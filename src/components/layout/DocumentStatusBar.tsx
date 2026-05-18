@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
@@ -25,6 +25,8 @@ interface Props {
 export default function DocumentStatusBar({ document: doc }: Props) {
   const [status, setStatus] = useState(doc.status)
   const [open, setOpen] = useState(false)
+
+  useEffect(() => { setStatus(doc.status) }, [doc.status])
   const router = useRouter()
   const supabase = createClient()
   const statuses = doc.type === 'quote' ? QUOTE_STATUSES : INVOICE_STATUSES
