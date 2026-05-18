@@ -6,8 +6,8 @@ import { Toaster } from "@/components/ui/sonner";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Studio Invoice",
-  description: "Invoicing for Treehouse Studios",
+  title: "Mado Invoice",
+  description: "Invoicing for Mado",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

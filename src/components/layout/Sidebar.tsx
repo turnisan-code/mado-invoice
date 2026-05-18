@@ -33,7 +33,7 @@ export default function Sidebar() {
   return (
     <aside className="w-56 shrink-0 flex flex-col h-screen sticky top-0 border-r border-neutral-200 bg-white">
       <div className="px-5 py-5 border-b border-neutral-100">
-        <span className="font-semibold text-sm tracking-wide">Studio Invoice</span>
+        <span className="font-semibold text-sm tracking-wide">Mado Invoice</span>
       </div>
       <nav className="flex-1 py-3 px-2 space-y-0.5">
         {nav.map(({ href, label, icon: Icon }) => (

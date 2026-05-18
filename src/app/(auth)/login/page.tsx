@@ -28,7 +28,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-neutral-50">
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-1 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight">Studio Invoice</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Mado Invoice</h1>
           <p className="text-sm text-neutral-500">Sign in</p>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
