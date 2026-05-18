@@ -1,0 +1,123 @@
+export type Language = 'de' | 'en'
+export type Currency = 'EUR' | 'USD' | 'GBP'
+export type TaxTreatment = 'at_vat' | 'eu_reverse_charge' | 'non_eu'
+export type ClientStatus = 'active' | 'inactive' | 'lead'
+export type DocumentType = 'invoice' | 'quote' | 'credit_note'
+export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' | 'rejected' | 'cancelled'
+export type VatRate = 0 | 10 | 13 | 20
+export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
+
+export interface Settings {
+  id: string
+  company_name: string
+  owner_name: string
+  address_line1: string
+  address_line2: string | null
+  zip: string
+  city: string
+  country: string
+  email: string
+  phone: string | null
+  website: string | null
+  uid_number: string
+  iban: string
+  bic: string
+  bank_name: string | null
+  invoice_prefix: string
+  quote_prefix: string
+  credit_note_prefix: string
+  next_invoice_number: number
+  next_quote_number: number
+  next_credit_note_number: number
+  default_payment_days: number
+  default_language: Language
+  logo_url: string | null
+  invoice_footer_de: string | null
+  invoice_footer_en: string | null
+}
+
+export interface Client {
+  id: string
+  created_at: string
+  name: string
+  company: string | null
+  address_line1: string
+  address_line2: string | null
+  zip: string
+  city: string
+  country: string
+  email: string
+  phone: string | null
+  uid_number: string | null
+  tax_treatment: TaxTreatment
+  language: Language
+  currency: Currency
+  payment_days: number
+  status: ClientStatus
+  tags: string[]
+  notes: string | null
+}
+
+export interface CatalogueItem {
+  id: string
+  name_de: string
+  name_en: string
+  default_price: number
+  unit: Unit
+  vat_rate: VatRate
+  category: string | null
+  sort_order: number
+  active: boolean
+}
+
+export interface Document {
+  id: string
+  created_at: string
+  type: DocumentType
+  number: string
+  client_id: string
+  client?: Client
+  date: string
+  service_date: string | null
+  due_date: string | null
+  status: DocumentStatus
+  language: Language
+  currency: Currency
+  tax_treatment: TaxTreatment
+  exchange_rate: number
+  notes: string | null
+  notes_internal: string | null
+  converted_from_id: string | null
+  items?: DocumentItem[]
+  payments?: Payment[]
+}
+
+export interface DocumentItem {
+  id: string
+  document_id: string
+  sort_order: number
+  description: string
+  service_date: string | null
+  quantity: number
+  unit: Unit
+  unit_price: number
+  vat_rate: VatRate
+  catalogue_item_id: string | null
+}
+
+export interface Payment {
+  id: string
+  document_id: string
+  date: string
+  amount: number
+  note: string | null
+}
+
+export interface DocumentTotals {
+  subtotal: number
+  vat_groups: { rate: VatRate; base: number; amount: number }[]
+  total_vat: number
+  total: number
+  total_paid: number
+  balance_due: number
+}
