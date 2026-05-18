@@ -79,7 +79,7 @@ export default async function InvoicesPage({
             {filtered?.map(doc => (
               <tr key={doc.id} className="hover:bg-neutral-50 transition-colors">
                 <td className="px-4 py-3">
-                  <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">{doc.number}</Link>
+                  <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">{doc.number ?? <span className="text-neutral-400">Draft</span>}</Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600">
                   {doc.clients?.company ?? doc.clients?.name ?? '—'}

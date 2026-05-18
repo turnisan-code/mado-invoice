@@ -75,7 +75,7 @@ export interface Document {
   id: string
   created_at: string
   type: DocumentType
-  number: string
+  number: string | null
   client_id: string
   client?: Client
   date: string

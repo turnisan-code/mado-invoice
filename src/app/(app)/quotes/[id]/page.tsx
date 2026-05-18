@@ -28,7 +28,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <Link href="/quotes" className="text-neutral-400 hover:text-neutral-600 transition-colors">
           <ArrowLeft size={16} />
         </Link>
-        <h1 className="text-2xl font-semibold">{doc.number}</h1>
+        <h1 className="text-2xl font-semibold">{doc.number ?? <span className="text-neutral-400">Draft</span>}</h1>
         <DocumentStatusBar document={doc} />
         {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
           <ConvertToInvoiceButton quoteId={doc.id} />

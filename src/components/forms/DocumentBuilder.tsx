@@ -211,6 +211,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
     setSaving(true)
 
+    const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'invoices'
+
     const docFields = {
       client_id: clientId, date, service_date: serviceDate || null,
       due_date: dueDate || null, language, currency, tax_treatment: taxTreatment,
@@ -219,24 +221,36 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     }
 
     if (doc) {
-      const { error } = await supabase.from('documents').update(docFields).eq('id', doc.id)
+      // Existing doc: assign number only when first marking as sent
+      let numberUpdate: { number?: string } = {}
+      if (status === 'sent' && !doc.number) {
+        const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
+        if (numErr) { toast.error(numErr.message); setSaving(false); return }
+        numberUpdate = { number: numData }
+      }
+      const { error } = await supabase.from('documents').update({ ...docFields, ...numberUpdate }).eq('id', doc.id)
       if (error) { toast.error(error.message); setSaving(false); return }
       await supabase.from('document_items').delete().eq('document_id', doc.id)
       const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(doc.id))
       if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-      toast.success('Saved.')
+      toast.success(status === 'sent' && !doc.number ? 'Issued & saved.' : 'Saved.')
       router.refresh()
     } else {
-      const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
-      if (numErr) { toast.error(numErr.message); setSaving(false); return }
+      // New doc: only get a number if sending immediately
+      let number: string | null = null
+      if (status === 'sent') {
+        const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
+        if (numErr) { toast.error(numErr.message); setSaving(false); return }
+        number = numData
+      }
       const { data: newDoc, error } = await supabase.from('documents').insert({
-        type, number: numData, exchange_rate: 1, ...docFields,
+        type, number, exchange_rate: 1, ...docFields,
       }).select().single()
       if (error) { toast.error(error.message); setSaving(false); return }
       const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(newDoc.id))
       if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-      toast.success('Created.')
-      router.push(`/${type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'invoices'}/${newDoc.id}`)
+      toast.success(status === 'draft' ? 'Draft saved.' : 'Created.')
+      router.push(`/${basePath}/${newDoc.id}`)
     }
     setSaving(false)
   }
