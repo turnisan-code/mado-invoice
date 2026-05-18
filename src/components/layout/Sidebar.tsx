@@ -4,12 +4,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut
+  BookOpen, Settings, BarChart3, LogOut, Moon, Sun
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { useTheme } from 'next-themes'
 
 const nav = [
   { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
@@ -25,6 +26,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const { theme, setTheme } = useTheme()
 
   async function signOut() {
     await supabase.auth.signOut()
@@ -32,8 +34,8 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col h-screen sticky top-0 border-r border-neutral-200 bg-white">
-      <div className="px-4 py-5 border-b border-neutral-100">
+    <aside className="w-56 shrink-0 flex flex-col h-screen sticky top-0 border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+      <div className="px-4 py-5 border-b border-neutral-100 dark:border-neutral-800">
         <Logo />
       </div>
       <nav className="flex-1 py-3 px-2 space-y-0.5">
@@ -44,8 +46,8 @@ export default function Sidebar() {
             className={cn(
               'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
               pathname.startsWith(href)
-                ? 'bg-neutral-100 text-neutral-900 font-medium'
-                : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700'
+                ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300'
             )}
           >
             <Icon size={16} />
@@ -53,10 +55,17 @@ export default function Sidebar() {
           </Link>
         ))}
       </nav>
-      <div className="p-2 border-t border-neutral-100">
+      <div className="p-2 border-t border-neutral-100 dark:border-neutral-800 space-y-0.5">
+        <button
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          className="flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+        </button>
         <button
           onClick={signOut}
-          className="flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm text-neutral-400 hover:text-neutral-600 hover:bg-neutral-50 transition-colors"
+          className="flex w-full items-center gap-3 px-3 py-2 rounded-md text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
         >
           <LogOut size={16} />
           Sign out

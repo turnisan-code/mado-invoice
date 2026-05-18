@@ -57,50 +57,50 @@ export default async function ClientsPage({
             name="q"
             defaultValue={q}
             placeholder="Search name, company, email…"
-            className="w-full pl-8 pr-3 py-1.5 text-sm border border-neutral-200 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white"
+            className="w-full pl-8 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
           />
         </div>
         <select
           name="status"
           defaultValue={status ?? ''}
-          className="text-sm border border-neutral-200 rounded-md px-2 py-1.5 bg-white focus:outline-none"
+          className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
         >
           <option value="">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="lead">Lead</option>
         </select>
-        <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 hover:bg-neutral-50 transition-colors">
+        <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
           Filter
         </button>
       </form>
 
-      <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="border-b border-neutral-100 bg-neutral-50">
+          <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Name</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Company</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Country</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Tax</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Status</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Tags</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Name</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Company</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Country</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tax</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Status</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tags</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-50">
+          <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {(filtered?.length ?? 0) === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-neutral-400">No clients found.</td>
+                <td colSpan={6} className="px-4 py-10 text-center text-neutral-400 dark:text-neutral-500">No clients found.</td>
               </tr>
             )}
             {filtered?.map(c => (
-              <tr key={c.id} className="hover:bg-neutral-50 transition-colors cursor-pointer">
+              <tr key={c.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors cursor-pointer">
                 <td className="px-4 py-3">
                   <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{c.name}</Link>
                 </td>
-                <td className="px-4 py-3 text-neutral-500">{c.company ?? '—'}</td>
-                <td className="px-4 py-3 text-neutral-500">{c.country}</td>
-                <td className="px-4 py-3 text-neutral-500">{taxLabel[c.tax_treatment] ?? c.tax_treatment}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.country}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{taxLabel[c.tax_treatment] ?? c.tax_treatment}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[c.status]}`}>
                     {c.status}
@@ -109,7 +109,7 @@ export default async function ClientsPage({
                 <td className="px-4 py-3">
                   <div className="flex gap-1 flex-wrap">
                     {c.tags.map((t: string) => (
-                      <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{t}</span>
+                      <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{t}</span>
                     ))}
                   </div>
                 </td>
@@ -118,7 +118,7 @@ export default async function ClientsPage({
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-neutral-400">{filtered?.length ?? 0} client{filtered?.length !== 1 ? 's' : ''}</p>
+      <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered?.length ?? 0} client{filtered?.length !== 1 ? 's' : ''}</p>
     </div>
   )
 }

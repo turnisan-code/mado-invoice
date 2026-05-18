@@ -68,7 +68,7 @@ export default async function DashboardPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Dashboard</h1>
         <div className="flex gap-2">
-          <Link href="/quotes/new" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 hover:bg-neutral-50 transition-colors">
+          <Link href="/quotes/new" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
             New Quote
           </Link>
           <Link href="/invoices/new" className="text-sm px-3 py-1.5 rounded-md bg-neutral-900 text-white hover:bg-neutral-700 transition-colors">
@@ -79,37 +79,37 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map(({ label, value, amount, icon: Icon, color }) => (
-          <div key={label} className="bg-white rounded-xl border border-neutral-200 p-4 space-y-3">
+          <div key={label} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-neutral-500">{label}</span>
+              <span className="text-sm text-neutral-500 dark:text-neutral-400">{label}</span>
               <span className={`p-1.5 rounded-md ${color}`}><Icon size={14} /></span>
             </div>
             <div>
               {value !== null && <div className="text-2xl font-semibold">{value}</div>}
-              <div className={value !== null ? 'text-sm text-neutral-400' : 'text-2xl font-semibold'}>{formatMoney(amount)}</div>
+              <div className={value !== null ? 'text-sm text-neutral-400 dark:text-neutral-500' : 'text-2xl font-semibold'}>{formatMoney(amount)}</div>
             </div>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl border border-neutral-200">
-          <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+        <div className="lg:col-span-2 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
+          <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
             <span className="font-medium text-sm">Recent Invoices</span>
-            <Link href="/invoices" className="text-xs text-neutral-400 hover:text-neutral-600">View all →</Link>
+            <Link href="/invoices" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">View all →</Link>
           </div>
-          <div className="divide-y divide-neutral-50">
+          <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {recentInvoices.length === 0 && (
-              <p className="px-5 py-8 text-sm text-neutral-400 text-center">No invoices yet.</p>
+              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">No invoices yet.</p>
             )}
             {recentInvoices.map((inv) => {
               const totals = calcTotals(inv.document_items ?? [], inv.payments ?? [])
               const clientName = (inv.clients as { name: string } | null)?.name
               return (
-                <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 transition-colors gap-3">
+                <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{inv.number}</div>
-                    {clientName && <div className="text-xs text-neutral-400">{clientName}</div>}
+                    {clientName && <div className="text-xs text-neutral-400 dark:text-neutral-500">{clientName}</div>}
                   </div>
                   <div className="text-sm font-medium text-right shrink-0">
                     {formatMoney(totals.total, inv.currency)}
@@ -126,22 +126,22 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-neutral-200">
-          <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
+          <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
             <span className="font-medium text-sm">Pending Quotes</span>
-            <Link href="/quotes" className="text-xs text-neutral-400 hover:text-neutral-600">View all →</Link>
+            <Link href="/quotes" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">View all →</Link>
           </div>
-          <div className="divide-y divide-neutral-50">
+          <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {(quotes?.length ?? 0) === 0 && (
-              <p className="px-5 py-8 text-sm text-neutral-400 text-center">No pending quotes.</p>
+              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">No pending quotes.</p>
             )}
             {quotes?.map((q) => {
               const clientName = (q.clients as unknown as { name: string } | null)?.name
               return (
-                <Link key={q.id} href={`/quotes/${q.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 transition-colors gap-3">
+                <Link key={q.id} href={`/quotes/${q.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">{q.number}</div>
-                    {clientName && <div className="text-xs text-neutral-400">{clientName}</div>}
+                    {clientName && <div className="text-xs text-neutral-400 dark:text-neutral-500">{clientName}</div>}
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${statusColor[q.status] ?? ''}`}>
                     {statusLabel[q.status] ?? q.status}

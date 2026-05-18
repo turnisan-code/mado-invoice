@@ -306,7 +306,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <div className="space-y-1.5">
           <Label>Client *</Label>
           <select value={clientId} onChange={e => handleClientChange(e.target.value)}
-            className="w-full border border-neutral-200 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-neutral-400">
+            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
             <option value="">Select client…</option>
             {clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
               <option key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''}</option>
@@ -329,7 +329,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <div className="space-y-1.5">
           <Label>Language</Label>
           <select value={language} onChange={e => setLanguage(e.target.value as Language)}
-            className="w-full border border-neutral-200 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none">
+            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             <option value="de">Deutsch</option>
             <option value="en">English</option>
           </select>
@@ -337,7 +337,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <div className="space-y-1.5">
           <Label>Currency</Label>
           <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
-            className="w-full border border-neutral-200 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none">
+            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             <option value="EUR">EUR</option>
             <option value="USD">USD</option>
             <option value="GBP">GBP</option>
@@ -346,7 +346,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <div className="space-y-1.5">
           <Label>Tax treatment</Label>
           <select value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)}
-            className="w-full border border-neutral-200 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none">
+            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             <option value="at_vat">Austrian VAT</option>
             <option value="eu_reverse_charge">Reverse Charge (EU)</option>
             <option value="non_eu">Non-EU (no VAT)</option>
@@ -368,7 +368,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
       {/* Line items */}
       <div className="space-y-1.5">
-        <div className="grid gap-2 text-xs font-medium text-neutral-400 px-1" style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
+        <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
           <span /><span>Description</span><span>Service date</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span />
         </div>
 
@@ -390,7 +390,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
               return (
                 <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
                   {handle}
-                  <div className="flex-1 border-t border-neutral-200" />
+                  <div className="flex-1 border-t border-neutral-200 dark:border-neutral-700" />
                   {deleteBtn(line.id)}
                 </div>
               )
@@ -400,9 +400,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
               return (
                 <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
                   {handle}
-                  <div className="flex-1 border-t border-dashed border-neutral-300" />
-                  <span className="text-xs text-neutral-400 shrink-0 px-1">Page break</span>
-                  <div className="flex-1 border-t border-dashed border-neutral-300" />
+                  <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
+                  <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0 px-1">Page break</span>
+                  <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
                   {deleteBtn(line.id)}
                 </div>
               )
@@ -416,7 +416,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Section heading…"
-                    className="flex-1 text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 px-1 py-1.5 focus:outline-none focus:border-neutral-400"
+                    className="flex-1 text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -431,7 +431,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Note…"
-                    className="flex-1 text-sm text-neutral-500 bg-transparent border-0 border-b border-neutral-100 px-1 py-1.5 focus:outline-none focus:border-neutral-300"
+                    className="flex-1 text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -444,7 +444,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                 <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
                   {handle}
                   <div className="flex-1 flex justify-end items-center gap-3 pr-1">
-                    <span className="text-xs text-neutral-400 uppercase tracking-wide">Subtotal</span>
+                    <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
                     <span className="text-sm font-medium">{formatMoney(amount, currency)}</span>
                   </div>
                   {deleteBtn(line.id)}
@@ -465,39 +465,39 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                     onFocus={() => { setActiveLine(line.id); setShowCatalogue(true) }}
                   />
                   {showCatalogue && activeLine === line.id && (
-                    <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white border border-neutral-200 rounded-lg shadow-lg max-h-72 overflow-auto">
+                    <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto">
                       {catalogueItems.filter(i => i.active).map(item => (
                         <button key={item.id} type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-neutral-50 text-sm flex justify-between items-center"
+                          className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
                           onMouseDown={() => pickCatalogueItem(item, line.id)}>
                           <span>{language === 'de' ? item.name_de : item.name_en}</span>
-                          <span className="text-xs text-neutral-400">{formatMoney(item.default_price)}/{item.unit}</span>
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
                         </button>
                       ))}
-                      <div className="border-t border-neutral-100">
+                      <div className="border-t border-neutral-100 dark:border-neutral-800">
                         {addingItem ? (
                           <div className="p-3 space-y-2">
                             <div className="grid grid-cols-2 gap-2">
-                              <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 rounded px-2 py-1 w-full" />
-                              <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 rounded px-2 py-1 w-full" />
+                              <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                              <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
                             </div>
                             <div className="grid grid-cols-3 gap-2">
-                              <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 rounded px-2 py-1 w-full" />
-                              <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 rounded px-1 py-1 bg-white">
+                              <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                              <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
                                 {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                               </select>
-                              <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 rounded px-1 py-1 bg-white">
+                              <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
                                 {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                               </select>
                             </div>
-                            <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 rounded px-2 py-1 w-full" />
+                            <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
                             <div className="flex gap-2">
                               <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
-                              <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 rounded hover:bg-neutral-50">Cancel</button>
+                              <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
                             </div>
                           </div>
                         ) : (
-                          <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 hover:bg-neutral-50 flex items-center gap-1.5">
+                          <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
                             <Plus size={12} /> New catalogue item…
                           </button>
                         )}
@@ -512,7 +512,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                   onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
                   className="text-sm" />
                 <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
-                  className="h-9 border border-neutral-200 rounded-md px-2 text-sm bg-white focus:outline-none">
+                  className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
                   {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
                 <Input type="number" value={line.unit_price} min={0} step={0.01}
@@ -520,7 +520,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                   className="text-sm" />
                 <select value={line.vat_rate}
                   onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
-                  className="h-9 border border-neutral-200 rounded-md px-2 text-sm bg-white focus:outline-none">
+                  className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
                   {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                 </select>
                 {deleteBtn(line.id)}
@@ -532,13 +532,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         {/* Add row controls */}
         <div className="flex items-center gap-3 pt-1 flex-wrap">
           <button type="button" onClick={() => addLine('item')}
-            className="flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-700 transition-colors">
+            className="flex items-center gap-1.5 text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
             <Plus size={14} /> Add line
           </button>
-          <span className="text-neutral-200 text-xs">|</span>
+          <span className="text-neutral-200 dark:text-neutral-700 text-xs">|</span>
           {(['heading', 'text', 'separator', 'subtotal', 'page_break'] as LineType[]).map(lt => (
             <button key={lt} type="button" onClick={() => addLine(lt)}
-              className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors">
+              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
               {lt === 'heading' ? 'Heading' : lt === 'text' ? 'Note' : lt === 'separator' ? 'Divider' : lt === 'subtotal' ? 'Subtotal' : 'Page break'}
             </button>
           ))}
@@ -550,24 +550,24 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       {/* Totals + discount */}
       <div className="flex justify-end">
         <div className="w-72 space-y-1.5 text-sm">
-          <div className="flex justify-between text-neutral-500">
+          <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
             <span>{language === 'de' ? 'Netto' : 'Subtotal'}</span>
             <span>{formatMoney(totals.subtotal, currency)}</span>
           </div>
 
           {/* Discount */}
           {discountType ? (
-            <div className="flex items-center justify-between gap-2 text-neutral-500">
+            <div className="flex items-center justify-between gap-2 text-neutral-500 dark:text-neutral-400">
               <div className="flex items-center gap-1.5">
                 <span>{language === 'de' ? 'Rabatt' : 'Discount'}</span>
                 <select value={discountType} onChange={e => setDiscountType(e.target.value as 'percent' | 'fixed')}
-                  className="text-xs border border-neutral-200 rounded px-1 py-0.5 bg-white focus:outline-none">
+                  className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-0.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
                   <option value="percent">%</option>
                   <option value="fixed">{currency}</option>
                 </select>
                 <input type="number" value={discountValue} min={0} step={discountType === 'percent' ? 1 : 0.01}
                   onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
-                  className="w-16 text-xs border border-neutral-200 rounded px-1.5 py-0.5 focus:outline-none" />
+                  className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none" />
                 <button type="button" onClick={() => { setDiscountType(null); setDiscountValue(0) }}
                   className="text-neutral-300 hover:text-neutral-500"><X size={12} /></button>
               </div>
@@ -575,13 +575,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             </div>
           ) : (
             <button type="button" onClick={() => setDiscountType('percent')}
-              className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors">
+              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
               + {language === 'de' ? 'Rabatt hinzufügen' : 'Add discount'}
             </button>
           )}
 
           {totals.vat_groups.map(g => (
-            <div key={g.rate} className="flex justify-between text-neutral-500">
+            <div key={g.rate} className="flex justify-between text-neutral-500 dark:text-neutral-400">
               <span>USt. {g.rate}%</span>
               <span>{formatMoney(g.amount, currency)}</span>
             </div>
@@ -593,7 +593,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
           </div>
           {totals.total_paid > 0 && (
             <>
-              <div className="flex justify-between text-neutral-500">
+              <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
                 <span>{language === 'de' ? 'Bezahlt' : 'Paid'}</span>
                 <span>−{formatMoney(totals.total_paid, currency)}</span>
               </div>

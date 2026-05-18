@@ -28,14 +28,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <Link href="/invoices" className="text-neutral-400 hover:text-neutral-600 transition-colors">
+        <Link href="/invoices" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
           <ArrowLeft size={16} />
         </Link>
-        <h1 className="text-2xl font-semibold">{doc.number ?? <span className="text-neutral-400">Draft</span>}</h1>
+        <h1 className="text-2xl font-semibold">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
         <DocumentStatusBar document={doc} />
         <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
       </div>
-      <div className="bg-white rounded-xl border border-neutral-200 p-6">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">
         <DocumentBuilder
           type="invoice"
           settings={settings!}

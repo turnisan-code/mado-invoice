@@ -47,9 +47,9 @@ export default async function InvoicesPage({
 
       <form className="flex gap-3">
         <input name="q" defaultValue={q} placeholder="Search number or client…"
-          className="flex-1 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white" />
+          className="flex-1 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100" />
         <select name="status" defaultValue={status ?? ''}
-          className="text-sm border border-neutral-200 rounded-md px-2 py-1.5 bg-white focus:outline-none">
+          className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
           <option value="">All statuses</option>
           <option value="draft">Draft</option>
           <option value="sent">Sent</option>
@@ -57,35 +57,35 @@ export default async function InvoicesPage({
           <option value="overdue">Overdue</option>
           <option value="cancelled">Cancelled</option>
         </select>
-        <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 hover:bg-neutral-50 transition-colors">Filter</button>
+        <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Filter</button>
       </form>
 
-      <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="border-b border-neutral-100 bg-neutral-50">
+          <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Number</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Client</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Date</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Due</th>
-              <th className="text-right px-4 py-3 font-medium text-neutral-500">Total</th>
-              <th className="text-left px-4 py-3 font-medium text-neutral-500">Status</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Number</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Client</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Date</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Due</th>
+              <th className="text-right px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Total</th>
+              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Status</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-50">
+          <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {(filtered?.length ?? 0) === 0 && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-neutral-400">No invoices found.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-neutral-400 dark:text-neutral-500">No invoices found.</td></tr>
             )}
             {filtered?.map(doc => (
-              <tr key={doc.id} className="hover:bg-neutral-50 transition-colors">
+              <tr key={doc.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <td className="px-4 py-3">
-                  <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">{doc.number ?? <span className="text-neutral-400">Draft</span>}</Link>
+                  <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</Link>
                 </td>
-                <td className="px-4 py-3 text-neutral-600">
+                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                   {doc.clients?.company ?? doc.clients?.name ?? '—'}
                 </td>
-                <td className="px-4 py-3 text-neutral-500">{doc.date}</td>
-                <td className="px-4 py-3 text-neutral-500">{doc.due_date ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.due_date ?? '—'}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items ?? []), doc.currency)}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
@@ -95,7 +95,7 @@ export default async function InvoicesPage({
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-neutral-400">{filtered?.length ?? 0} invoice{filtered?.length !== 1 ? 's' : ''}</p>
+      <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered?.length ?? 0} invoice{filtered?.length !== 1 ? 's' : ''}</p>
     </div>
   )
 }

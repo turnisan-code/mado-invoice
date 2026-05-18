@@ -49,12 +49,12 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         {status} ▾
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-neutral-200 rounded-lg shadow-md py-1 min-w-32">
+        <div className="absolute top-full left-0 mt-1 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-md py-1 min-w-32">
           {statuses.map(s => (
             <button
               key={s}
               onClick={() => changeStatus(s)}
-              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-50 transition-colors ${s === status ? 'font-medium' : ''}`}
+              className={`w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors ${s === status ? 'font-medium' : ''}`}
             >
               {s}
             </button>

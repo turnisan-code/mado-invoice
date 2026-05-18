@@ -26,11 +26,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-50">
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3">
           <Logo />
-          <p className="text-sm text-neutral-500">Sign in</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Sign in</p>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">

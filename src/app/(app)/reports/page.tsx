@@ -56,16 +56,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">VAT Report</h1>
-          <p className="text-sm text-neutral-500 mt-1">Copy these figures into FinanzOnline.</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Copy these figures into FinanzOnline.</p>
         </div>
         <form className="flex gap-2">
-          <select name="year" defaultValue={year} className="text-sm border border-neutral-200 rounded-md px-2 py-1.5 bg-white focus:outline-none">
+          <select name="year" defaultValue={year} className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             {years.map(y => <option key={y} value={y}>Q{quarter} {y}</option>)}
           </select>
-          <select name="quarter" defaultValue={quarter} className="text-sm border border-neutral-200 rounded-md px-2 py-1.5 bg-white focus:outline-none">
+          <select name="quarter" defaultValue={quarter} className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             {quarters.map(q => <option key={q} value={q}>Q{q}</option>)}
           </select>
-          <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 hover:bg-neutral-50 transition-colors">Load</button>
+          <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Load</button>
         </form>
       </div>
 
@@ -73,11 +73,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         Period: <strong>{qStart}</strong> – <strong>{qEnd}</strong> · {yearDocs.length} invoice{yearDocs.length !== 1 ? 's' : ''} included (sent, paid, overdue)
       </div>
 
-      <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-neutral-100">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+        <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
           <span className="font-medium text-sm">Umsatzsteuervoranmeldung (UVA)</span>
         </div>
-        <div className="divide-y divide-neutral-50 text-sm">
+        <div className="divide-y divide-neutral-50 dark:divide-neutral-800 text-sm">
           <Row label="Gesamtumsatz netto (Kennzahl 000)" value={formatMoney(subtotal)} />
           {Object.entries(vatMap).sort(([a], [b]) => parseInt(b) - parseInt(a)).map(([rate, g]) => (
             <div key={rate}>
@@ -87,7 +87,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           ))}
           {reverseChargeBase > 0 && <Row label="Innergemeinschaftliche Leistungen (Reverse Charge)" value={formatMoney(reverseChargeBase)} note="→ ZM meldepflichtig" />}
           {nonEUBase > 0 && <Row label="Nicht steuerbare Auslandsumsätze (Non-EU)" value={formatMoney(nonEUBase)} />}
-          <div className="px-5 py-4 flex justify-between items-center bg-neutral-50">
+          <div className="px-5 py-4 flex justify-between items-center bg-neutral-50 dark:bg-neutral-800">
             <span className="font-semibold">Zahllast USt gesamt</span>
             <span className="font-semibold text-base">{formatMoney(totalVat)}</span>
           </div>
@@ -100,11 +100,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-neutral-100">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+        <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
           <span className="font-medium text-sm">Summary</span>
         </div>
-        <div className="divide-y divide-neutral-50 text-sm">
+        <div className="divide-y divide-neutral-50 dark:divide-neutral-800 text-sm">
           <Row label="Net revenue" value={formatMoney(subtotal)} />
           <Row label="VAT collected" value={formatMoney(totalVat)} />
           <Row label="Gross revenue" value={formatMoney(gross)} bold />
@@ -118,8 +118,8 @@ function Row({ label, value, bold = false, note }: { label: string; value: strin
   return (
     <div className="px-5 py-3 flex justify-between items-center">
       <div>
-        <span className={bold ? 'font-medium' : 'text-neutral-600'}>{label}</span>
-        {note && <span className="ml-2 text-xs text-neutral-400">{note}</span>}
+        <span className={bold ? 'font-medium' : 'text-neutral-600 dark:text-neutral-400'}>{label}</span>
+        {note && <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">{note}</span>}
       </div>
       <span className={bold ? 'font-semibold' : ''}>{value}</span>
     </div>

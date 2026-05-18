@@ -82,23 +82,23 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
   }
 
   return (
-    <div className="bg-white rounded-xl border border-neutral-200 p-6 space-y-4">
+    <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-neutral-700">Payments</h2>
-        <div className="text-sm text-neutral-500">
-          Balance: <span className={fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-neutral-900'}>
+        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Payments</h2>
+        <div className="text-sm text-neutral-500 dark:text-neutral-400">
+          Balance: <span className={fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-neutral-900 dark:text-neutral-100'}>
             {fullyPaid ? 'Paid in full' : formatMoney(balanceDue, currency)}
           </span>
         </div>
       </div>
 
       {payments.length > 0 && (
-        <div className="divide-y divide-neutral-100 text-sm">
+        <div className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
           {payments.map(p => (
             <div key={p.id} className="flex items-center py-2 gap-3">
-              <span className="text-neutral-400 w-24 shrink-0">{p.date}</span>
+              <span className="text-neutral-400 dark:text-neutral-500 w-24 shrink-0">{p.date}</span>
               <span className="font-medium">{formatMoney(p.amount, currency)}</span>
-              {p.note && <span className="text-neutral-400 flex-1 truncate">{p.note}</span>}
+              {p.note && <span className="text-neutral-400 dark:text-neutral-500 flex-1 truncate">{p.note}</span>}
               <button
                 onClick={() => removePayment(p.id)}
                 className="ml-auto text-neutral-300 hover:text-red-500 transition-colors"
