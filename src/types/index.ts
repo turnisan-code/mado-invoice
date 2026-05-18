@@ -6,6 +6,7 @@ export type DocumentType = 'invoice' | 'quote' | 'credit_note'
 export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' | 'rejected' | 'cancelled'
 export type VatRate = 0 | 10 | 13 | 20
 export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
+export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
 
 export interface Settings {
   id: string
@@ -88,6 +89,8 @@ export interface Document {
   notes: string | null
   notes_internal: string | null
   converted_from_id: string | null
+  discount_type: 'percent' | 'fixed' | null
+  discount_value: number | null
   items?: DocumentItem[]
   payments?: Payment[]
 }
@@ -96,12 +99,13 @@ export interface DocumentItem {
   id: string
   document_id: string
   sort_order: number
+  line_type: LineType
   description: string
   service_date: string | null
-  quantity: number
-  unit: Unit
-  unit_price: number
-  vat_rate: VatRate
+  quantity: number | null
+  unit: Unit | null
+  unit_price: number | null
+  vat_rate: VatRate | null
   catalogue_item_id: string | null
 }
 
@@ -115,6 +119,7 @@ export interface Payment {
 
 export interface DocumentTotals {
   subtotal: number
+  discount_amount: number
   vat_groups: { rate: VatRate; base: number; amount: number }[]
   total_vat: number
   total: number

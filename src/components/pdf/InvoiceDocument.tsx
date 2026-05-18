@@ -1,24 +1,20 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
 import { formatMoney, formatDate } from '@/lib/utils/document'
-import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate } from '@/types'
+import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 
 const s = StyleSheet.create({
   page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
 
-  // Top row
   topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 40 },
   logo: { width: 130, height: 52, objectFit: 'contain', objectPositionX: 0 },
   logoFallback: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', maxWidth: 160 },
-  topRight: {},
   docTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
 
-  // Billed to
   billedSection: { marginBottom: 32 },
   billedLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   billedText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.6 },
 
-  // Table
   tableHeader: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a1a1a', borderBottomWidth: 1, borderBottomColor: '#1a1a1a', paddingVertical: 6, marginBottom: 0 },
   tableHeaderText: { fontSize: 8, fontFamily: 'Helvetica-Bold' },
   tableRow: { flexDirection: 'row', paddingVertical: 7, borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4' },
@@ -28,13 +24,21 @@ const s = StyleSheet.create({
   colRate: { width: 88, textAlign: 'right' },
   colAmount: { width: 72, textAlign: 'right' },
 
-  // Bottom section
+  // Special line types
+  headingRow: { paddingVertical: 8, paddingTop: 12 },
+  headingText: { fontFamily: 'Helvetica-Bold', fontSize: 9.5 },
+  textRow: { paddingVertical: 4 },
+  textRowText: { fontSize: 8.5, color: '#4b4b4b' },
+  separatorRow: { borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginVertical: 6 },
+  subtotalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 5, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginTop: 2 },
+  subtotalLabel: { fontSize: 7.5, color: '#9b9b9b', marginRight: 8, textTransform: 'uppercase' },
+  subtotalValue: { width: 72, textAlign: 'right', fontFamily: 'Helvetica-Bold', fontSize: 8.5 },
+
   bottomDivider: { borderTopWidth: 1, borderTopColor: '#1a1a1a', marginTop: 28, marginBottom: 18 },
   bottomRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dueDateLabel: { fontSize: 8, color: '#6b6b6b', marginBottom: 3 },
   dueDateValue: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
 
-  // Totals
   totalsBlock: { width: 210 },
   totalsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   totalsLabel: { color: '#6b6b6b' },
@@ -43,11 +47,9 @@ const s = StyleSheet.create({
   totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
   totalValue: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
 
-  // Tax note + notes
   taxNote: { marginTop: 16, fontSize: 8, color: '#6b6b6b', fontStyle: 'italic' },
   notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
 
-  // Footer — rendered as fixed at page bottom
   footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
   footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
@@ -70,6 +72,7 @@ const LABELS: Record<string, Record<'de' | 'en', string>> = {
   rate:          { de: 'Preis',                en: 'Rate' },
   amount:        { de: 'Betrag',               en: 'Amount' },
   subtotal:      { de: 'Nettobetrag',          en: 'Sub-Total' },
+  discount:      { de: 'Rabatt',               en: 'Discount' },
   grand_total:   { de: 'Gesamtbetrag',         en: 'Total' },
   contact:       { de: 'Kontakt',              en: 'Contact' },
   payment:       { de: 'Zahlungsinformationen', en: 'Payment Info' },
@@ -78,6 +81,16 @@ const LABELS: Record<string, Record<'de' | 'en', string>> = {
 
 function L(key: string, lang: 'de' | 'en'): string {
   return LABELS[key]?.[lang] ?? key
+}
+
+interface DocItem {
+  line_type?: LineType
+  description: string
+  service_date: string | null
+  quantity: number | null
+  unit: Unit | null
+  unit_price: number | null
+  vat_rate: VatRate | null
 }
 
 interface DocData {
@@ -91,21 +104,28 @@ interface DocData {
   tax_treatment: TaxTreatment
   notes: string | null
   tax_note: string | null
-  items: { description: string; service_date: string | null; quantity: number; unit: Unit; unit_price: number; vat_rate: VatRate }[]
-  totals: {
-    subtotal: number
-    vat_groups: { rate: number; base: number; amount: number }[]
-    total_vat: number
-    total: number
-    total_paid: number
-    balance_due: number
-  }
+  discount_type: 'percent' | 'fixed' | null
+  discount_value: number | null
+  items: DocItem[]
+  totals: DocumentTotals
 }
 
 interface Props {
   settings: Settings
   client: Client
   document: DocData
+}
+
+function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
+  let sum = 0
+  for (let i = upToIdx - 1; i >= 0; i--) {
+    const item = items[i]
+    if ((item.line_type ?? 'item') === 'subtotal') break
+    if ((item.line_type ?? 'item') === 'item' && item.quantity != null && item.unit_price != null) {
+      sum += item.quantity * item.unit_price
+    }
+  }
+  return sum
 }
 
 export default function InvoiceDocument({ settings, client, document: doc }: Props) {
@@ -117,7 +137,7 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
     <Document>
       <Page size="A4" style={s.page}>
 
-        {/* Top row: logo left, doc title + meta right */}
+        {/* Top row */}
         <View style={s.topRow}>
           <View>
             {settings.logo_url
@@ -125,7 +145,7 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
               : <Text style={s.logoFallback}>{settings.company_name}</Text>
             }
           </View>
-          <View style={s.topRight}>
+          <View>
             <Text style={s.docTitle}>{L(doc.type, lang)}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
@@ -148,7 +168,7 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
           </Text>
         </View>
 
-        {/* Line items table */}
+        {/* Table header */}
         <View style={s.tableHeader}>
           <Text style={[s.tableHeaderText, s.colDesc]}>{L('description', lang)}</Text>
           <Text style={[s.tableHeaderText, s.colQty]}>{L('qty', lang)}</Text>
@@ -156,19 +176,60 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
           <Text style={[s.tableHeaderText, s.colAmount]}>{L('amount', lang)}</Text>
         </View>
 
-        {doc.items.map((item, i) => (
-          <View key={i} style={s.tableRow}>
-            <View style={s.colDesc}>
-              <Text>{item.description}</Text>
-              {item.service_date && (
-                <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
-              )}
+        {/* Line items */}
+        {doc.items.map((item, i) => {
+          const lt = item.line_type ?? 'item'
+
+          if (lt === 'page_break') {
+            return <View key={i} break />
+          }
+
+          if (lt === 'separator') {
+            return <View key={i} style={s.separatorRow} />
+          }
+
+          if (lt === 'heading') {
+            return (
+              <View key={i} style={s.headingRow}>
+                <Text style={s.headingText}>{item.description}</Text>
+              </View>
+            )
+          }
+
+          if (lt === 'text') {
+            return (
+              <View key={i} style={s.textRow}>
+                <Text style={s.textRowText}>{item.description}</Text>
+              </View>
+            )
+          }
+
+          if (lt === 'subtotal') {
+            const amount = calcSectionSubtotal(doc.items, i)
+            return (
+              <View key={i} style={s.subtotalRow}>
+                <Text style={s.subtotalLabel}>Subtotal</Text>
+                <Text style={s.subtotalValue}>{fmt(amount)}</Text>
+              </View>
+            )
+          }
+
+          // item
+          if (item.quantity == null || item.unit_price == null || item.unit == null) return null
+          return (
+            <View key={i} style={s.tableRow}>
+              <View style={s.colDesc}>
+                <Text>{item.description}</Text>
+                {item.service_date && (
+                  <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
+                )}
+              </View>
+              <Text style={s.colQty}>{item.quantity}</Text>
+              <Text style={s.colRate}>{fmt(item.unit_price)}/{item.unit}</Text>
+              <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
             </View>
-            <Text style={s.colQty}>{item.quantity}</Text>
-            <Text style={s.colRate}>{fmt(item.unit_price)}/{item.unit}</Text>
-            <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
-          </View>
-        ))}
+          )
+        })}
 
         {/* Divider + due date + totals */}
         <View style={s.bottomDivider} />
@@ -186,6 +247,14 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
               <Text style={s.totalsLabel}>{L('subtotal', lang)}</Text>
               <Text>{fmt(doc.totals.subtotal)}</Text>
             </View>
+            {doc.totals.discount_amount > 0 && (
+              <View style={s.totalsRow}>
+                <Text style={s.totalsLabel}>
+                  {L('discount', lang)}{doc.discount_type === 'percent' && doc.discount_value ? ` (${doc.discount_value}%)` : ''}
+                </Text>
+                <Text>−{fmt(doc.totals.discount_amount)}</Text>
+              </View>
+            )}
             {doc.tax_treatment === 'at_vat' && doc.totals.vat_groups.map(g => (
               <View key={g.rate} style={s.totalsRow}>
                 <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
@@ -212,7 +281,7 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
         {/* Notes */}
         {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
 
-        {/* Footer — fixed at bottom of every page */}
+        {/* Footer */}
         <View style={s.footer} fixed>
           <View>
             <Text style={s.footerTitle}>{L('contact', lang)}</Text>
