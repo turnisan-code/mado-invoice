@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -100,6 +100,21 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
+  const [dragOver, setDragOver] = useState<number | null>(null)
+  const dragIdx = useRef<number | null>(null)
+
+  function handleDragStart(idx: number) { dragIdx.current = idx }
+  function handleDragOver(e: React.DragEvent, idx: number) { e.preventDefault(); setDragOver(idx) }
+  function handleDrop(idx: number) {
+    if (dragIdx.current === null || dragIdx.current === idx) { setDragOver(null); return }
+    const next = [...lines]
+    const [moved] = next.splice(dragIdx.current, 1)
+    next.splice(idx, 0, moved)
+    setLines(next)
+    dragIdx.current = null
+    setDragOver(null)
+  }
+  function handleDragEnd() { dragIdx.current = null; setDragOver(null) }
 
   const client = clients.find(c => c.id === clientId)
   const discount = discountType && discountValue > 0 ? { type: discountType, value: discountValue } : null
@@ -336,15 +351,28 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
       {/* Line items */}
       <div className="space-y-1.5">
-        <div className="grid gap-2 text-xs font-medium text-neutral-400 px-1" style={{ gridTemplateColumns: '1fr 110px 70px 80px 90px 60px 32px' }}>
-          <span>Description</span><span>Service date</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span />
+        <div className="grid gap-2 text-xs font-medium text-neutral-400 px-1" style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
+          <span /><span>Description</span><span>Service date</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span />
         </div>
 
         <div className="space-y-1">
           {lines.map((line, idx) => {
+            const dragProps = {
+              draggable: true,
+              onDragStart: () => handleDragStart(idx),
+              onDragOver: (e: React.DragEvent) => handleDragOver(e, idx),
+              onDrop: () => handleDrop(idx),
+              onDragEnd: handleDragEnd,
+            }
+            const dragOverClass = dragOver === idx ? 'border-t-2 border-blue-400' : ''
+            const handle = (
+              <GripVertical size={14} className="text-neutral-300 cursor-grab shrink-0 mt-2.5" />
+            )
+
             if (line.line_type === 'separator') {
               return (
-                <div key={line.id} className="flex items-center gap-2 py-1">
+                <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
+                  {handle}
                   <div className="flex-1 border-t border-neutral-200" />
                   {deleteBtn(line.id)}
                 </div>
@@ -353,7 +381,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
             if (line.line_type === 'page_break') {
               return (
-                <div key={line.id} className="flex items-center gap-2 py-1">
+                <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
+                  {handle}
                   <div className="flex-1 border-t border-dashed border-neutral-300" />
                   <span className="text-xs text-neutral-400 shrink-0 px-1">Page break</span>
                   <div className="flex-1 border-t border-dashed border-neutral-300" />
@@ -364,7 +393,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
             if (line.line_type === 'heading') {
               return (
-                <div key={line.id} className="flex items-center gap-2">
+                <div key={line.id} {...dragProps} className={`flex items-center gap-2 ${dragOverClass}`}>
+                  {handle}
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
@@ -378,7 +408,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
             if (line.line_type === 'text') {
               return (
-                <div key={line.id} className="flex items-center gap-2">
+                <div key={line.id} {...dragProps} className={`flex items-center gap-2 ${dragOverClass}`}>
+                  {handle}
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
@@ -393,7 +424,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             if (line.line_type === 'subtotal') {
               const amount = calcSectionSubtotal(lines, idx)
               return (
-                <div key={line.id} className="flex items-center gap-2 py-1">
+                <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
+                  {handle}
                   <div className="flex-1 flex justify-end items-center gap-3 pr-1">
                     <span className="text-xs text-neutral-400 uppercase tracking-wide">Subtotal</span>
                     <span className="text-sm font-medium">{formatMoney(amount, currency)}</span>
@@ -405,7 +437,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
             // item
             return (
-              <div key={line.id} className="grid gap-2 items-start" style={{ gridTemplateColumns: '1fr 110px 70px 80px 90px 60px 32px' }}>
+              <div key={line.id} {...dragProps} className={`grid gap-2 items-start ${dragOverClass}`} style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
+                {handle}
                 <div className="relative">
                   <Input
                     value={line.description}
