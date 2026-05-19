@@ -5,7 +5,7 @@ export default async function ClientsPage() {
   const supabase = await createClient()
 
   const [{ data: clients }, { data: lastInvoices }] = await Promise.all([
-    supabase.from('clients').select('id, name, company, email, language, currency, payment_days, tax_treatment, address_line1, address_line2, zip, city, country, uid_number').order('name'),
+    supabase.from('clients').select('id, name, company, email, language, currency, payment_days, tax_treatment, address_line1, address_line2, zip, city, country, uid_number, status, tags').order('name'),
     supabase.from('documents').select('client_id, date').eq('type', 'invoice').order('date', { ascending: false }),
   ])
 
