@@ -105,7 +105,7 @@ export default function ClientForm({ client }: Props) {
       const { data, error } = await supabase.from('clients').insert(payload).select().single()
       if (error) { toast.error(error.message); setSaving(false); return }
       toast.success('Client created.')
-      router.push(`/clients/${data.id}`)
+      router.push('/clients')
     }
     setSaving(false)
     router.refresh()
