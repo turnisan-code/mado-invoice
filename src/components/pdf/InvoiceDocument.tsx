@@ -49,6 +49,7 @@ const s = StyleSheet.create({
 
   taxNote: { marginTop: 16, fontSize: 8, color: '#6b6b6b', fontStyle: 'italic' },
   notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
+  footerNote: { marginTop: 16, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
 
   footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
   footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
@@ -280,6 +281,13 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
 
         {/* Notes */}
         {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
+
+        {/* Footer text from Templates settings */}
+        {(lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en) && (
+          <Text style={s.footerNote}>
+            {lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en}
+          </Text>
+        )}
 
         {/* Footer */}
         <View style={s.footer} fixed>
