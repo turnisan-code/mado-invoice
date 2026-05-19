@@ -69,7 +69,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const supabase = createClient()
 
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
-  const [date, setDate] = useState(doc?.date ?? today())
+  const [date, setDate] = useState(doc?.date ?? '')
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
   const [dueDate, setDueDate] = useState(doc?.due_date ?? '')
   const [language, setLanguage] = useState<Language>(doc?.language ?? settings.default_language as Language ?? 'de')
@@ -148,7 +148,6 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       if (c.language) setLanguage(c.language)
       if (c.currency) setCurrency(c.currency as Currency)
       setTaxTreatment(c.tax_treatment as TaxTreatment)
-      if (!dueDate) setDueDate(addDays(date, c.payment_days))
     }
   }
 
@@ -240,9 +239,16 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
     const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'invoices'
 
+    const effectiveDate = (status === 'sent' && !date) ? today() : date
+    if (status === 'sent' && !date) setDate(effectiveDate)
+    const effectiveDueDate = (status === 'sent' && !dueDate && client)
+      ? addDays(effectiveDate, client.payment_days ?? 14)
+      : dueDate
+    if (status === 'sent' && !dueDate && client) setDueDate(effectiveDueDate)
+
     const docFields = {
-      client_id: clientId, date, service_date: serviceDate || null,
-      due_date: dueDate || null, language, currency, tax_treatment: taxTreatment,
+      client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
+      due_date: effectiveDueDate || null, language, currency, tax_treatment: taxTreatment,
       notes: notes || null, notes_internal: notesInternal || null, status,
       discount_type: discountType, discount_value: discountValue || null,
     }
