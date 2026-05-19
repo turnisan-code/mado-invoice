@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
+import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import { calcTotals } from '@/lib/utils/document'
 import Link from 'next/link'
@@ -33,6 +34,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         </Link>
         <h1 className="text-2xl font-semibold">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
         <DocumentStatusBar document={doc} />
+        <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
         <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
       </div>
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">

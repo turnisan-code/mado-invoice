@@ -136,7 +136,7 @@ export default function ClientForm({ client, onSaved }: Props) {
       </div>
       <Field label="Country" name="country" defaultValue={client?.country ?? ''} />
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Email *" name="email" type="email" defaultValue={client?.email} required />
+        <Field label="Email" name="email" type="email" defaultValue={client?.email} />
         <Field label="Phone" name="phone" defaultValue={client?.phone ?? ''} />
       </div>
       <Field label="UID-Nummer" name="uid_number" defaultValue={client?.uid_number ?? ''} placeholder="ATU..." />

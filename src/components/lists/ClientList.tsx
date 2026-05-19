@@ -18,7 +18,7 @@ const taxLabel: Record<string, string> = {
 
 const STATUSES = ['active', 'inactive', 'lead']
 
-type SortKey = 'name' | 'company' | 'country' | 'status'
+type SortKey = 'name' | 'company' | 'country' | 'status' | 'last_invoiced'
 type SortDir = 'asc' | 'desc'
 
 interface Client {
@@ -39,7 +39,7 @@ function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: Sort
 
 const PAGE_SIZE = 25
 
-export default function ClientList({ clients }: { clients: Client[] }) {
+export default function ClientList({ clients, lastInvoicedMap = {} }: { clients: Client[]; lastInvoicedMap?: Record<string, string> }) {
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'name', dir: 'asc' })
@@ -65,6 +65,7 @@ export default function ClientList({ clients }: { clients: Client[] }) {
       else if (sort.key === 'company') { av = a.company ?? ''; bv = b.company ?? '' }
       else if (sort.key === 'country') { av = a.country ?? ''; bv = b.country ?? '' }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
+      else if (sort.key === 'last_invoiced') { av = lastInvoicedMap[a.id] ?? ''; bv = lastInvoicedMap[b.id] ?? '' }
       if (av < bv) return sort.dir === 'asc' ? -1 : 1
       if (av > bv) return sort.dir === 'asc' ? 1 : -1
       return 0
@@ -118,12 +119,18 @@ export default function ClientList({ clients }: { clients: Client[] }) {
               <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tax</th>
               <Th col="status" label="Status" className="text-left" />
               <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tags</th>
+              <th
+                className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+                onClick={() => toggleSort('last_invoiced')}
+              >
+                <span className="flex items-center gap-1">Last Invoice<SortIcon col="last_invoiced" sort={sort} /></span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-16 text-center">
+                <td colSpan={7} className="px-4 py-16 text-center">
                   <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
                   <p className="text-sm text-neutral-400 dark:text-neutral-500">
                     {q || status ? 'No clients match your filters.' : 'No clients yet.'}
@@ -153,6 +160,9 @@ export default function ClientList({ clients }: { clients: Client[] }) {
                       <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{t}</span>
                     ))}
                   </div>
+                </td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
+                  {lastInvoicedMap[c.id] ?? '—'}
                 </td>
               </tr>
             ))}

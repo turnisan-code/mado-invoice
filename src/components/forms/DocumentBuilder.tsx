@@ -413,6 +413,18 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
   }, [autoSave, doc])
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (doc) autoSave()
+        else save('draft')
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [autoSave, doc, save])
+
   const deleteBtn = (id: string) => (
     <button type="button" onClick={() => removeLine(id)}
       className="h-9 w-8 flex items-center justify-center text-neutral-300 hover:text-red-500 transition-colors shrink-0">
@@ -486,7 +498,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       {/* Client & dates */}
       <div>
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Client & Dates</p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Client *</Label>
           <select value={clientId} onChange={e => handleClientChange(e.target.value)}
@@ -509,7 +521,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           <div className="space-y-1.5">
             <Label>Language</Label>
           <select value={language} onChange={e => setLanguage(e.target.value as Language)}
@@ -554,6 +566,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       {/* Line items */}
       <div className="space-y-1.5">
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Line Items</p>
+        <div className="overflow-x-auto -mx-1 px-1">
+        <div className="min-w-[560px]">
         <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
           <span /><span>Description</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span /><span />
         </div>
@@ -732,6 +746,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             )
           })}
         </div>
+        </div>{/* end min-w */}
+        </div>{/* end overflow-x-auto */}
 
         {/* Add row controls */}
         <div className="flex items-center gap-2 pt-2 flex-wrap">
@@ -815,7 +831,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       {/* Notes */}
       <div>
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Notes</p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none text-sm" />

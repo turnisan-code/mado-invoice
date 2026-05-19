@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import ConvertToInvoiceButton from '@/components/layout/ConvertToInvoiceButton'
+import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -33,6 +34,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
           <ConvertToInvoiceButton quoteId={doc.id} />
         )}
+        <DuplicateDocumentButton docId={doc.id} docType="quote" backTo="/quotes" />
         <DeleteDocumentButton id={doc.id} backTo="/quotes" docNumber={doc.number} docType="quote" />
       </div>
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">

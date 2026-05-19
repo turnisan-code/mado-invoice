@@ -144,7 +144,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
               </tr>
             )}
             {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
-              <tr key={doc.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              <tr key={doc.id} className={`hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
                 <td className="px-4 py-3">
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
                     {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}

@@ -27,6 +27,8 @@ export default async function DashboardPage() {
   const now = new Date().toISOString().split('T')[0]
   const thisMonth = now.slice(0, 7)
   const thisYear = now.slice(0, 4)
+  const lastMonthDate = new Date(); lastMonthDate.setMonth(lastMonthDate.getMonth() - 1)
+  const lastMonth = lastMonthDate.toISOString().slice(0, 7)
 
   const allInvoices = invoices ?? []
 
@@ -37,21 +39,31 @@ export default async function DashboardPage() {
     calcTotals(doc.document_items ?? [], doc.payments ?? []).total_paid
 
   const open = allInvoices.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
-  const overdue = allInvoices.filter(i => i.status === 'sent' && i.due_date && i.due_date < now)
+  const overdue = allInvoices.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
   const paidThisMonth = allInvoices.filter(i =>
     i.status === 'paid' && (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(thisMonth))
   )
+  const paidLastMonth = allInvoices.filter(i =>
+    i.status === 'paid' && (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(lastMonth))
+  )
+  const revenueThisMonth = paidThisMonth.reduce((s, d) => s + getPaid(d), 0)
+  const revenueLastMonth = paidLastMonth.reduce((s, d) => s + getPaid(d), 0)
+  const momDelta = revenueLastMonth > 0 ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100) : null
   const revenueThisYear = allInvoices
     .filter(i => i.status === 'paid' && i.date?.startsWith(thisYear))
     .reduce((s, doc) => s + getPaid(doc), 0)
 
+  const oldestOverdueDays = overdue.length > 0
+    ? Math.max(...overdue.filter(i => i.due_date).map(i => Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)))
+    : null
+
   const recentInvoices = allInvoices.slice(0, 10)
 
   const stats = [
-    { label: 'Open', value: open.length, amount: open.reduce((s, d) => s + getTotal(d), 0), icon: FileText, color: 'text-blue-600 bg-blue-50', href: '/invoices?status=sent' },
-    { label: 'Overdue', value: overdue.length, amount: overdue.reduce((s, d) => s + getTotal(d), 0), icon: AlertTriangle, color: 'text-red-600 bg-red-50', href: '/invoices?status=overdue' },
-    { label: 'Paid this month', value: paidThisMonth.length, amount: paidThisMonth.reduce((s, d) => s + getPaid(d), 0), icon: CheckCircle, color: 'text-green-600 bg-green-50', href: null },
-    { label: `Revenue ${thisYear}`, value: null, amount: revenueThisYear, icon: TrendingUp, color: 'text-purple-600 bg-purple-50', href: null },
+    { label: 'Open', value: open.length, amount: open.reduce((s, d) => s + getTotal(d), 0), sub: null, icon: FileText, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950', href: '/invoices?status=sent' },
+    { label: 'Overdue', value: overdue.length, amount: overdue.reduce((s, d) => s + getTotal(d), 0), sub: oldestOverdueDays != null ? `oldest: ${oldestOverdueDays}d` : null, icon: AlertTriangle, color: 'text-red-600 bg-red-50 dark:bg-red-950', href: '/invoices?status=overdue' },
+    { label: 'Paid this month', value: paidThisMonth.length, amount: revenueThisMonth, sub: momDelta != null ? `${momDelta >= 0 ? '+' : ''}${momDelta}% vs last month` : null, icon: CheckCircle, color: 'text-green-600 bg-green-50 dark:bg-green-950', href: null },
+    { label: `Revenue ${thisYear}`, value: null, amount: revenueThisYear, sub: null, icon: TrendingUp, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950', href: null },
   ]
 
   const statusLabel: Record<string, string> = {
@@ -80,7 +92,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(({ label, value, amount, icon: Icon, color, href }) => {
+        {stats.map(({ label, value, amount, sub, icon: Icon, color, href }) => {
           const inner = (
             <>
               <div className="flex items-center justify-between">
@@ -90,6 +102,7 @@ export default async function DashboardPage() {
               <div>
                 {value !== null && <div className="text-2xl font-semibold">{value}</div>}
                 <div className={value !== null ? 'text-sm text-neutral-400 dark:text-neutral-500' : 'text-2xl font-semibold'}>{formatMoney(amount)}</div>
+                {sub && <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{sub}</div>}
               </div>
             </>
           )
