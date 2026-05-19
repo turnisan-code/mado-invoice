@@ -305,6 +305,47 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     return { blob, number: docData.number }
   }
 
+  async function ensureNumberAndSave(): Promise<{ number: string; newDocId?: string } | null> {
+    if (doc?.number) return { number: doc.number }
+    if (!clientId) { toast.error('Select a client.'); return null }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return null }
+
+    setSaving(true)
+    const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
+    if (numErr) { toast.error(numErr.message); setSaving(false); return null }
+    const num: string = numData
+
+    const effectiveDate = date || today()
+    const effectiveDueDate = dueDate || (client ? addDays(effectiveDate, client.payment_days ?? 14) : null)
+    const docFields = {
+      client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
+      due_date: effectiveDueDate || null, language, currency, tax_treatment: taxTreatment,
+      notes: notes || null, notes_internal: notesInternal || null, status: 'sent' as const,
+      discount_type: discountType, discount_value: discountValue || null,
+    }
+
+    if (doc) {
+      const { error } = await supabase.from('documents').update({ ...docFields, number: num }).eq('id', doc.id)
+      if (error) { toast.error(error.message); setSaving(false); return null }
+      await supabase.from('document_items').delete().eq('document_id', doc.id)
+      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(doc.id))
+      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return null }
+      if (!date) setDate(effectiveDate)
+      if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
+      setSaving(false)
+      return { number: num }
+    } else {
+      const { data: newDoc, error } = await supabase.from('documents').insert({
+        type, number: num, exchange_rate: 1, ...docFields,
+      }).select().single()
+      if (error) { toast.error(error.message); setSaving(false); return null }
+      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(newDoc.id))
+      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return null }
+      setSaving(false)
+      return { number: num, newDocId: newDoc.id }
+    }
+  }
+
   async function downloadPdf() {
     const result = await buildPdfBlob()
     if (!result) return
@@ -314,12 +355,39 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   }
 
   async function savePdf() {
-    const result = await buildPdfBlob()
+    const saved = await ensureNumberAndSave()
+    if (!saved) return
+    const result = await buildPdfBlob(saved.number)
     if (!result) return
+    const filename = `${saved.number}.pdf`
+
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await (window as Window & typeof globalThis & { showSaveFilePicker: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
+          suggestedName: filename,
+          types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+        })
+        const writable = await handle.createWritable()
+        await writable.write(result.blob)
+        await writable.close()
+        if (saved.newDocId) {
+          const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
+          router.push(`/${basePath}/${saved.newDocId}`)
+        } else router.refresh()
+        return
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+      }
+    }
+
     const url = URL.createObjectURL(result.blob)
-    const a = Object.assign(document.createElement('a'), { href: url, download: `${result.number}.pdf` })
+    const a = Object.assign(document.createElement('a'), { href: url, download: filename })
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
+    if (saved.newDocId) {
+      const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
+      router.push(`/${basePath}/${saved.newDocId}`)
+    } else router.refresh()
   }
 
   function buildEmailContent(numOverride?: string) {
@@ -372,52 +440,12 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!client) { toast.error('Select a client first.'); return }
     if (!client.email) { toast.error('Client has no email address.'); return }
 
-    let effectiveNumber = doc?.number ?? null
-    let newDocId: string | null = null
-    let alreadySent = false
+    const saved = await ensureNumberAndSave()
+    if (!saved) return
 
-    if (!effectiveNumber) {
-      if (!clientId) { toast.error('Select a client.'); return }
-      if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
-
-      setSaving(true)
-      const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
-      if (numErr) { toast.error(numErr.message); setSaving(false); return }
-      effectiveNumber = numData
-
-      const effectiveDate = date || today()
-      const effectiveDueDate = dueDate || (client ? addDays(effectiveDate, client.payment_days ?? 14) : null)
-      const docFields = {
-        client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
-        due_date: effectiveDueDate || null, language, currency, tax_treatment: taxTreatment,
-        notes: notes || null, notes_internal: notesInternal || null, status: 'sent' as const,
-        discount_type: discountType, discount_value: discountValue || null,
-      }
-
-      if (doc) {
-        const { error } = await supabase.from('documents').update({ ...docFields, number: effectiveNumber }).eq('id', doc.id)
-        if (error) { toast.error(error.message); setSaving(false); return }
-        await supabase.from('document_items').delete().eq('document_id', doc.id)
-        const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(doc.id))
-        if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-        if (!date) setDate(effectiveDate)
-        if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
-      } else {
-        const { data: newDoc, error } = await supabase.from('documents').insert({
-          type, number: effectiveNumber, exchange_rate: 1, ...docFields,
-        }).select().single()
-        if (error) { toast.error(error.message); setSaving(false); return }
-        const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(newDoc.id))
-        if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-        newDocId = newDoc.id
-      }
-      alreadySent = true
-      setSaving(false)
-    }
-
-    const content = buildEmailContent(effectiveNumber ?? undefined)
+    const content = buildEmailContent(saved.number)
     if (!content) return
-    const pdfResult = await buildPdfBlob(effectiveNumber ?? undefined)
+    const pdfResult = await buildPdfBlob(saved.number)
     if (!pdfResult) return
 
     const reader = new FileReader()
@@ -426,7 +454,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       reader.readAsDataURL(pdfResult.blob)
     })
 
-    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${effectiveNumber}.pdf`, newDocId: newDocId ?? undefined, alreadySent })
+    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${saved.number}.pdf`, newDocId: saved.newDocId, alreadySent: true })
   }
 
   async function confirmSendViaGmail() {
