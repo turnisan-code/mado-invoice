@@ -39,6 +39,18 @@ export interface Settings {
   gmail_access_token: string | null
   gmail_refresh_token: string | null
   gmail_token_expiry: number | null
+  email_subject_invoice_de: string | null
+  email_body_invoice_de: string | null
+  email_subject_invoice_en: string | null
+  email_body_invoice_en: string | null
+  email_subject_quote_de: string | null
+  email_body_quote_de: string | null
+  email_subject_quote_en: string | null
+  email_body_quote_en: string | null
+  email_subject_credit_note_de: string | null
+  email_body_credit_note_de: string | null
+  email_subject_credit_note_en: string | null
+  email_body_credit_note_en: string | null
 }
 
 export interface Client {

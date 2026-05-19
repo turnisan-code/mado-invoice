@@ -291,13 +291,35 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   function buildEmailContent() {
     if (!client) return null
     const num = doc?.number ?? 'DRAFT'
-    const isDE = language === 'de'
-    const subject = isDE
+    const lang = language as 'de' | 'en'
+    const typeKey = type === 'credit_note' ? 'credit_note' : type
+
+    const vars: Record<string, string> = {
+      invoice_number: num,
+      client: client.company ?? client.name,
+      total: formatMoney(totals.total, currency),
+      due_date: dueDate ?? '',
+      date,
+      company: settings.company_name,
+      owner: settings.owner_name,
+    }
+    function sub(tpl: string) {
+      return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? `{{${k}}}`)
+    }
+
+    const subjectKey = `email_subject_${typeKey}_${lang}` as keyof typeof settings
+    const bodyKey    = `email_body_${typeKey}_${lang}`    as keyof typeof settings
+
+    const defaultSubject = lang === 'de'
       ? `${typeLabel[type].de} ${num} – ${settings.company_name}`
       : `${typeLabel[type].en} ${num} – ${settings.company_name}`
-    const body = isDE
+    const defaultBody = lang === 'de'
       ? `Guten Tag,\n\nanbei übermittle ich Ihnen ${typeLabel[type].de} ${num}.\n\nBei Fragen stehe ich Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen\n${settings.owner_name}`
       : `Dear ${client.name},\n\nPlease find attached ${typeLabel[type].en} ${num}.\n\nDo not hesitate to contact me if you have any questions.\n\nKind regards,\n${settings.owner_name}`
+
+    const subject = settings[subjectKey] ? sub(settings[subjectKey] as string) : defaultSubject
+    const body    = settings[bodyKey]    ? sub(settings[bodyKey]    as string) : defaultBody
+
     return { subject, body, num }
   }
 

@@ -38,7 +38,23 @@ export default function SettingsForm({ settings }: Props) {
   const [disconnecting, setDisconnecting] = useState(false)
   const footerDeRef = useRef<HTMLTextAreaElement>(null)
   const footerEnRef = useRef<HTMLTextAreaElement>(null)
-  const activeFooter = useRef<'de' | 'en'>('de')
+
+  type DocType = 'invoice' | 'quote' | 'credit_note'
+  const [emailTpl, setEmailTpl] = useState({
+    invoice:     { subject_de: settings?.email_subject_invoice_de ?? '',     body_de: settings?.email_body_invoice_de ?? '',     subject_en: settings?.email_subject_invoice_en ?? '',     body_en: settings?.email_body_invoice_en ?? '' },
+    quote:       { subject_de: settings?.email_subject_quote_de ?? '',       body_de: settings?.email_body_quote_de ?? '',       subject_en: settings?.email_subject_quote_en ?? '',       body_en: settings?.email_body_quote_en ?? '' },
+    credit_note: { subject_de: settings?.email_subject_credit_note_de ?? '', body_de: settings?.email_body_credit_note_de ?? '', subject_en: settings?.email_subject_credit_note_en ?? '', body_en: settings?.email_body_credit_note_en ?? '' },
+  })
+  function setTpl(docType: DocType, field: string, value: string) {
+    setEmailTpl(t => ({ ...t, [docType]: { ...t[docType], [field]: value } }))
+  }
+
+  // Tracks the last-focused template input/textarea and its setter
+  const lastFocused = useRef<{ el: HTMLTextAreaElement | HTMLInputElement; setter: (v: string) => void } | null>(null)
+  function onTplFocus(el: HTMLTextAreaElement | HTMLInputElement, setter: (v: string) => void) {
+    lastFocused.current = { el, setter }
+  }
+
   const supabase = createClient()
   const searchParams = useSearchParams()
 
@@ -60,15 +76,12 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   function insertVar(token: string) {
-    const isDE = activeFooter.current === 'de'
-    const ref = isDE ? footerDeRef : footerEnRef
-    const setter = isDE ? setFooterDe : setFooterEn
-    const el = ref.current
-    if (!el) return
+    const target = lastFocused.current
+    if (!target) return
+    const { el, setter } = target
     const start = el.selectionStart ?? el.value.length
     const end = el.selectionEnd ?? start
-    const next = el.value.slice(0, start) + token + el.value.slice(end)
-    setter(next)
+    setter(el.value.slice(0, start) + token + el.value.slice(end))
     requestAnimationFrame(() => {
       el.focus()
       el.setSelectionRange(start + token.length, start + token.length)
@@ -118,8 +131,20 @@ export default function SettingsForm({ settings }: Props) {
       next_credit_note_number: parseInt(fd.get('next_credit_note_number') as string, 10),
       default_payment_days: parseInt(fd.get('default_payment_days') as string, 10),
       default_language: fd.get('default_language') as string,
-      invoice_footer_de: (fd.get('invoice_footer_de') as string) || null,
-      invoice_footer_en: (fd.get('invoice_footer_en') as string) || null,
+      invoice_footer_de: footerDe || null,
+      invoice_footer_en: footerEn || null,
+      email_subject_invoice_de: emailTpl.invoice.subject_de || null,
+      email_body_invoice_de: emailTpl.invoice.body_de || null,
+      email_subject_invoice_en: emailTpl.invoice.subject_en || null,
+      email_body_invoice_en: emailTpl.invoice.body_en || null,
+      email_subject_quote_de: emailTpl.quote.subject_de || null,
+      email_body_quote_de: emailTpl.quote.body_de || null,
+      email_subject_quote_en: emailTpl.quote.subject_en || null,
+      email_body_quote_en: emailTpl.quote.body_en || null,
+      email_subject_credit_note_de: emailTpl.credit_note.subject_de || null,
+      email_body_credit_note_de: emailTpl.credit_note.body_de || null,
+      email_subject_credit_note_en: emailTpl.credit_note.subject_en || null,
+      email_body_credit_note_en: emailTpl.credit_note.body_en || null,
     }
 
     const { error } = await supabase.from('settings').update(payload).eq('id', settings!.id)
@@ -284,12 +309,54 @@ export default function SettingsForm({ settings }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label>Footer (Deutsch)</Label>
-              <Textarea ref={footerDeRef} name="invoice_footer_de" value={footerDe} onChange={e => setFooterDe(e.target.value)} onFocus={() => { activeFooter.current = 'de' }} rows={4} className="resize-none text-sm" />
+              <Textarea ref={footerDeRef} name="invoice_footer_de" value={footerDe} onChange={e => setFooterDe(e.target.value)} onFocus={e => onTplFocus(e.currentTarget, setFooterDe)} rows={4} className="resize-none text-sm" />
             </div>
             <div className="space-y-1.5">
               <Label>Footer (English)</Label>
-              <Textarea ref={footerEnRef} name="invoice_footer_en" value={footerEn} onChange={e => setFooterEn(e.target.value)} onFocus={() => { activeFooter.current = 'en' }} rows={4} className="resize-none text-sm" />
+              <Textarea ref={footerEnRef} name="invoice_footer_en" value={footerEn} onChange={e => setFooterEn(e.target.value)} onFocus={e => onTplFocus(e.currentTarget, setFooterEn)} rows={4} className="resize-none text-sm" />
             </div>
+          </section>
+
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Email templates</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Pre-filled subject and body for "Send via Gmail". Same variables as footer. Click a field first, then a variable chip.</p>
+            {(
+              [
+                { type: 'invoice' as DocType,     label: 'Invoice' },
+                { type: 'quote' as DocType,       label: 'Quote' },
+                { type: 'credit_note' as DocType, label: 'Credit Note' },
+              ] as const
+            ).map(({ type: dt, label }) => (
+              <div key={dt} className="space-y-3 border border-neutral-100 dark:border-neutral-800 rounded-lg p-4">
+                <p className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{label}</p>
+                <div className="grid grid-cols-2 gap-4">
+                  {(['de', 'en'] as const).map(lang => (
+                    <div key={lang} className="space-y-2">
+                      <p className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase">{lang === 'de' ? 'Deutsch' : 'English'}</p>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Subject</Label>
+                        <input
+                          value={emailTpl[dt][`subject_${lang}`]}
+                          onChange={e => setTpl(dt, `subject_${lang}`, e.target.value)}
+                          onFocus={e => onTplFocus(e.currentTarget, v => setTpl(dt, `subject_${lang}`, v))}
+                          className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Body</Label>
+                        <textarea
+                          value={emailTpl[dt][`body_${lang}`]}
+                          onChange={e => setTpl(dt, `body_${lang}`, e.target.value)}
+                          onFocus={e => onTplFocus(e.currentTarget, v => setTpl(dt, `body_${lang}`, v))}
+                          rows={5}
+                          className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
           </section>
 
           <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
