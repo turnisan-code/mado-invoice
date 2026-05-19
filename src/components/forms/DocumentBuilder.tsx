@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -99,6 +99,10 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
+  const [autoSaving, setAutoSaving] = useState(false)
+  const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstRender = useRef(true)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
@@ -304,6 +308,32 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
     setShowSentConfirm(true)
   }
+
+  const autoSave = useCallback(async () => {
+    if (!doc || !clientId || saving) return
+    setAutoSaving(true)
+    const { error } = await supabase.from('documents').update({
+      client_id: clientId, date, service_date: serviceDate || null,
+      due_date: dueDate || null, language, currency, tax_treatment: taxTreatment,
+      notes: notes || null, notes_internal: notesInternal || null,
+      discount_type: discountType, discount_value: discountValue || null,
+    }).eq('id', doc.id)
+    if (!error) {
+      await supabase.from('document_items').delete().eq('document_id', doc.id)
+      await supabase.from('document_items').insert(buildItemsPayload(doc.id))
+      setLastSaved(new Date())
+    }
+    setAutoSaving(false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, clientId, date, serviceDate, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving])
+
+  useEffect(() => {
+    if (!doc) return
+    if (isFirstRender.current) { isFirstRender.current = false; return }
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(autoSave, 2000)
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
+  }, [autoSave, doc])
 
   const deleteBtn = (id: string) => (
     <button type="button" onClick={() => removeLine(id)}
@@ -685,9 +715,16 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
           <Mail size={13} /> Send via Superhuman
         </Button>
         <div className="flex-1" />
-        <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
-          Save draft
-        </Button>
+        {doc && (
+          <span className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">
+            {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+          </span>
+        )}
+        {!doc && (
+          <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
+            Save draft
+          </Button>
+        )}
         <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
           {saving ? 'Saving…' : 'Mark as sent'}
         </Button>

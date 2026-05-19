@@ -7,12 +7,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
 import type { Settings } from '@/types'
 
 interface Props { settings: Settings | null }
 
+const TABS = ['Business', 'Numbering', 'Templates'] as const
+type Tab = typeof TABS[number]
+
 export default function SettingsForm({ settings }: Props) {
+  const [tab, setTab] = useState<Tab>('Business')
   const [saving, setSaving] = useState(false)
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
   const [uploadingLogo, setUploadingLogo] = useState(false)
@@ -72,103 +75,138 @@ export default function SettingsForm({ settings }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Logo</h2>
-        <div className="flex items-center gap-4">
-          {logoUrl && (
-            <img src={logoUrl} alt="Logo" className="h-14 w-auto object-contain border border-neutral-100 dark:border-neutral-800 rounded-md p-1" />
-          )}
-          <div>
-            <label className="cursor-pointer text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-              {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
-              <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
-            </label>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5">PNG or SVG, transparent background recommended</p>
-          </div>
-        </div>
-      </section>
+      {/* Tabs */}
+      <div className="flex border-b border-neutral-200 dark:border-neutral-700">
+        {TABS.map(t => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              tab === t
+                ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
+                : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
 
-      <Separator />
+      {tab === 'Business' && (
+        <div className="space-y-6">
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Logo</p>
+            <div className="flex items-center gap-4">
+              {logoUrl && (
+                <img src={logoUrl} alt="Logo" className="h-14 w-auto object-contain border border-neutral-100 dark:border-neutral-800 rounded-md p-1" />
+              )}
+              <div>
+                <label className="cursor-pointer text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                  {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                </label>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5">PNG or SVG, transparent background recommended</p>
+              </div>
+            </div>
+          </section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Business details</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <F label="Business name *" name="company_name" defaultValue={settings?.company_name} required />
-          <F label="Owner name" name="owner_name" defaultValue={settings?.owner_name} />
-        </div>
-        <F label="Address *" name="address_line1" defaultValue={settings?.address_line1} required />
-        <F label="Address line 2" name="address_line2" defaultValue={settings?.address_line2 ?? ''} />
-        <div className="grid grid-cols-3 gap-3">
-          <F label="ZIP" name="zip" defaultValue={settings?.zip} />
-          <F label="City" name="city" defaultValue={settings?.city} className="col-span-2" />
-        </div>
-        <F label="Country" name="country" defaultValue={settings?.country ?? 'Austria'} />
-        <div className="grid grid-cols-2 gap-3">
-          <F label="Email" name="email" type="email" defaultValue={settings?.email} />
-          <F label="Phone" name="phone" defaultValue={settings?.phone ?? ''} />
-        </div>
-        <F label="Website" name="website" defaultValue={settings?.website ?? ''} />
-        <F label="UID-Nummer *" name="uid_number" defaultValue={settings?.uid_number} required placeholder="ATU…" />
-      </section>
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Business details</p>
+            <div className="grid grid-cols-2 gap-3">
+              <F label="Business name *" name="company_name" defaultValue={settings?.company_name} required />
+              <F label="Owner name" name="owner_name" defaultValue={settings?.owner_name} />
+            </div>
+            <F label="Address *" name="address_line1" defaultValue={settings?.address_line1} required />
+            <F label="Address line 2" name="address_line2" defaultValue={settings?.address_line2 ?? ''} />
+            <div className="grid grid-cols-3 gap-3">
+              <F label="ZIP" name="zip" defaultValue={settings?.zip} />
+              <F label="City" name="city" defaultValue={settings?.city} className="col-span-2" />
+            </div>
+            <F label="Country" name="country" defaultValue={settings?.country ?? 'Austria'} />
+            <div className="grid grid-cols-2 gap-3">
+              <F label="Email" name="email" type="email" defaultValue={settings?.email} />
+              <F label="Phone" name="phone" defaultValue={settings?.phone ?? ''} />
+            </div>
+            <F label="Website" name="website" defaultValue={settings?.website ?? ''} />
+            <F label="UID-Nummer *" name="uid_number" defaultValue={settings?.uid_number} required placeholder="ATU…" />
+          </section>
 
-      <Separator />
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Bank details</p>
+            <F label="IBAN *" name="iban" defaultValue={settings?.iban} required />
+            <div className="grid grid-cols-2 gap-3">
+              <F label="BIC" name="bic" defaultValue={settings?.bic} />
+              <F label="Bank name" name="bank_name" defaultValue={settings?.bank_name ?? ''} />
+            </div>
+          </section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Bank details</h2>
-        <F label="IBAN *" name="iban" defaultValue={settings?.iban} required />
-        <div className="grid grid-cols-2 gap-3">
-          <F label="BIC" name="bic" defaultValue={settings?.bic} />
-          <F label="Bank name" name="bank_name" defaultValue={settings?.bank_name ?? ''} />
+          {/* Hidden fields for other tabs so form data is complete */}
+          <HiddenNumberingFields settings={settings} />
+          <HiddenTemplateFields settings={settings} />
         </div>
-      </section>
+      )}
 
-      <Separator />
+      {tab === 'Numbering' && (
+        <div className="space-y-6">
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Document prefixes</p>
+            <div className="grid grid-cols-3 gap-3">
+              <F label="Invoice prefix" name="invoice_prefix" defaultValue={settings?.invoice_prefix ?? 'R'} />
+              <F label="Quote prefix" name="quote_prefix" defaultValue={settings?.quote_prefix ?? 'A'} />
+              <F label="Credit note prefix" name="credit_note_prefix" defaultValue={settings?.credit_note_prefix ?? 'G'} />
+            </div>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Numbers will look like: R-2026-001, A-2026-001, G-2026-001</p>
+          </section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Document numbering</h2>
-        <div className="grid grid-cols-3 gap-3">
-          <F label="Invoice prefix" name="invoice_prefix" defaultValue={settings?.invoice_prefix ?? 'R'} />
-          <F label="Quote prefix" name="quote_prefix" defaultValue={settings?.quote_prefix ?? 'A'} />
-          <F label="Credit note prefix" name="credit_note_prefix" defaultValue={settings?.credit_note_prefix ?? 'G'} />
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Next numbers</p>
+            <div className="grid grid-cols-3 gap-3">
+              <F label="Next invoice #" name="next_invoice_number" type="number" defaultValue={String(settings?.next_invoice_number ?? 1)} />
+              <F label="Next quote #" name="next_quote_number" type="number" defaultValue={String(settings?.next_quote_number ?? 1)} />
+              <F label="Next credit note #" name="next_credit_note_number" type="number" defaultValue={String(settings?.next_credit_note_number ?? 1)} />
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Defaults</p>
+            <div className="grid grid-cols-2 gap-3">
+              <F label="Default payment days" name="default_payment_days" type="number" defaultValue={String(settings?.default_payment_days ?? 14)} />
+              <div className="space-y-1.5">
+                <Label>Default language</Label>
+                <select name="default_language" defaultValue={settings?.default_language ?? 'de'}
+                  className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
+                  <option value="de">Deutsch</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
+          <HiddenTemplateFields settings={settings} />
         </div>
-        <p className="text-xs text-neutral-400 dark:text-neutral-500">Numbers will look like: R-2026-001, A-2026-001, G-2026-001</p>
-        <div className="grid grid-cols-3 gap-3">
-          <F label="Next invoice #" name="next_invoice_number" type="number" defaultValue={String(settings?.next_invoice_number ?? 1)} />
-          <F label="Next quote #" name="next_quote_number" type="number" defaultValue={String(settings?.next_quote_number ?? 1)} />
-          <F label="Next credit note #" name="next_credit_note_number" type="number" defaultValue={String(settings?.next_credit_note_number ?? 1)} />
-        </div>
-      </section>
+      )}
 
-      <Separator />
+      {tab === 'Templates' && (
+        <div className="space-y-6">
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Invoice footer text</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Printed at the bottom of every invoice and quote.</p>
+            <div className="space-y-1.5">
+              <Label>Footer (Deutsch)</Label>
+              <Textarea name="invoice_footer_de" defaultValue={settings?.invoice_footer_de ?? ''} rows={4} className="resize-none text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Footer (English)</Label>
+              <Textarea name="invoice_footer_en" defaultValue={settings?.invoice_footer_en ?? ''} rows={4} className="resize-none text-sm" />
+            </div>
+          </section>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Defaults</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <F label="Default payment days" name="default_payment_days" type="number" defaultValue={String(settings?.default_payment_days ?? 14)} />
-          <div className="space-y-1.5">
-            <Label>Default language</Label>
-            <select name="default_language" defaultValue={settings?.default_language ?? 'de'}
-              className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
-              <option value="de">Deutsch</option>
-              <option value="en">English</option>
-            </select>
-          </div>
+          <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
+          <HiddenNumberingFields settings={settings} />
         </div>
-      </section>
-
-      <Separator />
-
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Invoice footer text</h2>
-        <div className="space-y-1.5">
-          <Label>Footer (Deutsch)</Label>
-          <Textarea name="invoice_footer_de" defaultValue={settings?.invoice_footer_de ?? ''} rows={3} className="resize-none text-sm" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Footer (English)</Label>
-          <Textarea name="invoice_footer_en" defaultValue={settings?.invoice_footer_en ?? ''} rows={3} className="resize-none text-sm" />
-        </div>
-      </section>
+      )}
 
       <Button type="submit" disabled={saving} className="w-full">
         {saving ? 'Saving…' : 'Save settings'}
@@ -185,5 +223,50 @@ function F({ label, name, defaultValue, type = 'text', required = false, placeho
       <Label htmlFor={name}>{label}</Label>
       <Input id={name} name={name} type={type} defaultValue={defaultValue ?? ''} required={required} placeholder={placeholder} className="text-sm" />
     </div>
+  )
+}
+
+function HiddenBusinessFields({ settings, logoUrl }: { settings: Settings | null; logoUrl: string }) {
+  return (
+    <>
+      <input type="hidden" name="company_name" value={settings?.company_name ?? ''} />
+      <input type="hidden" name="owner_name" value={settings?.owner_name ?? ''} />
+      <input type="hidden" name="address_line1" value={settings?.address_line1 ?? ''} />
+      <input type="hidden" name="address_line2" value={settings?.address_line2 ?? ''} />
+      <input type="hidden" name="zip" value={settings?.zip ?? ''} />
+      <input type="hidden" name="city" value={settings?.city ?? ''} />
+      <input type="hidden" name="country" value={settings?.country ?? ''} />
+      <input type="hidden" name="email" value={settings?.email ?? ''} />
+      <input type="hidden" name="phone" value={settings?.phone ?? ''} />
+      <input type="hidden" name="website" value={settings?.website ?? ''} />
+      <input type="hidden" name="uid_number" value={settings?.uid_number ?? ''} />
+      <input type="hidden" name="iban" value={settings?.iban ?? ''} />
+      <input type="hidden" name="bic" value={settings?.bic ?? ''} />
+      <input type="hidden" name="bank_name" value={settings?.bank_name ?? ''} />
+    </>
+  )
+}
+
+function HiddenNumberingFields({ settings }: { settings: Settings | null }) {
+  return (
+    <>
+      <input type="hidden" name="invoice_prefix" value={settings?.invoice_prefix ?? 'R'} />
+      <input type="hidden" name="quote_prefix" value={settings?.quote_prefix ?? 'A'} />
+      <input type="hidden" name="credit_note_prefix" value={settings?.credit_note_prefix ?? 'G'} />
+      <input type="hidden" name="next_invoice_number" value={String(settings?.next_invoice_number ?? 1)} />
+      <input type="hidden" name="next_quote_number" value={String(settings?.next_quote_number ?? 1)} />
+      <input type="hidden" name="next_credit_note_number" value={String(settings?.next_credit_note_number ?? 1)} />
+      <input type="hidden" name="default_payment_days" value={String(settings?.default_payment_days ?? 14)} />
+      <input type="hidden" name="default_language" value={settings?.default_language ?? 'de'} />
+    </>
+  )
+}
+
+function HiddenTemplateFields({ settings }: { settings: Settings | null }) {
+  return (
+    <>
+      <input type="hidden" name="invoice_footer_de" value={settings?.invoice_footer_de ?? ''} />
+      <input type="hidden" name="invoice_footer_en" value={settings?.invoice_footer_en ?? ''} />
+    </>
   )
 }

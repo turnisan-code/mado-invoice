@@ -128,3 +128,12 @@
     @apply font-sans;
   }
 }
+
+/* Native date/time inputs need color-scheme to render chrome correctly in dark mode */
+.dark input[type="date"],
+.dark input[type="time"],
+.dark input[type="datetime-local"],
+.dark input[type="month"],
+.dark input[type="week"] {
+  color-scheme: dark;
+}
