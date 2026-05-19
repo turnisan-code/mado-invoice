@@ -99,6 +99,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string } | null>(null)
+  const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -324,26 +326,27 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       reader.readAsDataURL(pdfResult.blob)
     })
 
-    const toastId = toast.loading('Sending…')
+    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${content.num}.pdf` })
+  }
+
+  async function confirmSendViaGmail() {
+    if (!gmailPreview) return
+    setGmailSending(true)
     const res = await fetch('/api/gmail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        to: client.email,
-        subject: content.subject,
-        body: content.body,
-        pdfBase64,
-        filename: `${content.num}.pdf`,
-      }),
+      body: JSON.stringify(gmailPreview),
     })
+    setGmailSending(false)
+    setGmailPreview(null)
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
-      toast.error(err.error ?? 'Failed to send email.', { id: toastId })
+      toast.error(err.error ?? 'Failed to send email.')
       return
     }
 
-    toast.success('Email sent via Gmail.', { id: toastId })
+    toast.success('Email sent via Gmail.')
     if (doc?.status === 'draft') requestSent()
   }
 
@@ -388,6 +391,49 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   return (
     <div className="space-y-6">
+      {/* Gmail send preview */}
+      {gmailPreview && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 w-full max-w-lg space-y-4">
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Review email</h3>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</label>
+                <input
+                  value={gmailPreview.to}
+                  onChange={e => setGmailPreview(p => p ? { ...p, to: e.target.value } : p)}
+                  className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Subject</label>
+                <input
+                  value={gmailPreview.subject}
+                  onChange={e => setGmailPreview(p => p ? { ...p, subject: e.target.value } : p)}
+                  className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Body</label>
+                <textarea
+                  value={gmailPreview.body}
+                  onChange={e => setGmailPreview(p => p ? { ...p, body: e.target.value } : p)}
+                  rows={7}
+                  className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
+                />
+              </div>
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">PDF attached: {gmailPreview.filename}</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="outline" onClick={() => setGmailPreview(null)} disabled={gmailSending}>Cancel</Button>
+              <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>
+                {gmailSending ? 'Sending…' : 'Send'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Mark as sent confirmation */}
       {showSentConfirm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
