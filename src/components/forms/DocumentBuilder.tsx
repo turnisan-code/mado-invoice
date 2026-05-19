@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X, GripVertical } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -97,6 +97,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [saving, setSaving] = useState(false)
   const [showCatalogue, setShowCatalogue] = useState(false)
   const [activeLine, setActiveLine] = useState<string | null>(null)
+  const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
+  const [showSentConfirm, setShowSentConfirm] = useState(false)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
@@ -255,8 +257,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     setSaving(false)
   }
 
-  async function downloadPdf() {
-    if (!client) { toast.error('Select a client first.'); return }
+  async function buildPdfBlob() {
+    if (!client) { toast.error('Select a client first.'); return null }
     const docData = {
       number: doc?.number ?? 'DRAFT',
       date, service_date: serviceDate || null, due_date: dueDate || null,
@@ -269,10 +271,15 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     const blob = await pdf(
       <InvoiceDocument settings={settings} client={client} document={docData} />
     ).toBlob()
-    const url = URL.createObjectURL(blob)
-    const a = Object.assign(document.createElement('a'), { href: url, download: `${docData.number}.pdf` })
-    a.click()
-    URL.revokeObjectURL(url)
+    return { blob, number: docData.number }
+  }
+
+  async function downloadPdf() {
+    const result = await buildPdfBlob()
+    if (!result) return
+    const url = URL.createObjectURL(result.blob)
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
   async function openInEmail() {
@@ -292,6 +299,12 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     await downloadPdf()
   }
 
+  function requestSent() {
+    if (!clientId) { toast.error('Select a client.'); return }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
+    setShowSentConfirm(true)
+  }
+
   const deleteBtn = (id: string) => (
     <button type="button" onClick={() => removeLine(id)}
       className="h-9 w-8 flex items-center justify-center text-neutral-300 hover:text-red-500 transition-colors shrink-0">
@@ -301,8 +314,28 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   return (
     <div className="space-y-6">
-      {/* Header fields */}
-      <div className="grid grid-cols-2 gap-4">
+      {/* Mark as sent confirmation */}
+      {showSentConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full space-y-4">
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as sent?</h3>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">
+              {!doc?.number
+                ? `This will issue a new ${type} number and mark it as sent. This cannot be undone.`
+                : `This will mark ${type} ${doc.number} as sent.`}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button type="button" variant="outline" onClick={() => setShowSentConfirm(false)}>Cancel</Button>
+              <Button type="button" onClick={() => { setShowSentConfirm(false); save('sent') }}>Confirm</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Client & dates */}
+      <div>
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Client & Dates</p>
+        <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Client *</Label>
           <select value={clientId} onChange={e => handleClientChange(e.target.value)}
@@ -323,11 +356,11 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm" />
           </div>
         </div>
-      </div>
+        </div>
 
-      <div className="grid grid-cols-4 gap-3">
-        <div className="space-y-1.5">
-          <Label>Language</Label>
+        <div className="grid grid-cols-4 gap-3 mt-4">
+          <div className="space-y-1.5">
+            <Label>Language</Label>
           <select value={language} onChange={e => setLanguage(e.target.value as Language)}
             className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
             <option value="de">Deutsch</option>
@@ -359,17 +392,19 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       </div>
 
       {taxNote && (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-3">
           {taxNote}
         </div>
       )}
+      </div>{/* end Client & Dates */}
 
       <Separator />
 
       {/* Line items */}
       <div className="space-y-1.5">
-        <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
-          <span /><span>Description</span><span>Service date</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span />
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Line Items</p>
+        <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
+          <span /><span>Description</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span /><span />
         </div>
 
         <div className="space-y-1">
@@ -454,94 +489,114 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
             // item
             return (
-              <div key={line.id} {...dragProps} className={`grid gap-2 items-start ${dragOverClass}`} style={{ gridTemplateColumns: '16px 1fr 110px 70px 80px 90px 60px 32px' }}>
-                {handle}
-                <div className="relative">
-                  <Input
-                    value={line.description}
-                    onChange={e => updateLine(line.id, { description: e.target.value })}
-                    placeholder="Description…"
-                    className="text-sm"
-                    onFocus={() => { setActiveLine(line.id); setShowCatalogue(true) }}
-                  />
-                  {showCatalogue && activeLine === line.id && (
-                    <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto">
-                      {catalogueItems.filter(i => i.active).map(item => (
-                        <button key={item.id} type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
-                          onMouseDown={() => pickCatalogueItem(item, line.id)}>
-                          <span>{language === 'de' ? item.name_de : item.name_en}</span>
-                          <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
-                        </button>
-                      ))}
-                      <div className="border-t border-neutral-100 dark:border-neutral-800">
-                        {addingItem ? (
-                          <div className="p-3 space-y-2">
-                            <div className="grid grid-cols-2 gap-2">
-                              <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                              <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                              <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                              <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                              </select>
-                              <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                              </select>
-                            </div>
-                            <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                            <div className="flex gap-2">
-                              <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
-                              <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
-                            <Plus size={12} /> New catalogue item…
+              <div key={line.id} className={dragOverClass}>
+                <div {...dragProps} className="grid gap-2 items-start" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
+                  {handle}
+                  <div className="relative">
+                    <Input
+                      value={line.description}
+                      onChange={e => updateLine(line.id, { description: e.target.value })}
+                      placeholder="Description…"
+                      className="text-sm"
+                      onFocus={() => { setActiveLine(line.id); setShowCatalogue(true) }}
+                    />
+                    {showCatalogue && activeLine === line.id && (
+                      <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto">
+                        {catalogueItems.filter(i => i.active).map(item => (
+                          <button key={item.id} type="button"
+                            className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
+                            onMouseDown={() => pickCatalogueItem(item, line.id)}>
+                            <span>{language === 'de' ? item.name_de : item.name_en}</span>
+                            <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
                           </button>
-                        )}
+                        ))}
+                        <div className="border-t border-neutral-100 dark:border-neutral-800">
+                          {addingItem ? (
+                            <div className="p-3 space-y-2">
+                              <div className="grid grid-cols-2 gap-2">
+                                <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
+                                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                                <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
+                                  {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                                </select>
+                              </div>
+                              <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                              <div className="flex gap-2">
+                                <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
+                                <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
+                              <Plus size={12} /> New catalogue item…
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                  <Input type="number" value={line.quantity} min={0} step={0.25}
+                    onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
+                    className="text-sm" />
+                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
+                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <Input type="number" value={line.unit_price} min={0} step={0.01}
+                    onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
+                    className="text-sm" />
+                  <select value={line.vat_rate}
+                    onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
+                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                    {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDateLine(activeDateLine === line.id ? null : line.id)}
+                    title={line.service_date ?? 'Set service date'}
+                    className={`h-9 w-6 flex items-center justify-center transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-300 hover:text-neutral-500'}`}
+                  >
+                    <Calendar size={13} />
+                  </button>
+                  {deleteBtn(line.id)}
                 </div>
-                <Input type="date" value={line.service_date ?? ''}
-                  onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
-                  className="text-sm" />
-                <Input type="number" value={line.quantity} min={0} step={0.25}
-                  onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
-                  className="text-sm" />
-                <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
-                  className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-                <Input type="number" value={line.unit_price} min={0} step={0.01}
-                  onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
-                  className="text-sm" />
-                <select value={line.vat_rate}
-                  onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
-                  className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-                  {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                </select>
-                {deleteBtn(line.id)}
+                {(activeDateLine === line.id || line.service_date) && (
+                  <div className="ml-6 mt-1 flex items-center gap-2">
+                    <Input type="date" value={line.service_date ?? ''}
+                      onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
+                      className="text-xs w-40" />
+                    {line.service_date && (
+                      <button type="button" onClick={() => { updateLine(line.id, { service_date: null }); setActiveDateLine(null) }}
+                        className="text-neutral-300 hover:text-neutral-500"><X size={12} /></button>
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
 
         {/* Add row controls */}
-        <div className="flex items-center gap-3 pt-1 flex-wrap">
+        <div className="flex items-center gap-2 pt-2 flex-wrap">
           <button type="button" onClick={() => addLine('item')}
-            className="flex items-center gap-1.5 text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
-            <Plus size={14} /> Add line
+            className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+            <Plus size={13} /> Add line
           </button>
-          <span className="text-neutral-200 dark:text-neutral-700 text-xs">|</span>
-          {(['heading', 'text', 'separator', 'subtotal', 'page_break'] as LineType[]).map(lt => (
-            <button key={lt} type="button" onClick={() => addLine(lt)}
-              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
-              {lt === 'heading' ? 'Heading' : lt === 'text' ? 'Note' : lt === 'separator' ? 'Divider' : lt === 'subtotal' ? 'Subtotal' : 'Page break'}
-            </button>
-          ))}
+          <div className="flex items-center gap-1">
+            {([['heading', 'H'], ['text', 'T'], ['separator', '—'], ['subtotal', '∑'], ['page_break', '⋯']] as [LineType, string][]).map(([lt, icon]) => (
+              <button key={lt} type="button" onClick={() => addLine(lt)}
+                title={lt === 'heading' ? 'Heading' : lt === 'text' ? 'Note' : lt === 'separator' ? 'Divider' : lt === 'subtotal' ? 'Subtotal' : 'Page break'}
+                className="w-7 h-7 flex items-center justify-center rounded border border-neutral-200 dark:border-neutral-700 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
+                {icon}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -607,30 +662,33 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       </div>
 
       {/* Notes */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
-          <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none text-sm" />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Internal notes</Label>
-          <Textarea value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none text-sm" placeholder="Not printed on PDF…" />
+      <div>
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Notes</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none text-sm" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Internal notes</Label>
+            <Textarea value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none text-sm" placeholder="Not printed on PDF…" />
+          </div>
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={downloadPdf} className="flex items-center gap-1.5">
-          <Download size={14} /> PDF preview
+      {/* Sticky action bar */}
+      <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-3">
+        <Button type="button" variant="outline" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5">
+          <Download size={13} /> Preview PDF
         </Button>
-        <Button type="button" variant="outline" onClick={openInEmail} className="flex items-center gap-1.5">
-          Open in email
+        <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
+          <Mail size={13} /> Send via Superhuman
         </Button>
         <div className="flex-1" />
-        <Button type="button" variant="ghost" onClick={() => save('draft')} disabled={saving}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
           Save draft
         </Button>
-        <Button type="button" onClick={() => save('sent')} disabled={saving}>
+        <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
           {saving ? 'Saving…' : 'Mark as sent'}
         </Button>
       </div>

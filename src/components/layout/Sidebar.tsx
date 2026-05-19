@@ -35,9 +35,9 @@ export default function Sidebar() {
 
   return (
     <aside className="w-56 shrink-0 flex flex-col h-screen sticky top-0 border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
-      <div className="px-4 py-5 border-b border-neutral-100 dark:border-neutral-800">
+      <Link href="/dashboard" className="block px-4 py-5 border-b border-neutral-100 dark:border-neutral-800">
         <Logo />
-      </div>
+      </Link>
       <nav className="flex-1 py-3 px-2 space-y-0.5">
         {nav.map(({ href, label, icon: Icon }) => (
           <Link

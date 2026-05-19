@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { formatMoney } from '@/lib/utils/document'
+import ReportControls from '@/components/layout/ReportControls'
+import { Suspense } from 'react'
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ year?: string; quarter?: string }> }) {
   const { year: yearParam, quarter: quarterParam } = await searchParams
@@ -48,7 +50,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const totalVat = Object.values(vatMap).reduce((s, g) => s + g.vat, 0)
   const gross = subtotal + totalVat
 
-  const quarters = [1, 2, 3, 4]
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
 
   return (
@@ -58,15 +59,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <h1 className="text-2xl font-semibold">VAT Report</h1>
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Copy these figures into FinanzOnline.</p>
         </div>
-        <form className="flex gap-2">
-          <select name="year" defaultValue={year} className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-            {years.map(y => <option key={y} value={y}>Q{quarter} {y}</option>)}
-          </select>
-          <select name="quarter" defaultValue={quarter} className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-            {quarters.map(q => <option key={q} value={q}>Q{q}</option>)}
-          </select>
-          <button type="submit" className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Load</button>
-        </form>
+        <Suspense>
+          <ReportControls year={year} quarter={quarter} years={years} />
+        </Suspense>
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-800">

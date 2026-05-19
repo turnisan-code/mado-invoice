@@ -141,7 +141,7 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
             className="shrink-0 flex items-center gap-1.5"
           >
             <Plus size={13} />
-            {saving ? 'Saving…' : 'Record'}
+            {saving ? 'Saving…' : 'Add payment'}
           </Button>
         </div>
       )}

@@ -46,10 +46,10 @@ export default async function DashboardPage() {
   const recentInvoices = allInvoices.slice(0, 10)
 
   const stats = [
-    { label: 'Open', value: open.length, amount: open.reduce((s, d) => s + getTotal(d), 0), icon: FileText, color: 'text-blue-600 bg-blue-50' },
-    { label: 'Overdue', value: overdue.length, amount: overdue.reduce((s, d) => s + getTotal(d), 0), icon: AlertTriangle, color: 'text-red-600 bg-red-50' },
-    { label: 'Paid this month', value: paidThisMonth.length, amount: paidThisMonth.reduce((s, d) => s + getPaid(d), 0), icon: CheckCircle, color: 'text-green-600 bg-green-50' },
-    { label: `Revenue ${thisYear}`, value: null, amount: revenueThisYear, icon: TrendingUp, color: 'text-purple-600 bg-purple-50' },
+    { label: 'Open', value: open.length, amount: open.reduce((s, d) => s + getTotal(d), 0), icon: FileText, color: 'text-blue-600 bg-blue-50', href: '/invoices?status=sent' },
+    { label: 'Overdue', value: overdue.length, amount: overdue.reduce((s, d) => s + getTotal(d), 0), icon: AlertTriangle, color: 'text-red-600 bg-red-50', href: '/invoices?status=overdue' },
+    { label: 'Paid this month', value: paidThisMonth.length, amount: paidThisMonth.reduce((s, d) => s + getPaid(d), 0), icon: CheckCircle, color: 'text-green-600 bg-green-50', href: null },
+    { label: `Revenue ${thisYear}`, value: null, amount: revenueThisYear, icon: TrendingUp, color: 'text-purple-600 bg-purple-50', href: null },
   ]
 
   const statusLabel: Record<string, string> = {
@@ -78,18 +78,29 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(({ label, value, amount, icon: Icon, color }) => (
-          <div key={label} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-neutral-500 dark:text-neutral-400">{label}</span>
-              <span className={`p-1.5 rounded-md ${color}`}><Icon size={14} /></span>
+        {stats.map(({ label, value, amount, icon: Icon, color, href }) => {
+          const inner = (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-neutral-500 dark:text-neutral-400">{label}</span>
+                <span className={`p-1.5 rounded-md ${color}`}><Icon size={14} /></span>
+              </div>
+              <div>
+                {value !== null && <div className="text-2xl font-semibold">{value}</div>}
+                <div className={value !== null ? 'text-sm text-neutral-400 dark:text-neutral-500' : 'text-2xl font-semibold'}>{formatMoney(amount)}</div>
+              </div>
+            </>
+          )
+          return href ? (
+            <Link key={label} href={href} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3 hover:border-neutral-300 dark:hover:border-neutral-600 transition-colors block">
+              {inner}
+            </Link>
+          ) : (
+            <div key={label} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 space-y-3">
+              {inner}
             </div>
-            <div>
-              {value !== null && <div className="text-2xl font-semibold">{value}</div>}
-              <div className={value !== null ? 'text-sm text-neutral-400 dark:text-neutral-500' : 'text-2xl font-semibold'}>{formatMoney(amount)}</div>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
