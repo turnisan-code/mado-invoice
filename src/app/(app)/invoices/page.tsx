@@ -4,11 +4,11 @@ import { markOverdueInvoices } from '@/lib/utils/overdue'
 
 export default async function InvoicesPage() {
   const supabase = await createClient()
-  await markOverdueInvoices(supabase)
+  void markOverdueInvoices(supabase)
 
   const { data: docs } = await supabase
     .from('documents')
-    .select('*, clients(name, company), document_items(*)')
+    .select('id, number, date, due_date, status, currency, clients(name, company), document_items(quantity, unit_price, vat_rate)')
     .eq('type', 'invoice')
     .order('date', { ascending: false })
 

@@ -7,12 +7,12 @@ import Link from 'next/link'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
-  await markOverdueInvoices(supabase)
+  void markOverdueInvoices(supabase)
 
   const [{ data: invoices }, { data: quotes }] = await Promise.all([
     supabase
       .from('documents')
-      .select('*, document_items(*), payments(*), clients(name)')
+      .select('id, number, status, date, due_date, currency, clients(name), document_items(quantity, unit_price, vat_rate), payments(amount, date)')
       .eq('type', 'invoice')
       .order('date', { ascending: false }),
     supabase
