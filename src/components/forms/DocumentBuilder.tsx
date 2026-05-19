@@ -288,6 +288,15 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
+  async function savePdf() {
+    const result = await buildPdfBlob()
+    if (!result) return
+    const url = URL.createObjectURL(result.blob)
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${result.number}.pdf` })
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
+  }
+
   function buildEmailContent() {
     if (!client) return null
     const num = doc?.number ?? 'DRAFT'
@@ -822,6 +831,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-3">
         <Button type="button" variant="outline" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5">
           <Download size={13} /> Preview PDF
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
+          <Download size={13} /> Download PDF
         </Button>
         {settings.gmail_email ? (
           <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
