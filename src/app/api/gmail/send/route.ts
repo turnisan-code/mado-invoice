@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: settings } = await supabase.from('settings').select('*').eq('user_id', user.id).single()
+  const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings?.gmail_refresh_token) {
     return NextResponse.json({ error: 'Gmail not connected' }, { status: 400 })
   }
