@@ -84,6 +84,10 @@ function L(key: string, lang: 'de' | 'en'): string {
   return LABELS[key]?.[lang] ?? key
 }
 
+function replaceVars(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
+}
+
 interface DocItem {
   line_type?: LineType
   description: string
@@ -133,6 +137,20 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
   const noLabel = doc.type === 'quote' ? L('quote_no', lang) : L('invoice_no', lang)
+
+  const footerVars: Record<string, string> = {
+    invoice_number: doc.number,
+    date: doc.date,
+    due_date: doc.due_date ?? '',
+    client: client.company ?? client.name,
+    subtotal: fmt(doc.totals.subtotal),
+    vat: fmt(doc.totals.total_vat),
+    total: fmt(doc.totals.total),
+    balance_due: fmt(doc.totals.balance_due),
+  }
+
+  const rawFooter = lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en
+  const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
 
   return (
     <Document>
@@ -283,11 +301,7 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
         {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
 
         {/* Footer text from Templates settings */}
-        {(lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en) && (
-          <Text style={s.footerNote}>
-            {lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en}
-          </Text>
-        )}
+        {footerText && <Text style={s.footerNote}>{footerText}</Text>}
 
         {/* Footer */}
         <View style={s.footer} fixed>

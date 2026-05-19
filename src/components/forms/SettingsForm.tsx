@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -14,12 +14,44 @@ interface Props { settings: Settings | null }
 const TABS = ['Business', 'Numbering', 'Templates'] as const
 type Tab = typeof TABS[number]
 
+const FOOTER_VARS = [
+  { token: '{{invoice_number}}', label: 'Number' },
+  { token: '{{date}}',           label: 'Date' },
+  { token: '{{due_date}}',       label: 'Due date' },
+  { token: '{{client}}',         label: 'Client' },
+  { token: '{{subtotal}}',       label: 'Subtotal' },
+  { token: '{{vat}}',            label: 'VAT' },
+  { token: '{{total}}',          label: 'Total' },
+  { token: '{{balance_due}}',    label: 'Balance due' },
+]
+
 export default function SettingsForm({ settings }: Props) {
   const [tab, setTab] = useState<Tab>('Business')
   const [saving, setSaving] = useState(false)
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [footerDe, setFooterDe] = useState(settings?.invoice_footer_de ?? '')
+  const [footerEn, setFooterEn] = useState(settings?.invoice_footer_en ?? '')
+  const footerDeRef = useRef<HTMLTextAreaElement>(null)
+  const footerEnRef = useRef<HTMLTextAreaElement>(null)
+  const activeFooter = useRef<'de' | 'en'>('de')
   const supabase = createClient()
+
+  function insertVar(token: string) {
+    const isDE = activeFooter.current === 'de'
+    const ref = isDE ? footerDeRef : footerEnRef
+    const setter = isDE ? setFooterDe : setFooterEn
+    const el = ref.current
+    if (!el) return
+    const start = el.selectionStart ?? el.value.length
+    const end = el.selectionEnd ?? start
+    const next = el.value.slice(0, start) + token + el.value.slice(end)
+    setter(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + token.length, start + token.length)
+    })
+  }
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -143,7 +175,7 @@ export default function SettingsForm({ settings }: Props) {
 
           {/* Hidden fields for other tabs so form data is complete */}
           <HiddenNumberingFields settings={settings} />
-          <HiddenTemplateFields settings={settings} />
+          <HiddenTemplateFields footerDe={footerDe} footerEn={footerEn} />
         </div>
       )}
 
@@ -184,7 +216,7 @@ export default function SettingsForm({ settings }: Props) {
           </section>
 
           <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
-          <HiddenTemplateFields settings={settings} />
+          <HiddenTemplateFields footerDe={footerDe} footerEn={footerEn} />
         </div>
       )}
 
@@ -192,14 +224,27 @@ export default function SettingsForm({ settings }: Props) {
         <div className="space-y-6">
           <section className="space-y-4">
             <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Invoice footer text</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Printed at the bottom of every invoice and quote.</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Printed at the bottom of every invoice and quote. Click a variable to insert it at the cursor.</p>
+            <div className="flex flex-wrap gap-1.5">
+              {FOOTER_VARS.map(v => (
+                <button
+                  key={v.token}
+                  type="button"
+                  onClick={() => insertVar(v.token)}
+                  className="text-xs px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-500 transition-colors"
+                >
+                  <span className="font-mono">{v.token}</span>
+                  <span className="ml-1.5 text-neutral-400 dark:text-neutral-500 text-[10px]">{v.label}</span>
+                </button>
+              ))}
+            </div>
             <div className="space-y-1.5">
               <Label>Footer (Deutsch)</Label>
-              <Textarea name="invoice_footer_de" defaultValue={settings?.invoice_footer_de ?? ''} rows={4} className="resize-none text-sm" />
+              <Textarea ref={footerDeRef} name="invoice_footer_de" value={footerDe} onChange={e => setFooterDe(e.target.value)} onFocus={() => { activeFooter.current = 'de' }} rows={4} className="resize-none text-sm" />
             </div>
             <div className="space-y-1.5">
               <Label>Footer (English)</Label>
-              <Textarea name="invoice_footer_en" defaultValue={settings?.invoice_footer_en ?? ''} rows={4} className="resize-none text-sm" />
+              <Textarea ref={footerEnRef} name="invoice_footer_en" value={footerEn} onChange={e => setFooterEn(e.target.value)} onFocus={() => { activeFooter.current = 'en' }} rows={4} className="resize-none text-sm" />
             </div>
           </section>
 
@@ -262,11 +307,11 @@ function HiddenNumberingFields({ settings }: { settings: Settings | null }) {
   )
 }
 
-function HiddenTemplateFields({ settings }: { settings: Settings | null }) {
+function HiddenTemplateFields({ footerDe, footerEn }: { footerDe: string; footerEn: string }) {
   return (
     <>
-      <input type="hidden" name="invoice_footer_de" value={settings?.invoice_footer_de ?? ''} />
-      <input type="hidden" name="invoice_footer_en" value={settings?.invoice_footer_en ?? ''} />
+      <input type="hidden" name="invoice_footer_de" value={footerDe} />
+      <input type="hidden" name="invoice_footer_en" value={footerEn} />
     </>
   )
 }
