@@ -537,11 +537,23 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-sm" />
+            {!date && !doc ? (
+              <div className="h-9 flex items-center px-3 text-sm text-neutral-400 dark:text-neutral-500 border border-dashed border-neutral-200 dark:border-neutral-700 rounded-md">
+                Set on send
+              </div>
+            ) : (
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-sm" />
+            )}
           </div>
           <div className="space-y-1.5">
             <Label>{type === 'invoice' ? 'Due date' : 'Valid until'}</Label>
-            <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm" />
+            {!dueDate && !doc ? (
+              <div className="h-9 flex items-center px-3 text-sm text-neutral-400 dark:text-neutral-500 border border-dashed border-neutral-200 dark:border-neutral-700 rounded-md">
+                Set on send
+              </div>
+            ) : (
+              <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm" />
+            )}
           </div>
         </div>
         </div>
@@ -867,7 +879,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                 <span>{language === 'de' ? 'Bezahlt' : 'Paid'}</span>
                 <span>−{formatMoney(totals.total_paid, currency)}</span>
               </div>
-              <div className="flex justify-between font-semibold text-green-700">
+              <div className={`flex justify-between font-semibold ${totals.balance_due > 0.005 ? 'text-amber-600' : 'text-green-600'}`}>
                 <span>{language === 'de' ? 'Offen' : 'Balance due'}</span>
                 <span>{formatMoney(totals.balance_due, currency)}</span>
               </div>

@@ -27,7 +27,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const totals = calcTotals(doc.document_items ?? [], payments)
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <Link href="/invoices" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
           <ArrowLeft size={16} />

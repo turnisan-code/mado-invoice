@@ -24,7 +24,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <Link href="/quotes" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
           <ArrowLeft size={16} />

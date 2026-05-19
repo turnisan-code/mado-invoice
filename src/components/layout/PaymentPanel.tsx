@@ -86,7 +86,7 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Payments</h2>
         <div className="text-sm text-neutral-500 dark:text-neutral-400">
-          Balance: <span className={fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-neutral-900 dark:text-neutral-100'}>
+          Balance: <span className={fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
             {fullyPaid ? 'Paid in full' : formatMoney(balanceDue, currency)}
           </span>
         </div>

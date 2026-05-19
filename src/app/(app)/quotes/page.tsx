@@ -11,7 +11,7 @@ export default async function QuotesPage() {
     .order('date', { ascending: false })
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-8 max-w-5xl mx-auto">
       <QuoteList quotes={docs ?? []} />
     </div>
   )

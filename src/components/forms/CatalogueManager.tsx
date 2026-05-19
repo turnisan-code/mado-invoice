@@ -123,7 +123,7 @@ export default function CatalogueManager({ initialItems }: Props) {
                     onDragEnd={() => { dragId.current = null; setDragOver(null) }}
                     className={`${!item.active ? 'opacity-40' : ''} ${dragOver === item.id ? 'border-t-2 border-blue-400' : ''} transition-colors`}
                   >
-                    <td className="px-3 py-2 text-neutral-300 dark:text-neutral-600 cursor-grab">
+                    <td className="px-3 py-2 text-neutral-400 dark:text-neutral-500 cursor-grab hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                       <GripVertical size={14} />
                     </td>
                     {editingId === item.id ? (

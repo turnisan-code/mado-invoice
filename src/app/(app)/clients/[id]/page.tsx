@@ -59,7 +59,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const initials = client.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-start gap-4">
         <Link href="/clients" className="mt-1 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">

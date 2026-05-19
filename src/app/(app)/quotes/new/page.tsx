@@ -12,7 +12,7 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
   ])
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6">
+    <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">New Quote</h1>
       <div className="bg-white rounded-xl border border-neutral-200 p-6">
         <DocumentBuilder
