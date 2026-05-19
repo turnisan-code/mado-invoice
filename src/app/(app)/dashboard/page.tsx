@@ -130,7 +130,7 @@ export default async function DashboardPage() {
             )}
             {recentInvoices.map((inv) => {
               const totals = calcTotals(inv.document_items ?? [], inv.payments ?? [])
-              const clientName = (inv.clients as { name: string } | null)?.name
+              const clientName = (inv.clients as unknown as { name: string } | null)?.name
               return (
                 <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors gap-3">
                   <div className="flex-1 min-w-0">
