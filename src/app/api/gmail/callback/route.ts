@@ -26,12 +26,15 @@ export async function GET(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/login`)
 
+  const { data: settings } = await supabase.from('settings').select('id').single()
+  if (!settings) return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/settings?gmail=error`)
+
   await supabase.from('settings').update({
     gmail_email: userInfo.email,
     gmail_access_token: tokens.access_token,
     gmail_refresh_token: tokens.refresh_token,
     gmail_token_expiry: tokens.expiry_date,
-  }).eq('user_id', user.id)
+  }).eq('id', settings.id)
 
   return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/settings?gmail=connected`)
 }
