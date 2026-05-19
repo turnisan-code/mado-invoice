@@ -1,7 +1,9 @@
-import { DocumentItem, DocumentTotals, VatRate } from '@/types'
+import { DocumentTotals, VatRate } from '@/types'
+
+type CalcItem = { line_type?: string | null; quantity: number | null; unit_price: number | null; vat_rate: number | null }
 
 export function calcTotals(
-  items: DocumentItem[],
+  items: CalcItem[],
   payments: { amount: number }[] = [],
   discount?: { type: 'percent' | 'fixed'; value: number } | null
 ): DocumentTotals {

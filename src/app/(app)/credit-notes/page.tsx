@@ -6,7 +6,7 @@ export default async function CreditNotesPage() {
 
   const { data: docs } = await supabase
     .from('documents')
-    .select('*, clients(name, company), document_items(quantity, unit_price, vat_rate)')
+    .select('*, clients(name, company), document_items(line_type, quantity, unit_price, vat_rate)')
     .eq('type', 'credit_note')
     .order('date', { ascending: false })
 

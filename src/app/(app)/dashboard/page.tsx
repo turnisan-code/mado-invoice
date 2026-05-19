@@ -12,7 +12,7 @@ export default async function DashboardPage() {
   const [{ data: invoices }, { data: quotes }] = await Promise.all([
     supabase
       .from('documents')
-      .select('id, number, status, date, due_date, currency, clients(name), document_items(quantity, unit_price, vat_rate), payments(amount, date)')
+      .select('id, number, status, date, due_date, currency, clients(name), document_items(line_type, quantity, unit_price, vat_rate), payments(amount, date)')
       .eq('type', 'invoice')
       .order('date', { ascending: false }),
     supabase
