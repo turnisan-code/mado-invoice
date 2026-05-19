@@ -16,8 +16,9 @@ export function calcTotals(
     const line = item.quantity * item.unit_price
     subtotal += line
     const vatAmt = line * (item.vat_rate / 100)
-    const existing = vatMap.get(item.vat_rate) ?? { base: 0, amount: 0 }
-    vatMap.set(item.vat_rate, { base: existing.base + line, amount: existing.amount + vatAmt })
+    const rate = item.vat_rate as VatRate
+    const existing = vatMap.get(rate) ?? { base: 0, amount: 0 }
+    vatMap.set(rate, { base: existing.base + line, amount: existing.amount + vatAmt })
   }
 
   let vat_groups = Array.from(vatMap.entries())
