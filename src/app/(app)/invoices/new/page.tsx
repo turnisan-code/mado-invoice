@@ -7,7 +7,7 @@ export default async function NewInvoicePage({ searchParams }: { searchParams: P
 
   const [{ data: settings }, { data: clients }, { data: catalogue }] = await Promise.all([
     supabase.from('settings').select('*').single(),
-    supabase.from('clients').select('id, name, company, email, language, currency, payment_days, tax_treatment, address_line1, address_line2, zip, city, country, uid_number').order('name'),
+    supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').order('sort_order'),
   ])
 
