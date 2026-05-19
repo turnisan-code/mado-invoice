@@ -184,8 +184,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     toast.success('Item added to catalogue.')
   }
 
-  function catalogueName(item: CatalogueItem) {
-    return (language === 'de' ? item.name_de : item.name_en) || (language === 'de' ? item.name_en : item.name_de) || ''
+  function catalogueName(item: CatalogueItem): string {
+    if (language === 'de') return item.name_de || item.name_en || ''
+    return item.name_en || item.name_de || ''
   }
 
   function pickCatalogueItem(item: CatalogueItem, lineId: string) {
@@ -684,14 +685,25 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                     />
                     {showCatalogue && activeLine === line.id && (
                       <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto">
-                        {catalogueItems.filter(i => i.active).map(item => (
-                          <button key={item.id} type="button"
-                            className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
-                            onMouseDown={() => pickCatalogueItem(item, line.id)}>
-                            <span>{catalogueName(item)}</span>
-                            <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
-                          </button>
-                        ))}
+                        {(() => {
+                          const q = line.description.toLowerCase()
+                          const matches = catalogueItems.filter(i => {
+                            if (!i.active) return false
+                            const n = catalogueName(i).toLowerCase()
+                            return !q || n.includes(q) || i.name_de.toLowerCase().includes(q) || (i.name_en ?? '').toLowerCase().includes(q)
+                          })
+                          if (matches.length === 0) return (
+                            <p className="px-3 py-4 text-xs text-neutral-400 dark:text-neutral-500 text-center">No items found</p>
+                          )
+                          return matches.map(item => (
+                            <button key={item.id} type="button"
+                              className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
+                              onMouseDown={() => pickCatalogueItem(item, line.id)}>
+                              <span>{catalogueName(item)}</span>
+                              <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
+                            </button>
+                          ))
+                        })()}
                         <div className="border-t border-neutral-100 dark:border-neutral-800">
                           {addingItem ? (
                             <div className="p-3 space-y-2">
