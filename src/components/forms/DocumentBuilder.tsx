@@ -127,12 +127,25 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const client = clients.find(c => c.id === clientId)
   const discount = discountType && discountValue > 0 ? { type: discountType, value: discountValue } : null
 
+  // Apply client defaults on mount when pre-selecting a client (e.g. navigating from client page)
+  useEffect(() => {
+    if (defaultClientId && !doc) {
+      const c = clients.find(cl => cl.id === defaultClientId)
+      if (c) {
+        if (c.language) setLanguage(c.language)
+        if (c.currency) setCurrency(c.currency as Currency)
+        setTaxTreatment(c.tax_treatment as TaxTreatment)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function handleClientChange(id: string) {
     const c = clients.find(cl => cl.id === id)
     setClientId(id)
     if (c) {
-      setLanguage(c.language)
-      setCurrency(c.currency)
+      if (c.language) setLanguage(c.language)
+      if (c.currency) setCurrency(c.currency as Currency)
       setTaxTreatment(c.tax_treatment as TaxTreatment)
       if (!dueDate) setDueDate(addDays(date, c.payment_days))
     }
@@ -171,9 +184,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     toast.success('Item added to catalogue.')
   }
 
+  function catalogueName(item: CatalogueItem) {
+    return (language === 'de' ? item.name_de : item.name_en) || (language === 'de' ? item.name_en : item.name_de) || ''
+  }
+
   function pickCatalogueItem(item: CatalogueItem, lineId: string) {
     updateLine(lineId, {
-      description: language === 'de' ? item.name_de : item.name_en,
+      description: catalogueName(item),
       unit_price: item.default_price,
       unit: item.unit as Unit,
       vat_rate: item.vat_rate as VatRate,
@@ -671,7 +688,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                           <button key={item.id} type="button"
                             className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
                             onMouseDown={() => pickCatalogueItem(item, line.id)}>
-                            <span>{language === 'de' ? item.name_de : item.name_en}</span>
+                            <span>{catalogueName(item)}</span>
                             <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
                           </button>
                         ))}
