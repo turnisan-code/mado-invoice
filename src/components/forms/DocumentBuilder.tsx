@@ -96,6 +96,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   )
   const [saving, setSaving] = useState(false)
   const [showCatalogue, setShowCatalogue] = useState(false)
+  const [catalogueFlipUp, setCatalogueFlipUp] = useState(false)
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
@@ -681,10 +682,15 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                       onChange={e => updateLine(line.id, { description: e.target.value })}
                       placeholder="Description…"
                       className="text-sm"
-                      onFocus={() => { setActiveLine(line.id); setShowCatalogue(true) }}
+                      onFocus={e => {
+                        setActiveLine(line.id)
+                        setShowCatalogue(true)
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        setCatalogueFlipUp(rect.bottom + 288 > window.innerHeight)
+                      }}
                     />
                     {showCatalogue && activeLine === line.id && (
-                      <div className="absolute top-full left-0 z-20 mt-1 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto">
+                      <div className={`absolute left-0 z-20 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto ${catalogueFlipUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                         {(() => {
                           const q = line.description.toLowerCase()
                           const matches = catalogueItems.filter(i => {
