@@ -96,7 +96,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   )
   const [saving, setSaving] = useState(false)
   const [showCatalogue, setShowCatalogue] = useState(false)
-  const [catalogueFlipUp, setCatalogueFlipUp] = useState(false)
+  const [cataloguePos, setCataloguePos] = useState<{ top?: number; bottom?: number; left: number }>({ top: 0, left: 0 })
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
@@ -686,11 +686,15 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                         setActiveLine(line.id)
                         setShowCatalogue(true)
                         const rect = e.currentTarget.getBoundingClientRect()
-                        setCatalogueFlipUp(rect.bottom + 288 > window.innerHeight)
+                        const flipUp = rect.bottom + 288 > window.innerHeight
+                        setCataloguePos(flipUp
+                          ? { bottom: window.innerHeight - rect.top + 4, left: rect.left }
+                          : { top: rect.bottom + 4, left: rect.left }
+                        )
                       }}
                     />
                     {showCatalogue && activeLine === line.id && (
-                      <div className={`absolute left-0 z-20 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto ${catalogueFlipUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
+                      <div className="fixed z-50 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={cataloguePos}>
                         {(() => {
                           const q = line.description.toLowerCase()
                           const matches = catalogueItems.filter(i => {
