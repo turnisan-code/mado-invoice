@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { X } from 'lucide-react'
 import type { Client } from '@/types'
 
-interface Props { client?: Client }
+interface Props { client?: Client; onSaved?: () => void }
 
 const TAX_OPTIONS = [
   { value: 'at_vat', label: 'Austrian VAT (20%)' },
@@ -66,7 +66,7 @@ function TagInput({ initialTags }: { initialTags: string[] }) {
   )
 }
 
-export default function ClientForm({ client }: Props) {
+export default function ClientForm({ client, onSaved }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const [saving, setSaving] = useState(false)
@@ -101,6 +101,7 @@ export default function ClientForm({ client }: Props) {
       const { error } = await supabase.from('clients').update(payload).eq('id', client.id)
       if (error) { toast.error(error.message); setSaving(false); return }
       toast.success('Client updated.')
+      onSaved?.()
     } else {
       const { data, error } = await supabase.from('clients').insert(payload).select().single()
       if (error) { toast.error(error.message); setSaving(false); return }

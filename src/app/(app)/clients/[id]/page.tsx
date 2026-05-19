@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
-import ClientForm from '@/components/forms/ClientForm'
+import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatMoney } from '@/lib/utils/document'
@@ -82,7 +82,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         <div>
           <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-4">Client Details</p>
           <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">
-            <ClientForm client={client} />
+            <ClientEditSection client={client} />
           </div>
         </div>
 
