@@ -694,6 +694,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                       }}
                     />
                     {showCatalogue && activeLine === line.id && (
+                      <>
+                      <div className="fixed inset-0 z-40" onMouseDown={() => setShowCatalogue(false)} />
                       <div className="fixed z-50 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={cataloguePos}>
                         {(() => {
                           const q = line.description.toLowerCase()
@@ -743,6 +745,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                           )}
                         </div>
                       </div>
+                      </>
                     )}
                   </div>
                   <Input type="number" value={line.quantity} min={0} step={0.25}
