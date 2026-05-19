@@ -286,8 +286,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
-  async function openInEmail() {
-    if (!client) { toast.error('Select a client first.'); return }
+  function buildEmailContent() {
+    if (!client) return null
     const num = doc?.number ?? 'DRAFT'
     const isDE = language === 'de'
     const subject = isDE
@@ -296,11 +296,55 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     const body = isDE
       ? `Guten Tag,\n\nanbei übermittle ich Ihnen ${typeLabel[type].de} ${num}.\n\nBei Fragen stehe ich Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen\n${settings.owner_name}`
       : `Dear ${client.name},\n\nPlease find attached ${typeLabel[type].en} ${num}.\n\nDo not hesitate to contact me if you have any questions.\n\nKind regards,\n${settings.owner_name}`
+    return { subject, body, num }
+  }
+
+  async function openInEmail() {
+    if (!client) { toast.error('Select a client first.'); return }
+    const content = buildEmailContent()
+    if (!content) return
     const mailLink = Object.assign(document.createElement('a'), {
-      href: `mailto:${client.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+      href: `mailto:${client.email}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`
     })
     mailLink.click()
     await downloadPdf()
+  }
+
+  async function sendViaGmail() {
+    if (!client) { toast.error('Select a client first.'); return }
+    if (!client.email) { toast.error('Client has no email address.'); return }
+    const content = buildEmailContent()
+    if (!content) return
+    const pdfResult = await buildPdfBlob()
+    if (!pdfResult) return
+
+    const reader = new FileReader()
+    const pdfBase64 = await new Promise<string>((resolve) => {
+      reader.onload = () => resolve((reader.result as string).split(',')[1])
+      reader.readAsDataURL(pdfResult.blob)
+    })
+
+    const toastId = toast.loading('Sending…')
+    const res = await fetch('/api/gmail/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: client.email,
+        subject: content.subject,
+        body: content.body,
+        pdfBase64,
+        filename: `${content.num}.pdf`,
+      }),
+    })
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      toast.error(err.error ?? 'Failed to send email.', { id: toastId })
+      return
+    }
+
+    toast.success('Email sent via Gmail.', { id: toastId })
+    if (doc?.status === 'draft') requestSent()
   }
 
   function requestSent() {
@@ -711,9 +755,15 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <Button type="button" variant="outline" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5">
           <Download size={13} /> Preview PDF
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
-          <Mail size={13} /> Send via Superhuman
-        </Button>
+        {settings.gmail_email ? (
+          <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
+            <Mail size={13} /> Send via Gmail
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
+            <Mail size={13} /> Send via Superhuman
+          </Button>
+        )}
         <div className="flex-1" />
         {doc && (
           <span className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">

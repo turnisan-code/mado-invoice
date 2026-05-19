@@ -35,6 +35,10 @@ export interface Settings {
   logo_url: string | null
   invoice_footer_de: string | null
   invoice_footer_en: string | null
+  gmail_email: string | null
+  gmail_access_token: string | null
+  gmail_refresh_token: string | null
+  gmail_token_expiry: number | null
 }
 
 export interface Client {

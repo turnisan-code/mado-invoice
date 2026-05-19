@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { CheckCircle, Mail } from 'lucide-react'
 import type { Settings } from '@/types'
 
 interface Props { settings: Settings | null }
@@ -32,10 +34,30 @@ export default function SettingsForm({ settings }: Props) {
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [footerDe, setFooterDe] = useState(settings?.invoice_footer_de ?? '')
   const [footerEn, setFooterEn] = useState(settings?.invoice_footer_en ?? '')
+  const [gmailEmail, setGmailEmail] = useState(settings?.gmail_email ?? null)
+  const [disconnecting, setDisconnecting] = useState(false)
   const footerDeRef = useRef<HTMLTextAreaElement>(null)
   const footerEnRef = useRef<HTMLTextAreaElement>(null)
   const activeFooter = useRef<'de' | 'en'>('de')
   const supabase = createClient()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const status = searchParams.get('gmail')
+    if (status === 'connected') toast.success('Gmail connected successfully.')
+    if (status === 'error') toast.error('Gmail connection failed. Please try again.')
+  }, [searchParams])
+
+  async function disconnectGmail() {
+    setDisconnecting(true)
+    await supabase.from('settings').update({
+      gmail_email: null, gmail_access_token: null,
+      gmail_refresh_token: null, gmail_token_expiry: null,
+    }).eq('id', settings!.id)
+    setGmailEmail(null)
+    setDisconnecting(false)
+    toast.success('Gmail disconnected.')
+  }
 
   function insertVar(token: string) {
     const isDE = activeFooter.current === 'de'
@@ -171,6 +193,28 @@ export default function SettingsForm({ settings }: Props) {
               <F label="BIC" name="bic" defaultValue={settings?.bic} />
               <F label="Bank name" name="bank_name" defaultValue={settings?.bank_name ?? ''} />
             </div>
+          </section>
+
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Gmail integration</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Send invoices directly from your Gmail account with the PDF auto-attached.</p>
+            {gmailEmail ? (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                  <CheckCircle size={15} />
+                  <span>Connected as <strong>{gmailEmail}</strong></span>
+                </div>
+                <button type="button" onClick={disconnectGmail} disabled={disconnecting}
+                  className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
+                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+            ) : (
+              <a href="/api/gmail/auth"
+                className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                <Mail size={14} /> Connect Gmail account
+              </a>
+            )}
           </section>
 
           {/* Hidden fields for other tabs so form data is complete */}
