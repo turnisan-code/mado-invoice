@@ -42,12 +42,16 @@ function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: Sort
   return sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
 }
 
+const PAGE_SIZE = 25
+
 export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'date', dir: 'desc' })
+  const [page, setPage] = useState(0)
 
   function toggleSort(key: SortKey) {
+    setPage(0)
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
   }
 
@@ -97,13 +101,13 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       <div className="flex gap-3 flex-wrap">
         <input
           value={q}
-          onChange={e => setQ(e.target.value)}
+          onChange={e => { setQ(e.target.value); setPage(0) }}
           placeholder="Search number or client…"
           className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         />
         <select
           value={status}
-          onChange={e => setStatus(e.target.value)}
+          onChange={e => { setStatus(e.target.value); setPage(0) }}
           className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
         >
           <option value="">All statuses</option>
@@ -139,7 +143,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 </td>
               </tr>
             )}
-            {filtered.map(doc => (
+            {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
               <tr key={doc.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <td className="px-4 py-3">
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
@@ -160,7 +164,16 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</p>
+        {filtered.length > PAGE_SIZE && (
+          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+            <button onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
+            <span>Page {page + 1} of {Math.ceil(filtered.length / PAGE_SIZE)}</span>
+            <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

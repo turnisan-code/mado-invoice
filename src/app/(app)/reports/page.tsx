@@ -32,13 +32,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   for (const doc of yearDocs) {
     for (const item of (doc.document_items ?? [])) {
+      if (item.quantity == null || item.unit_price == null) continue
       const net = item.quantity * item.unit_price
+      if (net === 0) continue
       subtotal += net
       if (doc.tax_treatment === 'at_vat') {
-        const key = String(item.vat_rate)
+        const key = String(item.vat_rate ?? 0)
         if (!vatMap[key]) vatMap[key] = { base: 0, vat: 0 }
         vatMap[key].base += net
-        vatMap[key].vat += net * (item.vat_rate / 100)
+        vatMap[key].vat += net * ((item.vat_rate ?? 0) / 100)
       } else if (doc.tax_treatment === 'eu_reverse_charge') {
         reverseChargeBase += net
       } else {

@@ -2,24 +2,22 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, MessageSquareQuote } from 'lucide-react'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileX } from 'lucide-react'
 import { formatMoney } from '@/lib/utils/document'
 
 const statusColor: Record<string, string> = {
   draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
   sent: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
-  accepted: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  rejected: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
   cancelled: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
 }
 
-const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled']
+const STATUSES = ['draft', 'sent', 'cancelled']
 
 type SortKey = 'number' | 'client' | 'date' | 'total' | 'status'
 type SortDir = 'asc' | 'desc'
 
 interface DocItem { quantity: number | null; unit_price: number | null; vat_rate: number | null }
-interface Quote {
+interface Doc {
   id: string
   number: string | null
   status: string
@@ -43,7 +41,7 @@ function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: Sort
 
 const PAGE_SIZE = 25
 
-export default function QuoteList({ quotes }: { quotes: Quote[] }) {
+export default function CreditNoteList({ docs }: { docs: Doc[] }) {
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'date', dir: 'desc' })
@@ -55,7 +53,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   }
 
   const filtered = useMemo(() => {
-    let list = quotes
+    let list = docs
     if (status) list = list.filter(d => d.status === status)
     if (q) {
       const lq = q.toLowerCase()
@@ -74,14 +72,11 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       if (av > bv) return sort.dir === 'asc' ? 1 : -1
       return 0
     })
-  }, [quotes, q, status, sort])
+  }, [docs, q, status, sort])
 
   function Th({ col, label, className = '' }: { col: SortKey; label: string; className?: string }) {
     return (
-      <th
-        className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`}
-        onClick={() => toggleSort(col)}
-      >
+      <th className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`} onClick={() => toggleSort(col)}>
         <span className="flex items-center gap-1">{label}<SortIcon col={col} sort={sort} /></span>
       </th>
     )
@@ -90,24 +85,17 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Quotes</h1>
-        <Link href="/quotes/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-          <Plus size={14} /> New Quote
+        <h1 className="text-2xl font-semibold">Credit Notes</h1>
+        <Link href="/credit-notes/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
+          <Plus size={14} /> New Credit Note
         </Link>
       </div>
 
       <div className="flex gap-3 flex-wrap">
-        <input
-          value={q}
-          onChange={e => { setQ(e.target.value); setPage(0) }}
-          placeholder="Search number or client…"
-          className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
-        />
-        <select
-          value={status}
-          onChange={e => { setStatus(e.target.value); setPage(0) }}
-          className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
-        >
+        <input value={q} onChange={e => { setQ(e.target.value); setPage(0) }} placeholder="Search number or client…"
+          className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+        <select value={status} onChange={e => { setStatus(e.target.value); setPage(0) }}
+          className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
           <option value="">All statuses</option>
           {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
         </select>
@@ -128,13 +116,13 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-16 text-center">
-                  <MessageSquareQuote size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
+                  <FileX size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
                   <p className="text-sm text-neutral-400 dark:text-neutral-500">
-                    {q || status ? 'No quotes match your filters.' : 'No quotes yet.'}
+                    {q || status ? 'No credit notes match your filters.' : 'No credit notes yet.'}
                   </p>
                   {!q && !status && (
-                    <Link href="/quotes/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                      Create your first quote
+                    <Link href="/credit-notes/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
+                      Create your first credit note
                     </Link>
                   )}
                 </td>
@@ -143,13 +131,11 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
             {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
               <tr key={doc.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <td className="px-4 py-3">
-                  <Link href={`/quotes/${doc.id}`} className="font-medium hover:underline">
+                  <Link href={`/credit-notes/${doc.id}`} className="font-medium hover:underline">
                     {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                  {doc.clients?.company ?? doc.clients?.name ?? '—'}
-                </td>
+                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
@@ -161,7 +147,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
         </table>
       </div>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} quote{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} credit note{filtered.length !== 1 ? 's' : ''}</p>
         {filtered.length > PAGE_SIZE && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
             <button onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>

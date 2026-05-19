@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut, Moon, Sun
+  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import { createClient } from '@/lib/supabase/client'
@@ -13,13 +13,14 @@ import { cn } from '@/lib/utils'
 import { useTheme } from 'next-themes'
 
 const nav = [
-  { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
-  { href: '/clients',    label: 'Clients',     icon: Users },
-  { href: '/invoices',   label: 'Invoices',    icon: FileText },
-  { href: '/quotes',     label: 'Quotes',      icon: MessageSquareQuote },
-  { href: '/catalogue',  label: 'Catalogue',   icon: BookOpen },
-  { href: '/reports',    label: 'VAT Report',  icon: BarChart3 },
-  { href: '/settings',   label: 'Settings',    icon: Settings },
+  { href: '/dashboard',     label: 'Dashboard',     icon: LayoutDashboard },
+  { href: '/clients',       label: 'Clients',        icon: Users },
+  { href: '/invoices',      label: 'Invoices',       icon: FileText },
+  { href: '/quotes',        label: 'Quotes',         icon: MessageSquareQuote },
+  { href: '/credit-notes',  label: 'Credit Notes',   icon: FileX },
+  { href: '/catalogue',     label: 'Catalogue',      icon: BookOpen },
+  { href: '/reports',       label: 'VAT Report',     icon: BarChart3 },
+  { href: '/settings',      label: 'Settings',       icon: Settings },
 ]
 
 export default function Sidebar() {

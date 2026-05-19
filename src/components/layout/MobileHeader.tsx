@@ -3,20 +3,21 @@
 import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Menu, X, LayoutDashboard, Users, FileText, MessageSquareQuote, BookOpen, Settings, BarChart3, LogOut, Moon, Sun } from 'lucide-react'
+import { Menu, X, LayoutDashboard, Users, FileText, MessageSquareQuote, BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 
 const nav = [
-  { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
-  { href: '/clients',    label: 'Clients',     icon: Users },
-  { href: '/invoices',   label: 'Invoices',    icon: FileText },
-  { href: '/quotes',     label: 'Quotes',      icon: MessageSquareQuote },
-  { href: '/catalogue',  label: 'Catalogue',   icon: BookOpen },
-  { href: '/reports',    label: 'VAT Report',  icon: BarChart3 },
-  { href: '/settings',   label: 'Settings',    icon: Settings },
+  { href: '/dashboard',     label: 'Dashboard',    icon: LayoutDashboard },
+  { href: '/clients',       label: 'Clients',       icon: Users },
+  { href: '/invoices',      label: 'Invoices',      icon: FileText },
+  { href: '/quotes',        label: 'Quotes',        icon: MessageSquareQuote },
+  { href: '/credit-notes',  label: 'Credit Notes',  icon: FileX },
+  { href: '/catalogue',     label: 'Catalogue',     icon: BookOpen },
+  { href: '/reports',       label: 'VAT Report',    icon: BarChart3 },
+  { href: '/settings',      label: 'Settings',      icon: Settings },
 ]
 
 export default function MobileHeader() {

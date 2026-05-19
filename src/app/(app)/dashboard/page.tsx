@@ -1,11 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { calcTotals } from '@/lib/utils/document'
 import { formatMoney } from '@/lib/utils/document'
-import { FileText, Clock, CheckCircle, AlertTriangle, TrendingUp } from 'lucide-react'
+import { markOverdueInvoices } from '@/lib/utils/overdue'
+import { FileText, CheckCircle, AlertTriangle, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
+  await markOverdueInvoices(supabase)
 
   const [{ data: invoices }, { data: quotes }] = await Promise.all([
     supabase

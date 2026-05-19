@@ -1,20 +1,18 @@
 import { createClient } from '@/lib/supabase/server'
-import InvoiceList from '@/components/lists/InvoiceList'
-import { markOverdueInvoices } from '@/lib/utils/overdue'
+import CreditNoteList from '@/components/lists/CreditNoteList'
 
-export default async function InvoicesPage() {
+export default async function CreditNotesPage() {
   const supabase = await createClient()
-  await markOverdueInvoices(supabase)
 
   const { data: docs } = await supabase
     .from('documents')
     .select('*, clients(name, company), document_items(*)')
-    .eq('type', 'invoice')
+    .eq('type', 'credit_note')
     .order('date', { ascending: false })
 
   return (
     <div className="p-8 max-w-5xl mx-auto">
-      <InvoiceList invoices={docs ?? []} />
+      <CreditNoteList docs={docs ?? []} />
     </div>
   )
 }
