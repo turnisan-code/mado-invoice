@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -64,7 +64,14 @@ const typeLabel: Record<DocumentType, { de: string; en: string }> = {
   credit_note: { de: 'Gutschrift', en: 'Credit Note' },
 }
 
-export default function DocumentBuilder({ type, settings, clients, catalogue, document: doc, defaultClientId }: Props) {
+export interface DocumentBuilderHandle {
+  buildPdfBlob: (numOverride?: string) => Promise<{ blob: Blob; number: string } | null>
+}
+
+const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
+  { type, settings, clients, catalogue, document: doc, defaultClientId }: Props,
+  ref,
+) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -320,6 +327,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     ).toBlob()
     return { blob, number: docData.number }
   }
+
+  useImperativeHandle(ref, () => ({ buildPdfBlob }))
 
   async function ensureNumberAndSave(): Promise<{ number: string; newDocId?: string } | null> {
     if (doc?.number) return { number: doc.number }
@@ -1105,4 +1114,6 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       </div>
     </div>
   )
-}
+})
+
+export default DocumentBuilder

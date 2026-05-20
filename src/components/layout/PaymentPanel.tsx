@@ -8,36 +8,13 @@ import { formatMoney } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { pdf } from '@react-pdf/renderer'
-import InvoiceDocument from '@/components/pdf/InvoiceDocument'
-import type { Currency, Settings, Client, DocumentType, Language, TaxTreatment, VatRate, Unit, LineType, DocumentTotals } from '@/types'
+import type { Currency } from '@/types'
 
 interface Payment {
   id: string
   date: string
   amount: number
   note: string | null
-}
-
-export interface BookamatPdfData {
-  settings: Settings
-  client: Client
-  document: {
-    number: string
-    date: string
-    service_date: string | null
-    due_date: string | null
-    type: DocumentType
-    language: Language
-    currency: Currency
-    tax_treatment: TaxTreatment
-    notes: string | null
-    tax_note: string | null
-    discount_type: 'percent' | 'fixed' | null
-    discount_value: number | null
-    items: { line_type?: LineType; description: string; service_date: string | null; quantity: number | null; unit: Unit | null; unit_price: number | null; vat_rate: VatRate | null }[]
-    totals: DocumentTotals
-  }
 }
 
 interface Props {
@@ -47,10 +24,10 @@ interface Props {
   currency: Currency
   bookamatConfigured?: boolean
   bookamatBookingId?: string | null
-  bookamatPdfData?: BookamatPdfData
+  generatePdfForBookamat?: () => Promise<{ base64: string; filename: string } | null>
 }
 
-export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, bookamatPdfData }: Props) {
+export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, generatePdfForBookamat }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [amount, setAmount] = useState('')
@@ -147,29 +124,16 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     setBookamatId(String(bookingId))
     toast.success('Synced to Bookamat — attaching PDF…')
 
-    // Generate PDF client-side and attach to the booking
-    if (bookamatPdfData) {
+    // Generate PDF via DocumentBuilder (already working) and attach to booking
+    if (generatePdfForBookamat) {
       try {
-        const blob = await pdf(
-          <InvoiceDocument {...bookamatPdfData} />
-        ).toBlob()
-
-        const reader = new FileReader()
-        const pdfBase64 = await new Promise<string>((resolve) => {
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(blob)
-        })
+        const pdf = await generatePdfForBookamat()
+        if (!pdf) { toast.warning('Could not generate PDF — no client selected?'); setSyncingBookamat(false); return }
 
         const attachRes = await fetch('/api/bookamat/attach-pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bookingId,
-            pdfBase64,
-            filename: `${bookamatPdfData.document.number}.pdf`,
-            country,
-            year,
-          }),
+          body: JSON.stringify({ bookingId, pdfBase64: pdf.base64, filename: pdf.filename, country, year }),
         })
 
         if (attachRes.ok) {
