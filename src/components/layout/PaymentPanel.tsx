@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { formatMoney } from '@/lib/utils/document'
-import { Trash2, Plus } from 'lucide-react'
+import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Currency } from '@/types'
@@ -22,14 +22,19 @@ interface Props {
   total: number
   payments: Payment[]
   currency: Currency
+  bookamatConfigured?: boolean
+  bookamatBookingId?: string | null
 }
 
-export default function PaymentPanel({ documentId, total, payments: initial, currency }: Props) {
+export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showBookamatPrompt, setShowBookamatPrompt] = useState(false)
+  const [syncingBookamat, setSyncingBookamat] = useState(false)
+  const [bookamatId, setBookamatId] = useState(bookamatBookingId ?? null)
   const router = useRouter()
   const supabase = createClient()
 
@@ -59,6 +64,9 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     if (newTotal >= total - 0.005) {
       await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId)
       toast.success('Payment recorded — invoice marked as paid.')
+      if (!bookamatId && bookamatConfigured) {
+        setShowBookamatPrompt(true)
+      }
     } else {
       toast.success('Payment recorded.')
     }
@@ -79,6 +87,27 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     }
 
     router.refresh()
+  }
+
+  async function syncToBookamat() {
+    setSyncingBookamat(true)
+    const res = await fetch('/api/bookamat/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId }),
+    })
+    setSyncingBookamat(false)
+    setShowBookamatPrompt(false)
+    if (res.ok) {
+      const { bookingId } = await res.json()
+      setBookamatId(String(bookingId))
+      toast.success('Synced to Bookamat.')
+    } else if (res.status === 409) {
+      toast.info('Already synced to Bookamat.')
+    } else {
+      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
+      toast.error(`Bookamat sync failed: ${error}`)
+    }
   }
 
   return (
@@ -143,6 +172,56 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
             <Plus size={13} />
             {saving ? 'Saving…' : 'Add payment'}
           </Button>
+        </div>
+      )}
+
+      {/* Bookamat sync status */}
+      {bookamatConfigured && (
+        <div className="flex items-center justify-between pt-2 border-t border-neutral-100 dark:border-neutral-800">
+          {bookamatId ? (
+            <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+              <CheckCircle2 size={13} /> Synced to Bookamat
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowBookamatPrompt(true)}
+              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+            >
+              Sync to Bookamat →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bookamat confirmation modal */}
+      {showBookamatPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 w-full max-w-sm space-y-4 shadow-xl">
+            <div>
+              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Sync to Bookamat?</h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                This invoice is fully paid. Add it to your Bookamat bookkeeping?
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBookamatPrompt(false)}
+                className="text-sm px-4 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={syncToBookamat}
+                disabled={syncingBookamat}
+                className="text-sm px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
+              >
+                {syncingBookamat ? 'Syncing…' : 'Sync to Bookamat'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

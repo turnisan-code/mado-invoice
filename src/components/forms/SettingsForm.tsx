@@ -39,6 +39,22 @@ export default function SettingsForm({ settings }: Props) {
   const [driveFolder, setDriveFolder] = useState(settings?.drive_folder_id ?? '')
   const [driveFolderName, setDriveFolderName] = useState(settings?.drive_folder_name ?? '')
   const [savingDrive, setSavingDrive] = useState(false)
+  const [bookamatUsername, setBookamatUsername] = useState(settings?.bookamat_username ?? '')
+  const [bookamatApiKey, setBookamatApiKey] = useState(settings?.bookamat_api_key ?? '')
+  const [bookamatCountry, setBookamatCountry] = useState(settings?.bookamat_country ?? 'at')
+  const [bookamatBankId, setBookamatBankId] = useState<number | ''>(settings?.bookamat_bank_account_id ?? '')
+  const [bookamatCostId, setBookamatCostId] = useState<number | ''>(settings?.bookamat_cost_account_id ?? '')
+  const [bookamatVat0, setBookamatVat0] = useState<number | ''>(settings?.bookamat_vat_account_0 ?? '')
+  const [bookamatVat10, setBookamatVat10] = useState<number | ''>(settings?.bookamat_vat_account_10 ?? '')
+  const [bookamatVat13, setBookamatVat13] = useState<number | ''>(settings?.bookamat_vat_account_13 ?? '')
+  const [bookamatVat20, setBookamatVat20] = useState<number | ''>(settings?.bookamat_vat_account_20 ?? '')
+  const [bookamatAccounts, setBookamatAccounts] = useState<{
+    bankAccounts: { id: number; title: string }[]
+    costAccounts: { id: number; title: string }[]
+    vatAccounts: { id: number; title: string }[]
+  } | null>(null)
+  const [loadingAccounts, setLoadingAccounts] = useState(false)
+  const [savingBookamat, setSavingBookamat] = useState(false)
   const footerDeRef = useRef<HTMLTextAreaElement>(null)
   const footerEnRef = useRef<HTMLTextAreaElement>(null)
 
@@ -104,6 +120,39 @@ export default function SettingsForm({ settings }: Props) {
       el.focus()
       el.setSelectionRange(start + token.length, start + token.length)
     })
+  }
+
+  async function loadBookamatAccounts() {
+    if (!bookamatUsername || !bookamatApiKey) { toast.error('Enter username and API key first.'); return }
+    setLoadingAccounts(true)
+    const res = await fetch('/api/bookamat/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: bookamatUsername, apiKey: bookamatApiKey, country: bookamatCountry }),
+    })
+    setLoadingAccounts(false)
+    if (!res.ok) { const { error } = await res.json().catch(() => ({})); toast.error(error ?? 'Failed to load accounts.'); return }
+    const data = await res.json()
+    setBookamatAccounts(data)
+    toast.success('Accounts loaded.')
+  }
+
+  async function saveBookamat() {
+    if (!settings) return
+    setSavingBookamat(true)
+    await supabase.from('settings').update({
+      bookamat_username: bookamatUsername || null,
+      bookamat_api_key: bookamatApiKey || null,
+      bookamat_country: bookamatCountry,
+      bookamat_bank_account_id: bookamatBankId || null,
+      bookamat_cost_account_id: bookamatCostId || null,
+      bookamat_vat_account_0: bookamatVat0 || null,
+      bookamat_vat_account_10: bookamatVat10 || null,
+      bookamat_vat_account_13: bookamatVat13 || null,
+      bookamat_vat_account_20: bookamatVat20 || null,
+    }).eq('id', settings.id)
+    setSavingBookamat(false)
+    toast.success('Bookamat settings saved.')
   }
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -314,6 +363,78 @@ export default function SettingsForm({ settings }: Props) {
                 )}
               </div>
             )}
+          </section>
+
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Bookamat</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Automatically sync paid invoices to your Bookamat bookkeeping.</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-neutral-500 dark:text-neutral-400">Username</label>
+                  <input type="text" value={bookamatUsername} onChange={e => setBookamatUsername(e.target.value)}
+                    placeholder="your@email.com"
+                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-neutral-500 dark:text-neutral-400">API Key</label>
+                  <input type="password" value={bookamatApiKey} onChange={e => setBookamatApiKey(e.target.value)}
+                    placeholder="From Mein Account → API"
+                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600" />
+                </div>
+              </div>
+              <button type="button" onClick={loadBookamatAccounts} disabled={loadingAccounts}
+                className="text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
+                {loadingAccounts ? 'Loading…' : 'Load accounts from Bookamat'}
+              </button>
+              {bookamatAccounts && (
+                <div className="space-y-3 pt-1">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Bank account (receives payments)</label>
+                    <select value={bookamatBankId} onChange={e => setBookamatBankId(Number(e.target.value))}
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                      <option value="">Select…</option>
+                      {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Income account (Erlöskonto)</label>
+                    <select value={bookamatCostId} onChange={e => setBookamatCostId(Number(e.target.value))}
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                      <option value="">Select…</option>
+                      {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">VAT accounts (Umsatzsteuerkonten)</label>
+                    {([
+                      [0, bookamatVat0, setBookamatVat0],
+                      [10, bookamatVat10, setBookamatVat10],
+                      [13, bookamatVat13, setBookamatVat13],
+                      [20, bookamatVat20, setBookamatVat20],
+                    ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
+                      <div key={rate} className="flex items-center gap-3">
+                        <span className="text-xs text-neutral-400 dark:text-neutral-500 w-8 shrink-0">{rate}%</span>
+                        <select value={val} onChange={e => setter(Number(e.target.value))}
+                          className="flex-1 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                          <option value="">Not used</option>
+                          {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                  <button type="button" onClick={saveBookamat} disabled={savingBookamat}
+                    className="text-sm px-3 py-2 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50">
+                    {savingBookamat ? 'Saving…' : 'Save Bookamat settings'}
+                  </button>
+                </div>
+              )}
+              {settings?.bookamat_username && !bookamatAccounts && (
+                <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                  <CheckCircle size={13} /> Connected as {settings.bookamat_username}
+                </div>
+              )}
+            </div>
           </section>
 
           {/* Hidden fields for other tabs so form data is complete */}

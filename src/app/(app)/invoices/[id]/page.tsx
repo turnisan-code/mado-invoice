@@ -51,6 +51,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         total={totals.total}
         payments={payments}
         currency={doc.currency ?? 'EUR'}
+        bookamatConfigured={!!(settings?.bookamat_username && settings?.bookamat_api_key && settings?.bookamat_bank_account_id)}
+        bookamatBookingId={doc.bookamat_booking_id ?? null}
       />
     </div>
   )

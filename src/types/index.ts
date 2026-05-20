@@ -41,6 +41,15 @@ export interface Settings {
   gmail_token_expiry: number | null
   drive_folder_id: string | null
   drive_folder_name: string | null
+  bookamat_username: string | null
+  bookamat_api_key: string | null
+  bookamat_country: string | null
+  bookamat_bank_account_id: number | null
+  bookamat_cost_account_id: number | null
+  bookamat_vat_account_0: number | null
+  bookamat_vat_account_10: number | null
+  bookamat_vat_account_13: number | null
+  bookamat_vat_account_20: number | null
   email_subject_invoice_de: string | null
   email_body_invoice_de: string | null
   email_subject_invoice_en: string | null
@@ -109,6 +118,7 @@ export interface Document {
   converted_from_id: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
+  bookamat_booking_id?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }
