@@ -48,8 +48,6 @@ export async function POST(req: NextRequest) {
   const totals = calcTotals(doc.document_items ?? [], doc.payments ?? [])
 
   const country = settings.bookamat_country ?? 'at'
-  const year = new Date(doc.date).getFullYear()
-  const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
   const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`
 
   const client = doc.clients as { name: string; company: string | null; uid_number: string | null } | null
@@ -66,6 +64,10 @@ export async function POST(req: NextRequest) {
   const lastPayment = ((doc.payments ?? []) as { date: string; amount: number }[])
     .sort((a, b) => b.date.localeCompare(a.date))[0]
   const paymentDate = lastPayment?.date ?? doc.date
+
+  // Use payment date year for the fiscal year URL (not invoice date)
+  const year = new Date(paymentDate).getFullYear()
+  const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
 
   const amounts = totals.vat_groups.map(g => {
     const vatAccId = vatAccountMap[g.rate]
@@ -101,6 +103,8 @@ export async function POST(req: NextRequest) {
     amounts,
   }
 
+  console.log('[bookamat/sync] payload:', JSON.stringify(payload))
+
   const bookingRes = await fetch(`${baseUrl}bookings/`, {
     method: 'POST',
     headers: {
@@ -112,10 +116,12 @@ export async function POST(req: NextRequest) {
 
   if (!bookingRes.ok) {
     const text = await bookingRes.text()
+    console.log('[bookamat/sync] error response:', text)
     return NextResponse.json({ error: text }, { status: 500 })
   }
 
   const booking = await bookingRes.json()
+  console.log('[bookamat/sync] created booking:', JSON.stringify(booking))
   const bookingId = booking.id
 
   await supabase
