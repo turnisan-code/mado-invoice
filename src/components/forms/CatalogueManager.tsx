@@ -54,6 +54,8 @@ export default function CatalogueManager({ initialItems }: Props) {
 
   async function deleteItem(id: string) {
     if (!confirm('Delete this item?')) return
+    // Null out references in existing document line items first (FK constraint)
+    await supabase.from('document_items').update({ catalogue_item_id: null }).eq('catalogue_item_id', id)
     const { error } = await supabase.from('catalogue_items').delete().eq('id', id)
     if (error) { toast.error(error.message); return }
     setItems(items.filter(i => i.id !== id))
