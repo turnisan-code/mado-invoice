@@ -297,7 +297,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         {footerText && <Text style={s.footerNote}>{footerText}</Text>}
 
         {/* EPC QR code — rendered in page body above footer, only on final PDFs */}
-        {qrCodeDataUri && (
+        {/* !!qrCodeDataUri converts null→false; react-pdf crashes on null children but handles false fine */}
+        {!!qrCodeDataUri && (
           <View style={s.qrRow}>
             <View>
               <Image src={qrCodeDataUri} style={s.qrImage} />
