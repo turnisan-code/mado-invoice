@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -366,6 +366,19 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     }
   }
 
+  async function saveToDrive() {
+    const saved = await ensureNumberAndSave()
+    if (!saved) return
+    const result = await buildPdfBlob(saved.number)
+    if (!result) return
+    const pdfBase64 = await blobToBase64(result.blob)
+    await uploadToDrive(pdfBase64, `${saved.number}.pdf`)
+    if (saved.newDocId) {
+      const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
+      router.push(`/${basePath}/${saved.newDocId}`)
+    } else router.refresh()
+  }
+
   async function blobToBase64(blob: Blob): Promise<string> {
     return new Promise((resolve) => {
       const reader = new FileReader()
@@ -400,7 +413,6 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         const writable = await handle.createWritable()
         await writable.write(result.blob)
         await writable.close()
-        void uploadToDrive(pdfBase64, filename)
         if (saved.newDocId) {
           const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
           router.push(`/${basePath}/${saved.newDocId}`)
@@ -415,7 +427,6 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     const a = Object.assign(document.createElement('a'), { href: url, download: filename })
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
-    void uploadToDrive(pdfBase64, filename)
     if (saved.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${saved.newDocId}`)
@@ -1023,6 +1034,11 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
           <Download size={13} /> Download PDF
         </Button>
+        {settings.drive_folder_id && (
+          <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5">
+            <HardDrive size={13} /> Save to Drive
+          </Button>
+        )}
         {settings.gmail_email ? (
           <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
             <Mail size={13} /> Send via Gmail
