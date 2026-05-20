@@ -53,7 +53,10 @@ export default function MobileHeader() {
       </div>
 
       {/* Bottom tab bar */}
-      <div className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-stretch safe-bottom">
+      <div
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-stretch"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
         {PRIMARY_NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href)
           return (
@@ -94,7 +97,7 @@ export default function MobileHeader() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setMoreOpen(false)} />
 
           {/* Sheet */}
-          <div className="relative bg-white dark:bg-neutral-900 rounded-t-2xl shadow-xl pb-safe">
+          <div className="relative bg-white dark:bg-neutral-900 rounded-t-2xl shadow-xl" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
             {/* Handle */}
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-10 h-1 rounded-full bg-neutral-200 dark:bg-neutral-700" />
@@ -143,8 +146,6 @@ export default function MobileHeader() {
               </button>
             </div>
 
-            {/* iOS safe area spacer */}
-            <div className="h-safe-bottom" />
           </div>
         </div>
       )}
