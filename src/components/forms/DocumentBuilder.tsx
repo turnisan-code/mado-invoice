@@ -433,10 +433,19 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   }
 
   async function downloadPdf() {
+    // Open the window immediately (in the click handler) before any awaits —
+    // browsers block window.open if it's called after async work.
+    const win = window.open('', '_blank')
     const result = await buildPdfBlob()
-    if (!result) return
+    if (!result) { win?.close(); return }
     const url = URL.createObjectURL(result.blob)
-    window.open(url, '_blank')
+    if (win) {
+      win.location.href = url
+    } else {
+      // Popup was blocked — fall back to a direct download
+      const a = document.createElement('a')
+      a.href = url; a.download = `${result.number}.pdf`; a.click()
+    }
     setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
