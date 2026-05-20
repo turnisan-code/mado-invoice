@@ -24,7 +24,6 @@ const s = StyleSheet.create({
   colRate: { width: 88, textAlign: 'right' },
   colAmount: { width: 72, textAlign: 'right' },
 
-  // Special line types
   headingRow: { paddingVertical: 8, paddingTop: 12 },
   headingText: { fontFamily: 'Helvetica-Bold', fontSize: 9.5 },
   textRow: { paddingVertical: 4 },
@@ -137,6 +136,10 @@ function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
   return sum
 }
 
+// react-pdf's reconciler crashes on null/false/undefined children and on React Fragments.
+// Rules: never return null from map, never use &&, always use ternaries with <View/> fallback,
+// never use <></> fragments — wrap in <View> instead.
+
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
@@ -156,6 +159,15 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const rawFooter = lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en
   const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
 
+  // Pre-filter items to avoid null returns inside map
+  const renderableItems = doc.items.filter(item => {
+    const lt = item.line_type ?? 'item'
+    if (lt !== 'item') return true
+    return item.quantity != null && item.unit_price != null && item.unit != null
+  })
+
+  const hasQr = !!qrCodeDataUri
+
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -172,9 +184,10 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.docTitle}>{L(doc.type, lang)}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
-            {doc.service_date && (
-              <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
-            )}
+            {doc.service_date
+              ? <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
+              : <View />
+            }
           </View>
         </View>
 
@@ -199,17 +212,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           <Text style={[s.tableHeaderText, s.colAmount]}>{L('amount', lang)}</Text>
         </View>
 
-        {/* Line items */}
-        {doc.items.map((item, i) => {
+        {/* Line items — filtered above so no null returns needed */}
+        {renderableItems.map((item, i) => {
           const lt = item.line_type ?? 'item'
 
-          if (lt === 'page_break') {
-            return <View key={i} break />
-          }
-
-          if (lt === 'separator') {
-            return <View key={i} style={s.separatorRow} />
-          }
+          if (lt === 'page_break') return <View key={i} break />
+          if (lt === 'separator') return <View key={i} style={s.separatorRow} />
 
           if (lt === 'heading') {
             return (
@@ -237,19 +245,19 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             )
           }
 
-          // item — react-pdf crashes on null children, skip incomplete items
-          if (item.quantity == null || item.unit_price == null || item.unit == null) return <View key={i} />
+          // regular item (quantity/price guaranteed non-null by filter above)
           return (
             <View key={i} style={s.tableRow}>
               <View style={s.colDesc}>
                 <Text>{item.description}</Text>
-                {item.service_date && (
-                  <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
-                )}
+                {item.service_date
+                  ? <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
+                  : <View />
+                }
               </View>
               <Text style={s.colQty}>{item.quantity}</Text>
-              <Text style={s.colRate}>{fmt(item.unit_price)}/{item.unit}</Text>
-              <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
+              <Text style={s.colRate}>{fmt(item.unit_price!)}/{item.unit}</Text>
+              <Text style={s.colAmount}>{fmt(item.quantity! * item.unit_price!)}</Text>
             </View>
           )
         })}
@@ -257,57 +265,72 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         {/* Divider + due date + totals */}
         <View style={s.bottomDivider} />
         <View style={s.bottomRow}>
+          {/* Due date block — use View wrapper instead of Fragment */}
           <View>
-            {doc.due_date && (
-              <>
+            {doc.due_date ? (
+              <View>
                 <Text style={s.dueDateLabel}>{doc.type === 'quote' ? L('valid_label', lang) : L('due_label', lang)}</Text>
                 <Text style={s.dueDateValue}>{formatDate(doc.due_date, lang)}</Text>
-              </>
-            )}
+              </View>
+            ) : <View />}
           </View>
+
           <View style={s.totalsBlock}>
             <View style={s.totalsRow}>
               <Text style={s.totalsLabel}>{L('subtotal', lang)}</Text>
               <Text>{fmt(doc.totals.subtotal)}</Text>
             </View>
-            {doc.totals.discount_amount > 0 && (
+
+            {doc.totals.discount_amount > 0 ? (
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>
                   {L('discount', lang)}{doc.discount_type === 'percent' && doc.discount_value ? ` (${doc.discount_value}%)` : ''}
                 </Text>
                 <Text>−{fmt(doc.totals.discount_amount)}</Text>
               </View>
-            )}
-            {doc.tax_treatment === 'at_vat' && doc.totals.vat_groups.map(g => (
-              <View key={g.rate} style={s.totalsRow}>
-                <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
-                <Text>{fmt(g.amount)}</Text>
-              </View>
-            ))}
+            ) : <View />}
+
+            {doc.tax_treatment === 'at_vat'
+              ? doc.totals.vat_groups.map(g => (
+                  <View key={g.rate} style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
+                    <Text>{fmt(g.amount)}</Text>
+                  </View>
+                ))
+              : <View />
+            }
+
             <View style={s.totalsDivider} />
             <View style={s.totalRow}>
               <Text style={s.totalLabel}>{L('grand_total', lang)}</Text>
               <Text style={s.totalValue}>{fmt(doc.totals.total)}</Text>
             </View>
-            {doc.totals.total_paid > 0 && (
+
+            {doc.totals.total_paid > 0 ? (
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{lang === 'de' ? 'Offen' : 'Balance due'}</Text>
                 <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(doc.totals.balance_due)}</Text>
               </View>
-            )}
+            ) : <View />}
           </View>
         </View>
 
-        {/* Tax note */}
-        {doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
+        {doc.tax_note
+          ? <Text style={s.taxNote}>{doc.tax_note}</Text>
+          : <View />
+        }
 
-        {/* Notes */}
-        {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
+        {doc.notes
+          ? <Text style={s.notes}>{doc.notes}</Text>
+          : <View />
+        }
 
-        {/* Footer text from Templates settings */}
-        {footerText && <Text style={s.footerNote}>{footerText}</Text>}
+        {footerText
+          ? <Text style={s.footerNote}>{footerText}</Text>
+          : <View />
+        }
 
-        {/* Footer */}
+        {/* Footer — fixed, renders on every page */}
         <View style={s.footer} fixed>
           <View>
             <Text style={s.footerTitle}>{L('contact', lang)}</Text>
@@ -324,14 +347,14 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               {'BIC: '}{settings.bic}
             </Text>
           </View>
+          {/* QR column — always same structure, no conditional nulls */}
           <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
             <View style={s.qrBlock}>
-              {/* Always render same structure — react-pdf fixed footer crashes on conditional null children */}
-              {qrCodeDataUri
-                ? <Image src={qrCodeDataUri} style={s.qrImage} />
+              {hasQr
+                ? <Image src={qrCodeDataUri as string} style={s.qrImage} />
                 : <View style={s.qrImage} />
               }
-              {qrCodeDataUri
+              {hasQr
                 ? <Text style={s.qrLabel}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
                 : <View style={{ height: 12 }} />
               }
