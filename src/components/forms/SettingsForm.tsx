@@ -147,24 +147,8 @@ export default function SettingsForm({ settings }: Props) {
     setDirty(d => ({ ...d, [section]: false }))
   }
 
-  // ── Sidebar active section ───────────────────────────────────────────────────
+  // ── Sidebar active section (tab-driven, no scroll) ──────────────────────────
   const [activeSection, setActiveSection] = useState<string>('company')
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) setActiveSection(entry.target.id)
-        })
-      },
-      { rootMargin: '-15% 0px -80% 0px' }
-    )
-    NAV_ITEMS.forEach(item => {
-      const el = document.getElementById(item.id)
-      if (el) observer.observe(el)
-    })
-    return () => observer.disconnect()
-  }, [])
 
   // ── Brand state ──────────────────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
@@ -494,30 +478,29 @@ export default function SettingsForm({ settings }: Props) {
     <div className="flex gap-10 items-start">
 
       {/* ── Sticky left sidebar nav ── */}
-      <nav className="hidden lg:block w-40 shrink-0">
-        <div className="sticky top-8 space-y-0.5">
-          {NAV_ITEMS.map(({ id, label, Icon }) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                activeSection === id
-                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
-                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
-              }`}
-            >
-              <Icon size={14} />
-              {label}
-            </a>
-          ))}
-        </div>
+      <nav className="hidden lg:flex flex-col gap-0.5 w-40 shrink-0 sticky top-8 self-start">
+        {NAV_ITEMS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveSection(id)}
+            className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors text-left w-full ${
+              activeSection === id
+                ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </nav>
 
       {/* ── Main content ── */}
       <div className="flex-1 min-w-0 space-y-5">
 
         {/* ── 1. Company ── */}
-        <div id="company" className="scroll-mt-8">
+        {activeSection === 'company' && <div>
           <SectionCard
             title="Company"
             description="Logo and company identity shown on all documents."
@@ -576,10 +559,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 2. Address ── */}
-        <div id="address" className="scroll-mt-8">
+        {activeSection === 'address' && <div>
           <SectionCard
             title="Address"
             description="Printed on invoices and used as the sender address."
@@ -648,10 +631,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 3. Banking ── */}
-        <div id="banking" className="scroll-mt-8">
+        {activeSection === 'banking' && <div>
           <SectionCard
             title="Banking"
             description="Bank details printed on invoices for payment."
@@ -680,10 +663,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 4. Numbering ── */}
-        <div id="numbering" className="scroll-mt-8">
+        {activeSection === 'numbering' && <div>
           <SectionCard
             title="Numbering"
             description="Prefixes, counters, and document defaults."
@@ -736,10 +719,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 5. PDF Footer ── */}
-        <div id="footer" className="scroll-mt-8">
+        {activeSection === 'footer' && <div>
           <SectionCard
             title="PDF Footer"
             description="Printed at the bottom of every invoice and quote."
@@ -774,10 +757,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 6. Email Templates ── */}
-        <div id="templates" className="scroll-mt-8">
+        {activeSection === 'templates' && <div>
           <SectionCard
             title="Email Templates"
             description="Pre-filled subject and body for sending documents via Gmail."
@@ -869,10 +852,10 @@ export default function SettingsForm({ settings }: Props) {
               />
             </div>
           </SectionCard>
-        </div>
+        </div>}
 
         {/* ── 7. Integrations ── */}
-        <div id="integrations" className="scroll-mt-8 space-y-3">
+        {activeSection === 'integrations' && <div className="space-y-3">
           <div className="px-1 pb-1">
             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Integrations</p>
             <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Connect external services to automate your workflow.</p>
@@ -1080,7 +1063,7 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             )}
           </IntegrationCard>
-        </div>
+        </div>}
 
       </div>
     </div>
