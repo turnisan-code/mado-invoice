@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { CheckCircle, Mail, HardDrive, ChevronRight, X } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug } from 'lucide-react'
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
 import type { Settings } from '@/types'
 
@@ -45,6 +45,17 @@ const DOC_TABS: { type: DocType; label: string }[] = [
   { type: 'credit_note', label: 'Credit Note' },
   { type: 'reminder',    label: 'Reminder' },
 ]
+
+// ── Sidebar nav items ──────────────────────────────────────────────────────────
+const NAV_ITEMS = [
+  { id: 'company',      label: 'Company',      Icon: Building2 },
+  { id: 'address',      label: 'Address',      Icon: MapPin },
+  { id: 'banking',      label: 'Banking',      Icon: CreditCard },
+  { id: 'numbering',    label: 'Numbering',    Icon: Hash },
+  { id: 'footer',       label: 'PDF Footer',   Icon: FileText },
+  { id: 'templates',    label: 'Email',        Icon: Mail },
+  { id: 'integrations', label: 'Integrations', Icon: Plug },
+] as const
 
 // ── SectionCard ────────────────────────────────────────────────────────────────
 function SectionCard({
@@ -135,6 +146,25 @@ export default function SettingsForm({ settings }: Props) {
   function clearDirty(section: string) {
     setDirty(d => ({ ...d, [section]: false }))
   }
+
+  // ── Sidebar active section ───────────────────────────────────────────────────
+  const [activeSection, setActiveSection] = useState<string>('company')
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) setActiveSection(entry.target.id)
+        })
+      },
+      { rootMargin: '-15% 0px -80% 0px' }
+    )
+    NAV_ITEMS.forEach(item => {
+      const el = document.getElementById(item.id)
+      if (el) observer.observe(el)
+    })
+    return () => observer.disconnect()
+  }, [])
 
   // ── Brand state ──────────────────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
@@ -459,561 +489,599 @@ export default function SettingsForm({ settings }: Props) {
     })
   }
 
-  const activeVars = activeDocTab === 'reminder' ? REMINDER_VARS : FOOTER_VARS
-
   // ─────────────────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-5">
+    <div className="flex gap-10 items-start">
 
-      {/* ── 1. Brand ── */}
-      <SectionCard
-        title="Brand"
-        description="Logo and company identity shown on all documents."
-        dirty={!!dirty.brand}
-        saving={saving === 'brand'}
-        onSave={saveBiz}
-      >
-        {/* Logo */}
-        <div className="flex items-start gap-4">
-          {logoUrl ? (
-            <div className="relative shrink-0">
-              <div className="h-16 w-16 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex items-center justify-center overflow-hidden p-2">
-                <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain" />
-              </div>
-              <button
-                type="button"
-                onClick={removeLogo}
-                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
-              >
-                <X size={10} className="text-neutral-600 dark:text-neutral-300" />
-              </button>
-            </div>
-          ) : (
-            <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">
-              <span className="text-[10px] text-neutral-300 dark:text-neutral-600 text-center leading-tight px-1">No logo</span>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
-              {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
-              <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
-            </label>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">PNG or SVG, transparent background</p>
-          </div>
-        </div>
-
-        {/* Company & owner name */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className={lbl}>Company name</label>
-            <input
-              className={inp}
-              value={biz.company_name}
-              onChange={e => { setBiz(b => ({ ...b, company_name: e.target.value })); markDirty('brand') }}
-              placeholder="Acme GmbH"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className={lbl}>Owner name</label>
-            <input
-              className={inp}
-              value={biz.owner_name}
-              onChange={e => { setBiz(b => ({ ...b, owner_name: e.target.value })); markDirty('brand') }}
-              placeholder="Jane Doe"
-            />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* ── 2. Contact & Address ── */}
-      <SectionCard
-        title="Contact & Address"
-        description="Printed on invoices and used as the sender address."
-        dirty={!!dirty.contact}
-        saving={saving === 'contact'}
-        onSave={saveContact}
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className={lbl}>Email</label>
-            <input type="email" className={inp} value={contact.email}
-              onChange={e => { setContact(c => ({ ...c, email: e.target.value })); markDirty('contact') }}
-              placeholder="billing@company.com" />
-          </div>
-          <div className="space-y-1.5">
-            <label className={lbl}>Phone</label>
-            <input className={inp} value={contact.phone}
-              onChange={e => { setContact(c => ({ ...c, phone: e.target.value })); markDirty('contact') }}
-              placeholder="+43 1 234 5678" />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <label className={lbl}>Website</label>
-          <input className={inp} value={contact.website}
-            onChange={e => { setContact(c => ({ ...c, website: e.target.value })); markDirty('contact') }}
-            placeholder="https://company.com" />
-        </div>
-        <div className="space-y-1.5">
-          <label className={lbl}>Address</label>
-          <input className={inp} value={contact.address_line1}
-            onChange={e => { setContact(c => ({ ...c, address_line1: e.target.value })); markDirty('contact') }}
-            placeholder="Musterstraße 1" />
-        </div>
-        <div className="space-y-1.5">
-          <label className={lbl}>Address line 2</label>
-          <input className={inp} value={contact.address_line2}
-            onChange={e => { setContact(c => ({ ...c, address_line2: e.target.value })); markDirty('contact') }}
-            placeholder="Top 5" />
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div className="space-y-1.5">
-            <label className={lbl}>ZIP</label>
-            <input className={inp} value={contact.zip}
-              onChange={e => { setContact(c => ({ ...c, zip: e.target.value })); markDirty('contact') }}
-              placeholder="1010" />
-          </div>
-          <div className="space-y-1.5 col-span-2">
-            <label className={lbl}>City</label>
-            <input className={inp} value={contact.city}
-              onChange={e => { setContact(c => ({ ...c, city: e.target.value })); markDirty('contact') }}
-              placeholder="Vienna" />
-          </div>
-        </div>
-        <div className="space-y-1.5">
-          <label className={lbl}>Country</label>
-          <input className={inp} value={contact.country}
-            onChange={e => { setContact(c => ({ ...c, country: e.target.value })); markDirty('contact') }}
-            placeholder="Austria" />
-        </div>
-        <div className="space-y-1.5">
-          <label className={lbl}>UID-Nummer</label>
-          <input className={inp} value={contact.uid_number}
-            onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); markDirty('contact') }}
-            placeholder="ATU…" />
-        </div>
-      </SectionCard>
-
-      {/* ── 3. Banking ── */}
-      <SectionCard
-        title="Banking"
-        description="Bank details printed on invoices for payment."
-        dirty={!!dirty.banking}
-        saving={saving === 'banking'}
-        onSave={saveBankingSection}
-      >
-        <div className="space-y-1.5">
-          <label className={lbl}>IBAN</label>
-          <input className={inp} value={banking.iban}
-            onChange={e => { setBanking(b => ({ ...b, iban: e.target.value })); markDirty('banking') }}
-            placeholder="AT12 3456 7890 1234 5678" />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className={lbl}>BIC</label>
-            <input className={inp} value={banking.bic}
-              onChange={e => { setBanking(b => ({ ...b, bic: e.target.value })); markDirty('banking') }}
-              placeholder="RLNWATWW" />
-          </div>
-          <div className="space-y-1.5">
-            <label className={lbl}>Bank name</label>
-            <input className={inp} value={banking.bank_name}
-              onChange={e => { setBanking(b => ({ ...b, bank_name: e.target.value })); markDirty('banking') }}
-              placeholder="Raiffeisen" />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* ── 4. Documents ── */}
-      <SectionCard
-        title="Documents"
-        description="Numbering prefixes, counters, and document defaults."
-        dirty={!!dirty.docs}
-        saving={saving === 'docs'}
-        onSave={saveDocsSection}
-      >
-        <div>
-          <p className={`${lbl} mb-2`}>Prefixes</p>
-          <div className="grid grid-cols-3 gap-3">
-            {([
-              ['Invoice',     'invoice_prefix'],
-              ['Quote',       'quote_prefix'],
-              ['Credit note', 'credit_note_prefix'],
-            ] as const).map(([label, key]) => (
-              <div key={key} className="space-y-1.5">
-                <label className={lbl}>{label}</label>
-                <input className={inp} value={docs[key]}
-                  onChange={e => { setDocs(d => ({ ...d, [key]: e.target.value })); markDirty('docs') }} />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5">e.g. R-2026-001</p>
-        </div>
-
-        <div>
-          <p className={`${lbl} mb-2`}>Next numbers</p>
-          <div className="grid grid-cols-3 gap-3">
-            {([
-              ['Invoice',     'next_invoice_number'],
-              ['Quote',       'next_quote_number'],
-              ['Credit note', 'next_credit_note_number'],
-            ] as const).map(([label, key]) => (
-              <div key={key} className="space-y-1.5">
-                <label className={lbl}>{label}</label>
-                <input type="number" className={inp} value={docs[key]}
-                  onChange={e => { setDocs(d => ({ ...d, [key]: e.target.value })); markDirty('docs') }} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <label className={lbl}>Default payment days</label>
-            <input type="number" className={inp} value={docs.default_payment_days}
-              onChange={e => { setDocs(d => ({ ...d, default_payment_days: e.target.value })); markDirty('docs') }} />
-          </div>
-          <div className="space-y-1.5">
-            <label className={lbl}>Default language</label>
-            <select
-              value={docs.default_language}
-              onChange={e => { setDocs(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('docs') }}
-              className={inp}
-            >
-              <option value="de">Deutsch</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* ── 5. PDF Footer ── */}
-      <SectionCard
-        title="PDF Footer"
-        description="Printed at the bottom of every invoice and quote. Click a variable to insert at cursor."
-        dirty={!!dirty.footer}
-        saving={saving === 'footer'}
-        onSave={saveFooter}
-      >
-        <VarChips vars={FOOTER_VARS} onInsert={insertVar} />
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label className={lbl}>Deutsch</label>
-            <textarea
-              value={footerDe}
-              onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
-              onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
-              rows={4}
-              className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className={lbl}>English</label>
-            <textarea
-              value={footerEn}
-              onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
-              onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
-              rows={4}
-              className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
-            />
-          </div>
-        </div>
-      </SectionCard>
-
-      {/* ── 6. Email Templates ── */}
-      <SectionCard
-        title="Email Templates"
-        description="Pre-filled subject and body for sending documents via Gmail."
-        dirty={!!dirty.templates}
-        saving={saving === 'templates'}
-        onSave={saveTemplates}
-      >
-        {/* Doc type tabs */}
-        <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
-          {DOC_TABS.map(({ type, label }) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => setActiveDocTab(type)}
-              className={`px-3 h-7 text-xs font-medium rounded-md transition-colors ${
-                activeDocTab === type
-                  ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
-                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {/* Language toggle */}
-        <div className="flex items-center gap-1 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
-          {(['de', 'en'] as const).map(lang => (
-            <button
-              key={lang}
-              type="button"
-              onClick={() => setActiveLang(lang)}
-              className={`px-3 h-6 text-xs font-medium rounded-md transition-colors ${
-                activeLang === lang
-                  ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
-                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
-              }`}
-            >
-              {lang === 'de' ? 'DE' : 'EN'}
-            </button>
-          ))}
-        </div>
-
-        {/* Variable chips */}
-        <VarChips
-          vars={activeDocTab === 'reminder' ? REMINDER_VARS : FOOTER_VARS}
-          onInsert={insertTplVar}
-        />
-
-        {/* Subject */}
-        <div className="space-y-1.5">
-          <label className={lbl}>Subject</label>
-          <input
-            ref={subjectRef}
-            className={inp}
-            value={tpl[subjectKey]}
-            onChange={e => setTplField(activeDocTab, subjectKey, e.target.value)}
-            onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, subjectKey, v))}
-            placeholder={
-              activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_SUBJECT_DE :
-              activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_SUBJECT_EN :
-              undefined
-            }
-          />
-        </div>
-
-        {/* Body */}
-        <div className="space-y-1.5">
-          <label className={lbl}>Body</label>
-          <textarea
-            ref={bodyRef}
-            value={tpl[bodyKey]}
-            onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
-            onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
-            rows={8}
-            placeholder={
-              activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_BODY_DE :
-              activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_BODY_EN :
-              undefined
-            }
-            className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
-          />
-        </div>
-      </SectionCard>
-
-      {/* ── 7. Integrations ── */}
-      <div className="space-y-4">
-        <div className="px-1">
-          <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Integrations</p>
-          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Connect external services to automate your workflow.</p>
-        </div>
-
-        {/* Gmail */}
-        <IntegrationCard
-          title="Gmail"
-          description="Send invoices directly from your Gmail account with the PDF attached."
-        >
-          {gmailEmail ? (
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
-              <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-                <CheckCircle size={14} />
-                <span>{gmailEmail}</span>
-              </span>
-              <button
-                type="button"
-                onClick={disconnectGmail}
-                disabled={disconnecting}
-                className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
-              >
-                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-              </button>
-            </div>
-          ) : (
+      {/* ── Sticky left sidebar nav ── */}
+      <nav className="hidden lg:block w-40 shrink-0">
+        <div className="sticky top-8 space-y-0.5">
+          {NAV_ITEMS.map(({ id, label, Icon }) => (
             <a
-              href="/api/gmail/auth"
-              className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
+              key={id}
+              href={`#${id}`}
+              className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                activeSection === id
+                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
+              }`}
             >
-              <Mail size={14} /> Connect Gmail
+              <Icon size={14} />
+              {label}
             </a>
-          )}
-        </IntegrationCard>
+          ))}
+        </div>
+      </nav>
 
-        {/* Google Drive */}
-        <IntegrationCard
-          title="Google Drive"
-          description="Auto-upload PDFs to a Drive folder when you send or download an invoice."
-        >
-          {!gmailEmail ? (
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect Gmail first to enable Drive.</p>
-          ) : (
-            <div className="space-y-3">
+      {/* ── Main content ── */}
+      <div className="flex-1 min-w-0 space-y-5">
+
+        {/* ── 1. Company ── */}
+        <div id="company" className="scroll-mt-8">
+          <SectionCard
+            title="Company"
+            description="Logo and company identity shown on all documents."
+            dirty={!!dirty.brand}
+            saving={saving === 'brand'}
+            onSave={saveBiz}
+          >
+            {/* Logo */}
+            <div className="flex items-start gap-4">
+              {logoUrl ? (
+                <div className="relative shrink-0">
+                  <div className="h-16 w-16 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 flex items-center justify-center overflow-hidden p-2">
+                    <img src={logoUrl} alt="Logo" className="max-h-full max-w-full object-contain" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={removeLogo}
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+                  >
+                    <X size={10} className="text-neutral-600 dark:text-neutral-300" />
+                  </button>
+                </div>
+              ) : (
+                <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">
+                  <span className="text-[10px] text-neutral-300 dark:text-neutral-600 text-center leading-tight px-1">No logo</span>
+                </div>
+              )}
               <div className="space-y-1.5">
-                <label className={lbl}>Folder URL or ID</label>
+                <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
+                  {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
+                  <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                </label>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">PNG or SVG, transparent background</p>
+              </div>
+            </div>
+
+            {/* Company & owner name */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Company name</label>
                 <input
-                  type="text"
-                  value={driveFolder}
-                  onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true) }}
-                  placeholder="https://drive.google.com/drive/folders/…"
                   className={inp}
+                  value={biz.company_name}
+                  onChange={e => { setBiz(b => ({ ...b, company_name: e.target.value })); markDirty('brand') }}
+                  placeholder="Acme GmbH"
                 />
               </div>
-              {driveFolder && (
-                <div className="space-y-1.5">
-                  <label className={lbl}>Display name</label>
-                  <input
-                    type="text"
-                    value={driveFolderName}
-                    onChange={e => { setDriveFolderName(e.target.value); setDriveDirty(true) }}
-                    placeholder="e.g. Invoices 2026"
-                    className={inp}
-                  />
-                </div>
-              )}
-              <div className="flex items-center gap-3">
-                {settings?.drive_folder_id && !driveDirty && (
-                  <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                    <CheckCircle size={13} />
-                    {settings.drive_folder_name || settings.drive_folder_id}
-                  </span>
-                )}
-                {driveDirty && (
-                  <button
-                    type="button"
-                    onClick={saveDriveFolder}
-                    disabled={savingDrive}
-                    className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
-                  >
-                    <HardDrive size={13} /> {savingDrive ? 'Saving…' : 'Save folder'}
-                  </button>
-                )}
+              <div className="space-y-1.5">
+                <label className={lbl}>Owner name</label>
+                <input
+                  className={inp}
+                  value={biz.owner_name}
+                  onChange={e => { setBiz(b => ({ ...b, owner_name: e.target.value })); markDirty('brand') }}
+                  placeholder="Jane Doe"
+                />
               </div>
-              {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
-                <p className="text-xs text-amber-600 dark:text-amber-500">
-                  Re-connect your Google account to grant Drive access.{' '}
-                  <a href="/api/gmail/auth" className="underline">Re-connect →</a>
-                </p>
-              )}
             </div>
-          )}
-        </IntegrationCard>
+          </SectionCard>
+        </div>
 
-        {/* Bookamat */}
-        <IntegrationCard
-          title="Bookamat"
-          description="Automatically sync paid invoices to your Bookamat bookkeeping."
-        >
-          {bookamatUsername && !bookamatAccounts ? (
-            <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
-              <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-                <CheckCircle size={14} />
-                <span>{bookamatUsername}</span>
-                {bookamatBankId && <span className="text-green-600/60 dark:text-green-400/60">· accounts configured</span>}
+        {/* ── 2. Address ── */}
+        <div id="address" className="scroll-mt-8">
+          <SectionCard
+            title="Address"
+            description="Printed on invoices and used as the sender address."
+            dirty={!!dirty.contact}
+            saving={saving === 'contact'}
+            onSave={saveContact}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Email</label>
+                <input type="email" className={inp} value={contact.email}
+                  onChange={e => { setContact(c => ({ ...c, email: e.target.value })); markDirty('contact') }}
+                  placeholder="billing@company.com" />
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Phone</label>
+                <input className={inp} value={contact.phone}
+                  onChange={e => { setContact(c => ({ ...c, phone: e.target.value })); markDirty('contact') }}
+                  placeholder="+43 1 234 5678" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className={lbl}>Website</label>
+              <input className={inp} value={contact.website}
+                onChange={e => { setContact(c => ({ ...c, website: e.target.value })); markDirty('contact') }}
+                placeholder="https://company.com" />
+            </div>
+            <div className="space-y-1.5">
+              <label className={lbl}>Address</label>
+              <input className={inp} value={contact.address_line1}
+                onChange={e => { setContact(c => ({ ...c, address_line1: e.target.value })); markDirty('contact') }}
+                placeholder="Musterstraße 1" />
+            </div>
+            <div className="space-y-1.5">
+              <label className={lbl}>Address line 2</label>
+              <input className={inp} value={contact.address_line2}
+                onChange={e => { setContact(c => ({ ...c, address_line2: e.target.value })); markDirty('contact') }}
+                placeholder="Top 5" />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>ZIP</label>
+                <input className={inp} value={contact.zip}
+                  onChange={e => { setContact(c => ({ ...c, zip: e.target.value })); markDirty('contact') }}
+                  placeholder="1010" />
+              </div>
+              <div className="space-y-1.5 col-span-2">
+                <label className={lbl}>City</label>
+                <input className={inp} value={contact.city}
+                  onChange={e => { setContact(c => ({ ...c, city: e.target.value })); markDirty('contact') }}
+                  placeholder="Vienna" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Country</label>
+                <input className={inp} value={contact.country}
+                  onChange={e => { setContact(c => ({ ...c, country: e.target.value })); markDirty('contact') }}
+                  placeholder="Austria" />
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>UID-Nummer</label>
+                <input className={inp} value={contact.uid_number}
+                  onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); markDirty('contact') }}
+                  placeholder="ATU…" />
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── 3. Banking ── */}
+        <div id="banking" className="scroll-mt-8">
+          <SectionCard
+            title="Banking"
+            description="Bank details printed on invoices for payment."
+            dirty={!!dirty.banking}
+            saving={saving === 'banking'}
+            onSave={saveBankingSection}
+          >
+            <div className="space-y-1.5">
+              <label className={lbl}>IBAN</label>
+              <input className={inp} value={banking.iban}
+                onChange={e => { setBanking(b => ({ ...b, iban: e.target.value })); markDirty('banking') }}
+                placeholder="AT12 3456 7890 1234 5678" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>BIC</label>
+                <input className={inp} value={banking.bic}
+                  onChange={e => { setBanking(b => ({ ...b, bic: e.target.value })); markDirty('banking') }}
+                  placeholder="RLNWATWW" />
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Bank name</label>
+                <input className={inp} value={banking.bank_name}
+                  onChange={e => { setBanking(b => ({ ...b, bank_name: e.target.value })); markDirty('banking') }}
+                  placeholder="Raiffeisen" />
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── 4. Numbering ── */}
+        <div id="numbering" className="scroll-mt-8">
+          <SectionCard
+            title="Numbering"
+            description="Prefixes, counters, and document defaults."
+            dirty={!!dirty.docs}
+            saving={saving === 'docs'}
+            onSave={saveDocsSection}
+          >
+            {/* Column headers */}
+            <div className="grid grid-cols-[140px_80px_80px_1fr] gap-3 items-center pb-1 border-b border-neutral-100 dark:border-neutral-800">
+              <span className={lbl}></span>
+              <span className={lbl}>Prefix</span>
+              <span className={lbl}>Next #</span>
+              <span className={lbl}>Preview</span>
+            </div>
+
+            {/* One row per doc type */}
+            {([
+              { label: 'Invoice',     prefixKey: 'invoice_prefix' as const,     numKey: 'next_invoice_number' as const },
+              { label: 'Quote',       prefixKey: 'quote_prefix' as const,       numKey: 'next_quote_number' as const },
+              { label: 'Credit note', prefixKey: 'credit_note_prefix' as const, numKey: 'next_credit_note_number' as const },
+            ]).map(row => (
+              <div key={row.prefixKey} className="grid grid-cols-[140px_80px_80px_1fr] gap-3 items-center">
+                <span className="text-sm text-neutral-700 dark:text-neutral-300">{row.label}</span>
+                <input className={inp} value={docs[row.prefixKey]}
+                  onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }} />
+                <input type="number" min="1" className={inp} value={docs[row.numKey]}
+                  onChange={e => { setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
+                  {docs[row.prefixKey] || '?'}-{String(parseInt(docs[row.numKey]) || 1).padStart(3, '0')}
+                </span>
+              </div>
+            ))}
+
+            <div className="grid grid-cols-2 gap-3 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+              <div className="space-y-1.5">
+                <label className={lbl}>Default payment days</label>
+                <input type="number" className={inp} value={docs.default_payment_days}
+                  onChange={e => { setDocs(d => ({ ...d, default_payment_days: e.target.value })); markDirty('docs') }} />
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Default language</label>
+                <select
+                  value={docs.default_language}
+                  onChange={e => { setDocs(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('docs') }}
+                  className={inp}
+                >
+                  <option value="de">Deutsch</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── 5. PDF Footer ── */}
+        <div id="footer" className="scroll-mt-8">
+          <SectionCard
+            title="PDF Footer"
+            description="Printed at the bottom of every invoice and quote."
+            dirty={!!dirty.footer}
+            saving={saving === 'footer'}
+            onSave={saveFooter}
+          >
+            <VarChips vars={FOOTER_VARS} onInsert={insertVar} />
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 -mt-1">
+              Focus a text field, then click a variable to insert it at the cursor.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className={lbl}>Deutsch</label>
+                <textarea
+                  value={footerDe}
+                  onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
+                  onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
+                  rows={4}
+                  className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>English</label>
+                <textarea
+                  value={footerEn}
+                  onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
+                  onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
+                  rows={4}
+                  className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                />
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── 6. Email Templates ── */}
+        <div id="templates" className="scroll-mt-8">
+          <SectionCard
+            title="Email Templates"
+            description="Pre-filled subject and body for sending documents via Gmail."
+            dirty={!!dirty.templates}
+            saving={saving === 'templates'}
+            onSave={saveTemplates}
+          >
+            {/* Doc type tabs */}
+            <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
+              {DOC_TABS.map(({ type, label }) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setActiveDocTab(type)}
+                  className={`px-3 h-7 text-xs font-medium rounded-md transition-colors ${
+                    activeDocTab === type
+                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Language toggle */}
+            <div className="flex items-center gap-1 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
+              {(['de', 'en'] as const).map(lang => (
+                <button
+                  key={lang}
+                  type="button"
+                  onClick={() => setActiveLang(lang)}
+                  className={`px-3 h-6 text-xs font-medium rounded-md transition-colors ${
+                    activeLang === lang
+                      ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                  }`}
+                >
+                  {lang === 'de' ? 'DE' : 'EN'}
+                </button>
+              ))}
+            </div>
+
+            {/* Variable chips */}
+            <VarChips
+              vars={activeDocTab === 'reminder' ? REMINDER_VARS : FOOTER_VARS}
+              onInsert={insertTplVar}
+            />
+
+            {/* Context label */}
+            <div className="flex items-center gap-2 py-2 border-t border-neutral-100 dark:border-neutral-800">
+              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {DOC_TABS.find(t => t.type === activeDocTab)?.label} · {activeLang === 'de' ? 'Deutsch' : 'English'}
               </span>
-              <button
-                type="button"
-                onClick={() => loadBookamatAccounts()}
-                disabled={loadingAccounts}
-                className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
-              >
-                {loadingAccounts ? 'Loading…' : 'Change'}
-              </button>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className={lbl}>Username</label>
-                  <input
-                    type="text"
-                    value={bookamatUsername}
-                    onChange={e => setBookamatUsername(e.target.value)}
-                    placeholder="your@email.com"
-                    className={inp}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className={lbl}>API Key</label>
-                  <input
-                    type="password"
-                    value={bookamatApiKey}
-                    onChange={e => setBookamatApiKey(e.target.value)}
-                    placeholder="From Mein Account → API"
-                    className={inp}
-                  />
-                </div>
-              </div>
 
-              {!bookamatAccounts ? (
+            {/* Subject */}
+            <div className="space-y-1.5">
+              <label className={lbl}>Subject</label>
+              <input
+                ref={subjectRef}
+                className={inp}
+                value={tpl[subjectKey]}
+                onChange={e => setTplField(activeDocTab, subjectKey, e.target.value)}
+                onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, subjectKey, v))}
+                placeholder={
+                  activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_SUBJECT_DE :
+                  activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_SUBJECT_EN :
+                  undefined
+                }
+              />
+            </div>
+
+            {/* Body */}
+            <div className="space-y-1.5">
+              <label className={lbl}>Body</label>
+              <textarea
+                ref={bodyRef}
+                value={tpl[bodyKey]}
+                onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
+                onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
+                rows={8}
+                placeholder={
+                  activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_BODY_DE :
+                  activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_BODY_EN :
+                  undefined
+                }
+                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+              />
+            </div>
+          </SectionCard>
+        </div>
+
+        {/* ── 7. Integrations ── */}
+        <div id="integrations" className="scroll-mt-8 space-y-3">
+          <div className="px-1 pb-1">
+            <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Integrations</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Connect external services to automate your workflow.</p>
+          </div>
+
+          {/* Gmail */}
+          <IntegrationCard
+            title="Gmail"
+            description="Send invoices directly from your Gmail account with the PDF attached."
+          >
+            {gmailEmail ? (
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                  <CheckCircle size={14} />
+                  <span>{gmailEmail}</span>
+                </span>
                 <button
                   type="button"
-                  onClick={loadBookamatAccounts}
-                  disabled={loadingAccounts}
-                  className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
+                  onClick={disconnectGmail}
+                  disabled={disconnecting}
+                  className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
                 >
-                  {loadingAccounts ? 'Loading…' : <><ChevronRight size={14} /> Load accounts</>}
+                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
                 </button>
-              ) : (
-                <div className="space-y-4 pt-1 border-t border-neutral-100 dark:border-neutral-800">
-                  <div className="space-y-1.5 pt-1">
-                    <label className={lbl}>Bank account (receives payments)</label>
-                    <select
-                      value={bookamatBankId}
-                      onChange={e => setBookamatBankId(Number(e.target.value))}
+              </div>
+            ) : (
+              <a
+                href="/api/gmail/auth"
+                className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
+              >
+                <Mail size={14} /> Connect Gmail
+              </a>
+            )}
+          </IntegrationCard>
+
+          {/* Google Drive */}
+          <IntegrationCard
+            title="Google Drive"
+            description="Auto-upload PDFs to a Drive folder when you send or download an invoice."
+          >
+            {!gmailEmail ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect Gmail first to enable Drive.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className={lbl}>Folder URL or ID</label>
+                  <input
+                    type="text"
+                    value={driveFolder}
+                    onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true) }}
+                    placeholder="https://drive.google.com/drive/folders/…"
+                    className={inp}
+                  />
+                </div>
+                {driveFolder && (
+                  <div className="space-y-1.5">
+                    <label className={lbl}>Display name</label>
+                    <input
+                      type="text"
+                      value={driveFolderName}
+                      onChange={e => { setDriveFolderName(e.target.value); setDriveDirty(true) }}
+                      placeholder="e.g. Invoices 2026"
                       className={inp}
+                    />
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  {settings?.drive_folder_id && !driveDirty && (
+                    <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle size={13} />
+                      {settings.drive_folder_name || settings.drive_folder_id}
+                    </span>
+                  )}
+                  {driveDirty && (
+                    <button
+                      type="button"
+                      onClick={saveDriveFolder}
+                      disabled={savingDrive}
+                      className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                     >
-                      <option value="">Select…</option>
-                      {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                    </select>
+                      <HardDrive size={13} /> {savingDrive ? 'Saving…' : 'Save folder'}
+                    </button>
+                  )}
+                </div>
+                {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Re-connect your Google account to grant Drive access.{' '}
+                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
+                  </p>
+                )}
+              </div>
+            )}
+          </IntegrationCard>
+
+          {/* Bookamat */}
+          <IntegrationCard
+            title="Bookamat"
+            description="Automatically sync paid invoices to your Bookamat bookkeeping."
+          >
+            {bookamatUsername && !bookamatAccounts ? (
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                  <CheckCircle size={14} />
+                  <span>{bookamatUsername}</span>
+                  {bookamatBankId && <span className="text-green-600/60 dark:text-green-400/60">· accounts configured</span>}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => loadBookamatAccounts()}
+                  disabled={loadingAccounts}
+                  className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
+                >
+                  {loadingAccounts ? 'Loading…' : 'Change'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className={lbl}>Username</label>
+                    <input
+                      type="text"
+                      value={bookamatUsername}
+                      onChange={e => setBookamatUsername(e.target.value)}
+                      placeholder="your@email.com"
+                      className={inp}
+                    />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={lbl}>Income account (Erlöskonto)</label>
-                    <select
-                      value={bookamatCostId}
-                      onChange={e => setBookamatCostId(Number(e.target.value))}
+                    <label className={lbl}>API Key</label>
+                    <input
+                      type="password"
+                      value={bookamatApiKey}
+                      onChange={e => setBookamatApiKey(e.target.value)}
+                      placeholder="From Mein Account → API"
                       className={inp}
-                    >
-                      <option value="">Select…</option>
-                      {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                    </select>
+                    />
                   </div>
-                  <div className="space-y-2">
-                    <label className={lbl}>VAT accounts</label>
-                    {([
-                      [0,  bookamatVat0,  setBookamatVat0],
-                      [10, bookamatVat10, setBookamatVat10],
-                      [13, bookamatVat13, setBookamatVat13],
-                      [20, bookamatVat20, setBookamatVat20],
-                    ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
-                      <div key={rate} className="flex items-center gap-3">
-                        <span className="text-xs text-neutral-400 dark:text-neutral-500 w-7 shrink-0 text-right">{rate}%</span>
-                        <select
-                          value={val}
-                          onChange={e => setter(Number(e.target.value))}
-                          className={inp}
-                        >
-                          <option value="">Not used</option>
-                          {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
+                </div>
+
+                {!bookamatAccounts ? (
                   <button
                     type="button"
-                    onClick={saveBookamat}
-                    disabled={savingBookamat}
-                    className="w-full h-9 text-sm rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50 font-medium"
+                    onClick={loadBookamatAccounts}
+                    disabled={loadingAccounts}
+                    className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                   >
-                    {savingBookamat ? 'Saving…' : 'Save Bookamat settings'}
+                    {loadingAccounts ? 'Loading…' : <><ChevronRight size={14} /> Load accounts</>}
                   </button>
-                </div>
-              )}
-            </div>
-          )}
-        </IntegrationCard>
+                ) : (
+                  <div className="space-y-4 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                    <div className="space-y-1.5 pt-1">
+                      <label className={lbl}>Bank account (receives payments)</label>
+                      <select
+                        value={bookamatBankId}
+                        onChange={e => setBookamatBankId(Number(e.target.value))}
+                        className={inp}
+                      >
+                        <option value="">Select…</option>
+                        {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className={lbl}>Income account (Erlöskonto)</label>
+                      <select
+                        value={bookamatCostId}
+                        onChange={e => setBookamatCostId(Number(e.target.value))}
+                        className={inp}
+                      >
+                        <option value="">Select…</option>
+                        {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className={lbl}>VAT accounts</label>
+                      {([
+                        [0,  bookamatVat0,  setBookamatVat0],
+                        [10, bookamatVat10, setBookamatVat10],
+                        [13, bookamatVat13, setBookamatVat13],
+                        [20, bookamatVat20, setBookamatVat20],
+                      ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
+                        <div key={rate} className="flex items-center gap-3">
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 w-7 shrink-0 text-right">{rate}%</span>
+                          <select
+                            value={val}
+                            onChange={e => setter(Number(e.target.value))}
+                            className={inp}
+                          >
+                            <option value="">Not used</option>
+                            {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={saveBookamat}
+                      disabled={savingBookamat}
+                      className="w-full h-9 text-sm rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50 font-medium"
+                    >
+                      {savingBookamat ? 'Saving…' : 'Save Bookamat settings'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </IntegrationCard>
+        </div>
+
       </div>
     </div>
   )
