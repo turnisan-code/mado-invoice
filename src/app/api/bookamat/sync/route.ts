@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { calcTotals } from '@/lib/utils/document'
+import type { Client, Settings, VatRate } from '@/types'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   const country = settings.bookamat_country ?? 'at'
   const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`
 
-  const client = doc.clients as { name: string; company: string | null; uid_number: string | null } | null
+  const client = doc.clients as Client | null
   const clientName = (client?.company ?? client?.name ?? '').slice(0, 30)
   const title = `${doc.number ?? 'Draft'} – ${clientName}`.slice(0, 50)
 
@@ -128,6 +129,65 @@ export async function POST(req: NextRequest) {
     .from('documents')
     .update({ bookamat_booking_id: String(bookingId) })
     .eq('id', documentId)
+
+  // Attach PDF to the booking
+  try {
+    const { renderToBuffer } = await import('@react-pdf/renderer')
+    const React = (await import('react')).default
+    const { default: InvoiceDocument } = await import('@/components/pdf/InvoiceDocument')
+
+    const docData = {
+      number: doc.number ?? '',
+      date: doc.date,
+      service_date: doc.service_date,
+      due_date: doc.due_date,
+      type: doc.type,
+      language: doc.language,
+      currency: doc.currency,
+      tax_treatment: doc.tax_treatment,
+      notes: doc.notes,
+      tax_note: null,
+      discount_type: doc.discount_type,
+      discount_value: doc.discount_value,
+      items: (doc.document_items ?? []).map((i: Record<string, unknown>) => ({
+        line_type: i.line_type,
+        description: i.description,
+        service_date: i.service_date,
+        quantity: i.quantity,
+        unit: i.unit,
+        unit_price: i.unit_price,
+        vat_rate: i.vat_rate as VatRate,
+      })),
+      totals,
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdfBuffer = await renderToBuffer(
+      React.createElement(InvoiceDocument, {
+        settings: settings as unknown as Settings,
+        client: client as Client,
+        document: docData,
+      }) as any
+    )
+
+    const formData = new FormData()
+    formData.append('file', new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' }), `${doc.number}.pdf`)
+
+    const uploadRes = await fetch(`${baseUrl}bookings/${bookingId}/documents/`, {
+      method: 'POST',
+      headers: { Authorization: authHeader },
+      body: formData,
+    })
+
+    if (!uploadRes.ok) {
+      const uploadErr = await uploadRes.text()
+      console.log('[bookamat/sync] PDF upload failed:', uploadErr)
+    } else {
+      console.log('[bookamat/sync] PDF attached successfully')
+    }
+  } catch (pdfErr) {
+    console.log('[bookamat/sync] PDF generation/upload error:', pdfErr)
+  }
 
   return NextResponse.json({ ok: true, bookingId })
 }
