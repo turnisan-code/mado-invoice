@@ -24,23 +24,30 @@ export async function POST(req: NextRequest) {
 
     // Strip data URL prefix and decode base64
     const base64Data = pdfBase64.replace(/^data:application\/pdf;base64,/, '')
-    const pdfBytes = Uint8Array.from(Buffer.from(base64Data, 'base64'))
+    const pdfBuffer = Buffer.from(base64Data, 'base64')
 
     const url = `${baseUrl}bookings/${bookingId}/documents/`
-    console.log('[bookamat/attach-pdf] POST', url, 'bytes:', pdfBytes.length)
+    console.log('[bookamat/attach-pdf] POST', url, 'bytes:', pdfBuffer.length)
 
-    // Try 'document' field name first (Bookamat convention), fallback to 'file'
-    const formData = new FormData()
-    formData.append(
-      'document',
-      new Blob([pdfBytes], { type: 'application/pdf' }),
-      filename,
+    // Build multipart body manually — avoids undici FormData/Blob streaming bugs
+    // that cause "terminated" errors in Node.js serverless environments
+    const boundary = `----StudioInvoiceBoundary${Date.now().toString(36)}`
+    const safeFilename = filename.replace(/"/g, '')
+    const preamble = Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="document"; filename="${safeFilename}"\r\n` +
+      `Content-Type: application/pdf\r\n\r\n`
     )
+    const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`)
+    const body = Buffer.concat([preamble, pdfBuffer, epilogue])
 
     const res = await fetch(url, {
       method: 'POST',
-      headers: { Authorization: authHeader },
-      body: formData,
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
     })
 
     const text = await res.text()
