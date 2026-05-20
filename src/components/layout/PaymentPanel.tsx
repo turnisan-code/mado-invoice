@@ -8,6 +8,8 @@ import { formatMoney } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { pdf } from '@react-pdf/renderer'
+import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import type { Currency, Settings, Client, DocumentType, Language, TaxTreatment, VatRate, Unit, LineType, DocumentTotals } from '@/types'
 
 interface Payment {
@@ -148,12 +150,8 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     // Generate PDF client-side and attach to the booking
     if (bookamatPdfData) {
       try {
-        const { pdf } = await import('@react-pdf/renderer')
-        const { default: InvoiceDocument } = await import('@/components/pdf/InvoiceDocument')
-        const React = (await import('react')).default
-
         const blob = await pdf(
-          React.createElement(InvoiceDocument, bookamatPdfData) as any
+          <InvoiceDocument {...bookamatPdfData} />
         ).toBlob()
 
         const reader = new FileReader()

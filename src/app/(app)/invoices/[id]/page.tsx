@@ -28,7 +28,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   const client = clients?.find(c => c.id === doc.client_id) ?? null
   const bookamatPdfData: BookamatPdfData | undefined = settings && client ? {
-    settings,
+    // Strip logo_url — image loading inside react-pdf's web worker can crash
+    settings: { ...settings, logo_url: null },
     client,
     document: {
       number: doc.number ?? '',
