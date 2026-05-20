@@ -8,12 +8,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle, Mail, HardDrive } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight } from 'lucide-react'
 import type { Settings } from '@/types'
 
 interface Props { settings: Settings | null }
 
-const TABS = ['Business', 'Numbering', 'Templates'] as const
+const TABS = ['Business', 'Numbering', 'Templates', 'Integrations'] as const
 type Tab = typeof TABS[number]
 
 const FOOTER_VARS = [
@@ -30,6 +30,7 @@ const FOOTER_VARS = [
 export default function SettingsForm({ settings }: Props) {
   const [tab, setTab] = useState<Tab>('Business')
   const [saving, setSaving] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [footerDe, setFooterDe] = useState(settings?.invoice_footer_de ?? '')
@@ -39,6 +40,7 @@ export default function SettingsForm({ settings }: Props) {
   const [driveFolder, setDriveFolder] = useState(settings?.drive_folder_id ?? '')
   const [driveFolderName, setDriveFolderName] = useState(settings?.drive_folder_name ?? '')
   const [savingDrive, setSavingDrive] = useState(false)
+  const [driveDirty, setDriveDirty] = useState(false)
   const [bookamatUsername, setBookamatUsername] = useState(settings?.bookamat_username ?? '')
   const [bookamatApiKey, setBookamatApiKey] = useState(settings?.bookamat_api_key ?? '')
   const [bookamatCountry, setBookamatCountry] = useState(settings?.bookamat_country ?? 'at')
@@ -66,9 +68,9 @@ export default function SettingsForm({ settings }: Props) {
   })
   function setTpl(docType: DocType, field: string, value: string) {
     setEmailTpl(t => ({ ...t, [docType]: { ...t[docType], [field]: value } }))
+    setIsDirty(true)
   }
 
-  // Tracks the last-focused template input/textarea and its setter
   const lastFocused = useRef<{ el: HTMLTextAreaElement | HTMLInputElement; setter: (v: string) => void } | null>(null)
   function onTplFocus(el: HTMLTextAreaElement | HTMLInputElement, setter: (v: string) => void) {
     lastFocused.current = { el, setter }
@@ -79,9 +81,15 @@ export default function SettingsForm({ settings }: Props) {
 
   useEffect(() => {
     const status = searchParams.get('gmail')
-    if (status === 'connected') toast.success('Gmail connected successfully.')
+    if (status === 'connected') { toast.success('Gmail connected successfully.'); setTab('Integrations') }
     if (status === 'error') toast.error('Gmail connection failed. Please try again.')
   }, [searchParams])
+
+  // Reset dirty flag when switching tabs (uncontrolled fields reset naturally via re-mount)
+  function switchTab(t: Tab) {
+    setTab(t)
+    setIsDirty(false)
+  }
 
   async function disconnectGmail() {
     setDisconnecting(true)
@@ -97,7 +105,6 @@ export default function SettingsForm({ settings }: Props) {
   async function saveDriveFolder() {
     if (!settings) return
     setSavingDrive(true)
-    // Accept full URL or bare folder ID
     const match = driveFolder.match(/[-\w]{25,}/)
     const folderId = match ? match[0] : driveFolder.trim()
     await supabase.from('settings').update({
@@ -106,6 +113,7 @@ export default function SettingsForm({ settings }: Props) {
     }).eq('id', settings.id)
     setDriveFolder(folderId)
     setSavingDrive(false)
+    setDriveDirty(false)
     toast.success(folderId ? 'Drive folder saved.' : 'Drive folder removed.')
   }
 
@@ -116,6 +124,7 @@ export default function SettingsForm({ settings }: Props) {
     const start = el.selectionStart ?? el.value.length
     const end = el.selectionEnd ?? start
     setter(el.value.slice(0, start) + token + el.value.slice(end))
+    setIsDirty(true)
     requestAnimationFrame(() => {
       el.focus()
       el.setSelectionRange(start + token.length, start + token.length)
@@ -134,7 +143,6 @@ export default function SettingsForm({ settings }: Props) {
     if (!res.ok) { const { error } = await res.json().catch(() => ({})); toast.error(error ?? 'Failed to load accounts.'); return }
     const data = await res.json()
     setBookamatAccounts(data)
-    toast.success('Accounts loaded.')
   }
 
   async function saveBookamat() {
@@ -217,19 +225,30 @@ export default function SettingsForm({ settings }: Props) {
     }
 
     const { error } = await supabase.from('settings').update(payload).eq('id', settings!.id)
-    if (error) { toast.error(error.message) } else { toast.success('Settings saved.') }
+    if (error) {
+      toast.error(error.message)
+    } else {
+      toast.success('Settings saved.')
+      setIsDirty(false)
+    }
     setSaving(false)
   }
 
+  const showSaveBar = isDirty && tab !== 'Integrations'
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form
+      onSubmit={handleSubmit}
+      onChange={() => setIsDirty(true)}
+      className="space-y-6"
+    >
       {/* Tabs */}
       <div className="flex border-b border-neutral-200 dark:border-neutral-700">
         {TABS.map(t => (
           <button
             key={t}
             type="button"
-            onClick={() => setTab(t)}
+            onClick={() => switchTab(t)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
               tab === t
                 ? 'border-neutral-900 dark:border-neutral-100 text-neutral-900 dark:text-neutral-100'
@@ -241,31 +260,30 @@ export default function SettingsForm({ settings }: Props) {
         ))}
       </div>
 
+      {/* ── Business ── */}
       {tab === 'Business' && (
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Logo</p>
+        <div className="space-y-8">
+          <Section title="Logo">
             <div className="flex items-center gap-4">
               {logoUrl && (
-                <img src={logoUrl} alt="Logo" className="h-14 w-auto object-contain border border-neutral-100 dark:border-neutral-800 rounded-md p-1" />
+                <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain border border-neutral-100 dark:border-neutral-800 rounded-lg p-1.5" />
               )}
               <div>
-                <label className="cursor-pointer text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-                  {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
+                <label className="cursor-pointer inline-flex items-center text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                  {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace' : 'Upload logo'}
                   <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
                 </label>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5">PNG or SVG, transparent background recommended</p>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1.5">PNG or SVG, transparent background</p>
               </div>
             </div>
-          </section>
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Business details</p>
+          <Section title="Business">
             <div className="grid grid-cols-2 gap-3">
-              <F label="Business name *" name="company_name" defaultValue={settings?.company_name} required />
+              <F label="Business name" name="company_name" defaultValue={settings?.company_name} required />
               <F label="Owner name" name="owner_name" defaultValue={settings?.owner_name} />
             </div>
-            <F label="Address *" name="address_line1" defaultValue={settings?.address_line1} required />
+            <F label="Address" name="address_line1" defaultValue={settings?.address_line1} required />
             <F label="Address line 2" name="address_line2" defaultValue={settings?.address_line2 ?? ''} />
             <div className="grid grid-cols-3 gap-3">
               <F label="ZIP" name="zip" defaultValue={settings?.zip} />
@@ -277,209 +295,47 @@ export default function SettingsForm({ settings }: Props) {
               <F label="Phone" name="phone" defaultValue={settings?.phone ?? ''} />
             </div>
             <F label="Website" name="website" defaultValue={settings?.website ?? ''} />
-            <F label="UID-Nummer *" name="uid_number" defaultValue={settings?.uid_number} required placeholder="ATU…" />
-          </section>
+            <F label="UID-Nummer" name="uid_number" defaultValue={settings?.uid_number} required placeholder="ATU…" />
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Bank details</p>
-            <F label="IBAN *" name="iban" defaultValue={settings?.iban} required />
+          <Section title="Bank">
+            <F label="IBAN" name="iban" defaultValue={settings?.iban} required />
             <div className="grid grid-cols-2 gap-3">
               <F label="BIC" name="bic" defaultValue={settings?.bic} />
               <F label="Bank name" name="bank_name" defaultValue={settings?.bank_name ?? ''} />
             </div>
-          </section>
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Gmail integration</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Send invoices directly from your Gmail account with the PDF auto-attached.</p>
-            {gmailEmail ? (
-              <div className="flex items-center justify-between p-3 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
-                <div className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-                  <CheckCircle size={15} />
-                  <span>Connected as <strong>{gmailEmail}</strong></span>
-                </div>
-                <button type="button" onClick={disconnectGmail} disabled={disconnecting}
-                  className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
-                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-                </button>
-              </div>
-            ) : (
-              <a href="/api/gmail/auth"
-                className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-                <Mail size={14} /> Connect Gmail account
-              </a>
-            )}
-          </section>
-
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Google Drive</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">
-              Auto-upload PDFs to a Drive folder when you send or download an invoice.
-              {!gmailEmail && <span className="text-amber-600 dark:text-amber-500"> Connect Gmail first to enable Drive.</span>}
-            </p>
-            {gmailEmail && (
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 dark:text-neutral-400">Folder URL or ID</label>
-                  <input
-                    type="text"
-                    value={driveFolder}
-                    onChange={e => setDriveFolder(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/…"
-                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600"
-                  />
-                </div>
-                {driveFolder && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Folder label (for display)</label>
-                    <input
-                      type="text"
-                      value={driveFolderName}
-                      onChange={e => setDriveFolderName(e.target.value)}
-                      placeholder="e.g. Invoices 2026"
-                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600"
-                    />
-                  </div>
-                )}
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={saveDriveFolder}
-                    disabled={savingDrive}
-                    className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
-                  >
-                    <HardDrive size={14} /> {savingDrive ? 'Saving…' : driveFolder ? 'Save folder' : 'Remove folder'}
-                  </button>
-                  {settings?.drive_folder_id && (
-                    <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                      <CheckCircle size={13} />
-                      {settings.drive_folder_name || settings.drive_folder_id}
-                    </span>
-                  )}
-                </div>
-                {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    Re-connect your Google account to grant Drive access.{' '}
-                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Bookamat</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Automatically sync paid invoices to your Bookamat bookkeeping.</p>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 dark:text-neutral-400">Username</label>
-                  <input type="text" value={bookamatUsername} onChange={e => setBookamatUsername(e.target.value)}
-                    placeholder="your@email.com"
-                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600" />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs text-neutral-500 dark:text-neutral-400">API Key</label>
-                  <input type="password" value={bookamatApiKey} onChange={e => setBookamatApiKey(e.target.value)}
-                    placeholder="From Mein Account → API"
-                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600" />
-                </div>
-              </div>
-              <button type="button" onClick={loadBookamatAccounts} disabled={loadingAccounts}
-                className="text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
-                {loadingAccounts ? 'Loading…' : 'Load accounts from Bookamat'}
-              </button>
-              {bookamatAccounts && (
-                <div className="space-y-3 pt-1">
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Bank account (receives payments)</label>
-                    <select value={bookamatBankId} onChange={e => setBookamatBankId(Number(e.target.value))}
-                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
-                      <option value="">Select…</option>
-                      {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Income account (Erlöskonto)</label>
-                    <select value={bookamatCostId} onChange={e => setBookamatCostId(Number(e.target.value))}
-                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
-                      <option value="">Select…</option>
-                      {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs text-neutral-500 dark:text-neutral-400">VAT accounts (Umsatzsteuerkonten)</label>
-                    {([
-                      [0, bookamatVat0, setBookamatVat0],
-                      [10, bookamatVat10, setBookamatVat10],
-                      [13, bookamatVat13, setBookamatVat13],
-                      [20, bookamatVat20, setBookamatVat20],
-                    ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
-                      <div key={rate} className="flex items-center gap-3">
-                        <span className="text-xs text-neutral-400 dark:text-neutral-500 w-8 shrink-0">{rate}%</span>
-                        <select value={val} onChange={e => setter(Number(e.target.value))}
-                          className="flex-1 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
-                          <option value="">Not used</option>
-                          {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                        </select>
-                      </div>
-                    ))}
-                  </div>
-                  <button type="button" onClick={saveBookamat} disabled={savingBookamat}
-                    className="text-sm px-3 py-2 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50">
-                    {savingBookamat ? 'Saving…' : 'Save Bookamat settings'}
-                  </button>
-                </div>
-              )}
-              {bookamatUsername && !bookamatAccounts && (
-                <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                  <CheckCircle size={13} /> Connected as {bookamatUsername}
-                  {bookamatBankId && <span className="text-neutral-400 dark:text-neutral-500">· bank & income accounts configured</span>}
-                  <button
-                    type="button"
-                    onClick={() => loadBookamatAccounts()}
-                    className="ml-1 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
-                  >
-                    Change
-                  </button>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Hidden fields for other tabs so form data is complete */}
           <HiddenNumberingFields settings={settings} />
           <HiddenTemplateFields footerDe={footerDe} footerEn={footerEn} />
         </div>
       )}
 
+      {/* ── Numbering ── */}
       {tab === 'Numbering' && (
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Document prefixes</p>
+        <div className="space-y-8">
+          <Section title="Prefixes">
             <div className="grid grid-cols-3 gap-3">
-              <F label="Invoice prefix" name="invoice_prefix" defaultValue={settings?.invoice_prefix ?? 'R'} />
-              <F label="Quote prefix" name="quote_prefix" defaultValue={settings?.quote_prefix ?? 'A'} />
-              <F label="Credit note prefix" name="credit_note_prefix" defaultValue={settings?.credit_note_prefix ?? 'G'} />
+              <F label="Invoice" name="invoice_prefix" defaultValue={settings?.invoice_prefix ?? 'R'} />
+              <F label="Quote" name="quote_prefix" defaultValue={settings?.quote_prefix ?? 'A'} />
+              <F label="Credit note" name="credit_note_prefix" defaultValue={settings?.credit_note_prefix ?? 'G'} />
             </div>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Numbers will look like: R-2026-001, A-2026-001, G-2026-001</p>
-          </section>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">e.g. R-2026-001</p>
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Next numbers</p>
+          <Section title="Next numbers">
             <div className="grid grid-cols-3 gap-3">
-              <F label="Next invoice #" name="next_invoice_number" type="number" defaultValue={String(settings?.next_invoice_number ?? 1)} />
-              <F label="Next quote #" name="next_quote_number" type="number" defaultValue={String(settings?.next_quote_number ?? 1)} />
-              <F label="Next credit note #" name="next_credit_note_number" type="number" defaultValue={String(settings?.next_credit_note_number ?? 1)} />
+              <F label="Invoice" name="next_invoice_number" type="number" defaultValue={String(settings?.next_invoice_number ?? 1)} />
+              <F label="Quote" name="next_quote_number" type="number" defaultValue={String(settings?.next_quote_number ?? 1)} />
+              <F label="Credit note" name="next_credit_note_number" type="number" defaultValue={String(settings?.next_credit_note_number ?? 1)} />
             </div>
-          </section>
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Defaults</p>
+          <Section title="Defaults">
             <div className="grid grid-cols-2 gap-3">
-              <F label="Default payment days" name="default_payment_days" type="number" defaultValue={String(settings?.default_payment_days ?? 14)} />
+              <F label="Payment days" name="default_payment_days" type="number" defaultValue={String(settings?.default_payment_days ?? 14)} />
               <div className="space-y-1.5">
-                <Label>Default language</Label>
+                <Label>Language</Label>
                 <select name="default_language" defaultValue={settings?.default_language ?? 'de'}
                   className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
                   <option value="de">Deutsch</option>
@@ -487,44 +343,46 @@ export default function SettingsForm({ settings }: Props) {
                 </select>
               </div>
             </div>
-          </section>
+          </Section>
 
           <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
           <HiddenTemplateFields footerDe={footerDe} footerEn={footerEn} />
         </div>
       )}
 
+      {/* ── Templates ── */}
       {tab === 'Templates' && (
-        <div className="space-y-6">
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Invoice footer text</p>
+        <div className="space-y-8">
+          <Section title="Invoice footer">
             <p className="text-xs text-neutral-400 dark:text-neutral-500">Printed at the bottom of every invoice and quote. Click a variable to insert it at the cursor.</p>
             <div className="flex flex-wrap gap-1.5">
               {FOOTER_VARS.map(v => (
-                <button
-                  key={v.token}
-                  type="button"
-                  onClick={() => insertVar(v.token)}
-                  className="text-xs px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-500 transition-colors"
-                >
-                  <span className="font-mono">{v.token}</span>
-                  <span className="ml-1.5 text-neutral-400 dark:text-neutral-500 text-[10px]">{v.label}</span>
+                <button key={v.token} type="button" onClick={() => insertVar(v.token)}
+                  className="text-xs px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors font-mono">
+                  {v.token}
                 </button>
               ))}
             </div>
-            <div className="space-y-1.5">
-              <Label>Footer (Deutsch)</Label>
-              <Textarea ref={footerDeRef} name="invoice_footer_de" value={footerDe} onChange={e => setFooterDe(e.target.value)} onFocus={e => onTplFocus(e.currentTarget, setFooterDe)} rows={4} className="resize-none text-sm" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Deutsch</Label>
+                <Textarea ref={footerDeRef} name="invoice_footer_de" value={footerDe}
+                  onChange={e => { setFooterDe(e.target.value); setIsDirty(true) }}
+                  onFocus={e => onTplFocus(e.currentTarget, v => { setFooterDe(v); setIsDirty(true) })}
+                  rows={4} className="resize-none text-sm" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">English</Label>
+                <Textarea ref={footerEnRef} name="invoice_footer_en" value={footerEn}
+                  onChange={e => { setFooterEn(e.target.value); setIsDirty(true) }}
+                  onFocus={e => onTplFocus(e.currentTarget, v => { setFooterEn(v); setIsDirty(true) })}
+                  rows={4} className="resize-none text-sm" />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Footer (English)</Label>
-              <Textarea ref={footerEnRef} name="invoice_footer_en" value={footerEn} onChange={e => setFooterEn(e.target.value)} onFocus={e => onTplFocus(e.currentTarget, setFooterEn)} rows={4} className="resize-none text-sm" />
-            </div>
-          </section>
+          </Section>
 
-          <section className="space-y-4">
-            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Email templates</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500">Pre-filled subject and body for "Send via Gmail". Same variables as footer. Click a field first, then a variable chip.</p>
+          <Section title="Email templates">
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">Pre-filled subject and body for "Send via Gmail". Click a field first, then insert a variable.</p>
             {(
               [
                 { type: 'invoice' as DocType,     label: 'Invoice' },
@@ -537,42 +395,231 @@ export default function SettingsForm({ settings }: Props) {
                 <div className="grid grid-cols-2 gap-4">
                   {(['de', 'en'] as const).map(lang => (
                     <div key={lang} className="space-y-2">
-                      <p className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase">{lang === 'de' ? 'Deutsch' : 'English'}</p>
+                      <p className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">{lang === 'de' ? 'Deutsch' : 'English'}</p>
                       <div className="space-y-1">
                         <Label className="text-xs">Subject</Label>
-                        <input
-                          value={emailTpl[dt][`subject_${lang}`]}
+                        <input value={emailTpl[dt][`subject_${lang}`]}
                           onChange={e => setTpl(dt, `subject_${lang}`, e.target.value)}
                           onFocus={e => onTplFocus(e.currentTarget, v => setTpl(dt, `subject_${lang}`, v))}
-                          className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
-                        />
+                          className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
                       </div>
                       <div className="space-y-1">
                         <Label className="text-xs">Body</Label>
-                        <textarea
-                          value={emailTpl[dt][`body_${lang}`]}
+                        <textarea value={emailTpl[dt][`body_${lang}`]}
                           onChange={e => setTpl(dt, `body_${lang}`, e.target.value)}
                           onFocus={e => onTplFocus(e.currentTarget, v => setTpl(dt, `body_${lang}`, v))}
                           rows={5}
-                          className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
-                        />
+                          className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none" />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
             ))}
-          </section>
+          </Section>
 
           <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />
           <HiddenNumberingFields settings={settings} />
         </div>
       )}
 
-      <Button type="submit" disabled={saving} className="w-full">
-        {saving ? 'Saving…' : 'Save settings'}
-      </Button>
+      {/* ── Integrations ── */}
+      {tab === 'Integrations' && (
+        <div className="space-y-6">
+          {/* Gmail */}
+          <IntegrationCard
+            title="Gmail"
+            description="Send invoices directly from your Gmail account with the PDF attached."
+          >
+            {gmailEmail ? (
+              <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                  <CheckCircle size={14} />
+                  <span>{gmailEmail}</span>
+                </span>
+                <button type="button" onClick={disconnectGmail} disabled={disconnecting}
+                  className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors">
+                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+                </button>
+              </div>
+            ) : (
+              <a href="/api/gmail/auth"
+                className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                <Mail size={14} /> Connect Gmail
+              </a>
+            )}
+          </IntegrationCard>
+
+          {/* Google Drive */}
+          <IntegrationCard
+            title="Google Drive"
+            description="Auto-upload PDFs to a Drive folder when you send or download an invoice."
+          >
+            {!gmailEmail ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect Gmail first to enable Drive.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-neutral-500 dark:text-neutral-400">Folder URL or ID</label>
+                  <input type="text" value={driveFolder}
+                    onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true) }}
+                    placeholder="https://drive.google.com/drive/folders/…"
+                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                </div>
+                {driveFolder && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Display name</label>
+                    <input type="text" value={driveFolderName}
+                      onChange={e => { setDriveFolderName(e.target.value); setDriveDirty(true) }}
+                      placeholder="e.g. Invoices 2026"
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  {settings?.drive_folder_id && !driveDirty && (
+                    <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle size={13} />
+                      {settings.drive_folder_name || settings.drive_folder_id}
+                    </span>
+                  )}
+                  {driveDirty && (
+                    <button type="button" onClick={saveDriveFolder} disabled={savingDrive}
+                      className="inline-flex items-center gap-2 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
+                      <HardDrive size={13} /> {savingDrive ? 'Saving…' : 'Save folder'}
+                    </button>
+                  )}
+                </div>
+                {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Re-connect your Google account to grant Drive access.{' '}
+                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
+                  </p>
+                )}
+              </div>
+            )}
+          </IntegrationCard>
+
+          {/* Bookamat */}
+          <IntegrationCard
+            title="Bookamat"
+            description="Automatically sync paid invoices to your Bookamat bookkeeping."
+          >
+            {bookamatUsername && !bookamatAccounts ? (
+              /* Connected state */
+              <div className="space-y-3">
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                  <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                    <CheckCircle size={14} />
+                    <span>{bookamatUsername}</span>
+                    {bookamatBankId && <span className="text-green-600/60 dark:text-green-400/60">· accounts configured</span>}
+                  </span>
+                  <button type="button" onClick={() => loadBookamatAccounts()} disabled={loadingAccounts}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors">
+                    {loadingAccounts ? 'Loading…' : 'Change'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Setup wizard */
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Username</label>
+                    <input type="text" value={bookamatUsername} onChange={e => setBookamatUsername(e.target.value)}
+                      placeholder="your@email.com"
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">API Key</label>
+                    <input type="password" value={bookamatApiKey} onChange={e => setBookamatApiKey(e.target.value)}
+                      placeholder="From Mein Account → API"
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                  </div>
+                </div>
+
+                {!bookamatAccounts ? (
+                  <button type="button" onClick={loadBookamatAccounts} disabled={loadingAccounts}
+                    className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
+                    {loadingAccounts ? 'Loading…' : <><ChevronRight size={14} /> Load accounts</>}
+                  </button>
+                ) : (
+                  <div className="space-y-4 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+                    <div className="space-y-1.5 pt-1">
+                      <label className="text-xs text-neutral-500 dark:text-neutral-400">Bank account (receives payments)</label>
+                      <select value={bookamatBankId} onChange={e => setBookamatBankId(Number(e.target.value))}
+                        className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                        <option value="">Select…</option>
+                        {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-neutral-500 dark:text-neutral-400">Income account (Erlöskonto)</label>
+                      <select value={bookamatCostId} onChange={e => setBookamatCostId(Number(e.target.value))}
+                        className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                        <option value="">Select…</option>
+                        {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs text-neutral-500 dark:text-neutral-400">VAT accounts</label>
+                      {([
+                        [0, bookamatVat0, setBookamatVat0],
+                        [10, bookamatVat10, setBookamatVat10],
+                        [13, bookamatVat13, setBookamatVat13],
+                        [20, bookamatVat20, setBookamatVat20],
+                      ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
+                        <div key={rate} className="flex items-center gap-3">
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 w-7 shrink-0 text-right">{rate}%</span>
+                          <select value={val} onChange={e => setter(Number(e.target.value))}
+                            className="flex-1 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none">
+                            <option value="">Not used</option>
+                            {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" onClick={saveBookamat} disabled={savingBookamat}
+                      className="w-full text-sm py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50 font-medium">
+                      {savingBookamat ? 'Saving…' : 'Save Bookamat settings'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </IntegrationCard>
+        </div>
+      )}
+
+      {/* Save bar — only visible when dirty, only on non-Integrations tabs */}
+      <div className={`transition-all duration-200 overflow-hidden ${showSaveBar ? 'max-h-20 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800">
+          <Button type="submit" disabled={saving} className="w-full">
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </div>
+      </div>
     </form>
+  )
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">{title}</p>
+      {children}
+    </section>
+  )
+}
+
+function IntegrationCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-5 space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{title}</p>
+        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{description}</p>
+      </div>
+      {children}
+    </div>
   )
 }
 
