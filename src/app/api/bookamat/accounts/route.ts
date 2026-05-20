@@ -18,7 +18,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'username, apiKey and country are required' }, { status: 400 })
   }
 
-  const baseUrl = `https://www.bookamat.com/api/v1/${country}/`
+  const year = new Date().getFullYear()
+  const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
   const authHeader = `ApiKey ${username}:${apiKey}`
 
   try {
