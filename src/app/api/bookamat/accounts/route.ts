@@ -41,11 +41,24 @@ export async function POST(req: NextRequest) {
       vatRes.json(),
     ])
 
-    const bankAccounts: { id: number; title: string }[] = bankData.objects ?? bankData
-    const costAccounts: { id: number; title: string }[] = costData.objects ?? costData
-    const vatAccounts: { id: number; title: string }[] = vatData.objects ?? vatData
+    console.log('[bookamat/accounts] raw:', JSON.stringify({ bankData, costData, vatData }).slice(0, 500))
 
-    return NextResponse.json({ bankAccounts, costAccounts, vatAccounts })
+    function toArray(data: unknown): { id: number; title: string }[] {
+      if (Array.isArray(data)) return data
+      if (data && typeof data === 'object') {
+        const d = data as Record<string, unknown>
+        if (Array.isArray(d.objects)) return d.objects as { id: number; title: string }[]
+        if (Array.isArray(d.results)) return d.results as { id: number; title: string }[]
+      }
+      return []
+    }
+
+    return NextResponse.json({
+      bankAccounts: toArray(bankData),
+      costAccounts: toArray(costData),
+      vatAccounts: toArray(vatData),
+      _raw: { bankData, costData, vatData },
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ error: message }, { status: 400 })
