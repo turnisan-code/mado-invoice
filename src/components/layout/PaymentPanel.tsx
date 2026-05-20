@@ -109,9 +109,16 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     setSyncingBookamat(false)
     setShowBookamatPrompt(false)
     if (res.ok) {
-      const { bookingId } = await res.json()
+      const { bookingId, pdfError, pdfStatus } = await res.json()
       setBookamatId(String(bookingId))
-      toast.success('Synced to Bookamat.')
+      if (pdfStatus === 'attached') {
+        toast.success('Synced to Bookamat — invoice PDF attached.')
+      } else if (pdfError) {
+        toast.success('Synced to Bookamat.')
+        toast.warning(`PDF not attached: ${pdfError}`)
+      } else {
+        toast.success('Synced to Bookamat.')
+      }
     } else if (res.status === 409) {
       toast.info('Already synced to Bookamat.')
     } else {

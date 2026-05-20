@@ -179,15 +179,17 @@ export async function POST(req: NextRequest) {
       body: formData,
     })
 
+    const uploadBody = await uploadRes.text()
     if (!uploadRes.ok) {
-      const uploadErr = await uploadRes.text()
-      console.log('[bookamat/sync] PDF upload failed:', uploadErr)
-    } else {
-      console.log('[bookamat/sync] PDF attached successfully')
+      console.log(`[bookamat/sync] PDF upload ${uploadRes.status}:`, uploadBody)
+      return NextResponse.json({ ok: true, bookingId, pdfError: `${uploadRes.status}: ${uploadBody}` })
     }
+    console.log('[bookamat/sync] PDF attached:', uploadBody.slice(0, 200))
   } catch (pdfErr) {
-    console.log('[bookamat/sync] PDF generation/upload error:', pdfErr)
+    const msg = pdfErr instanceof Error ? pdfErr.message : String(pdfErr)
+    console.log('[bookamat/sync] PDF error:', msg)
+    return NextResponse.json({ ok: true, bookingId, pdfError: msg })
   }
 
-  return NextResponse.json({ ok: true, bookingId })
+  return NextResponse.json({ ok: true, bookingId, pdfStatus: 'attached' })
 }
