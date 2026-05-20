@@ -89,6 +89,16 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     router.refresh()
   }
 
+  async function resetBookamatSync() {
+    const { error } = await supabase
+      .from('documents')
+      .update({ bookamat_booking_id: null })
+      .eq('id', documentId)
+    if (error) { toast.error(error.message); return }
+    setBookamatId(null)
+    toast.success('Sync reset — you can sync again after deleting the booking in Bookamat.')
+  }
+
   async function syncToBookamat() {
     setSyncingBookamat(true)
     const res = await fetch('/api/bookamat/sync', {
@@ -179,9 +189,18 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
       {bookamatConfigured && (
         <div className="flex items-center justify-between pt-2 border-t border-neutral-100 dark:border-neutral-800">
           {bookamatId ? (
-            <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-              <CheckCircle2 size={13} /> Synced to Bookamat
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle2 size={13} /> Synced to Bookamat
+              </span>
+              <button
+                type="button"
+                onClick={resetBookamatSync}
+                className="text-xs text-neutral-300 dark:text-neutral-600 hover:text-red-400 dark:hover:text-red-500 transition-colors"
+              >
+                Reset sync
+              </button>
+            </div>
           ) : (
             <button
               type="button"
