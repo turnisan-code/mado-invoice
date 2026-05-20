@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
     .sort((a, b) => b.date.localeCompare(a.date))[0]
   const paymentDate = lastPayment?.date ?? doc.date
 
+  const isForeignBusiness = doc.tax_treatment === 'eu_reverse_charge' || doc.tax_treatment === 'non_eu'
+
   const amounts = totals.vat_groups.map(g => {
     const vatAccId = vatAccountMap[g.rate]
     return {
@@ -77,7 +79,7 @@ export async function POST(req: NextRequest) {
       tax_percent: g.rate.toFixed(2),
       deductibility_tax_percent: '100.00',
       deductibility_amount_percent: '100.00',
-      foreign_business_base: null,
+      foreign_business_base: isForeignBusiness ? g.base.toFixed(2) : '0.00',
       country_dep: '',
       country_rec: '',
     }
@@ -92,7 +94,7 @@ export async function POST(req: NextRequest) {
       tax_percent: '0.00',
       deductibility_tax_percent: '100.00',
       deductibility_amount_percent: '100.00',
-      foreign_business_base: null,
+      foreign_business_base: isForeignBusiness ? totals.total.toFixed(2) : '0.00',
       country_dep: '',
       country_rec: '',
     })
