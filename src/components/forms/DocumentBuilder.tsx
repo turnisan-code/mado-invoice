@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -99,6 +99,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [cataloguePos, setCataloguePos] = useState<{ top?: number; bottom?: number; left: number }>({ top: 0, left: 0 })
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
+  const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
   const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; alreadySent?: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
@@ -111,6 +112,21 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
   const [dragOver, setDragOver] = useState<number | null>(null)
   const dragIdx = useRef<number | null>(null)
+
+  function toggleDatePop(lineId: string, e: React.MouseEvent<HTMLButtonElement>) {
+    if (activeDateLine === lineId) {
+      setActiveDateLine(null)
+      setDatePop(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    const flipUp = rect.bottom + 100 > window.innerHeight
+    setDatePop(flipUp
+      ? { bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right }
+      : { top: rect.bottom + 4, right: window.innerWidth - rect.right }
+    )
+    setActiveDateLine(lineId)
+  }
 
   function handleDragStart(idx: number) { dragIdx.current = idx }
   function handleDragOver(e: React.DragEvent, idx: number) { e.preventDefault(); setDragOver(idx) }
@@ -910,7 +926,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                   </select>
                   <button
                     type="button"
-                    onClick={() => setActiveDateLine(activeDateLine === line.id ? null : line.id)}
+                    onClick={(e) => toggleDatePop(line.id, e)}
                     title={line.service_date ?? 'Set service date'}
                     className={`h-9 w-6 flex items-center justify-center transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-300 hover:text-neutral-500'}`}
                   >
@@ -918,17 +934,6 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                   </button>
                   {deleteBtn(line.id)}
                 </div>
-                {(activeDateLine === line.id || line.service_date) && (
-                  <div className="ml-6 mt-1 flex items-center gap-2">
-                    <Input type="date" value={line.service_date ?? ''}
-                      onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
-                      className="text-xs w-40" />
-                    {line.service_date && (
-                      <button type="button" onClick={() => { updateLine(line.id, { service_date: null }); setActiveDateLine(null) }}
-                        className="text-neutral-300 hover:text-neutral-500"><X size={12} /></button>
-                    )}
-                  </div>
-                )}
               </div>
             )
           })}
@@ -937,20 +942,24 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         </div>{/* end overflow-x-auto */}
 
         {/* Add row controls */}
-        <div className="flex items-center gap-2 pt-2 flex-wrap">
+        <div className="flex items-center gap-1 pt-3 flex-wrap">
           <button type="button" onClick={() => addLine('item')}
             className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
             <Plus size={13} /> Add line
           </button>
-          <div className="flex items-center gap-1">
-            {([['heading', 'H'], ['text', 'T'], ['separator', '—'], ['subtotal', '∑'], ['page_break', '⋯']] as [LineType, string][]).map(([lt, icon]) => (
-              <button key={lt} type="button" onClick={() => addLine(lt)}
-                title={lt === 'heading' ? 'Heading' : lt === 'text' ? 'Note' : lt === 'separator' ? 'Divider' : lt === 'subtotal' ? 'Subtotal' : 'Page break'}
-                className="w-7 h-7 flex items-center justify-center rounded border border-neutral-200 dark:border-neutral-700 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
-                {icon}
-              </button>
-            ))}
-          </div>
+          <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-700 mx-1.5" />
+          {([
+            ['heading', 'Heading'],
+            ['text', 'Note'],
+            ['separator', 'Divider'],
+            ['subtotal', 'Subtotal'],
+            ['page_break', 'Page break'],
+          ] as [LineType, string][]).map(([lt, label]) => (
+            <button key={lt} type="button" onClick={() => addLine(lt as LineType)}
+              className="text-xs px-2 py-1 rounded text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              + {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -1030,11 +1039,36 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         </div>
       </div>
 
+      {/* Date popover */}
+      {activeDateLine && datePop && (() => {
+        const line = lines.find(l => l.id === activeDateLine && l.line_type === 'item')
+        if (!line) return null
+        return (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => { setActiveDateLine(null); setDatePop(null) }} />
+            <div className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg p-3 space-y-2" style={datePop}>
+              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Service date</p>
+              <Input type="date" value={line.service_date ?? ''}
+                onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
+                className="text-xs w-40" autoFocus />
+              {line.service_date && (
+                <button type="button"
+                  onClick={() => { updateLine(line.id, { service_date: null }); setActiveDateLine(null); setDatePop(null) }}
+                  className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-red-500 transition-colors">
+                  Clear date
+                </button>
+              )}
+            </div>
+          </>
+        )
+      })()}
+
       {/* Sticky action bar */}
       <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-3">
-        <Button type="button" variant="outline" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5">
-          <Download size={13} /> Preview PDF
+        <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500">
+          <Eye size={13} /> Preview
         </Button>
+        <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
         <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
           <Download size={13} /> Download PDF
         </Button>
