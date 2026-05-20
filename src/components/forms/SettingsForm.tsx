@@ -180,14 +180,17 @@ export default function SettingsForm({ settings }: Props) {
 
   // ── Documents state ──────────────────────────────────────────────────────────
   const [docs, setDocs] = useState({
-    invoice_prefix:          settings?.invoice_prefix ?? 'R',
-    quote_prefix:            settings?.quote_prefix ?? 'A',
-    credit_note_prefix:      settings?.credit_note_prefix ?? 'G',
-    next_invoice_number:     String(settings?.next_invoice_number ?? 1),
-    next_quote_number:       String(settings?.next_quote_number ?? 1),
-    next_credit_note_number: String(settings?.next_credit_note_number ?? 1),
-    default_payment_days:    String(settings?.default_payment_days ?? 14),
-    default_language:        settings?.default_language ?? 'de',
+    invoice_prefix:              settings?.invoice_prefix ?? 'R',
+    quote_prefix:                settings?.quote_prefix ?? 'A',
+    credit_note_prefix:          settings?.credit_note_prefix ?? 'G',
+    next_invoice_number:         String(settings?.next_invoice_number ?? 1),
+    next_quote_number:           String(settings?.next_quote_number ?? 1),
+    next_credit_note_number:     String(settings?.next_credit_note_number ?? 1),
+    invoice_number_format:       settings?.invoice_number_format ?? '{prefix}-{YYYY}-{NNN}',
+    quote_number_format:         settings?.quote_number_format ?? '{prefix}-{YYYY}-{NNN}',
+    credit_note_number_format:   settings?.credit_note_number_format ?? '{prefix}-{YYYY}-{NNN}',
+    default_payment_days:        String(settings?.default_payment_days ?? 14),
+    default_language:            settings?.default_language ?? 'de',
   })
 
   // ── Footer state ─────────────────────────────────────────────────────────────
@@ -307,14 +310,17 @@ export default function SettingsForm({ settings }: Props) {
     if (!settings) return
     setSaving('docs')
     const { error } = await supabase.from('settings').update({
-      invoice_prefix:          docs.invoice_prefix,
-      quote_prefix:            docs.quote_prefix,
-      credit_note_prefix:      docs.credit_note_prefix,
-      next_invoice_number:     parseInt(docs.next_invoice_number, 10) || 1,
-      next_quote_number:       parseInt(docs.next_quote_number, 10) || 1,
-      next_credit_note_number: parseInt(docs.next_credit_note_number, 10) || 1,
-      default_payment_days:    parseInt(docs.default_payment_days, 10) || 14,
-      default_language:        docs.default_language,
+      invoice_prefix:              docs.invoice_prefix,
+      quote_prefix:                docs.quote_prefix,
+      credit_note_prefix:          docs.credit_note_prefix,
+      next_invoice_number:         parseInt(docs.next_invoice_number, 10) || 1,
+      next_quote_number:           parseInt(docs.next_quote_number, 10) || 1,
+      next_credit_note_number:     parseInt(docs.next_credit_note_number, 10) || 1,
+      invoice_number_format:       docs.invoice_number_format || '{prefix}-{YYYY}-{NNN}',
+      quote_number_format:         docs.quote_number_format || '{prefix}-{YYYY}-{NNN}',
+      credit_note_number_format:   docs.credit_note_number_format || '{prefix}-{YYYY}-{NNN}',
+      default_payment_days:        parseInt(docs.default_payment_days, 10) || 14,
+      default_language:            docs.default_language,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
@@ -471,6 +477,24 @@ export default function SettingsForm({ settings }: Props) {
       el.focus()
       el.setSelectionRange(start + token.length, start + token.length)
     })
+  }
+
+  // ── Number format live preview ───────────────────────────────────────────────
+  function previewFormat(fmt: string, prefix: string, num: string): string {
+    const n = parseInt(num) || 1
+    const now = new Date()
+    const YYYY = now.getFullYear().toString()
+    const YY = YYYY.slice(2)
+    const MM = String(now.getMonth() + 1).padStart(2, '0')
+    return fmt
+      .replace('{prefix}', prefix || '?')
+      .replace('{YYYY}', YYYY)
+      .replace('{YY}', YY)
+      .replace('{MM}', MM)
+      .replace('{NNNN}', String(n).padStart(4, '0'))
+      .replace('{NNN}', String(n).padStart(3, '0'))
+      .replace('{NN}', String(n).padStart(2, '0'))
+      .replace('{N}', String(n))
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -669,34 +693,50 @@ export default function SettingsForm({ settings }: Props) {
         {activeSection === 'numbering' && <div>
           <SectionCard
             title="Numbering"
-            description="Prefixes, counters, and document defaults."
+            description="Set the format for each document type. Use tokens to build the pattern."
             dirty={!!dirty.docs}
             saving={saving === 'docs'}
             onSave={saveDocsSection}
           >
+            {/* Token reference */}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-neutral-400 dark:text-neutral-500 pb-1">
+              <span className="text-neutral-500 dark:text-neutral-400 font-sans font-medium not-italic mr-1">Tokens:</span>
+              {['{prefix}','{YYYY}','{YY}','{MM}','{NNN}','{NN}','{N}','{NNNN}'].map(t => (
+                <span key={t}>{t}</span>
+              ))}
+            </div>
+
             {/* Column headers */}
-            <div className="grid grid-cols-[140px_80px_80px_1fr] gap-3 items-center pb-1 border-b border-neutral-100 dark:border-neutral-800">
+            <div className="grid grid-cols-[100px_72px_1fr_72px] gap-3 items-center pb-1 border-b border-neutral-100 dark:border-neutral-800">
               <span className={lbl}></span>
               <span className={lbl}>Prefix</span>
+              <span className={lbl}>Format template</span>
               <span className={lbl}>Next #</span>
-              <span className={lbl}>Preview</span>
             </div>
 
             {/* One row per doc type */}
             {([
-              { label: 'Invoice',     prefixKey: 'invoice_prefix' as const,     numKey: 'next_invoice_number' as const },
-              { label: 'Quote',       prefixKey: 'quote_prefix' as const,       numKey: 'next_quote_number' as const },
-              { label: 'Credit note', prefixKey: 'credit_note_prefix' as const, numKey: 'next_credit_note_number' as const },
+              { label: 'Invoice',     prefixKey: 'invoice_prefix' as const,     fmtKey: 'invoice_number_format' as const,     numKey: 'next_invoice_number' as const },
+              { label: 'Quote',       prefixKey: 'quote_prefix' as const,       fmtKey: 'quote_number_format' as const,       numKey: 'next_quote_number' as const },
+              { label: 'Credit note', prefixKey: 'credit_note_prefix' as const, fmtKey: 'credit_note_number_format' as const, numKey: 'next_credit_note_number' as const },
             ]).map(row => (
-              <div key={row.prefixKey} className="grid grid-cols-[140px_80px_80px_1fr] gap-3 items-center">
-                <span className="text-sm text-neutral-700 dark:text-neutral-300">{row.label}</span>
-                <input className={inp} value={docs[row.prefixKey]}
-                  onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }} />
-                <input type="number" min="1" className={inp} value={docs[row.numKey]}
-                  onChange={e => { setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
-                <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
-                  {docs[row.prefixKey] || '?'}-{String(parseInt(docs[row.numKey]) || 1).padStart(3, '0')}
-                </span>
+              <div key={row.prefixKey} className="space-y-1.5">
+                <div className="grid grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
+                  <span className="text-sm text-neutral-700 dark:text-neutral-300">{row.label}</span>
+                  <input className={inp} value={docs[row.prefixKey]}
+                    onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }}
+                    placeholder="R" />
+                  <input className={inp} value={docs[row.fmtKey]}
+                    onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
+                    placeholder="{prefix}-{YYYY}-{NNN}" />
+                  <input type="number" min="1" className={inp} value={docs[row.numKey]}
+                    onChange={e => { setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                </div>
+                <div className="pl-[112px]">
+                  <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
+                    → {previewFormat(docs[row.fmtKey], docs[row.prefixKey], docs[row.numKey])}
+                  </span>
+                </div>
               </div>
             ))}
 

@@ -30,6 +30,9 @@ export interface Settings {
   next_invoice_number: number
   next_quote_number: number
   next_credit_note_number: number
+  invoice_number_format: string
+  quote_number_format: string
+  credit_note_number_format: string
   default_payment_days: number
   default_language: Language
   logo_url: string | null
