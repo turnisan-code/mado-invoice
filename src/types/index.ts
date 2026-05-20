@@ -62,6 +62,10 @@ export interface Settings {
   email_body_credit_note_de: string | null
   email_subject_credit_note_en: string | null
   email_body_credit_note_en: string | null
+  email_subject_reminder_de: string | null
+  email_body_reminder_de: string | null
+  email_subject_reminder_en: string | null
+  email_body_reminder_en: string | null
 }
 
 export interface Client {
@@ -119,6 +123,7 @@ export interface Document {
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
   bookamat_booking_id?: string | null
+  reminder_sent_at?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }

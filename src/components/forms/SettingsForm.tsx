@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle, Mail, HardDrive, ChevronRight } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight, Bell } from 'lucide-react'
+import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder'
 import type { Settings } from '@/types'
 
 interface Props { settings: Settings | null }
@@ -57,6 +58,12 @@ export default function SettingsForm({ settings }: Props) {
   } | null>(null)
   const [loadingAccounts, setLoadingAccounts] = useState(false)
   const [savingBookamat, setSavingBookamat] = useState(false)
+  const [reminderTpl, setReminderTpl] = useState({
+    subject_de: settings?.email_subject_reminder_de ?? '',
+    body_de:    settings?.email_body_reminder_de    ?? '',
+    subject_en: settings?.email_subject_reminder_en ?? '',
+    body_en:    settings?.email_body_reminder_en    ?? '',
+  })
   const footerDeRef = useRef<HTMLTextAreaElement>(null)
   const footerEnRef = useRef<HTMLTextAreaElement>(null)
 
@@ -222,6 +229,10 @@ export default function SettingsForm({ settings }: Props) {
       email_body_credit_note_de: emailTpl.credit_note.body_de || null,
       email_subject_credit_note_en: emailTpl.credit_note.subject_en || null,
       email_body_credit_note_en: emailTpl.credit_note.body_en || null,
+      email_subject_reminder_de: reminderTpl.subject_de || null,
+      email_body_reminder_de:    reminderTpl.body_de    || null,
+      email_subject_reminder_en: reminderTpl.subject_en || null,
+      email_body_reminder_en:    reminderTpl.body_en    || null,
     }
 
     const { error } = await supabase.from('settings').update(payload).eq('id', settings!.id)
@@ -416,6 +427,57 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             ))}
+          </Section>
+
+          <Section title="Reminder email">
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">
+              Sent automatically each morning to clients with overdue invoices, and via the "Send reminder" button on any invoice.
+              Leave blank to use the built-in default.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { token: '{{invoice_number}}', label: 'Invoice #' },
+                { token: '{{client}}',         label: 'Client' },
+                { token: '{{amount}}',         label: 'Amount' },
+                { token: '{{due_date}}',       label: 'Due date' },
+                { token: '{{days_overdue}}',   label: 'Days overdue' },
+                { token: '{{iban}}',           label: 'IBAN' },
+                { token: '{{sender}}',         label: 'Your name' },
+              ].map(v => (
+                <button key={v.token} type="button" onClick={() => insertVar(v.token)}
+                  className="text-xs px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors font-mono">
+                  {v.token}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {(['de', 'en'] as const).map(lang => (
+                <div key={lang} className="space-y-2">
+                  <p className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">{lang === 'de' ? 'Deutsch' : 'English'}</p>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Subject</Label>
+                    <input
+                      value={reminderTpl[`subject_${lang}`]}
+                      onChange={e => { setReminderTpl(t => ({ ...t, [`subject_${lang}`]: e.target.value })); setIsDirty(true) }}
+                      onFocus={e => onTplFocus(e.currentTarget, v => { setReminderTpl(t => ({ ...t, [`subject_${lang}`]: v })); setIsDirty(true) })}
+                      placeholder={lang === 'de' ? DEFAULT_SUBJECT_DE : DEFAULT_SUBJECT_EN}
+                      className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Body</Label>
+                    <textarea
+                      value={reminderTpl[`body_${lang}`]}
+                      onChange={e => { setReminderTpl(t => ({ ...t, [`body_${lang}`]: e.target.value })); setIsDirty(true) }}
+                      onFocus={e => onTplFocus(e.currentTarget, v => { setReminderTpl(t => ({ ...t, [`body_${lang}`]: v })); setIsDirty(true) })}
+                      rows={7}
+                      placeholder={lang === 'de' ? DEFAULT_BODY_DE : DEFAULT_BODY_EN}
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </Section>
 
           <HiddenBusinessFields settings={settings} logoUrl={logoUrl} />

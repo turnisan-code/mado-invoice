@@ -4,6 +4,7 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import InvoicePageClient from '@/components/layout/InvoicePageClient'
+import ReminderButton from '@/components/layout/ReminderButton'
 import { calcTotals } from '@/lib/utils/document'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -35,6 +36,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <DocumentStatusBar document={doc} />
         <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
         <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
+        {(doc.status === 'overdue' || doc.status === 'sent') && (
+          <ReminderButton
+            documentId={doc.id}
+            reminderSentAt={doc.reminder_sent_at ?? null}
+            gmailConfigured={!!settings?.gmail_refresh_token}
+          />
+        )}
       </div>
       <InvoicePageClient
         type="invoice"
