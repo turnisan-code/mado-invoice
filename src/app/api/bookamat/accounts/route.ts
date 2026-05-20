@@ -41,23 +41,38 @@ export async function POST(req: NextRequest) {
       vatRes.json(),
     ])
 
-    console.log('[bookamat/accounts] raw:', JSON.stringify({ bankData, costData, vatData }).slice(0, 500))
+    console.log('[bookamat/accounts] raw:', JSON.stringify({ bankData, costData, vatData }).slice(0, 800))
 
     function toArray(data: unknown): { id: number; title: string }[] {
-      if (Array.isArray(data)) return data
-      if (data && typeof data === 'object') {
+      let arr: unknown[] = []
+      if (Array.isArray(data)) {
+        arr = data
+      } else if (data && typeof data === 'object') {
         const d = data as Record<string, unknown>
-        if (Array.isArray(d.objects)) return d.objects as { id: number; title: string }[]
-        if (Array.isArray(d.results)) return d.results as { id: number; title: string }[]
+        if (Array.isArray(d.objects)) arr = d.objects
+        else if (Array.isArray(d.results)) arr = d.results
+        else if (Array.isArray(d.data)) arr = d.data
+        else {
+          for (const v of Object.values(d)) {
+            if (Array.isArray(v)) { arr = v; break }
+          }
+        }
       }
-      return []
+      return arr
+        .map((item: unknown) => {
+          if (!item || typeof item !== 'object') return null
+          const o = item as Record<string, unknown>
+          const id = Number(o.id ?? o.pk ?? 0)
+          const title = String(o.title ?? o.name ?? o.description ?? o.label ?? o.bezeichnung ?? id)
+          return { id, title }
+        })
+        .filter((x): x is { id: number; title: string } => x !== null && x.id !== 0)
     }
 
     return NextResponse.json({
       bankAccounts: toArray(bankData),
       costAccounts: toArray(costData),
       vatAccounts: toArray(vatData),
-      _raw: { bankData, costData, vatData },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
