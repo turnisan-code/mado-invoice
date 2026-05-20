@@ -102,12 +102,24 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
 
   async function syncToBookamat() {
     setSyncingBookamat(true)
+    setShowBookamatPrompt(false)
+
+    // Generate PDF FIRST — before any state changes that could re-render
+    // DocumentBuilder and kill the react-pdf worker mid-generation
+    let pdfResult: { base64: string; filename: string } | null = null
+    if (generatePdfForBookamat) {
+      try {
+        pdfResult = await generatePdfForBookamat()
+      } catch (err) {
+        console.warn('PDF pre-generation failed:', err)
+      }
+    }
+
     const res = await fetch('/api/bookamat/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documentId }),
     })
-    setShowBookamatPrompt(false)
 
     if (!res.ok) {
       setSyncingBookamat(false)
@@ -122,22 +134,20 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
 
     const { bookingId, country, year } = await res.json()
     setBookamatId(String(bookingId))
-    toast.success('Synced to Bookamat — attaching PDF…')
 
-    // Generate PDF via DocumentBuilder (already working) and attach to booking
-    if (generatePdfForBookamat) {
+    // Attach pre-generated PDF
+    if (!pdfResult) {
+      toast.success('Synced to Bookamat.')
+    } else {
       try {
-        const pdf = await generatePdfForBookamat()
-        if (!pdf) { toast.warning('Could not generate PDF — no client selected?'); setSyncingBookamat(false); return }
-
         const attachRes = await fetch('/api/bookamat/attach-pdf', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId, pdfBase64: pdf.base64, filename: pdf.filename, country, year }),
+          body: JSON.stringify({ bookingId, pdfBase64: pdfResult.base64, filename: pdfResult.filename, country, year }),
         })
 
         if (attachRes.ok) {
-          toast.success('Invoice PDF attached to Bookamat booking.')
+          toast.success('Synced to Bookamat — invoice PDF attached.')
         } else {
           const { error } = await attachRes.json().catch(() => ({ error: 'Unknown error' }))
           toast.warning(`Synced, but PDF not attached: ${error}`)

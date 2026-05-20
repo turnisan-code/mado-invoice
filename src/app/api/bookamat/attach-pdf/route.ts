@@ -26,15 +26,16 @@ export async function POST(req: NextRequest) {
     const base64Data = pdfBase64.replace(/^data:application\/pdf;base64,/, '')
     const pdfBytes = Uint8Array.from(Buffer.from(base64Data, 'base64'))
 
+    const url = `${baseUrl}bookings/${bookingId}/documents/`
+    console.log('[bookamat/attach-pdf] POST', url, 'bytes:', pdfBytes.length)
+
+    // Try 'document' field name first (Bookamat convention), fallback to 'file'
     const formData = new FormData()
     formData.append(
-      'file',
+      'document',
       new Blob([pdfBytes], { type: 'application/pdf' }),
       filename,
     )
-
-    const url = `${baseUrl}bookings/${bookingId}/documents/`
-    console.log('[bookamat/attach-pdf] POST', url)
 
     const res = await fetch(url, {
       method: 'POST',
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
     })
 
     const text = await res.text()
-    console.log(`[bookamat/attach-pdf] ${res.status}:`, text.slice(0, 300))
+    console.log(`[bookamat/attach-pdf] ${res.status}:`, text.slice(0, 500))
 
     if (!res.ok) {
       return NextResponse.json({ error: `Bookamat ${res.status}: ${text}` }, { status: 500 })
