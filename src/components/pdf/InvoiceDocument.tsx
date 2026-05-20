@@ -173,7 +173,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.docTitle}>{L(doc.type, lang)}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
-            {doc.service_date && (
+            {!!doc.service_date && (
               <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
             )}
           </View>
@@ -232,12 +232,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             )
           }
 
-          if (item.quantity == null || item.unit_price == null || item.unit == null) return null
+          if (item.quantity == null || item.unit_price == null || item.unit == null) return false
           return (
             <View key={i} style={s.tableRow}>
               <View style={s.colDesc}>
                 <Text>{item.description}</Text>
-                {item.service_date && (
+                {!!item.service_date && (
                   <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
                 )}
               </View>
@@ -252,11 +252,11 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         <View style={s.bottomDivider} />
         <View style={s.bottomRow}>
           <View>
-            {doc.due_date && (
-              <>
+            {!!doc.due_date && (
+              <View>
                 <Text style={s.dueDateLabel}>{doc.type === 'quote' ? L('valid_label', lang) : L('due_label', lang)}</Text>
                 <Text style={s.dueDateValue}>{formatDate(doc.due_date, lang)}</Text>
-              </>
+              </View>
             )}
           </View>
           <View style={s.totalsBlock}>
@@ -292,9 +292,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           </View>
         </View>
 
-        {doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
-        {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
-        {footerText && <Text style={s.footerNote}>{footerText}</Text>}
+        {!!doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
+        {!!doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
+        {!!footerText && <Text style={s.footerNote}>{footerText}</Text>}
 
         {/* EPC QR code — rendered in page body above footer, only on final PDFs */}
         {/* !!qrCodeDataUri converts null→false; react-pdf crashes on null children but handles false fine */}
