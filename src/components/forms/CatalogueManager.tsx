@@ -29,6 +29,10 @@ export default function CatalogueManager({ initialItems }: Props) {
   const dragId = useRef<string | null>(null)
   const supabase = createClient()
 
+  const [pendingCats, setPendingCats] = useState<string[]>([]) // new sections not yet saved
+  const [newCatInput, setNewCatInput] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+
   const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))) as string[]
 
   function startEdit(item: CatalogueItem) { setEditingId(item.id); setDraft({ ...item }) }
@@ -134,11 +138,44 @@ export default function CatalogueManager({ initialItems }: Props) {
     toast.success('Category renamed.')
   }
 
+  async function deleteCategory(cat: string) {
+    const count = items.filter(i => i.category === cat).length
+    const msg = count > 0
+      ? `Move ${count} item${count === 1 ? '' : 's'} from "${cat}" to Uncategorised and remove section?`
+      : `Delete empty section "${cat}"?`
+    if (!confirm(msg)) return
+    if (count > 0) {
+      const { error } = await Promise.all(
+        items.filter(i => i.category === cat)
+          .map(i => supabase.from('catalogue_items').update({ category: null }).eq('id', i.id))
+      ).then(rs => rs.find(r => r.error) ?? { error: null })
+      if (error) { toast.error(error.message); return }
+      setItems(items.map(i => i.category === cat ? { ...i, category: null } : i))
+    }
+    setPendingCats(p => p.filter(c => c !== cat))
+    toast.success(count > 0 ? 'Section removed, items moved to Uncategorised.' : 'Section deleted.')
+  }
+
+  function confirmNewCat() {
+    const name = newCatName.trim()
+    if (!name) return
+    if (categories.includes(name) || pendingCats.includes(name)) {
+      toast.error('A section with that name already exists.')
+      return
+    }
+    setPendingCats(p => [...p, name])
+    setNewCatInput(false)
+    setNewCatName('')
+    // Immediately open the add-item form for this new section
+    startAdd(name)
+  }
+
   // all category names for the datalist
   const catDatalistId = 'cat-options'
 
-  // groups: named categories in order they appear, then uncategorised
-  const groupKeys: (string | null)[] = [...categories, null]
+  // groups: named categories + any pending (empty) sections, then uncategorised
+  const allCatNames = Array.from(new Set([...categories, ...pendingCats]))
+  const groupKeys: (string | null)[] = [...allCatNames, null]
 
   return (
     <div className="space-y-6">
@@ -148,7 +185,8 @@ export default function CatalogueManager({ initialItems }: Props) {
 
       {groupKeys.map(cat => {
         const group = items.filter(i => (i.category ?? null) === cat)
-        if (!group.length && cat !== null) return null
+        const isPending = cat !== null && pendingCats.includes(cat)
+        if (!group.length && cat !== null && !isPending) return null
 
         return (
           <div key={cat ?? '__none'} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
@@ -174,9 +212,16 @@ export default function CatalogueManager({ initialItems }: Props) {
                     <button
                       onClick={() => startRenameCat(cat)}
                       className="text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 transition-colors"
-                      title="Rename category"
+                      title="Rename section"
                     >
                       <Pencil size={11} />
+                    </button>
+                    <button
+                      onClick={() => deleteCategory(cat)}
+                      className="text-neutral-300 dark:text-neutral-600 hover:text-red-500 transition-colors"
+                      title="Delete section"
+                    >
+                      <Trash2 size={11} />
                     </button>
                     <span className="text-xs text-neutral-300 dark:text-neutral-600 ml-1">{group.length}</span>
                   </div>
@@ -357,6 +402,30 @@ export default function CatalogueManager({ initialItems }: Props) {
         )
       })}
 
+      {/* New section */}
+      {newCatInput ? (
+        <form
+          onSubmit={e => { e.preventDefault(); confirmNewCat() }}
+          className="flex items-center gap-2"
+        >
+          <input
+            autoFocus
+            value={newCatName}
+            onChange={e => setNewCatName(e.target.value)}
+            placeholder="Section name…"
+            className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-400 w-48"
+          />
+          <Button type="submit" size="sm">Create</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { setNewCatInput(false); setNewCatName('') }}>Cancel</Button>
+        </form>
+      ) : (
+        <button
+          onClick={() => setNewCatInput(true)}
+          className="flex items-center gap-1.5 text-sm text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+        >
+          <Plus size={14} /> New section
+        </button>
+      )}
     </div>
   )
 }
