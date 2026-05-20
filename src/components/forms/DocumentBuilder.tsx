@@ -347,7 +347,10 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   }
 
   async function uploadToDrive(pdfBase64: string, filename: string) {
-    if (!settings.drive_folder_id) return
+    if (!settings.drive_folder_id) {
+      toast.error('No Drive folder configured. Set one in Settings → Google Drive.')
+      return
+    }
     const res = await fetch('/api/drive/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1034,7 +1037,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
           <Download size={13} /> Download PDF
         </Button>
-        {settings.drive_folder_id && (
+        {settings.gmail_email && (
           <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5">
             <HardDrive size={13} /> Save to Drive
           </Button>
@@ -1059,9 +1062,11 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             Save draft
           </Button>
         )}
-        <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
-          {saving ? 'Saving…' : 'Mark as sent'}
-        </Button>
+        {(!doc || doc.status === 'draft') && (
+          <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
+            {saving ? 'Saving…' : 'Mark as sent'}
+          </Button>
+        )}
       </div>
     </div>
   )
