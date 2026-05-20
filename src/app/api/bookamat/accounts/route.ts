@@ -19,13 +19,14 @@ export async function POST(req: NextRequest) {
   }
 
   const year = new Date().getFullYear()
+  const base = `https://www.bookamat.com/api/v1/${country}/${year}/`
   const authHeader = `ApiKey ${username}:${apiKey}`
 
   try {
     const [bankRes, costRes, vatRes] = await Promise.all([
-      fetch(`https://www.bookamat.com/api/v1/preferences/bankaccounts/?format=json`, { headers: { Authorization: authHeader } }),
-      fetch(`https://www.bookamat.com/api/v1/${country}/${year}/preferences/costaccounts/?format=json`, { headers: { Authorization: authHeader } }),
-      fetch(`https://www.bookamat.com/api/v1/${country}/${year}/preferences/purchasetaxaccounts/?format=json`, { headers: { Authorization: authHeader } }),
+      fetch(`${base}preferences/bankaccounts/?format=json`, { headers: { Authorization: authHeader } }),
+      fetch(`${base}preferences/costaccounts/?format=json`, { headers: { Authorization: authHeader } }),
+      fetch(`${base}preferences/purchasetaxaccounts/?format=json`, { headers: { Authorization: authHeader } }),
     ])
 
     if (!bankRes.ok || !costRes.ok || !vatRes.ok) {
