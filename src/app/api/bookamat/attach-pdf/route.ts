@@ -7,8 +7,8 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const body = await req.json()
-    const { bookingId, pdfBase64, filename, country, year } = body
+    const payload = await req.json()
+    const { bookingId, pdfBase64, filename, country, year } = payload
 
     const { data: settings } = await supabase
       .from('settings')
