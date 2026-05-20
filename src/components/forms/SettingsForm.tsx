@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
 import type { Settings } from '@/types'
 
@@ -52,6 +52,7 @@ const NAV_ITEMS = [
   { id: 'address',      label: 'Address',      Icon: MapPin },
   { id: 'banking',      label: 'Banking',      Icon: CreditCard },
   { id: 'numbering',    label: 'Numbering',    Icon: Hash },
+  { id: 'defaults',     label: 'Defaults',     Icon: SlidersHorizontal },
   { id: 'footer',       label: 'PDF Footer',   Icon: FileText },
   { id: 'templates',    label: 'Email',        Icon: Mail },
   { id: 'integrations', label: 'Integrations', Icon: Plug },
@@ -189,8 +190,12 @@ export default function SettingsForm({ settings }: Props) {
     invoice_number_format:       settings?.invoice_number_format ?? '{prefix}-{YYYY}-{NNN}',
     quote_number_format:         settings?.quote_number_format ?? '{prefix}-{YYYY}-{NNN}',
     credit_note_number_format:   settings?.credit_note_number_format ?? '{prefix}-{YYYY}-{NNN}',
-    default_payment_days:        String(settings?.default_payment_days ?? 14),
-    default_language:            settings?.default_language ?? 'de',
+  })
+
+  // ── Defaults state ───────────────────────────────────────────────────────────
+  const [defaults, setDefaults] = useState({
+    default_payment_days: String(settings?.default_payment_days ?? 14),
+    default_language:     settings?.default_language ?? 'de',
   })
 
   // ── Footer state ─────────────────────────────────────────────────────────────
@@ -319,13 +324,24 @@ export default function SettingsForm({ settings }: Props) {
       invoice_number_format:       docs.invoice_number_format || '{prefix}-{YYYY}-{NNN}',
       quote_number_format:         docs.quote_number_format || '{prefix}-{YYYY}-{NNN}',
       credit_note_number_format:   docs.credit_note_number_format || '{prefix}-{YYYY}-{NNN}',
-      default_payment_days:        parseInt(docs.default_payment_days, 10) || 14,
-      default_language:            docs.default_language,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
     clearDirty('docs')
-    toast.success('Document settings saved.')
+    toast.success('Numbering saved.')
+  }
+
+  async function saveDefaults() {
+    if (!settings) return
+    setSaving('defaults')
+    const { error } = await supabase.from('settings').update({
+      default_payment_days: parseInt(defaults.default_payment_days, 10) || 14,
+      default_language:     defaults.default_language,
+    }).eq('id', settings.id)
+    setSaving(null)
+    if (error) { toast.error(error.message); return }
+    clearDirty('defaults')
+    toast.success('Defaults saved.')
   }
 
   async function saveFooter() {
@@ -740,28 +756,43 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             ))}
 
-            <div className="grid grid-cols-2 gap-3 pt-1 border-t border-neutral-100 dark:border-neutral-800">
+          </SectionCard>
+        </div>}
+
+        {/* ── 5. Defaults ── */}
+        {activeSection === 'defaults' && <div>
+          <SectionCard
+            title="Defaults"
+            description="Pre-filled values when creating a new document."
+            dirty={!!dirty.defaults}
+            saving={saving === 'defaults'}
+            onSave={saveDefaults}
+          >
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Default payment days</label>
-                <input type="number" className={inp} value={docs.default_payment_days}
-                  onChange={e => { setDocs(d => ({ ...d, default_payment_days: e.target.value })); markDirty('docs') }} />
+                <label className={lbl}>Payment days</label>
+                <input type="number" className={inp} value={defaults.default_payment_days}
+                  onChange={e => { setDefaults(d => ({ ...d, default_payment_days: e.target.value })); markDirty('defaults') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Days until invoice is due</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Default language</label>
+                <label className={lbl}>Language</label>
                 <select
-                  value={docs.default_language}
-                  onChange={e => { setDocs(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('docs') }}
+                  value={defaults.default_language}
+                  onChange={e => { setDefaults(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('defaults') }}
                   className={inp}
                 >
                   <option value="de">Deutsch</option>
                   <option value="en">English</option>
                 </select>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Language for new documents</p>
               </div>
             </div>
           </SectionCard>
         </div>}
 
-        {/* ── 5. PDF Footer ── */}
+        {/* ── 6. PDF Footer ── */}
+
         {activeSection === 'footer' && <div>
           <SectionCard
             title="PDF Footer"
