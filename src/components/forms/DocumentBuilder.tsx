@@ -433,20 +433,28 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   }
 
   async function downloadPdf() {
-    // Open the window immediately (in the click handler) before any awaits —
-    // browsers block window.open if it's called after async work.
+    // Open the window immediately (synchronously in the click handler) so
+    // the browser doesn't treat it as a blocked popup after the async work.
     const win = window.open('', '_blank')
     const result = await buildPdfBlob()
     if (!result) { win?.close(); return }
     const url = URL.createObjectURL(result.blob)
     if (win) {
-      win.location.href = url
+      // Write an embed into the opened window — more reliable than setting
+      // location.href to a blob URL (Safari blocks that).
+      win.document.write(
+        `<!DOCTYPE html><html><head><title>${result.number}</title></head>` +
+        `<body style="margin:0;padding:0;overflow:hidden">` +
+        `<embed src="${url}" type="application/pdf" width="100%" height="100%">` +
+        `</body></html>`
+      )
+      win.document.close()
     } else {
       // Popup was blocked — fall back to a direct download
       const a = document.createElement('a')
       a.href = url; a.download = `${result.number}.pdf`; a.click()
     }
-    setTimeout(() => URL.revokeObjectURL(url), 10000)
+    setTimeout(() => URL.revokeObjectURL(url), 30000)
   }
 
   async function savePdf() {
