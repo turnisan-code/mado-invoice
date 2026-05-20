@@ -9,6 +9,11 @@ const geist = Geist({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Mado Invoice",
   description: "Invoicing for Mado",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Mado',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
