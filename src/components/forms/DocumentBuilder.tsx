@@ -365,7 +365,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         { duration: 5000 }
       )
     } else {
-      toast.error('Drive upload failed.')
+      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
+      toast.error(`Drive upload failed: ${error}`)
     }
   }
 

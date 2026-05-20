@@ -46,17 +46,22 @@ export async function POST(req: NextRequest) {
   const { Readable } = await import('stream')
   const stream = Readable.from(buffer)
 
-  const { data: file } = await drive.files.create({
-    requestBody: {
-      name: filename,
-      parents: [settings.drive_folder_id],
-    },
-    media: {
-      mimeType: 'application/pdf',
-      body: stream,
-    },
-    fields: 'id,webViewLink',
-  })
-
-  return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+  try {
+    const { data: file } = await drive.files.create({
+      requestBody: {
+        name: filename,
+        parents: [settings.drive_folder_id],
+      },
+      media: {
+        mimeType: 'application/pdf',
+        body: stream,
+      },
+      fields: 'id,webViewLink',
+    })
+    return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+  } catch (err: unknown) {
+    const msg = (err as { message?: string })?.message ?? 'Unknown error'
+    console.error('[drive/upload]', msg)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }
