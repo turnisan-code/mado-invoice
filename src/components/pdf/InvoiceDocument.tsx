@@ -55,6 +55,9 @@ const s = StyleSheet.create({
   footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
   footerPage: { fontSize: 8, color: '#9b9b9b' },
+  qrBlock: { alignItems: 'center', justifyContent: 'flex-end' },
+  qrImage: { width: 56, height: 56 },
+  qrLabel: { fontSize: 6.5, color: '#9b9b9b', marginTop: 3, textAlign: 'center' },
 })
 
 const LABELS: Record<string, Record<'de' | 'en', string>> = {
@@ -119,6 +122,7 @@ interface Props {
   settings: Settings
   client: Client
   document: DocData
+  qrCodeDataUri?: string | null
 }
 
 function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
@@ -133,7 +137,7 @@ function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
   return sum
 }
 
-export default function InvoiceDocument({ settings, client, document: doc }: Props) {
+export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
   const noLabel = doc.type === 'quote' ? L('quote_no', lang) : L('invoice_no', lang)
@@ -320,7 +324,15 @@ export default function InvoiceDocument({ settings, client, document: doc }: Pro
               {'BIC: '}{settings.bic}
             </Text>
           </View>
-          <View style={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+          <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
+            {qrCodeDataUri ? (
+              <View style={s.qrBlock}>
+                <Image src={qrCodeDataUri} style={s.qrImage} />
+                <Text style={s.qrLabel}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
+              </View>
+            ) : (
+              <View />
+            )}
             <Text style={s.footerPage} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
           </View>
         </View>

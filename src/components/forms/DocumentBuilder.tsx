@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { calcTotals, formatMoney, addDays, today } from '@/lib/utils/document'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
+import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, Settings, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 
 interface LineItem {
@@ -322,8 +323,21 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       items: lines.map(l => ({ ...l })),
       totals,
     }
+
+    // Generate EPC QR code for invoices with EUR currency and a positive balance
+    let qrCodeDataUri: string | null = null
+    if (type === 'invoice' && currency === 'EUR' && totals.balance_due > 0 && settings.iban) {
+      qrCodeDataUri = await generateEpcQr({
+        bic: settings.bic ?? '',
+        name: settings.company_name,
+        iban: settings.iban,
+        amountEur: totals.balance_due,
+        reference: docData.number,
+      })
+    }
+
     const blob = await pdf(
-      <InvoiceDocument settings={settings} client={client} document={docData} />
+      <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={qrCodeDataUri} />
     ).toBlob()
     return { blob, number: docData.number }
   }
