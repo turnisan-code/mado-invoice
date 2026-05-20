@@ -54,9 +54,11 @@ const s = StyleSheet.create({
   footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
   footerPage: { fontSize: 8, color: '#9b9b9b' },
-  qrBlock: { alignItems: 'center', justifyContent: 'flex-end' },
-  qrImage: { width: 56, height: 56 },
-  qrLabel: { fontSize: 6.5, color: '#9b9b9b', marginTop: 3, textAlign: 'center' },
+
+  qrRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 20, gap: 12 },
+  qrImage: { width: 64, height: 64 },
+  qrCaption: { fontSize: 7, color: '#9b9b9b', marginTop: 4 },
+  qrText: { flex: 1, fontSize: 7.5, color: '#6b6b6b', lineHeight: 1.6, paddingTop: 2 },
 })
 
 const LABELS: Record<string, Record<'de' | 'en', string>> = {
@@ -136,10 +138,6 @@ function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
   return sum
 }
 
-// react-pdf's reconciler crashes on null/false/undefined children and on React Fragments.
-// Rules: never return null from map, never use &&, always use ternaries with <View/> fallback,
-// never use <></> fragments — wrap in <View> instead.
-
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
@@ -159,15 +157,6 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const rawFooter = lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en
   const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
 
-  // Pre-filter items to avoid null returns inside map
-  const renderableItems = doc.items.filter(item => {
-    const lt = item.line_type ?? 'item'
-    if (lt !== 'item') return true
-    return item.quantity != null && item.unit_price != null && item.unit != null
-  })
-
-  const hasQr = !!qrCodeDataUri
-
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -184,10 +173,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.docTitle}>{L(doc.type, lang)}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
-            {doc.service_date
-              ? <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
-              : <View />
-            }
+            {doc.service_date && (
+              <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
+            )}
           </View>
         </View>
 
@@ -212,8 +200,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           <Text style={[s.tableHeaderText, s.colAmount]}>{L('amount', lang)}</Text>
         </View>
 
-        {/* Line items — filtered above so no null returns needed */}
-        {renderableItems.map((item, i) => {
+        {/* Line items */}
+        {doc.items.map((item, i) => {
           const lt = item.line_type ?? 'item'
 
           if (lt === 'page_break') return <View key={i} break />
@@ -236,28 +224,26 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           }
 
           if (lt === 'subtotal') {
-            const amount = calcSectionSubtotal(doc.items, i)
             return (
               <View key={i} style={s.subtotalRow}>
                 <Text style={s.subtotalLabel}>Subtotal</Text>
-                <Text style={s.subtotalValue}>{fmt(amount)}</Text>
+                <Text style={s.subtotalValue}>{fmt(calcSectionSubtotal(doc.items, i))}</Text>
               </View>
             )
           }
 
-          // regular item (quantity/price guaranteed non-null by filter above)
+          if (item.quantity == null || item.unit_price == null || item.unit == null) return null
           return (
             <View key={i} style={s.tableRow}>
               <View style={s.colDesc}>
                 <Text>{item.description}</Text>
-                {item.service_date
-                  ? <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
-                  : <View />
-                }
+                {item.service_date && (
+                  <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
+                )}
               </View>
               <Text style={s.colQty}>{item.quantity}</Text>
-              <Text style={s.colRate}>{fmt(item.unit_price!)}/{item.unit}</Text>
-              <Text style={s.colAmount}>{fmt(item.quantity! * item.unit_price!)}</Text>
+              <Text style={s.colRate}>{fmt(item.unit_price)}/{item.unit}</Text>
+              <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
             </View>
           )
         })}
@@ -265,72 +251,68 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         {/* Divider + due date + totals */}
         <View style={s.bottomDivider} />
         <View style={s.bottomRow}>
-          {/* Due date block — use View wrapper instead of Fragment */}
           <View>
-            {doc.due_date ? (
-              <View>
+            {doc.due_date && (
+              <>
                 <Text style={s.dueDateLabel}>{doc.type === 'quote' ? L('valid_label', lang) : L('due_label', lang)}</Text>
                 <Text style={s.dueDateValue}>{formatDate(doc.due_date, lang)}</Text>
-              </View>
-            ) : <View />}
+              </>
+            )}
           </View>
-
           <View style={s.totalsBlock}>
             <View style={s.totalsRow}>
               <Text style={s.totalsLabel}>{L('subtotal', lang)}</Text>
               <Text>{fmt(doc.totals.subtotal)}</Text>
             </View>
-
-            {doc.totals.discount_amount > 0 ? (
+            {doc.totals.discount_amount > 0 && (
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>
                   {L('discount', lang)}{doc.discount_type === 'percent' && doc.discount_value ? ` (${doc.discount_value}%)` : ''}
                 </Text>
                 <Text>−{fmt(doc.totals.discount_amount)}</Text>
               </View>
-            ) : <View />}
-
-            {doc.tax_treatment === 'at_vat'
-              ? doc.totals.vat_groups.map(g => (
-                  <View key={g.rate} style={s.totalsRow}>
-                    <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
-                    <Text>{fmt(g.amount)}</Text>
-                  </View>
-                ))
-              : <View />
-            }
-
+            )}
+            {doc.tax_treatment === 'at_vat' && doc.totals.vat_groups.map(g => (
+              <View key={g.rate} style={s.totalsRow}>
+                <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
+                <Text>{fmt(g.amount)}</Text>
+              </View>
+            ))}
             <View style={s.totalsDivider} />
             <View style={s.totalRow}>
               <Text style={s.totalLabel}>{L('grand_total', lang)}</Text>
               <Text style={s.totalValue}>{fmt(doc.totals.total)}</Text>
             </View>
-
-            {doc.totals.total_paid > 0 ? (
+            {doc.totals.total_paid > 0 && (
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{lang === 'de' ? 'Offen' : 'Balance due'}</Text>
                 <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(doc.totals.balance_due)}</Text>
               </View>
-            ) : <View />}
+            )}
           </View>
         </View>
 
-        {doc.tax_note
-          ? <Text style={s.taxNote}>{doc.tax_note}</Text>
-          : <View />
-        }
+        {doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
+        {doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
+        {footerText && <Text style={s.footerNote}>{footerText}</Text>}
 
-        {doc.notes
-          ? <Text style={s.notes}>{doc.notes}</Text>
-          : <View />
-        }
+        {/* EPC QR code — rendered in page body above footer, only on final PDFs */}
+        {qrCodeDataUri && (
+          <View style={s.qrRow}>
+            <View>
+              <Image src={qrCodeDataUri} style={s.qrImage} />
+              <Text style={s.qrCaption}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
+            </View>
+            <Text style={s.qrText}>
+              {lang === 'de'
+                ? `QR-Code scannen, um die Überweisung in Ihrer Banking-App vorzubefüllen.\nIBAN: ${settings.iban}`
+                : `Scan to pre-fill the transfer in your banking app.\nIBAN: ${settings.iban}`
+              }
+            </Text>
+          </View>
+        )}
 
-        {footerText
-          ? <Text style={s.footerNote}>{footerText}</Text>
-          : <View />
-        }
-
-        {/* Footer — fixed, renders on every page */}
+        {/* Footer */}
         <View style={s.footer} fixed>
           <View>
             <Text style={s.footerTitle}>{L('contact', lang)}</Text>
@@ -347,18 +329,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               {'BIC: '}{settings.bic}
             </Text>
           </View>
-          {/* QR column — always same structure, no conditional nulls */}
-          <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
-            <View style={s.qrBlock}>
-              {hasQr
-                ? <Image src={qrCodeDataUri as string} style={s.qrImage} />
-                : <View style={s.qrImage} />
-              }
-              {hasQr
-                ? <Text style={s.qrLabel}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
-                : <View style={{ height: 12 }} />
-              }
-            </View>
+          <View style={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
             <Text style={s.footerPage} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
           </View>
         </View>
