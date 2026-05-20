@@ -14,7 +14,11 @@ export async function GET() {
   const url = oauth2.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/userinfo.email'],
+    scope: [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/drive.file',
+    ],
   })
   return NextResponse.redirect(url)
 }

@@ -346,6 +346,34 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     }
   }
 
+  async function uploadToDrive(pdfBase64: string, filename: string) {
+    if (!settings.drive_folder_id) return
+    const res = await fetch('/api/drive/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdfBase64, filename }),
+    })
+    if (res.ok) {
+      const { webViewLink } = await res.json()
+      toast.success(
+        webViewLink
+          ? <span>Uploaded to Drive — <a href={webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>
+          : 'Uploaded to Drive.',
+        { duration: 5000 }
+      )
+    } else {
+      toast.error('Drive upload failed.')
+    }
+  }
+
+  async function blobToBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve((reader.result as string).split(',')[1])
+      reader.readAsDataURL(blob)
+    })
+  }
+
   async function downloadPdf() {
     const result = await buildPdfBlob()
     if (!result) return
@@ -361,6 +389,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!result) return
     const filename = `${saved.number}.pdf`
 
+    const pdfBase64 = await blobToBase64(result.blob)
+
     if ('showSaveFilePicker' in window) {
       try {
         const handle = await (window as Window & typeof globalThis & { showSaveFilePicker: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
@@ -370,6 +400,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         const writable = await handle.createWritable()
         await writable.write(result.blob)
         await writable.close()
+        void uploadToDrive(pdfBase64, filename)
         if (saved.newDocId) {
           const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
           router.push(`/${basePath}/${saved.newDocId}`)
@@ -384,6 +415,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     const a = Object.assign(document.createElement('a'), { href: url, download: filename })
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
+    void uploadToDrive(pdfBase64, filename)
     if (saved.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${saved.newDocId}`)
@@ -475,6 +507,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     }
 
     toast.success('Email sent via Gmail.')
+    void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename)
     if (gmailPreview.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${gmailPreview.newDocId}`)

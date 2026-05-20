@@ -39,6 +39,8 @@ export interface Settings {
   gmail_access_token: string | null
   gmail_refresh_token: string | null
   gmail_token_expiry: number | null
+  drive_folder_id: string | null
+  drive_folder_name: string | null
   email_subject_invoice_de: string | null
   email_body_invoice_de: string | null
   email_subject_invoice_en: string | null

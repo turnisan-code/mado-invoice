@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckCircle, Mail } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive } from 'lucide-react'
 import type { Settings } from '@/types'
 
 interface Props { settings: Settings | null }
@@ -36,6 +36,9 @@ export default function SettingsForm({ settings }: Props) {
   const [footerEn, setFooterEn] = useState(settings?.invoice_footer_en ?? '')
   const [gmailEmail, setGmailEmail] = useState(settings?.gmail_email ?? null)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [driveFolder, setDriveFolder] = useState(settings?.drive_folder_id ?? '')
+  const [driveFolderName, setDriveFolderName] = useState(settings?.drive_folder_name ?? '')
+  const [savingDrive, setSavingDrive] = useState(false)
   const footerDeRef = useRef<HTMLTextAreaElement>(null)
   const footerEnRef = useRef<HTMLTextAreaElement>(null)
 
@@ -73,6 +76,21 @@ export default function SettingsForm({ settings }: Props) {
     setGmailEmail(null)
     setDisconnecting(false)
     toast.success('Gmail disconnected.')
+  }
+
+  async function saveDriveFolder() {
+    if (!settings) return
+    setSavingDrive(true)
+    // Accept full URL or bare folder ID
+    const match = driveFolder.match(/[-\w]{25,}/)
+    const folderId = match ? match[0] : driveFolder.trim()
+    await supabase.from('settings').update({
+      drive_folder_id: folderId || null,
+      drive_folder_name: folderId ? (driveFolderName || folderId) : null,
+    }).eq('id', settings.id)
+    setDriveFolder(folderId)
+    setSavingDrive(false)
+    toast.success(folderId ? 'Drive folder saved.' : 'Drive folder removed.')
   }
 
   function insertVar(token: string) {
@@ -239,6 +257,62 @@ export default function SettingsForm({ settings }: Props) {
                 className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <Mail size={14} /> Connect Gmail account
               </a>
+            )}
+          </section>
+
+          <section className="space-y-4">
+            <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Google Drive</p>
+            <p className="text-xs text-neutral-400 dark:text-neutral-500">
+              Auto-upload PDFs to a Drive folder when you send or download an invoice.
+              {!gmailEmail && <span className="text-amber-600 dark:text-amber-500"> Connect Gmail first to enable Drive.</span>}
+            </p>
+            {gmailEmail && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-neutral-500 dark:text-neutral-400">Folder URL or ID</label>
+                  <input
+                    type="text"
+                    value={driveFolder}
+                    onChange={e => setDriveFolder(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/…"
+                    className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600"
+                  />
+                </div>
+                {driveFolder && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">Folder label (for display)</label>
+                    <input
+                      type="text"
+                      value={driveFolderName}
+                      onChange={e => setDriveFolderName(e.target.value)}
+                      placeholder="e.g. Invoices 2026"
+                      className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-300 dark:focus:ring-neutral-600"
+                    />
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={saveDriveFolder}
+                    disabled={savingDrive}
+                    className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
+                  >
+                    <HardDrive size={14} /> {savingDrive ? 'Saving…' : driveFolder ? 'Save folder' : 'Remove folder'}
+                  </button>
+                  {settings?.drive_folder_id && (
+                    <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle size={13} />
+                      {settings.drive_folder_name || settings.drive_folder_id}
+                    </span>
+                  )}
+                </div>
+                {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Re-connect your Google account to grant Drive access.{' '}
+                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
+                  </p>
+                )}
+              </div>
             )}
           </section>
 
