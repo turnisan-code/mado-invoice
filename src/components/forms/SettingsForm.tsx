@@ -140,7 +140,7 @@ export default function SettingsForm({ settings }: Props) {
   async function saveBookamat() {
     if (!settings) return
     setSavingBookamat(true)
-    await supabase.from('settings').update({
+    const { error } = await supabase.from('settings').update({
       bookamat_username: bookamatUsername || null,
       bookamat_api_key: bookamatApiKey || null,
       bookamat_country: bookamatCountry,
@@ -152,7 +152,9 @@ export default function SettingsForm({ settings }: Props) {
       bookamat_vat_account_20: bookamatVat20 || null,
     }).eq('id', settings.id)
     setSavingBookamat(false)
-    toast.success('Bookamat settings saved.')
+    if (error) { toast.error(error.message); return }
+    setBookamatAccounts(null)
+    toast.success('Bookamat connected.')
   }
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -429,9 +431,10 @@ export default function SettingsForm({ settings }: Props) {
                   </button>
                 </div>
               )}
-              {settings?.bookamat_username && !bookamatAccounts && (
+              {bookamatUsername && !bookamatAccounts && (
                 <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                  <CheckCircle size={13} /> Connected as {settings.bookamat_username}
+                  <CheckCircle size={13} /> Connected as {bookamatUsername}
+                  {bookamatBankId && <span className="text-neutral-400 dark:text-neutral-500">· bank & income accounts configured</span>}
                 </div>
               )}
             </div>
