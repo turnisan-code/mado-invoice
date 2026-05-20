@@ -8,13 +8,34 @@ import { formatMoney } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { Currency } from '@/types'
+import type { Currency, Settings, Client, DocumentType, Language, TaxTreatment, VatRate, Unit, LineType, DocumentTotals } from '@/types'
 
 interface Payment {
   id: string
   date: string
   amount: number
   note: string | null
+}
+
+export interface BookamatPdfData {
+  settings: Settings
+  client: Client
+  document: {
+    number: string
+    date: string
+    service_date: string | null
+    due_date: string | null
+    type: DocumentType
+    language: Language
+    currency: Currency
+    tax_treatment: TaxTreatment
+    notes: string | null
+    tax_note: string | null
+    discount_type: 'percent' | 'fixed' | null
+    discount_value: number | null
+    items: { line_type?: LineType; description: string; service_date: string | null; quantity: number | null; unit: Unit | null; unit_price: number | null; vat_rate: VatRate | null }[]
+    totals: DocumentTotals
+  }
 }
 
 interface Props {
@@ -24,9 +45,10 @@ interface Props {
   currency: Currency
   bookamatConfigured?: boolean
   bookamatBookingId?: string | null
+  bookamatPdfData?: BookamatPdfData
 }
 
-export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId }: Props) {
+export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, bookamatPdfData }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [amount, setAmount] = useState('')
@@ -106,25 +128,65 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documentId }),
     })
-    setSyncingBookamat(false)
     setShowBookamatPrompt(false)
-    if (res.ok) {
-      const { bookingId, pdfError, pdfStatus } = await res.json()
-      setBookamatId(String(bookingId))
-      if (pdfStatus === 'attached') {
-        toast.success('Synced to Bookamat — invoice PDF attached.')
-      } else if (pdfError) {
-        toast.success('Synced to Bookamat.')
-        toast.warning(`PDF not attached: ${pdfError}`)
+
+    if (!res.ok) {
+      setSyncingBookamat(false)
+      if (res.status === 409) {
+        toast.info('Already synced to Bookamat.')
       } else {
-        toast.success('Synced to Bookamat.')
+        const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
+        toast.error(`Bookamat sync failed: ${error}`)
       }
-    } else if (res.status === 409) {
-      toast.info('Already synced to Bookamat.')
-    } else {
-      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
-      toast.error(`Bookamat sync failed: ${error}`)
+      return
     }
+
+    const { bookingId, country, year } = await res.json()
+    setBookamatId(String(bookingId))
+    toast.success('Synced to Bookamat — attaching PDF…')
+
+    // Generate PDF client-side and attach to the booking
+    if (bookamatPdfData) {
+      try {
+        const { pdf } = await import('@react-pdf/renderer')
+        const { default: InvoiceDocument } = await import('@/components/pdf/InvoiceDocument')
+        const React = (await import('react')).default
+
+        const blob = await pdf(
+          React.createElement(InvoiceDocument, bookamatPdfData) as any
+        ).toBlob()
+
+        const reader = new FileReader()
+        const pdfBase64 = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string)
+          reader.readAsDataURL(blob)
+        })
+
+        const attachRes = await fetch('/api/bookamat/attach-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookingId,
+            pdfBase64,
+            filename: `${bookamatPdfData.document.number}.pdf`,
+            country,
+            year,
+          }),
+        })
+
+        if (attachRes.ok) {
+          toast.success('Invoice PDF attached to Bookamat booking.')
+        } else {
+          const { error } = await attachRes.json().catch(() => ({ error: 'Unknown error' }))
+          toast.warning(`Synced, but PDF not attached: ${error}`)
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        toast.warning(`Synced, but PDF not attached: ${msg}`)
+      }
+    }
+
+    setSyncingBookamat(false)
   }
 
   return (
