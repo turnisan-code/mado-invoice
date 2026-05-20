@@ -188,7 +188,8 @@ export default function CatalogueManager({ initialItems }: Props) {
       {groupKeys.map(cat => {
         const group = items.filter(i => (i.category ?? null) === cat)
         const isPending = cat !== null && pendingCats.includes(cat)
-        if (!group.length && cat !== null && !isPending) return null
+        const isAddingHere = adding?.category === cat
+        if (!group.length && !isPending && !isAddingHere) return null
 
         return (
           <div key={cat ?? '__none'} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
