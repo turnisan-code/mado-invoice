@@ -113,6 +113,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [epcQrUri, setEpcQrUri] = useState<string | null>(null)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstRender = useRef(true)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
@@ -235,6 +236,24 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     discount
   )
 
+  // Pre-generate EPC QR so buildPdfBlob stays synchronous (no extra awaits
+  // that would cause window.open to be blocked by the popup blocker).
+  useEffect(() => {
+    if (type !== 'invoice' || !settings.iban || totals.balance_due <= 0) {
+      setEpcQrUri(null)
+      return
+    }
+    let cancelled = false
+    generateEpcQr({
+      bic: settings.bic ?? '',
+      name: settings.company_name,
+      iban: settings.iban,
+      amountEur: currency === 'EUR' ? totals.balance_due : undefined,
+      reference: doc?.number ?? '',
+    }).then(uri => { if (!cancelled) setEpcQrUri(uri) })
+    return () => { cancelled = true }
+  }, [type, settings.iban, settings.bic, settings.company_name, currency, totals.balance_due, doc?.number])
+
   const taxNote = taxTreatment === 'eu_reverse_charge'
     ? (language === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers' : 'VAT liability transfers to the recipient (Reverse Charge)')
     : taxTreatment === 'non_eu'
@@ -324,22 +343,8 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       totals,
     }
 
-    // Generate EPC QR code for all invoices with IBAN set.
-    // EUR invoices: amount pre-filled. Non-EUR (GBP, USD…): amount omitted,
-    // banking app will prompt the user — IBAN + reference still pre-filled.
-    let qrCodeDataUri: string | null = null
-    if (type === 'invoice' && settings.iban && totals.balance_due > 0) {
-      qrCodeDataUri = await generateEpcQr({
-        bic: settings.bic ?? '',
-        name: settings.company_name,
-        iban: settings.iban,
-        amountEur: currency === 'EUR' ? totals.balance_due : undefined,
-        reference: docData.number,
-      })
-    }
-
     const blob = await pdf(
-      <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={qrCodeDataUri} />
+      <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={epcQrUri} />
     ).toBlob()
     return { blob, number: docData.number }
   }
@@ -433,28 +438,11 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   }
 
   async function downloadPdf() {
-    // Open the window immediately (synchronously in the click handler) so
-    // the browser doesn't treat it as a blocked popup after the async work.
-    const win = window.open('', '_blank')
     const result = await buildPdfBlob()
-    if (!result) { win?.close(); return }
+    if (!result) return
     const url = URL.createObjectURL(result.blob)
-    if (win) {
-      // Write an embed into the opened window — more reliable than setting
-      // location.href to a blob URL (Safari blocks that).
-      win.document.write(
-        `<!DOCTYPE html><html><head><title>${result.number}</title></head>` +
-        `<body style="margin:0;padding:0;overflow:hidden">` +
-        `<embed src="${url}" type="application/pdf" width="100%" height="100%">` +
-        `</body></html>`
-      )
-      win.document.close()
-    } else {
-      // Popup was blocked — fall back to a direct download
-      const a = document.createElement('a')
-      a.href = url; a.download = `${result.number}.pdf`; a.click()
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 30000)
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
   async function savePdf() {
