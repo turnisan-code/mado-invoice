@@ -22,32 +22,26 @@ export async function POST(req: NextRequest) {
     const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`
     const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
 
-    // Strip data URL prefix and decode base64
-    const base64Data = pdfBase64.replace(/^data:application\/pdf;base64,/, '')
-    const pdfBuffer = Buffer.from(base64Data, 'base64')
+    // Strip data URL prefix — keep raw base64 string (Bookamat expects base64 JSON, not multipart)
+    const base64Data = pdfBase64.replace(/^data:[^;]+;base64,/, '')
 
-    const url = `${baseUrl}bookings/${bookingId}/documents/`
-    console.log('[bookamat/attach-pdf] POST', url, 'bytes:', pdfBuffer.length)
-
-    // Build multipart body manually — avoids undici FormData/Blob streaming bugs
-    // that cause "terminated" errors in Node.js serverless environments
-    const boundary = `----StudioInvoiceBoundary${Date.now().toString(36)}`
-    const safeFilename = filename.replace(/"/g, '')
-    const preamble = Buffer.from(
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="document"; filename="${safeFilename}"\r\n` +
-      `Content-Type: application/pdf\r\n\r\n`
-    )
-    const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`)
-    const body = Buffer.concat([preamble, pdfBuffer, epilogue])
+    // Bookamat: POST /bookings/attachments/ with JSON { booking, name, file }
+    // See: bookamat.com/dokumentation/api/v1/attachments_bookings.html
+    const url = `${baseUrl}bookings/attachments/`
+    const safeName = filename.replace(/"/g, '').slice(0, 50)
+    console.log('[bookamat/attach-pdf] POST', url, 'name:', safeName, 'base64 len:', base64Data.length)
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: authHeader,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Type': 'application/json',
       },
-      body,
+      body: JSON.stringify({
+        booking: Number(bookingId),
+        name: safeName,
+        file: base64Data,
+      }),
     })
 
     const text = await res.text()
