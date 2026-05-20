@@ -342,11 +342,16 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       items: lines.map(l => ({ ...l })),
       totals,
     }
-
-    const blob = await pdf(
-      <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={epcQrUri} />
-    ).toBlob()
-    return { blob, number: docData.number }
+    try {
+      const blob = await pdf(
+        <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={epcQrUri} />
+      ).toBlob()
+      return { blob, number: docData.number }
+    } catch (err) {
+      console.error('PDF generation failed:', err)
+      toast.error('PDF generation failed: ' + (err instanceof Error ? err.message : String(err)))
+      return null
+    }
   }
 
   useImperativeHandle(ref, () => ({ buildPdfBlob }))
@@ -441,7 +446,15 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     const result = await buildPdfBlob()
     if (!result) return
     const url = URL.createObjectURL(result.blob)
-    window.open(url, '_blank')
+    // Use a hidden <a> with target="_blank" — not blocked by popup blockers
+    // unlike window.open() called after async work.
+    const a = document.createElement('a')
+    a.href = url
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
