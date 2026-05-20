@@ -113,7 +113,6 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
-  const [epcQrUri, setEpcQrUri] = useState<string | null>(null)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstRender = useRef(true)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
@@ -236,25 +235,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     discount
   )
 
-  // Pre-generate EPC QR so buildPdfBlob stays synchronous (no extra awaits
-  // that would cause window.open to be blocked by the popup blocker).
-  useEffect(() => {
-    if (type !== 'invoice' || !settings.iban || totals.balance_due <= 0) {
-      setEpcQrUri(null)
-      return
-    }
-    let cancelled = false
-    generateEpcQr({
-      bic: settings.bic ?? '',
-      name: settings.company_name,
-      iban: settings.iban,
-      amountEur: currency === 'EUR' ? totals.balance_due : undefined,
-      reference: doc?.number ?? '',
-    }).then(uri => { if (!cancelled) setEpcQrUri(uri) })
-    return () => { cancelled = true }
-  }, [type, settings.iban, settings.bic, settings.company_name, currency, totals.balance_due, doc?.number])
-
-  const taxNote = taxTreatment === 'eu_reverse_charge'
+const taxNote = taxTreatment === 'eu_reverse_charge'
     ? (language === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers' : 'VAT liability transfers to the recipient (Reverse Charge)')
     : taxTreatment === 'non_eu'
     ? (language === 'de' ? 'Nicht steuerbar gem. § 3a UStG' : 'Not subject to Austrian VAT (§ 3a UStG)')
@@ -331,7 +312,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     setSaving(false)
   }
 
-  async function buildPdfBlob(numOverride?: string) {
+  async function buildPdfBlob(numOverride?: string, includeQr = false) {
     if (!client) { toast.error('Select a client first.'); return null }
     const docData = {
       number: numOverride ?? doc?.number ?? 'DRAFT',
@@ -342,9 +323,22 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       items: lines.map(l => ({ ...l })),
       totals,
     }
+
+    // Generate EPC QR only for final PDFs (save/send), not preview
+    let qrCodeDataUri: string | null = null
+    if (includeQr && type === 'invoice' && settings.iban && totals.balance_due > 0) {
+      qrCodeDataUri = await generateEpcQr({
+        bic: settings.bic ?? '',
+        name: settings.company_name,
+        iban: settings.iban,
+        amountEur: currency === 'EUR' ? totals.balance_due : undefined,
+        reference: docData.number,
+      })
+    }
+
     try {
       const blob = await pdf(
-        <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={epcQrUri} />
+        <InvoiceDocument settings={settings} client={client} document={docData} qrCodeDataUri={qrCodeDataUri} />
       ).toBlob()
       return { blob, number: docData.number }
     } catch (err) {
@@ -424,7 +418,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   async function saveToDrive() {
     const saved = await ensureNumberAndSave()
     if (!saved) return
-    const result = await buildPdfBlob(saved.number)
+    const result = await buildPdfBlob(saved.number, true)
     if (!result) return
     const pdfBase64 = await blobToBase64(result.blob)
     await uploadToDrive(pdfBase64, `${saved.number}.pdf`)
@@ -461,7 +455,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   async function savePdf() {
     const saved = await ensureNumberAndSave()
     if (!saved) return
-    const result = await buildPdfBlob(saved.number)
+    const result = await buildPdfBlob(saved.number, true)
     if (!result) return
     const filename = `${saved.number}.pdf`
 
@@ -551,7 +545,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
 
     const content = buildEmailContent(saved.number)
     if (!content) return
-    const pdfResult = await buildPdfBlob(saved.number)
+    const pdfResult = await buildPdfBlob(saved.number, true)
     if (!pdfResult) return
 
     const reader = new FileReader()
