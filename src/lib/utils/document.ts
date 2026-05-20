@@ -46,9 +46,12 @@ export function formatMoney(amount: number, currency = 'EUR'): string {
 }
 
 export function formatDate(date: string, lang: 'de' | 'en' = 'de'): string {
+  if (!date) return ''
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return date
   return new Intl.DateTimeFormat(lang === 'de' ? 'de-AT' : 'en-GB', {
     day: '2-digit', month: '2-digit', year: 'numeric'
-  }).format(new Date(date))
+  }).format(d)
 }
 
 export function addDays(date: string, days: number): string {
