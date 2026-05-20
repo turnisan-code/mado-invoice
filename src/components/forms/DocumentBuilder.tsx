@@ -324,14 +324,16 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       totals,
     }
 
-    // Generate EPC QR code for invoices with EUR currency and a positive balance
+    // Generate EPC QR code for all invoices with IBAN set.
+    // EUR invoices: amount pre-filled. Non-EUR (GBP, USD…): amount omitted,
+    // banking app will prompt the user — IBAN + reference still pre-filled.
     let qrCodeDataUri: string | null = null
-    if (type === 'invoice' && currency === 'EUR' && language === 'de' && totals.balance_due > 0 && settings.iban) {
+    if (type === 'invoice' && settings.iban && totals.balance_due > 0) {
       qrCodeDataUri = await generateEpcQr({
         bic: settings.bic ?? '',
         name: settings.company_name,
         iban: settings.iban,
-        amountEur: totals.balance_due,
+        amountEur: currency === 'EUR' ? totals.balance_due : undefined,
         reference: docData.number,
       })
     }
