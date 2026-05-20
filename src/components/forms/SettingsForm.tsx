@@ -435,6 +435,13 @@ export default function SettingsForm({ settings }: Props) {
                 <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
                   <CheckCircle size={13} /> Connected as {bookamatUsername}
                   {bookamatBankId && <span className="text-neutral-400 dark:text-neutral-500">· bank & income accounts configured</span>}
+                  <button
+                    type="button"
+                    onClick={() => loadBookamatAccounts()}
+                    className="ml-1 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+                  >
+                    Change
+                  </button>
                 </div>
               )}
             </div>
