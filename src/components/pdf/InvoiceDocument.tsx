@@ -237,8 +237,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             )
           }
 
-          // item
-          if (item.quantity == null || item.unit_price == null || item.unit == null) return null
+          // item — react-pdf crashes on null children, skip incomplete items
+          if (item.quantity == null || item.unit_price == null || item.unit == null) return <View key={i} />
           return (
             <View key={i} style={s.tableRow}>
               <View style={s.colDesc}>
@@ -325,14 +325,17 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end', justifyContent: 'space-between' }}>
-            {qrCodeDataUri ? (
-              <View style={s.qrBlock}>
-                <Image src={qrCodeDataUri} style={s.qrImage} />
-                <Text style={s.qrLabel}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
-              </View>
-            ) : (
-              <View />
-            )}
+            <View style={s.qrBlock}>
+              {/* Always render same structure — react-pdf fixed footer crashes on conditional null children */}
+              {qrCodeDataUri
+                ? <Image src={qrCodeDataUri} style={s.qrImage} />
+                : <View style={s.qrImage} />
+              }
+              {qrCodeDataUri
+                ? <Text style={s.qrLabel}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
+                : <View style={{ height: 12 }} />
+              }
+            </View>
             <Text style={s.footerPage} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
           </View>
         </View>
