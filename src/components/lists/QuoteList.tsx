@@ -114,7 +114,46 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       </div>
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
-        <table className="w-full text-sm">
+        {/* Mobile cards */}
+        <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
+          {filtered.length === 0 && (
+            <div className="py-16 text-center">
+              <MessageSquareQuote size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
+              <p className="text-sm text-neutral-400 dark:text-neutral-500">
+                {q || status ? 'No quotes match your filters.' : 'No quotes yet.'}
+              </p>
+              {!q && !status && (
+                <Link href="/quotes/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
+                  Create your first quote
+                </Link>
+              )}
+            </div>
+          )}
+          {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
+            <Link
+              key={doc.id}
+              href={`/quotes/${doc.id}`}
+              className="flex items-center justify-between px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+            >
+              <div className="min-w-0">
+                <p className="font-medium text-sm">
+                  {doc.number ?? <span className="text-neutral-400">Draft</span>}
+                </p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
+                  {doc.clients?.company ?? doc.clients?.name ?? '—'}
+                </p>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
+              </div>
+              <div className="flex flex-col items-end gap-1.5 ml-3 shrink-0">
+                <p className="font-semibold text-sm">{formatMoney(calcTotal(doc.document_items), doc.currency ?? undefined)}</p>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <table className="hidden sm:table w-full text-sm">
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
               <Th col="number" label="Number" className="text-left" />
@@ -147,9 +186,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                     {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}
                   </Link>
                 </td>
-                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                  {doc.clients?.company ?? doc.clients?.name ?? '—'}
-                </td>
+                <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">

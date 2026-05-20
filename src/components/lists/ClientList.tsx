@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, Users } from 'lucide-react'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, Users, ChevronRight } from 'lucide-react'
 
 const statusColor: Record<string, string> = {
   active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
@@ -110,7 +110,46 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
       </div>
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
-        <table className="w-full text-sm">
+        {/* Mobile cards */}
+        <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
+          {filtered.length === 0 && (
+            <div className="py-16 text-center">
+              <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
+              <p className="text-sm text-neutral-400 dark:text-neutral-500">
+                {q || status ? 'No clients match your filters.' : 'No clients yet.'}
+              </p>
+              {!q && !status && (
+                <Link href="/clients/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
+                  Add your first client
+                </Link>
+              )}
+            </div>
+          )}
+          {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(c => (
+            <Link
+              key={c.id}
+              href={`/clients/${c.id}`}
+              className="flex items-center justify-between px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+            >
+              <div className="min-w-0">
+                <p className="font-medium text-sm">{c.name}</p>
+                {c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
+                <div className="flex items-center gap-2 mt-1">
+                  {c.tags.slice(0, 2).map(t => (
+                    <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{t}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 ml-3 shrink-0">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[c.status] ?? ''}`}>{c.status}</span>
+                <ChevronRight size={14} className="text-neutral-300 dark:text-neutral-600" />
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <table className="hidden sm:table w-full text-sm">
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
               <Th col="name" label="Name" className="text-left" />
