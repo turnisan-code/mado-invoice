@@ -539,6 +539,27 @@ export default function SettingsForm({ settings }: Props) {
       {/* ── Main content ── */}
       <div className="flex-1 min-w-0 space-y-5">
 
+        {/* ── Mobile nav (horizontal scroll) ── */}
+        <div className="lg:hidden overflow-x-auto -mx-1 px-1 pb-1">
+          <div className="flex gap-1 w-max">
+            {NAV_ITEMS.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveSection(id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${
+                  activeSection === id
+                    ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                    : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
+                }`}
+              >
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* ── 1. Company ── */}
         {activeSection === 'company' && <div>
           <SectionCard
