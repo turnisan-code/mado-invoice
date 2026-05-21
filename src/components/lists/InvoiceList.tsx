@@ -330,10 +330,10 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
       {/* Bulk action bar */}
       <div
-        className={`fixed bottom-0 left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className={`fixed left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
+        style={{ bottom: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <div className="max-w-5xl mx-auto px-4 pb-4 md:pb-6">
+        <div className="max-w-5xl mx-auto px-4 pb-[4.5rem] md:pb-6">
           <div className="bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
             <span className="text-sm font-medium shrink-0">
               {selected.size} selected

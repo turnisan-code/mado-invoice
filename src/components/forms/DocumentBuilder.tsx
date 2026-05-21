@@ -783,7 +783,188 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       {/* Line items */}
       <div className="space-y-1.5">
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Line Items</p>
-        <div className="overflow-x-auto -mx-1 px-1">
+        {/* Mobile card layout */}
+        <div className="sm:hidden space-y-0">
+          {lines.map((line, idx) => {
+            if (line.line_type === 'separator') {
+              return (
+                <div key={line.id} className="flex items-center gap-2 py-1">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <div className="flex-1 border-t border-neutral-200 dark:border-neutral-700" />
+                  {deleteBtn(line.id)}
+                </div>
+              )
+            }
+
+            if (line.line_type === 'page_break') {
+              return (
+                <div key={line.id} className="flex items-center gap-2 py-1">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
+                  <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0 px-1">Page break</span>
+                  <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
+                  {deleteBtn(line.id)}
+                </div>
+              )
+            }
+
+            if (line.line_type === 'heading') {
+              return (
+                <div key={line.id} className="flex items-center gap-2">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <input
+                    value={line.description}
+                    onChange={e => updateLine(line.id, { description: e.target.value })}
+                    placeholder="Section heading…"
+                    className="flex-1 text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
+                  />
+                  {deleteBtn(line.id)}
+                </div>
+              )
+            }
+
+            if (line.line_type === 'text') {
+              return (
+                <div key={line.id} className="flex items-center gap-2">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <input
+                    value={line.description}
+                    onChange={e => updateLine(line.id, { description: e.target.value })}
+                    placeholder="Note…"
+                    className="flex-1 text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
+                  />
+                  {deleteBtn(line.id)}
+                </div>
+              )
+            }
+
+            if (line.line_type === 'subtotal') {
+              const amount = calcSectionSubtotal(lines, idx)
+              return (
+                <div key={line.id} className="flex items-center gap-2 py-1">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <div className="flex-1 flex justify-end items-center gap-3 pr-1">
+                    <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
+                    <span className="text-sm font-medium">{formatMoney(amount, currency)}</span>
+                  </div>
+                  {deleteBtn(line.id)}
+                </div>
+              )
+            }
+
+            // item
+            return (
+              <div key={line.id} className="py-3 border-b border-neutral-100 dark:border-neutral-800 space-y-2">
+                {/* Row 1: description */}
+                <div className="flex items-center gap-2">
+                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <div className="relative flex-1">
+                    <Input
+                      value={line.description}
+                      onChange={e => updateLine(line.id, { description: e.target.value })}
+                      placeholder="Description…"
+                      className="text-sm w-full"
+                      onFocus={e => {
+                        setActiveLine(line.id)
+                        setShowCatalogue(true)
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const flipUp = rect.bottom + 288 > window.innerHeight
+                        setCataloguePos(flipUp
+                          ? { bottom: window.innerHeight - rect.top + 4, left: 16 }
+                          : { top: rect.bottom + 4, left: 16 }
+                        )
+                      }}
+                    />
+                    {showCatalogue && activeLine === line.id && (
+                      <>
+                        <div className="fixed inset-0 z-40" onMouseDown={() => setShowCatalogue(false)} />
+                        <div className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={{ ...cataloguePos, width: 'calc(100vw - 2rem)' }}>
+                          {(() => {
+                            const q = line.description.toLowerCase()
+                            const matches = catalogueItems.filter(i => {
+                              if (!i.active) return false
+                              const n = catalogueName(i).toLowerCase()
+                              return !q || n.includes(q) || i.name_de.toLowerCase().includes(q) || (i.name_en ?? '').toLowerCase().includes(q)
+                            })
+                            if (matches.length === 0) return (
+                              <p className="px-3 py-4 text-xs text-neutral-400 dark:text-neutral-500 text-center">No items found</p>
+                            )
+                            return matches.map(item => (
+                              <button key={item.id} type="button"
+                                className="w-full text-left px-3 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
+                                onMouseDown={() => pickCatalogueItem(item, line.id)}>
+                                <span>{catalogueName(item)}</span>
+                                <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
+                              </button>
+                            ))
+                          })()}
+                          <div className="border-t border-neutral-100 dark:border-neutral-800">
+                            {addingItem ? (
+                              <div className="p-3 space-y-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                  <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                  <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
+                                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                                  </select>
+                                  <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
+                                    {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                                  </select>
+                                </div>
+                                <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
+                                <div className="flex gap-2">
+                                  <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
+                                  <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
+                                <Plus size={12} /> New catalogue item…
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {deleteBtn(line.id)}
+                </div>
+                {/* Row 2: qty / unit / price / vat / calendar */}
+                <div className="flex items-center gap-2 pl-6">
+                  <Input type="number" value={line.quantity} min={0} step={0.25}
+                    onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
+                    className="text-sm w-16 shrink-0" />
+                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
+                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none flex-1 min-w-0">
+                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                  <Input type="number" value={line.unit_price} min={0} step={0.01}
+                    onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
+                    className="text-sm w-24 shrink-0" />
+                  <select value={line.vat_rate}
+                    onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
+                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none w-16 shrink-0">
+                    {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={(e) => toggleDatePop(line.id, e)}
+                    title={line.service_date ?? 'Set service date'}
+                    className={`h-9 w-9 flex items-center justify-center shrink-0 transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-300 hover:text-neutral-500'}`}
+                  >
+                    <Calendar size={14} />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Desktop grid layout */}
+        <div className="hidden sm:block overflow-x-auto -mx-1 px-1">
         <div className="min-w-[560px]">
         <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
           <span /><span>Description</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span /><span />
@@ -894,7 +1075,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
                     {showCatalogue && activeLine === line.id && (
                       <>
                       <div className="fixed inset-0 z-40" onMouseDown={() => setShowCatalogue(false)} />
-                      <div className="fixed z-50 w-96 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={cataloguePos}>
+                      <div className="fixed z-50 w-96 max-w-[calc(100vw-2rem)] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={cataloguePos}>
                         {(() => {
                           const q = line.description.toLowerCase()
                           const matches = catalogueItems.filter(i => {
@@ -976,7 +1157,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
           })}
         </div>
         </div>{/* end min-w */}
-        </div>{/* end overflow-x-auto */}
+        </div>{/* end hidden sm:block overflow-x-auto */}
 
         {/* Add row controls */}
         <div className="flex items-center gap-1 pt-3 flex-wrap">
@@ -1003,8 +1184,8 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       <Separator />
 
       {/* Totals + discount */}
-      <div className="flex justify-end">
-        <div className="w-72 space-y-1.5 text-sm">
+      <div className="flex sm:justify-end">
+        <div className="w-full sm:w-72 space-y-1.5 text-sm">
           <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
             <span>{language === 'de' ? 'Netto' : 'Subtotal'}</span>
             <span>{formatMoney(totals.subtotal, currency)}</span>
@@ -1101,44 +1282,89 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       })()}
 
       {/* Sticky action bar */}
-      <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-3">
-        <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500">
-          <Eye size={13} /> Preview
-        </Button>
-        <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
-        <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
-          <Download size={13} /> Download PDF
-        </Button>
-        {settings.gmail_email && (
-          <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5">
-            <HardDrive size={13} /> Save to Drive
+      <div className="sticky bottom-0 -mx-6 -mb-6 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700">
+        {/* Mobile layout */}
+        <div className="sm:hidden px-4 pt-3 pb-4 space-y-2">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500 shrink-0">
+              <Eye size={13} /> Preview
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5 shrink-0">
+              <Download size={13} /> PDF
+            </Button>
+            {settings.gmail_email && (
+              <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5 shrink-0">
+                <HardDrive size={13} /> Drive
+              </Button>
+            )}
+            {settings.gmail_email ? (
+              <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5 shrink-0">
+                <Mail size={13} /> Gmail
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5 shrink-0">
+                <Mail size={13} /> Email
+              </Button>
+            )}
+            {doc && (
+              <span className="text-xs text-neutral-400 dark:text-neutral-500 ml-auto shrink-0">
+                {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {!doc && (
+              <Button type="button" variant="outline" size="sm" onClick={() => save('draft')} disabled={saving} className="flex-1">
+                Save draft
+              </Button>
+            )}
+            {(!doc || doc.status === 'draft') && (
+              <Button type="button" size="sm" onClick={requestSent} disabled={saving} className="flex-1">
+                {saving ? 'Saving…' : 'Mark as sent'}
+              </Button>
+            )}
+          </div>
+        </div>
+        {/* Desktop layout */}
+        <div className="hidden sm:flex items-center gap-3 px-6 py-4">
+          <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500">
+            <Eye size={13} /> Preview
           </Button>
-        )}
-        {settings.gmail_email ? (
-          <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
-            <Mail size={13} /> Send via Gmail
+          <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
+          <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
+            <Download size={13} /> Download PDF
           </Button>
-        ) : (
-          <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
-            <Mail size={13} /> Send via Superhuman
-          </Button>
-        )}
-        <div className="flex-1" />
-        {doc && (
-          <span className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">
-            {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-          </span>
-        )}
-        {!doc && (
-          <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
-            Save draft
-          </Button>
-        )}
-        {(!doc || doc.status === 'draft') && (
-          <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
-            {saving ? 'Saving…' : 'Mark as sent'}
-          </Button>
-        )}
+          {settings.gmail_email && (
+            <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5">
+              <HardDrive size={13} /> Save to Drive
+            </Button>
+          )}
+          {settings.gmail_email ? (
+            <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
+              <Mail size={13} /> Send via Gmail
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
+              <Mail size={13} /> Send via Superhuman
+            </Button>
+          )}
+          <div className="flex-1" />
+          {doc && (
+            <span className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">
+              {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </span>
+          )}
+          {!doc && (
+            <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
+              Save draft
+            </Button>
+          )}
+          {(!doc || doc.status === 'draft') && (
+            <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
+              {saving ? 'Saving…' : 'Mark as sent'}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )

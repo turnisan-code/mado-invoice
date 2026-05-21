@@ -45,7 +45,7 @@ export default function InvoicePageClient({
 
   return (
     <>
-      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           ref={builderRef}
           type={type}
