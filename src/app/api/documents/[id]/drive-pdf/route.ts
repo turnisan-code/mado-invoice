@@ -98,14 +98,30 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const drive = google.drive({ version: 'v3', auth: oauth2 })
   const { PassThrough } = await import('stream')
 
-  // Verify the stored file still exists and isn't in the trash
+  // 1. Verify stored file ID is still active (not trashed/deleted)
   let activeFileId: string | null = doc.drive_file_id ?? null
   if (activeFileId) {
     try {
       const { data: check } = await drive.files.get({ fileId: activeFileId, fields: 'id,trashed' })
       if (check.trashed) activeFileId = null
     } catch {
-      activeFileId = null // permanently deleted
+      activeFileId = null
+    }
+  }
+
+  // 2. If no stored ID, search the folder for a file with the same name
+  if (!activeFileId && settings.drive_folder_id) {
+    const safe = filename.replace(/'/g, "\\'")
+    const { data: found } = await drive.files.list({
+      q: `name='${safe}' and '${settings.drive_folder_id}' in parents and trashed=false`,
+      fields: 'files(id,webViewLink)',
+      pageSize: 1,
+    })
+    if (found.files && found.files.length > 0) {
+      activeFileId = found.files[0].id ?? null
+      if (activeFileId) {
+        await supabase.from('documents').update({ drive_file_id: activeFileId }).eq('id', id)
+      }
     }
   }
 
