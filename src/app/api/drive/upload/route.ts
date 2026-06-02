@@ -16,7 +16,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
   }
 
-  const { pdfBase64, filename } = await req.json()
+  const { pdfBase64, filename, documentId } = await req.json()
+
+  // Look up existing Drive file ID for this document (if any)
+  let existingFileId: string | null = null
+  if (documentId) {
+    const { data: doc } = await supabase
+      .from('documents')
+      .select('drive_file_id')
+      .eq('id', documentId)
+      .single()
+    existingFileId = doc?.drive_file_id ?? null
+  }
 
   const oauth2 = getOAuthClient()
   oauth2.setCredentials({
@@ -24,7 +35,6 @@ export async function POST(req: NextRequest) {
     refresh_token: settings.gmail_refresh_token,
     expiry_date: settings.gmail_token_expiry,
   })
-
   oauth2.on('tokens', async (tokens) => {
     await supabase.from('settings').update({
       gmail_access_token: tokens.access_token,
@@ -34,24 +44,39 @@ export async function POST(req: NextRequest) {
   })
 
   const drive = google.drive({ version: 'v3', auth: oauth2 })
-
-  const buffer = Buffer.from(pdfBase64, 'base64')
   const { Readable } = await import('stream')
-  const stream = Readable.from(buffer)
 
   try {
-    const { data: file } = await drive.files.create({
-      requestBody: {
-        name: filename,
-        parents: [settings.drive_folder_id],
-      },
-      media: {
-        mimeType: 'application/pdf',
-        body: stream,
-      },
-      fields: 'id,webViewLink',
-    })
-    return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+    let fileId: string | null | undefined
+    let webViewLink: string | null | undefined
+
+    if (existingFileId) {
+      // Update the existing file in-place — no duplicate
+      const { data: file } = await drive.files.update({
+        fileId: existingFileId,
+        requestBody: { name: filename },
+        media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
+        fields: 'id,webViewLink',
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+    } else {
+      // First upload — create new file
+      const { data: file } = await drive.files.create({
+        requestBody: { name: filename, parents: [settings.drive_folder_id] },
+        media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
+        fields: 'id,webViewLink',
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+
+      // Persist the file ID so future uploads reuse this file
+      if (documentId && fileId) {
+        await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', documentId)
+      }
+    }
+
+    return NextResponse.json({ fileId, webViewLink })
   } catch (err: unknown) {
     const msg = (err as { message?: string })?.message ?? 'Unknown error'
     console.error('[drive/upload]', msg)
