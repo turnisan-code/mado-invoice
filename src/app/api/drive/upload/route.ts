@@ -47,23 +47,41 @@ export async function POST(req: NextRequest) {
   const { Readable } = await import('stream')
 
   try {
-    // Delete the old file if it exists — we'll create a fresh one
+    const pdfBuffer = Buffer.from(pdfBase64, 'base64')
+    const { PassThrough } = await import('stream')
+
+    let fileId: string | null | undefined
+    let webViewLink: string | null | undefined
+
     if (existingFileId) {
-      try { await drive.files.delete({ fileId: existingFileId }) } catch { /* already gone */ }
+      // Update content of the existing file — same file ID, no duplicate in Drive Desktop
+      const stream = new PassThrough()
+      stream.end(pdfBuffer)
+      const { data: file } = await drive.files.update({
+        fileId: existingFileId,
+        requestBody: { name: filename },
+        media: { mimeType: 'application/pdf', body: stream },
+        fields: 'id,webViewLink',
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+    } else {
+      // First upload — create new file and save the ID
+      const stream = new PassThrough()
+      stream.end(pdfBuffer)
+      const { data: file } = await drive.files.create({
+        requestBody: { name: filename, parents: [settings.drive_folder_id] },
+        media: { mimeType: 'application/pdf', body: stream },
+        fields: 'id,webViewLink',
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+      if (documentId && fileId) {
+        await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', documentId)
+      }
     }
 
-    const { data: file } = await drive.files.create({
-      requestBody: { name: filename, parents: [settings.drive_folder_id] },
-      media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
-      fields: 'id,webViewLink',
-    })
-
-    // Persist the new file ID
-    if (documentId && file.id) {
-      await supabase.from('documents').update({ drive_file_id: file.id }).eq('id', documentId)
-    }
-
-    return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+    return NextResponse.json({ fileId, webViewLink })
   } catch (err: unknown) {
     const msg = (err as { message?: string })?.message ?? 'Unknown error'
     console.error('[drive/upload]', msg)
