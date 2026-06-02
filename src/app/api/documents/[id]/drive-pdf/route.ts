@@ -97,13 +97,33 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const drive = google.drive({ version: 'v3', auth: oauth2 })
   const { Readable } = await import('stream')
-  const stream = Readable.from(buffer)
 
-  const { data: file } = await drive.files.create({
-    requestBody: { name: filename, parents: [settings.drive_folder_id] },
-    media: { mimeType: 'application/pdf', body: stream },
-    fields: 'id,webViewLink',
-  })
+  let fileId: string | null | undefined
+  let webViewLink: string | null | undefined
 
-  return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+  if (doc.drive_file_id) {
+    // Update existing file — no duplicate
+    const { data: file } = await drive.files.update({
+      fileId: doc.drive_file_id,
+      requestBody: { name: filename },
+      media: { mimeType: 'application/pdf', body: Readable.from(buffer) },
+      fields: 'id,webViewLink',
+    })
+    fileId = file.id
+    webViewLink = file.webViewLink
+  } else {
+    // First upload — create and persist the file ID
+    const { data: file } = await drive.files.create({
+      requestBody: { name: filename, parents: [settings.drive_folder_id] },
+      media: { mimeType: 'application/pdf', body: Readable.from(buffer) },
+      fields: 'id,webViewLink',
+    })
+    fileId = file.id
+    webViewLink = file.webViewLink
+    if (fileId) {
+      await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', id)
+    }
+  }
+
+  return NextResponse.json({ fileId, webViewLink })
 }

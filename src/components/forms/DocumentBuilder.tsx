@@ -392,7 +392,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
     }
   }
 
-  async function uploadToDrive(pdfBase64: string, filename: string) {
+  async function uploadToDrive(pdfBase64: string, filename: string, documentId?: string) {
     if (!settings.drive_folder_id) {
       toast.error('No Drive folder configured. Set one in Settings → Google Drive.')
       return
@@ -400,7 +400,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
     const res = await fetch('/api/drive/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdfBase64, filename }),
+      body: JSON.stringify({ pdfBase64, filename, documentId }),
     })
     if (res.ok) {
       const { webViewLink } = await res.json()
@@ -422,7 +422,8 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
     const result = await buildPdfBlob(saved.number, true)
     if (!result) return
     const pdfBase64 = await blobToBase64(result.blob)
-    await uploadToDrive(pdfBase64, `${saved.number}.pdf`)
+    const docId = saved.newDocId ?? doc?.id
+    await uploadToDrive(pdfBase64, `${saved.number}.pdf`, docId)
     if (saved.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${saved.newDocId}`)
@@ -578,7 +579,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
     }
 
     toast.success('Email sent via Gmail.')
-    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename)
+    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.newDocId ?? doc?.id)
     if (gmailPreview.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${gmailPreview.newDocId}`)

@@ -130,6 +130,7 @@ export interface Document {
   bookamat_booking_id?: string | null
   reminder_sent_at?: string | null
   share_token?: string | null
+  drive_file_id?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }
