@@ -129,6 +129,7 @@ export interface Document {
   discount_value: number | null
   bookamat_booking_id?: string | null
   reminder_sent_at?: string | null
+  share_token?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }

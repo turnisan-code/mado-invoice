@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import ConvertToInvoiceButton from '@/components/layout/ConvertToInvoiceButton'
+import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import Link from 'next/link'
@@ -35,6 +36,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
+          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} />
           {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
             <ConvertToInvoiceButton quoteId={doc.id} />
           )}
