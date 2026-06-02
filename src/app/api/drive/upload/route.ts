@@ -47,36 +47,23 @@ export async function POST(req: NextRequest) {
   const { Readable } = await import('stream')
 
   try {
-    let fileId: string | null | undefined
-    let webViewLink: string | null | undefined
-
+    // Delete the old file if it exists — we'll create a fresh one
     if (existingFileId) {
-      // Update the existing file in-place — no duplicate
-      const { data: file } = await drive.files.update({
-        fileId: existingFileId,
-        requestBody: { name: filename },
-        media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
-        fields: 'id,webViewLink',
-      })
-      fileId = file.id
-      webViewLink = file.webViewLink
-    } else {
-      // First upload — create new file
-      const { data: file } = await drive.files.create({
-        requestBody: { name: filename, parents: [settings.drive_folder_id] },
-        media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
-        fields: 'id,webViewLink',
-      })
-      fileId = file.id
-      webViewLink = file.webViewLink
-
-      // Persist the file ID so future uploads reuse this file
-      if (documentId && fileId) {
-        await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', documentId)
-      }
+      try { await drive.files.delete({ fileId: existingFileId }) } catch { /* already gone */ }
     }
 
-    return NextResponse.json({ fileId, webViewLink })
+    const { data: file } = await drive.files.create({
+      requestBody: { name: filename, parents: [settings.drive_folder_id] },
+      media: { mimeType: 'application/pdf', body: Readable.from(Buffer.from(pdfBase64, 'base64')) },
+      fields: 'id,webViewLink',
+    })
+
+    // Persist the new file ID
+    if (documentId && file.id) {
+      await supabase.from('documents').update({ drive_file_id: file.id }).eq('id', documentId)
+    }
+
+    return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
   } catch (err: unknown) {
     const msg = (err as { message?: string })?.message ?? 'Unknown error'
     console.error('[drive/upload]', msg)
