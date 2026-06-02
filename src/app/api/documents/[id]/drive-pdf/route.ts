@@ -96,23 +96,38 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   })
 
   const drive = google.drive({ version: 'v3', auth: oauth2 })
-  const { Readable } = await import('stream')
+  const { PassThrough } = await import('stream')
 
-  // Delete the old file if it exists — create a fresh one
+  let fileId: string | null | undefined
+  let webViewLink: string | null | undefined
+
   if (doc.drive_file_id) {
-    try { await drive.files.delete({ fileId: doc.drive_file_id }) } catch { /* already gone */ }
+    // Update content of the existing file — same file ID, no duplicate in Drive Desktop
+    const stream = new PassThrough()
+    stream.end(buffer)
+    const { data: file } = await drive.files.update({
+      fileId: doc.drive_file_id,
+      requestBody: { name: filename },
+      media: { mimeType: 'application/pdf', body: stream },
+      fields: 'id,webViewLink',
+    })
+    fileId = file.id
+    webViewLink = file.webViewLink
+  } else {
+    // First upload — create new file and save the ID
+    const stream = new PassThrough()
+    stream.end(buffer)
+    const { data: file } = await drive.files.create({
+      requestBody: { name: filename, parents: [settings.drive_folder_id] },
+      media: { mimeType: 'application/pdf', body: stream },
+      fields: 'id,webViewLink',
+    })
+    fileId = file.id
+    webViewLink = file.webViewLink
+    if (fileId) {
+      await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', id)
+    }
   }
 
-  const { data: file } = await drive.files.create({
-    requestBody: { name: filename, parents: [settings.drive_folder_id] },
-    media: { mimeType: 'application/pdf', body: Readable.from(buffer) },
-    fields: 'id,webViewLink',
-  })
-
-  // Persist the new file ID
-  if (file.id) {
-    await supabase.from('documents').update({ drive_file_id: file.id }).eq('id', id)
-  }
-
-  return NextResponse.json({ fileId: file.id, webViewLink: file.webViewLink })
+  return NextResponse.json({ fileId, webViewLink })
 }
