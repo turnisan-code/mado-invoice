@@ -36,7 +36,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} />
+          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!settings?.drive_folder_id} />
           {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
             <ConvertToInvoiceButton quoteId={doc.id} />
           )}

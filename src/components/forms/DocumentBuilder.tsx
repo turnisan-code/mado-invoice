@@ -109,7 +109,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
   const [showSentConfirm, setShowSentConfirm] = useState(false)
-  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; alreadySent?: boolean } | null>(null)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; alreadySent?: boolean; uploadToDrive: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -557,7 +557,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       reader.readAsDataURL(pdfResult.blob)
     })
 
-    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${saved.number}.pdf`, newDocId: saved.newDocId, alreadySent: true })
+    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${saved.number}.pdf`, newDocId: saved.newDocId, alreadySent: true, uploadToDrive: !!settings.drive_folder_id })
   }
 
   async function confirmSendViaGmail() {
@@ -578,7 +578,7 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
     }
 
     toast.success('Email sent via Gmail.')
-    void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename)
+    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename)
     if (gmailPreview.newDocId) {
       const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
       router.push(`/${basePath}/${gmailPreview.newDocId}`)
@@ -675,6 +675,17 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
               </div>
               <p className="text-xs text-neutral-400 dark:text-neutral-500">PDF attached: {gmailPreview.filename}</p>
             </div>
+            {settings.drive_folder_id && (
+              <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={gmailPreview.uploadToDrive}
+                  onChange={e => setGmailPreview(p => p ? { ...p, uploadToDrive: e.target.checked } : p)}
+                  className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
+                />
+                Also save to Google Drive
+              </label>
+            )}
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={() => setGmailPreview(null)} disabled={gmailSending}>Cancel</Button>
               <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>

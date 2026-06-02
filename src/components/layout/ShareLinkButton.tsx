@@ -1,19 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { Link2, Check, Loader2, X } from 'lucide-react'
+import { Link2, Check, Loader2, X, HardDrive } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Props {
   documentId: string
   initialToken: string | null
+  driveConfigured: boolean
 }
 
-export default function ShareLinkButton({ documentId, initialToken }: Props) {
+export default function ShareLinkButton({ documentId, initialToken, driveConfigured }: Props) {
   const [token, setToken] = useState<string | null>(initialToken)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [saveToDrive, setSaveToDrive] = useState(driveConfigured)
+  const [driveUploading, setDriveUploading] = useState(false)
 
   const portalUrl = token
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/portal/${token}`
@@ -27,7 +30,7 @@ export default function ShareLinkButton({ documentId, initialToken }: Props) {
       if (!res.ok) throw new Error(data.error)
       setToken(data.token)
       setOpen(true)
-    } catch (e) {
+    } catch {
       toast.error('Failed to generate link')
     } finally {
       setLoading(false)
@@ -55,6 +58,32 @@ export default function ShareLinkButton({ documentId, initialToken }: Props) {
     setCopied(true)
     toast.success('Link copied')
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  async function uploadToDrive() {
+    setDriveUploading(true)
+    try {
+      const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(
+        data.webViewLink
+          ? <span>Saved to Drive — <a href={data.webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>
+          : 'Saved to Google Drive.',
+        { duration: 5000 }
+      )
+    } catch (e) {
+      toast.error(`Drive upload failed: ${e instanceof Error ? e.message : 'Unknown error'}`)
+    } finally {
+      setDriveUploading(false)
+    }
+  }
+
+  async function handleCopyWithDrive() {
+    await copyLink()
+    if (saveToDrive && driveConfigured) {
+      await uploadToDrive()
+    }
   }
 
   if (!open && !token) {
@@ -104,17 +133,32 @@ export default function ShareLinkButton({ documentId, initialToken }: Props) {
             className="flex-1 text-xs bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md px-2.5 py-1.5 text-neutral-700 dark:text-neutral-300 font-mono truncate"
           />
           <button
-            onClick={copyLink}
-            className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-md hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors"
+            onClick={handleCopyWithDrive}
+            disabled={driveUploading}
+            className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-md hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
           >
-            {copied ? <Check size={12} /> : null}
-            {copied ? 'Copied' : 'Copy'}
+            {driveUploading ? <Loader2 size={12} className="animate-spin" /> : copied ? <Check size={12} /> : null}
+            {driveUploading ? 'Saving…' : copied ? 'Copied' : 'Copy'}
           </button>
         </div>
+
+        {driveConfigured && (
+          <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveToDrive}
+              onChange={e => setSaveToDrive(e.target.checked)}
+              className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
+            />
+            <HardDrive size={13} className="text-neutral-400" />
+            Also save to Google Drive
+          </label>
+        )}
+
         <div className="flex justify-end pt-1">
           <button
             onClick={revokeLink}
-            disabled={loading}
+            disabled={loading || driveUploading}
             className="text-xs text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
           >
             {loading ? 'Revoking…' : 'Revoke link'}
