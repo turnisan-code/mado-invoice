@@ -105,9 +105,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     // Update content of the existing file — same file ID, no duplicate in Drive Desktop
     const stream = new PassThrough()
     stream.end(buffer)
+    // Media-only update (no requestBody) — forces a true content replacement
     const { data: file } = await drive.files.update({
       fileId: doc.drive_file_id,
-      requestBody: { name: filename },
       media: { mimeType: 'application/pdf', body: stream },
       fields: 'id,webViewLink',
     })

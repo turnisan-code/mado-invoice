@@ -57,9 +57,11 @@ export async function POST(req: NextRequest) {
       // Update content of the existing file — same file ID, no duplicate in Drive Desktop
       const stream = new PassThrough()
       stream.end(pdfBuffer)
+      // Media-only update (no requestBody) — forces a true content replacement
+      // including a new modifiedTime. Mixing requestBody+media can silently
+      // apply only the metadata change in some googleapis versions.
       const { data: file } = await drive.files.update({
         fileId: existingFileId,
-        requestBody: { name: filename },
         media: { mimeType: 'application/pdf', body: stream },
         fields: 'id,webViewLink',
       })
