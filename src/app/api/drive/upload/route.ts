@@ -44,22 +44,27 @@ export async function POST(req: NextRequest) {
   })
 
   const drive = google.drive({ version: 'v3', auth: oauth2 })
-  const { Readable } = await import('stream')
+  const { PassThrough } = await import('stream')
 
   try {
-    const pdfBuffer = Buffer.from(pdfBase64, 'base64')
-    const { PassThrough } = await import('stream')
+    // Verify the stored file still exists and isn't in the trash
+    if (existingFileId) {
+      try {
+        const { data: check } = await drive.files.get({ fileId: existingFileId, fields: 'id,trashed' })
+        if (check.trashed) existingFileId = null
+      } catch {
+        existingFileId = null // file was permanently deleted
+      }
+    }
 
+    const pdfBuffer = Buffer.from(pdfBase64, 'base64')
     let fileId: string | null | undefined
     let webViewLink: string | null | undefined
 
     if (existingFileId) {
-      // Update content of the existing file — same file ID, no duplicate in Drive Desktop
+      // Active file — update content in-place (same ID = no Drive Desktop conflict)
       const stream = new PassThrough()
       stream.end(pdfBuffer)
-      // Media-only update (no requestBody) — forces a true content replacement
-      // including a new modifiedTime. Mixing requestBody+media can silently
-      // apply only the metadata change in some googleapis versions.
       const { data: file } = await drive.files.update({
         fileId: existingFileId,
         media: { mimeType: 'application/pdf', body: stream },
@@ -68,7 +73,7 @@ export async function POST(req: NextRequest) {
       fileId = file.id
       webViewLink = file.webViewLink
     } else {
-      // First upload — create new file and save the ID
+      // No active file — create new and persist the ID
       const stream = new PassThrough()
       stream.end(pdfBuffer)
       const { data: file } = await drive.files.create({

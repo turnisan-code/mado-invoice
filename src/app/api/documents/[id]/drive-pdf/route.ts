@@ -98,23 +98,33 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const drive = google.drive({ version: 'v3', auth: oauth2 })
   const { PassThrough } = await import('stream')
 
+  // Verify the stored file still exists and isn't in the trash
+  let activeFileId: string | null = doc.drive_file_id ?? null
+  if (activeFileId) {
+    try {
+      const { data: check } = await drive.files.get({ fileId: activeFileId, fields: 'id,trashed' })
+      if (check.trashed) activeFileId = null
+    } catch {
+      activeFileId = null // permanently deleted
+    }
+  }
+
   let fileId: string | null | undefined
   let webViewLink: string | null | undefined
 
-  if (doc.drive_file_id) {
-    // Update content of the existing file — same file ID, no duplicate in Drive Desktop
+  if (activeFileId) {
+    // Active file — update content in-place
     const stream = new PassThrough()
     stream.end(buffer)
-    // Media-only update (no requestBody) — forces a true content replacement
     const { data: file } = await drive.files.update({
-      fileId: doc.drive_file_id,
+      fileId: activeFileId,
       media: { mimeType: 'application/pdf', body: stream },
       fields: 'id,webViewLink',
     })
     fileId = file.id
     webViewLink = file.webViewLink
   } else {
-    // First upload — create new file and save the ID
+    // No active file — create new and persist the ID
     const stream = new PassThrough()
     stream.end(buffer)
     const { data: file } = await drive.files.create({
