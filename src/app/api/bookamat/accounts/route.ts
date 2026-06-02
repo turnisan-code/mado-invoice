@@ -41,8 +41,6 @@ export async function POST(req: NextRequest) {
       vatRes.json(),
     ])
 
-    console.log('[bookamat/accounts] raw:', JSON.stringify({ bankData, costData, vatData }).slice(0, 800))
-
     function toArray(data: unknown): { id: number; title: string }[] {
       let arr: unknown[] = []
       if (Array.isArray(data)) {

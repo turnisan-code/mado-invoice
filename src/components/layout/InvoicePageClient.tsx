@@ -3,6 +3,7 @@
 import { useRef } from 'react'
 import DocumentBuilder, { type DocumentBuilderHandle } from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
+import ReminderButton from '@/components/layout/ReminderButton'
 import type { Settings, Client, CatalogueItem, Document, Currency } from '@/types'
 
 interface Payment {
@@ -23,11 +24,12 @@ interface Props {
   currency: Currency
   bookamatConfigured: boolean
   bookamatBookingId: string | null
+  reminderSentAt: string | null
 }
 
 export default function InvoicePageClient({
   type, settings, clients, catalogue, document, total, payments, currency,
-  bookamatConfigured, bookamatBookingId,
+  bookamatConfigured, bookamatBookingId, reminderSentAt,
 }: Props) {
   const builderRef = useRef<DocumentBuilderHandle>(null)
 
@@ -37,11 +39,14 @@ export default function InvoicePageClient({
     if (!result) return null
     const base64 = await new Promise<string>((resolve) => {
       const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
+      reader.onload = () => resolve((reader.result as string).split(',')[1])
       reader.readAsDataURL(result.blob)
     })
     return { base64, filename: `${result.number}.pdf` }
   }
+
+  const gmailConfigured = !!(settings.gmail_refresh_token)
+  const showReminder = (document.status === 'overdue' || document.status === 'sent') && gmailConfigured
 
   return (
     <>
@@ -64,6 +69,14 @@ export default function InvoicePageClient({
         bookamatBookingId={bookamatBookingId}
         generatePdfForBookamat={generatePdfBase64}
       />
+      {showReminder && (
+        <ReminderButton
+          documentId={document.id}
+          reminderSentAt={reminderSentAt}
+          gmailConfigured={gmailConfigured}
+          generatePdf={generatePdfBase64}
+        />
+      )}
     </>
   )
 }

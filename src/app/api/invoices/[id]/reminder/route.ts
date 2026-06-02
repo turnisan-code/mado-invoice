@@ -5,11 +5,14 @@ import {
   DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
-import { formatMoney } from '@/lib/utils/document'
+import { formatMoney, calcTotals } from '@/lib/utils/document'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
+  const body = await req.json().catch(() => ({}))
+  const pdfBase64: string | undefined = body.pdfBase64
+  const filename: string | undefined = body.filename
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -35,19 +38,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
     : 0
 
-  const total = (invoice.document_items ?? []).reduce((s: number, i: { quantity: number | null; unit_price: number | null; vat_rate: number | null }) => {
-    if (i.quantity == null || i.unit_price == null) return s
-    return s + i.quantity * i.unit_price * (1 + (i.vat_rate ?? 0) / 100)
-  }, 0)
+  const totals = calcTotals(invoice.document_items ?? [], [])
 
   const ctx = {
     invoiceNumber: invoice.number ?? 'Draft',
     clientName: client.company ?? client.name,
-    amount: formatMoney(total, invoice.currency ?? 'EUR'),
+    amount: formatMoney(totals.total, invoice.currency ?? 'EUR'),
     dueDate,
+    date: invoice.date ?? '',
     daysOverdue,
     iban: settings.iban ?? '',
     sender: settings.company_name ?? settings.owner_name ?? '',
+    company: settings.company_name ?? '',
+    owner: settings.owner_name ?? '',
   }
 
   const subjectTpl = lang === 'en'
@@ -65,6 +68,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     to: client.email,
     subject: fillTemplate(subjectTpl, ctx),
     body: fillTemplate(bodyTpl, ctx),
+    pdfBase64,
+    filename,
     onTokenRefresh: async (tokens) => {
       await supabase.from('settings').update({
         gmail_access_token: tokens.access_token,

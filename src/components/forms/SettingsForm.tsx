@@ -15,6 +15,7 @@ const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral
 const lbl = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
 
 // ── Variable chip sets ─────────────────────────────────────────────────────────
+// Used in the PDF footer section (server-side substitution supports these)
 const FOOTER_VARS = [
   { token: '{{invoice_number}}', label: 'Number' },
   { token: '{{date}}',           label: 'Date' },
@@ -26,14 +27,29 @@ const FOOTER_VARS = [
   { token: '{{balance_due}}',    label: 'Balance due' },
 ]
 
+// Used in email template sections (must match buildEmailContent vars exactly)
+const EMAIL_VARS = [
+  { token: '{{invoice_number}}', label: 'Invoice #' },
+  { token: '{{client}}',         label: 'Client' },
+  { token: '{{date}}',           label: 'Date' },
+  { token: '{{due_date}}',       label: 'Due date' },
+  { token: '{{total}}',          label: 'Total' },
+  { token: '{{balance_due}}',    label: 'Balance due' },
+  { token: '{{subtotal}}',       label: 'Subtotal' },
+  { token: '{{company}}',        label: 'Your company' },
+  { token: '{{owner}}',          label: 'Your name' },
+]
+
 const REMINDER_VARS = [
   { token: '{{invoice_number}}', label: 'Invoice #' },
   { token: '{{client}}',         label: 'Client' },
-  { token: '{{amount}}',         label: 'Amount' },
+  { token: '{{date}}',           label: 'Invoice date' },
   { token: '{{due_date}}',       label: 'Due date' },
+  { token: '{{balance_due}}',    label: 'Balance due' },
   { token: '{{days_overdue}}',   label: 'Days overdue' },
   { token: '{{iban}}',           label: 'IBAN' },
-  { token: '{{sender}}',         label: 'Your name' },
+  { token: '{{company}}',        label: 'Your company' },
+  { token: '{{owner}}',          label: 'Your name' },
 ]
 
 // ── Doc type config ────────────────────────────────────────────────────────────
@@ -199,8 +215,11 @@ export default function SettingsForm({ settings }: Props) {
   })
 
   // ── Footer state ─────────────────────────────────────────────────────────────
+  const [footerDocTab, setFooterDocTab] = useState<'invoice' | 'quote'>('invoice')
   const [footerDe, setFooterDe] = useState(settings?.invoice_footer_de ?? '')
   const [footerEn, setFooterEn] = useState(settings?.invoice_footer_en ?? '')
+  const [quoteFooterDe, setQuoteFooterDe] = useState(settings?.quote_footer_de ?? '')
+  const [quoteFooterEn, setQuoteFooterEn] = useState(settings?.quote_footer_en ?? '')
 
   // ── Email templates state ────────────────────────────────────────────────────
   const [emailTpl, setEmailTpl] = useState({
@@ -350,6 +369,8 @@ export default function SettingsForm({ settings }: Props) {
     const { error } = await supabase.from('settings').update({
       invoice_footer_de: footerDe || null,
       invoice_footer_en: footerEn || null,
+      quote_footer_de: quoteFooterDe || null,
+      quote_footer_en: quoteFooterEn || null,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
@@ -817,37 +838,72 @@ export default function SettingsForm({ settings }: Props) {
         {activeSection === 'footer' && <div>
           <SectionCard
             title="PDF Footer"
-            description="Printed at the bottom of every invoice and quote."
+            description="Note printed below the totals on each document. Supports variables."
             dirty={!!dirty.footer}
             saving={saving === 'footer'}
             onSave={saveFooter}
           >
+            {/* Doc type tabs */}
+            <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
+              {(['invoice', 'quote'] as const).map(t => (
+                <button key={t} type="button"
+                  onClick={() => setFooterDocTab(t)}
+                  className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${footerDocTab === t ? 'bg-white dark:bg-neutral-900 shadow-sm text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'}`}>
+                  {t === 'invoice' ? 'Invoice' : 'Quote'}
+                </button>
+              ))}
+            </div>
             <VarChips vars={FOOTER_VARS} onInsert={insertVar} />
             <p className="text-xs text-neutral-400 dark:text-neutral-500 -mt-1">
               Focus a text field, then click a variable to insert it at the cursor.
             </p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className={lbl}>Deutsch</label>
-                <textarea
-                  value={footerDe}
-                  onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
-                  onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
-                  rows={4}
-                  className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
-                />
+            {footerDocTab === 'invoice' ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={lbl}>Deutsch</label>
+                  <textarea
+                    value={footerDe}
+                    onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
+                    onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
+                    rows={4}
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={lbl}>English</label>
+                  <textarea
+                    value={footerEn}
+                    onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
+                    onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
+                    rows={4}
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label className={lbl}>English</label>
-                <textarea
-                  value={footerEn}
-                  onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
-                  onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
-                  rows={4}
-                  className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
-                />
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={lbl}>Deutsch</label>
+                  <textarea
+                    value={quoteFooterDe}
+                    onChange={e => { setQuoteFooterDe(e.target.value); markDirty('footer') }}
+                    onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterDe(v); markDirty('footer') })}
+                    rows={4}
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={lbl}>English</label>
+                  <textarea
+                    value={quoteFooterEn}
+                    onChange={e => { setQuoteFooterEn(e.target.value); markDirty('footer') }}
+                    onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterEn(v); markDirty('footer') })}
+                    rows={4}
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </SectionCard>
         </div>}
 
@@ -898,7 +954,7 @@ export default function SettingsForm({ settings }: Props) {
 
             {/* Variable chips */}
             <VarChips
-              vars={activeDocTab === 'reminder' ? REMINDER_VARS : FOOTER_VARS}
+              vars={activeDocTab === 'reminder' ? REMINDER_VARS : EMAIL_VARS}
               onInsert={insertTplVar}
             />
 

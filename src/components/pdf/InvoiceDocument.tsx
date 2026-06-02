@@ -10,6 +10,7 @@ const s = StyleSheet.create({
   logoFallback: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', maxWidth: 160 },
   docTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
+  qrBelowTotals: { width: 72, height: 72, marginTop: 14, alignSelf: 'flex-end' },
 
   billedSection: { marginBottom: 32 },
   billedLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
@@ -54,11 +55,6 @@ const s = StyleSheet.create({
   footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
   footerPage: { fontSize: 8, color: '#9b9b9b' },
-
-  qrRow: { flexDirection: 'row', alignItems: 'flex-start', marginTop: 20, gap: 12 },
-  qrImage: { width: 64, height: 64 },
-  qrCaption: { fontSize: 7, color: '#9b9b9b', marginTop: 4 },
-  qrText: { flex: 1, fontSize: 7.5, color: '#6b6b6b', lineHeight: 1.6, paddingTop: 2 },
 })
 
 const LABELS: Record<string, Record<'de' | 'en', string>> = {
@@ -154,7 +150,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
     balance_due: fmt(doc.totals.balance_due),
   }
 
-  const rawFooter = lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en
+  const rawFooter = doc.type === 'quote'
+    ? (lang === 'de' ? settings.quote_footer_de : settings.quote_footer_en)
+    : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
   const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
 
   return (
@@ -248,7 +246,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           )
         })}
 
-        {/* Divider + due date + totals */}
+        {/* Divider + due date + totals — wrap={false} keeps this whole block on one page */}
+        <View wrap={false}>
         <View style={s.bottomDivider} />
         <View style={s.bottomRow}>
           <View>
@@ -289,29 +288,17 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(doc.totals.balance_due)}</Text>
               </View>
             )}
+            {!!qrCodeDataUri && (
+              <Image src={qrCodeDataUri} style={s.qrBelowTotals} />
+            )}
           </View>
         </View>
+
+        </View>{/* end wrap={false} bottom block */}
 
         {!!doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
         {!!doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
         {!!footerText && <Text style={s.footerNote}>{footerText}</Text>}
-
-        {/* EPC QR code — rendered in page body above footer, only on final PDFs */}
-        {/* !!qrCodeDataUri converts null→false; react-pdf crashes on null children but handles false fine */}
-        {!!qrCodeDataUri && (
-          <View style={s.qrRow}>
-            <View>
-              <Image src={qrCodeDataUri} style={s.qrImage} />
-              <Text style={s.qrCaption}>{lang === 'de' ? 'Jetzt überweisen' : 'Scan to pay'}</Text>
-            </View>
-            <Text style={s.qrText}>
-              {lang === 'de'
-                ? `QR-Code scannen, um die Überweisung in Ihrer Banking-App vorzubefüllen.\nIBAN: ${settings.iban}`
-                : `Scan to pre-fill the transfer in your banking app.\nIBAN: ${settings.iban}`
-              }
-            </Text>
-          </View>
-        )}
 
         {/* Footer */}
         <View style={s.footer} fixed>

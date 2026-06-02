@@ -3,9 +3,37 @@ import { google } from 'googleapis'
 export type { ReminderContext } from './reminder-templates'
 export { fillTemplate, DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from './reminder-templates'
 
-function buildMime({ from, to, subject, body }: {
+function buildMime({ from, to, subject, body, pdfBase64, filename }: {
   from: string; to: string; subject: string; body: string
+  pdfBase64?: string; filename?: string
 }) {
+  if (pdfBase64 && filename) {
+    // Multipart with PDF attachment
+    const boundary = `boundary_${Date.now()}`
+    const lines = [
+      `From: ${from}`,
+      `To: ${to}`,
+      `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=UTF-8',
+      '',
+      body,
+      '',
+      `--${boundary}`,
+      'Content-Type: application/pdf',
+      'Content-Transfer-Encoding: base64',
+      `Content-Disposition: attachment; filename="${filename}"`,
+      '',
+      pdfBase64,
+      '',
+      `--${boundary}--`,
+    ]
+    return Buffer.from(lines.join('\r\n')).toString('base64url')
+  }
+  // Plain text only
   const lines = [
     `From: ${from}`,
     `To: ${to}`,
@@ -21,7 +49,7 @@ function buildMime({ from, to, subject, body }: {
 
 export async function sendReminderEmail({
   accessToken, refreshToken, tokenExpiry,
-  from, to, subject, body,
+  from, to, subject, body, pdfBase64, filename,
   onTokenRefresh,
 }: {
   accessToken: string
@@ -31,6 +59,8 @@ export async function sendReminderEmail({
   to: string
   subject: string
   body: string
+  pdfBase64?: string
+  filename?: string
   onTokenRefresh?: (tokens: { access_token: string | null; refresh_token?: string | null; expiry_date?: number | null }) => Promise<void>
 }) {
   const oauth2 = new google.auth.OAuth2(
@@ -51,6 +81,6 @@ export async function sendReminderEmail({
   }
 
   const gmail = google.gmail({ version: 'v1', auth: oauth2 })
-  const raw = buildMime({ from, to, subject, body })
+  const raw = buildMime({ from, to, subject, body, pdfBase64, filename })
   await gmail.users.messages.send({ userId: 'me', requestBody: { raw } })
 }

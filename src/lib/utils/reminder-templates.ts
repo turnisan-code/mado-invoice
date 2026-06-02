@@ -3,20 +3,31 @@ export interface ReminderContext {
   clientName: string
   amount: string
   dueDate: string
+  date: string
   daysOverdue: number
   iban: string
   sender: string
+  company: string
+  owner: string
 }
 
 export function fillTemplate(template: string, ctx: ReminderContext): string {
   return template
     .replace(/\{\{invoice_number\}\}/g, ctx.invoiceNumber)
     .replace(/\{\{client\}\}/g, ctx.clientName)
+    // amount aliases
     .replace(/\{\{amount\}\}/g, ctx.amount)
+    .replace(/\{\{total\}\}/g, ctx.amount)
+    .replace(/\{\{balance_due\}\}/g, ctx.amount)
+    // date aliases
     .replace(/\{\{due_date\}\}/g, ctx.dueDate)
+    .replace(/\{\{date\}\}/g, ctx.date)
     .replace(/\{\{days_overdue\}\}/g, String(ctx.daysOverdue))
     .replace(/\{\{iban\}\}/g, ctx.iban)
+    // sender aliases
     .replace(/\{\{sender\}\}/g, ctx.sender)
+    .replace(/\{\{company\}\}/g, ctx.company)
+    .replace(/\{\{owner\}\}/g, ctx.owner)
 }
 
 export const DEFAULT_SUBJECT_DE = 'Zahlungserinnerung: Rechnung {{invoice_number}}'

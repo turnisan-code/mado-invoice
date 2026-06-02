@@ -103,8 +103,6 @@ export async function POST(req: NextRequest) {
     amounts,
   }
 
-  console.log('[bookamat/sync] payload:', JSON.stringify(payload))
-
   const bookingRes = await fetch(`${baseUrl}bookings/`, {
     method: 'POST',
     headers: {
@@ -116,12 +114,10 @@ export async function POST(req: NextRequest) {
 
   if (!bookingRes.ok) {
     const text = await bookingRes.text()
-    console.log('[bookamat/sync] error response:', text)
     return NextResponse.json({ error: text }, { status: 500 })
   }
 
   const booking = await bookingRes.json()
-  console.log('[bookamat/sync] created booking:', JSON.stringify(booking))
   const bookingId = booking.id
 
   await supabase

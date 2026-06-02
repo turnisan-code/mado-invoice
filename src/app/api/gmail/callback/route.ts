@@ -1,14 +1,7 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-
-function getOAuthClient() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/gmail/callback`,
-  )
-}
+import { getOAuthClient } from '@/lib/google/client'
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')

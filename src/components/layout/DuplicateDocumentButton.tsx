@@ -71,7 +71,7 @@ export default function DuplicateDocumentButton({ docId, docType, backTo }: Prop
       title="Duplicate as draft"
       className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors disabled:opacity-50"
     >
-      <Copy size={14} /> {loading ? 'Duplicating…' : 'Duplicate'}
+      <Copy size={14} /> <span className="hidden sm:inline">{loading ? 'Duplicating…' : 'Duplicate'}</span>
     </button>
   )
 }

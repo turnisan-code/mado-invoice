@@ -1,14 +1,7 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-
-function getOAuthClient() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/gmail/callback`,
-  )
-}
+import { getOAuthClient } from '@/lib/google/client'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -37,7 +30,7 @@ export async function POST(req: NextRequest) {
       gmail_access_token: tokens.access_token,
       ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
       gmail_token_expiry: tokens.expiry_date,
-    }).eq('user_id', user.id)
+    }).eq('id', settings.id)
   })
 
   const drive = google.drive({ version: 'v3', auth: oauth2 })

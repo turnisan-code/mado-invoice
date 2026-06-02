@@ -58,7 +58,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, docType }:
       className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors ml-auto"
     >
       <Trash2 size={14} />
-      {loading ? 'Deleting…' : 'Delete'}
+      <span className="hidden sm:inline">{loading ? 'Deleting…' : 'Delete'}</span>
     </button>
   )
 }

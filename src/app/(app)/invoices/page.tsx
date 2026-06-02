@@ -1,10 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import InvoiceList from '@/components/lists/InvoiceList'
-import { markOverdueInvoices } from '@/lib/utils/overdue'
 
 export default async function InvoicesPage() {
   const supabase = await createClient()
-  void markOverdueInvoices(supabase)
 
   const { data: docs } = await supabase
     .from('documents')

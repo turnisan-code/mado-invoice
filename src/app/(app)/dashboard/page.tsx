@@ -1,20 +1,40 @@
 import { createClient } from '@/lib/supabase/server'
 import { calcTotals } from '@/lib/utils/document'
 import { formatMoney } from '@/lib/utils/document'
-import { markOverdueInvoices } from '@/lib/utils/overdue'
 import { FileText, CheckCircle, AlertTriangle, TrendingUp, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
-  void markOverdueInvoices(supabase)
 
-  const [{ data: invoices }, { data: quotes }] = await Promise.all([
+  const now = new Date().toISOString().split('T')[0]
+  const thisMonth = now.slice(0, 7)
+  const thisYear = now.slice(0, 4)
+  const lastMonthDate = new Date(); lastMonthDate.setMonth(lastMonthDate.getMonth() - 1)
+  const lastMonth = lastMonthDate.toISOString().slice(0, 7)
+
+  // 13 months back covers the full 12-month chart window + last month's stats
+  const chartCutoff = new Date()
+  chartCutoff.setMonth(chartCutoff.getMonth() - 13)
+  const chartCutoffStr = chartCutoff.toISOString().split('T')[0]
+
+  const itemSelect = 'id, number, status, date, due_date, currency, clients(name), document_items(line_type, quantity, unit_price, vat_rate), payments(amount, date)'
+
+  const [{ data: activeInvoices }, { data: paidInvoices }, { data: quotes }] = await Promise.all([
+    // Open/overdue invoices — no date cap needed, these are currently active
     supabase
       .from('documents')
-      .select('id, number, status, date, due_date, currency, clients(name), document_items(line_type, quantity, unit_price, vat_rate), payments(amount, date)')
+      .select(itemSelect)
       .eq('type', 'invoice')
+      .in('status', ['sent', 'overdue']),
+    // Paid invoices from the last 13 months — for chart, stats, and recently paid panel
+    supabase
+      .from('documents')
+      .select(itemSelect)
+      .eq('type', 'invoice')
+      .eq('status', 'paid')
+      .gte('date', chartCutoffStr)
       .order('date', { ascending: false }),
     supabase
       .from('documents')
@@ -25,73 +45,66 @@ export default async function DashboardPage() {
       .limit(5),
   ])
 
-  const now = new Date().toISOString().split('T')[0]
-  const thisMonth = now.slice(0, 7)
-  const thisYear = now.slice(0, 4)
-  const lastMonthDate = new Date(); lastMonthDate.setMonth(lastMonthDate.getMonth() - 1)
-  const lastMonth = lastMonthDate.toISOString().slice(0, 7)
+  const active = activeInvoices ?? []
+  const paid = paidInvoices ?? []
 
-  const allInvoices = invoices ?? []
-
-  const getTotal = (doc: typeof allInvoices[0]) =>
+  const getTotal = (doc: typeof active[0]) =>
     calcTotals(doc.document_items ?? [], doc.payments ?? []).total
 
-  const getPaid = (doc: typeof allInvoices[0]) =>
+  const getPaid = (doc: typeof paid[0]) =>
     calcTotals(doc.document_items ?? [], doc.payments ?? []).total_paid
 
-  const open = allInvoices.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
-  const overdue = allInvoices.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
-  const paidThisMonth = allInvoices.filter(i =>
-    i.status === 'paid' && (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(thisMonth))
-  )
-  const paidLastMonth = allInvoices.filter(i =>
-    i.status === 'paid' && (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(lastMonth))
-  )
-  const revenueThisMonth = paidThisMonth.reduce((s, d) => s + getPaid(d), 0)
-  const revenueLastMonth = paidLastMonth.reduce((s, d) => s + getPaid(d), 0)
-  const momDelta = revenueLastMonth > 0 ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100) : null
-  const revenueThisYear = allInvoices
-    .filter(i => i.status === 'paid' && i.date?.startsWith(thisYear))
-    .reduce((s, doc) => s + getPaid(doc), 0)
+  const open = active.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
+  const overdue = active.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
 
-  const outstanding = [...open, ...overdue].reduce((s, d) => s + getTotal(d), 0)
+  // Compute overdue total once — reused in KPI card and alert banner
+  const overdueTotal = overdue.reduce((s, d) => s + getTotal(d), 0)
+  const openTotal = open.reduce((s, d) => s + getTotal(d), 0)
+  const outstanding = overdueTotal + openTotal
   const outstandingCount = open.length + overdue.length
 
   const oldestOverdueDays = overdue.length > 0
-    ? Math.max(...overdue.filter(i => i.due_date).map(i => Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)))
+    ? Math.max(...overdue.filter(i => i.due_date).map(i =>
+        Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)
+      ))
     : null
 
-  const recentPaid = allInvoices
-    .filter(i => i.status === 'paid')
-    .slice(0, 6)
+  const paidThisMonth = paid.filter(i =>
+    (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(thisMonth))
+  )
+  const paidLastMonth = paid.filter(i =>
+    (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(lastMonth))
+  )
+  const revenueThisMonth = paidThisMonth.reduce((s, d) => s + getPaid(d), 0)
+  const revenueLastMonth = paidLastMonth.reduce((s, d) => s + getPaid(d), 0)
+  const momDelta = revenueLastMonth > 0
+    ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100)
+    : null
+  const revenueThisYear = paid
+    .filter(i => i.date?.startsWith(thisYear))
+    .reduce((s, doc) => s + getPaid(doc), 0)
 
-  // Build last 12 months bar data (revenue = payments received that month)
+  const recentPaid = paid.slice(0, 6)
+
+  // Build last 12 months bar chart data from payment dates
   const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const today = new Date()
   const months: MonthData[] = Array.from({ length: 12 }, (_, i) => {
     const d = new Date(today.getFullYear(), today.getMonth() - 11 + i, 1)
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    return {
-      label: monthLabels[d.getMonth()],
-      yearMonth: ym,
-      revenue: 0,
-      current: ym === thisMonth,
-    }
+    return { label: monthLabels[d.getMonth()], yearMonth: ym, revenue: 0, current: ym === thisMonth }
   })
   const monthMap = new Map(months.map((m, i) => [m.yearMonth, i]))
 
-  for (const inv of allInvoices) {
-    if (inv.status !== 'paid') continue
+  for (const inv of paid) {
     for (const p of (inv.payments ?? []) as { amount: number; date: string }[]) {
       if (!p.date) continue
-      const ym = p.date.slice(0, 7)
-      const idx = monthMap.get(ym)
+      const idx = monthMap.get(p.date.slice(0, 7))
       if (idx !== undefined) months[idx].revenue += p.amount
     }
   }
 
-  // Currency: use first invoice currency or EUR
-  const chartCurrency = allInvoices.find(i => i.currency)?.currency ?? 'EUR'
+  const chartCurrency = (active[0] ?? paid[0])?.currency ?? 'EUR'
 
   const stats = [
     {
@@ -107,7 +120,7 @@ export default async function DashboardPage() {
     {
       label: 'Overdue',
       value: overdue.length,
-      amount: overdue.reduce((s, d) => s + getTotal(d), 0),
+      amount: overdueTotal,
       sub: oldestOverdueDays != null ? `oldest: ${oldestOverdueDays}d` : null,
       subColor: undefined,
       icon: AlertTriangle,
@@ -274,7 +287,7 @@ export default async function DashboardPage() {
           <AlertTriangle size={15} className="shrink-0" />
           <span>
             <strong>{overdue.length} overdue invoice{overdue.length !== 1 ? 's' : ''}</strong>
-            {' '}— {formatMoney(overdue.reduce((s, d) => s + getTotal(d), 0))} outstanding. Send reminders or record payments.
+            {' '}— {formatMoney(overdueTotal)} outstanding. Send reminders or record payments.
           </span>
         </Link>
       )}

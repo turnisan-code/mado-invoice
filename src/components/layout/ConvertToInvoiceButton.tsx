@@ -23,7 +23,7 @@ export default function ConvertToInvoiceButton({ quoteId }: { quoteId: string })
   return (
     <Button variant="outline" size="sm" onClick={convert} disabled={loading} className="flex items-center gap-1.5">
       <ArrowRight size={14} />
-      {loading ? 'Converting…' : 'Convert to Invoice'}
+      <span className="hidden sm:inline">{loading ? 'Converting…' : 'Convert to Invoice'}</span>
     </Button>
   )
 }

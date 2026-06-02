@@ -5,7 +5,11 @@ import {
   DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
-import { formatMoney } from '@/lib/utils/document'
+import { formatMoney, calcTotals } from '@/lib/utils/document'
+import { pdf } from '@react-pdf/renderer'
+import InvoiceDocument from '@/components/pdf/InvoiceDocument'
+import React from 'react'
+import type { Settings, Client, TaxTreatment, Language, Currency } from '@/types'
 
 export const maxDuration = 60
 
@@ -48,19 +52,19 @@ export async function GET(req: NextRequest) {
       ? Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000)
       : 0
 
-    const total = (invoice.document_items ?? []).reduce((s: number, i: { quantity: number | null; unit_price: number | null; vat_rate: number | null }) => {
-      if (i.quantity == null || i.unit_price == null) return s
-      return s + i.quantity * i.unit_price * (1 + (i.vat_rate ?? 0) / 100)
-    }, 0)
+    const emailTotals = calcTotals(invoice.document_items ?? [], [])
 
     const ctx = {
       invoiceNumber: invoice.number ?? 'Draft',
       clientName: client.company ?? client.name,
-      amount: formatMoney(total, invoice.currency ?? 'EUR'),
+      amount: formatMoney(emailTotals.total, invoice.currency ?? 'EUR'),
       dueDate,
+      date: invoice.date ?? '',
       daysOverdue,
       iban: settings.iban ?? '',
       sender: settings.company_name ?? settings.owner_name ?? '',
+      company: settings.company_name ?? '',
+      owner: settings.owner_name ?? '',
     }
 
     const subjectTpl = lang === 'en'
@@ -69,6 +73,63 @@ export async function GET(req: NextRequest) {
     const bodyTpl = lang === 'en'
       ? (settings.email_body_reminder_en || DEFAULT_BODY_EN)
       : (settings.email_body_reminder_de || DEFAULT_BODY_DE)
+
+    // Generate PDF server-side
+    let pdfBase64: string | undefined
+    let filename: string | undefined
+    try {
+      const items = (invoice.document_items ?? [])
+      const totals = calcTotals(items, [])
+      const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
+      const invLang = (invoice.language ?? 'de') as Language
+      const taxNote = taxTreatment === 'eu_reverse_charge'
+        ? (invLang === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers' : 'VAT liability transfers to the recipient (Reverse Charge)')
+        : taxTreatment === 'non_eu'
+        ? (invLang === 'de' ? 'Nicht steuerbar gem. § 3a UStG' : 'Not subject to Austrian VAT (§ 3a UStG)')
+        : null
+      const docData = {
+        number: invoice.number ?? 'DRAFT',
+        date: invoice.date ?? '',
+        service_date: invoice.service_date ?? null,
+        due_date: invoice.due_date ?? null,
+        type: invoice.type,
+        language: invLang,
+        currency: (invoice.currency ?? 'EUR') as Currency,
+        tax_treatment: taxTreatment,
+        notes: invoice.notes ?? null,
+        tax_note: taxNote,
+        discount_type: invoice.discount_type ?? null,
+        discount_value: invoice.discount_value ?? null,
+        items: items.map((i: Record<string, unknown>) => ({
+          line_type: i.line_type,
+          description: i.description as string,
+          service_date: (i.service_date as string | null) ?? null,
+          quantity: i.quantity as number | null,
+          unit: i.unit as string | null,
+          unit_price: i.unit_price as number | null,
+          vat_rate: i.vat_rate as number | null,
+        })),
+        totals,
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stream = await pdf(React.createElement(InvoiceDocument, {
+        settings: settings as unknown as Settings,
+        client: client as unknown as Client,
+        document: docData,
+        qrCodeDataUri: null,
+      }) as any).toBuffer()
+      const chunks: Buffer[] = []
+      await new Promise<void>((resolve, reject) => {
+        stream.on('data', (chunk: Buffer | Uint8Array) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+        stream.on('end', resolve)
+        stream.on('error', reject)
+      })
+      pdfBase64 = Buffer.concat(chunks).toString('base64')
+      filename = `${invoice.number}.pdf`
+    } catch (pdfErr) {
+      console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
+      // Send without attachment rather than skipping entirely
+    }
 
     try {
       await sendReminderEmail({
@@ -79,6 +140,8 @@ export async function GET(req: NextRequest) {
         to: client.email,
         subject: fillTemplate(subjectTpl, ctx),
         body: fillTemplate(bodyTpl, ctx),
+        pdfBase64,
+        filename,
         onTokenRefresh: async (tokens) => {
           await supabase.from('settings').update({
             gmail_access_token: tokens.access_token,

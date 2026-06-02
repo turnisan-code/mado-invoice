@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHand
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive, Eye } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive, Eye, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -77,9 +77,9 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const supabase = createClient()
 
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
-  const [date, setDate] = useState(doc?.date ?? '')
+  const [date, setDate] = useState(doc?.date ?? today())
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
-  const [dueDate, setDueDate] = useState(doc?.due_date ?? '')
+  const [dueDate, setDueDate] = useState(doc?.due_date ?? addDays(today(), settings.default_payment_days))
   const [language, setLanguage] = useState<Language>(doc?.language ?? settings.default_language as Language ?? 'de')
   const [currency, setCurrency] = useState<Currency>(doc?.currency ?? 'EUR')
   const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>(doc?.tax_treatment as TaxTreatment ?? 'at_vat')
@@ -117,6 +117,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const isFirstRender = useRef(true)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
   const [dragOver, setDragOver] = useState<number | null>(null)
   const dragIdx = useRef<number | null>(null)
@@ -500,6 +501,8 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       invoice_number: num,
       client: client.company ?? client.name,
       total: formatMoney(totals.total, currency),
+      balance_due: formatMoney(totals.balance_due, currency),
+      subtotal: formatMoney(totals.subtotal, currency),
       due_date: dueDate ?? '',
       date,
       company: settings.company_name,
@@ -701,81 +704,83 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       )}
 
       {/* Client & dates */}
-      <div>
-        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Client & Dates</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="space-y-4">
+        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Client & Dates</p>
+
+        {/* Client selector — full width always */}
         <div className="space-y-1.5">
           <Label>Client *</Label>
           <select value={clientId} onChange={e => handleClientChange(e.target.value)}
-            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
+            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
             <option value="">Select client…</option>
             {clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
               <option key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''}</option>
             ))}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
+
+        {/* Date + Due date */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1 space-y-1.5">
             <Label>Date</Label>
-            {!date && !doc ? (
-              <div className="h-9 flex items-center px-3 text-sm text-neutral-400 dark:text-neutral-500 border border-dashed border-neutral-200 dark:border-neutral-700 rounded-md">
-                Set on send
-              </div>
-            ) : (
-              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-sm" />
-            )}
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-sm h-10 w-full" />
           </div>
-          <div className="space-y-1.5">
+          <div className="flex-1 space-y-1.5">
             <Label>{type === 'invoice' ? 'Due date' : 'Valid until'}</Label>
-            {!dueDate && !doc ? (
-              <div className="h-9 flex items-center px-3 text-sm text-neutral-400 dark:text-neutral-500 border border-dashed border-neutral-200 dark:border-neutral-700 rounded-md">
-                Set on send
-              </div>
-            ) : (
-              <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm" />
-            )}
+            <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm h-10 w-full" />
           </div>
         </div>
+
+        {/* Details toggle (mobile) / always visible (desktop) */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowDetails(d => !d)}
+            className="sm:hidden flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors mb-3"
+          >
+            <ChevronRight size={13} className={`transition-transform ${showDetails ? 'rotate-90' : ''}`} />
+            {showDetails ? 'Hide details' : 'Language, currency & tax'}
+          </button>
+
+          <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
+            <div className="space-y-1.5">
+              <Label>Language</Label>
+              <select value={language} onChange={e => setLanguage(e.target.value as Language)}
+                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                <option value="de">Deutsch</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Currency</Label>
+              <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
+                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+                <option value="GBP">GBP</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tax treatment</Label>
+              <select value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)}
+                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                <option value="at_vat">Austrian VAT</option>
+                <option value="eu_reverse_charge">Reverse Charge (EU)</option>
+                <option value="non_eu">Non-EU (no VAT)</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Service date</Label>
+              <Input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className="text-sm" />
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-          <div className="space-y-1.5">
-            <Label>Language</Label>
-          <select value={language} onChange={e => setLanguage(e.target.value as Language)}
-            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-            <option value="de">Deutsch</option>
-            <option value="en">English</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Currency</Label>
-          <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
-            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-            <option value="EUR">EUR</option>
-            <option value="USD">USD</option>
-            <option value="GBP">GBP</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Tax treatment</Label>
-          <select value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)}
-            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-            <option value="at_vat">Austrian VAT</option>
-            <option value="eu_reverse_charge">Reverse Charge (EU)</option>
-            <option value="non_eu">Non-EU (no VAT)</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label>Service date</Label>
-          <Input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className="text-sm" />
-        </div>
-      </div>
-
-      {taxNote && (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mt-3">
-          {taxNote}
-        </div>
-      )}
+        {taxNote && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            {taxNote}
+          </div>
+        )}
       </div>{/* end Client & Dates */}
 
       <Separator />
@@ -852,12 +857,11 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
               )
             }
 
-            // item
+            // item — mobile card
             return (
-              <div key={line.id} className="py-3 border-b border-neutral-100 dark:border-neutral-800 space-y-2">
-                {/* Row 1: description */}
+              <div key={line.id} className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-3 space-y-3 mb-2">
+                {/* Description + delete */}
                 <div className="flex items-center gap-2">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <div className="relative flex-1">
                     <Input
                       value={line.description}
@@ -932,30 +936,44 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
                   </div>
                   {deleteBtn(line.id)}
                 </div>
-                {/* Row 2: qty / unit / price / vat / calendar */}
-                <div className="flex items-center gap-2 pl-6">
-                  <Input type="number" value={line.quantity} min={0} step={0.25}
-                    onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
-                    className="text-sm w-16 shrink-0" />
-                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
-                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none flex-1 min-w-0">
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <Input type="number" value={line.unit_price} min={0} step={0.01}
-                    onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
-                    className="text-sm w-24 shrink-0" />
-                  <select value={line.vat_rate}
-                    onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
-                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none w-16 shrink-0">
-                    {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                  </select>
+                {/* Qty × Unit | Price */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs text-neutral-400 dark:text-neutral-500">Qty × Unit</p>
+                    <div className="flex gap-1.5">
+                      <Input type="number" value={line.quantity} min={0} step={0.25}
+                        onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
+                        className="w-14 text-sm shrink-0" />
+                      <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
+                        className="flex-1 h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none min-w-0">
+                        {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs text-neutral-400 dark:text-neutral-500">Price</p>
+                    <Input type="number" value={line.unit_price} min={0} step={0.01}
+                      onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
+                      className="text-sm w-full" />
+                  </div>
+                </div>
+                {/* VAT + service date */}
+                <div className="flex items-end gap-3">
+                  <div className="space-y-1 flex-1">
+                    <p className="text-xs text-neutral-400 dark:text-neutral-500">VAT</p>
+                    <select value={line.vat_rate}
+                      onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
+                      className="w-full h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                      {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                    </select>
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
                     title={line.service_date ?? 'Set service date'}
-                    className={`h-9 w-9 flex items-center justify-center shrink-0 transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-300 hover:text-neutral-500'}`}
+                    className={`h-9 w-10 flex items-center justify-center rounded-md border transition-colors ${line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400'}`}
                   >
-                    <Calendar size={14} />
+                    <Calendar size={15} />
                   </button>
                 </div>
               </div>
@@ -1284,46 +1302,51 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       {/* Sticky action bar */}
       <div className="sticky bottom-0 -mx-6 -mb-6 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700">
         {/* Mobile layout */}
-        <div className="sm:hidden px-4 pt-3 pb-4 space-y-2">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500 shrink-0">
-              <Eye size={13} /> Preview
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5 shrink-0">
-              <Download size={13} /> PDF
-            </Button>
+        <div className="sm:hidden px-4 pt-3 pb-5 space-y-3">
+          {/* Utility toolbar — segmented icon + label buttons */}
+          <div className="flex rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden divide-x divide-neutral-200 dark:divide-neutral-700">
+            <button type="button" onClick={downloadPdf}
+              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+              <Eye size={16} />
+              <span className="text-[10px] font-medium">Preview</span>
+            </button>
+            <button type="button" onClick={savePdf}
+              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+              <Download size={16} />
+              <span className="text-[10px] font-medium">PDF</span>
+            </button>
             {settings.gmail_email && (
-              <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5 shrink-0">
-                <HardDrive size={13} /> Drive
-              </Button>
+              <button type="button" onClick={saveToDrive}
+                className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+                <HardDrive size={16} />
+                <span className="text-[10px] font-medium">Drive</span>
+              </button>
             )}
-            {settings.gmail_email ? (
-              <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5 shrink-0">
-                <Mail size={13} /> Gmail
-              </Button>
-            ) : (
-              <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5 shrink-0">
-                <Mail size={13} /> Email
-              </Button>
-            )}
-            {doc && (
-              <span className="text-xs text-neutral-400 dark:text-neutral-500 ml-auto shrink-0">
-                {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-              </span>
-            )}
+            <button type="button" onClick={settings.gmail_email ? sendViaGmail : openInEmail}
+              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+              <Mail size={16} />
+              <span className="text-[10px] font-medium">{settings.gmail_email ? 'Gmail' : 'Email'}</span>
+            </button>
           </div>
+          {/* Primary CTAs */}
           <div className="flex gap-2">
             {!doc && (
-              <Button type="button" variant="outline" size="sm" onClick={() => save('draft')} disabled={saving} className="flex-1">
+              <Button type="button" variant="outline" onClick={() => save('draft')} disabled={saving} className="flex-1 h-11 text-sm">
                 Save draft
               </Button>
             )}
             {(!doc || doc.status === 'draft') && (
-              <Button type="button" size="sm" onClick={requestSent} disabled={saving} className="flex-1">
+              <Button type="button" onClick={requestSent} disabled={saving} className="flex-1 h-11 text-sm">
                 {saving ? 'Saving…' : 'Mark as sent'}
               </Button>
             )}
           </div>
+          {/* Auto-save status */}
+          {doc && (autoSaving || lastSaved) && (
+            <p className="text-[10px] text-center text-neutral-400 dark:text-neutral-500 -mt-1">
+              {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </p>
+          )}
         </div>
         {/* Desktop layout */}
         <div className="hidden sm:flex items-center gap-3 px-6 py-4">

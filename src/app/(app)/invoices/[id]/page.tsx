@@ -4,7 +4,6 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import InvoicePageClient from '@/components/layout/InvoicePageClient'
-import ReminderButton from '@/components/layout/ReminderButton'
 import { calcTotals } from '@/lib/utils/document'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -17,7 +16,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
-    supabase.from('catalogue_items').select('*').order('sort_order'),
+    supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
   ])
 
   if (!doc) notFound()
@@ -28,21 +27,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/invoices" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
-          <ArrowLeft size={16} />
-        </Link>
-        <h1 className="text-2xl font-semibold">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
-        <DocumentStatusBar document={doc} />
-        <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
-        <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
-        {(doc.status === 'overdue' || doc.status === 'sent') && (
-          <ReminderButton
-            documentId={doc.id}
-            reminderSentAt={doc.reminder_sent_at ?? null}
-            gmailConfigured={!!settings?.gmail_refresh_token}
-          />
-        )}
+      <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/invoices" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">
+            <ArrowLeft size={16} />
+          </Link>
+          <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+        </div>
+        <div className="flex items-center gap-2 pl-7 sm:pl-0">
+          <DocumentStatusBar document={doc} />
+          <div className="flex-1 sm:hidden" />
+          <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
+          <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
+        </div>
       </div>
       <InvoicePageClient
         type="invoice"
@@ -55,6 +52,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         currency={doc.currency ?? 'EUR'}
         bookamatConfigured={!!(settings?.bookamat_username && settings?.bookamat_api_key && settings?.bookamat_bank_account_id)}
         bookamatBookingId={doc.bookamat_booking_id ?? null}
+        reminderSentAt={doc.reminder_sent_at ?? null}
       />
     </div>
   )
