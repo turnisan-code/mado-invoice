@@ -47,13 +47,31 @@ export async function POST(req: NextRequest) {
   const { PassThrough } = await import('stream')
 
   try {
-    // Verify the stored file still exists and isn't in the trash
+    // 1. Verify stored file ID is still active (not trashed/deleted)
     if (existingFileId) {
       try {
         const { data: check } = await drive.files.get({ fileId: existingFileId, fields: 'id,trashed' })
         if (check.trashed) existingFileId = null
       } catch {
-        existingFileId = null // file was permanently deleted
+        existingFileId = null
+      }
+    }
+
+    // 2. If no stored ID, search the folder for a file with the same name
+    //    (handles pre-existing files and stale DB state)
+    if (!existingFileId) {
+      const safe = filename.replace(/'/g, "\\'")
+      const { data: found } = await drive.files.list({
+        q: `name='${safe}' and '${settings.drive_folder_id}' in parents and trashed=false`,
+        fields: 'files(id,webViewLink)',
+        pageSize: 1,
+      })
+      if (found.files && found.files.length > 0) {
+        existingFileId = found.files[0].id ?? null
+        // Adopt this file — persist so future uploads reuse it
+        if (documentId && existingFileId) {
+          await supabase.from('documents').update({ drive_file_id: existingFileId }).eq('id', documentId)
+        }
       }
     }
 
@@ -62,7 +80,7 @@ export async function POST(req: NextRequest) {
     let webViewLink: string | null | undefined
 
     if (existingFileId) {
-      // Active file — update content in-place (same ID = no Drive Desktop conflict)
+      // Update existing file in-place — same ID means Drive Desktop syncs cleanly
       const stream = new PassThrough()
       stream.end(pdfBuffer)
       const { data: file } = await drive.files.update({
@@ -73,7 +91,7 @@ export async function POST(req: NextRequest) {
       fileId = file.id
       webViewLink = file.webViewLink
     } else {
-      // No active file — create new and persist the ID
+      // No existing file — create new and persist the ID
       const stream = new PassThrough()
       stream.end(pdfBuffer)
       const { data: file } = await drive.files.create({
