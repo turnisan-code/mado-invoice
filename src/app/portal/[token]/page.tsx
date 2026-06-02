@@ -80,8 +80,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const showPaymentInfo = (doc.status === 'sent' || doc.status === 'overdue') && docType === 'invoice'
 
   return (
-    <div className="bg-neutral-50 min-h-screen">
-        <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
+    <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
 
           {/* Header */}
           <div className="flex items-start justify-between mb-8">
@@ -283,6 +282,5 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </div>
 
         </div>
-    </div>
   )
 }
