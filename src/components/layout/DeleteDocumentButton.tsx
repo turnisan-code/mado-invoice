@@ -28,7 +28,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, docType }:
 
       const { data: settings } = await supabase.from('settings').select(`id, ${counterField}`).single() as { data: Record<string, unknown> | null }
       const currentCounter = settings?.[counterField] as number | undefined
-      const seqMatch = docNumber.match(/(\d{3})$/)
+      const seqMatch = docNumber.match(/(\d+)$/)
       const seqNum = seqMatch ? parseInt(seqMatch[1], 10) : null
 
       if (currentCounter !== undefined && seqNum !== null && seqNum === currentCounter - 1) {

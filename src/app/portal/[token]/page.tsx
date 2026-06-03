@@ -1,5 +1,6 @@
 import React from 'react'
 import { notFound } from 'next/navigation'
+import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
 import { calcTotals, formatMoney, formatDate, calcSectionSubtotal } from '@/lib/utils/document'
 import { Download } from 'lucide-react'
@@ -284,6 +285,11 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
                 <div className="text-xs text-blue-600 mt-1">{doc.number}</div>
               </div>
             </div>
+          )}
+
+          {/* Quote accept/decline — only for sent quotes */}
+          {docType === 'quote' && doc.status === 'sent' && (
+            <QuoteActions token={token} lang={lang} />
           )}
 
           {/* Download PDF */}

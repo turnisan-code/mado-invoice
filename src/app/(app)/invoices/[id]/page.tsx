@@ -5,6 +5,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import InvoicePageClient from '@/components/layout/InvoicePageClient'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
+import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteButton'
 import { calcTotals } from '@/lib/utils/document'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -39,6 +40,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
           <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!settings?.drive_folder_id} />
+          <ConvertToCreditNoteButton invoiceId={doc.id} />
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
           <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
         </div>
