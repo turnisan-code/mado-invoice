@@ -8,6 +8,7 @@ import { ChevronDown } from 'lucide-react'
 
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
+const CREDIT_NOTE_STATUSES = ['draft', 'sent', 'cancelled'] as const
 
 const DESTRUCTIVE = new Set(['cancelled', 'rejected'])
 
@@ -40,7 +41,7 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
-  const statuses = doc.type === 'quote' ? QUOTE_STATUSES : INVOICE_STATUSES
+  const statuses = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
 
   useEffect(() => { setStatus(doc.status) }, [doc.status])
 

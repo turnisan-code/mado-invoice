@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X } from 'lucide-react'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2 } from 'lucide-react'
 import { formatMoney } from '@/lib/utils/document'
 import { toast } from 'sonner'
 
@@ -78,6 +78,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState<{ action: string; label: string } | null>(null)
 
   function toggleSort(key: SortKey) {
     setPage(0)
@@ -126,6 +127,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
   async function bulkUpdateStatus(newStatus: string) {
     setBulkLoading(true)
+    setBulkConfirm(null)
     const ids = [...selected]
     const res = await fetch('/api/invoices/bulk', {
       method: 'PATCH',
@@ -140,6 +142,27 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
     }
     const { updated } = await res.json()
     toast.success(`${updated} invoice${updated !== 1 ? 's' : ''} marked as ${newStatus}.`)
+    clearSelection()
+    router.refresh()
+  }
+
+  async function bulkDelete() {
+    setBulkLoading(true)
+    setBulkConfirm(null)
+    const ids = [...selected]
+    const res = await fetch('/api/invoices/bulk', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+    setBulkLoading(false)
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
+      toast.error(`Delete failed: ${error}`)
+      return
+    }
+    const { deleted } = await res.json()
+    toast.success(`${deleted} invoice${deleted !== 1 ? 's' : ''} deleted.`)
     clearSelection()
     router.refresh()
   }
@@ -340,14 +363,14 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
             </span>
             <div className="flex items-center gap-2 flex-1 flex-wrap">
               <button
-                onClick={() => bulkUpdateStatus('sent')}
+                onClick={() => setBulkConfirm({ action: 'sent', label: 'Mark as sent' })}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
               >
                 <Send size={12} /> Mark Sent
               </button>
               <button
-                onClick={() => bulkUpdateStatus('paid')}
+                onClick={() => setBulkConfirm({ action: 'paid', label: 'Mark as paid' })}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
               >
@@ -364,6 +387,13 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
               >
                 <Download size={12} /> Export CSV
               </button>
+              <button
+                onClick={() => setBulkConfirm({ action: 'delete', label: 'Delete' })}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
+              >
+                <Trash2 size={12} /> Delete
+              </button>
             </div>
             <button
               onClick={clearSelection}
@@ -374,6 +404,34 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           </div>
         </div>
       </div>
+
+      {/* Bulk action confirmation */}
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <div>
+              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{bulkConfirm.label} {selected.size} invoice{selected.size !== 1 ? 's' : ''}?</h3>
+              {bulkConfirm.action === 'delete' && (
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">This cannot be undone.</p>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setBulkConfirm(null)}
+                className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => bulkConfirm.action === 'delete' ? bulkDelete() : bulkUpdateStatus(bulkConfirm.action)}
+                className={`text-sm px-3 py-1.5 rounded-md text-white transition-colors ${bulkConfirm.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-neutral-900 dark:bg-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100'}`}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

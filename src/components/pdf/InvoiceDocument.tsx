@@ -154,6 +154,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
 
   const rawFooter = doc.type === 'quote'
     ? (lang === 'de' ? settings.quote_footer_de : settings.quote_footer_en)
+    : doc.type === 'credit_note'
+    ? (lang === 'de' ? settings.credit_note_footer_de : settings.credit_note_footer_en)
     : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
   const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
 

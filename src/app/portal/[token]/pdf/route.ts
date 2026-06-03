@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { calcTotals } from '@/lib/utils/document'
+import { calcTotals, getTaxNote } from '@/lib/utils/document'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { renderToBuffer } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
@@ -45,11 +45,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     }
   }
 
-  const taxNote = doc.tax_treatment === 'eu_reverse_charge'
-    ? (lang === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)' : 'Reverse charge — VAT to be accounted for by the recipient')
-    : doc.tax_treatment === 'non_eu'
-    ? (lang === 'de' ? 'Nicht steuerbar (Leistungsort außerhalb der EU)' : 'Not taxable — place of supply outside the EU')
-    : null
+  const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang)
 
   const docData = {
     number: doc.number ?? '',
