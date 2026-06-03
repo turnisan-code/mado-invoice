@@ -40,6 +40,8 @@ export interface Settings {
   invoice_footer_en: string | null
   quote_footer_de: string | null
   quote_footer_en: string | null
+  credit_note_footer_de: string | null
+  credit_note_footer_en: string | null
   gmail_email: string | null
   gmail_access_token: string | null
   gmail_refresh_token: string | null

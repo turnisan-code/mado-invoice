@@ -49,7 +49,7 @@ export function calcTotals(
 
   for (let i = 0; i < items.length; i++) {
     if ((items[i].line_type ?? 'item') === 'subtotal') {
-      const sd = items[i].discount_type && items[i].discount_value
+      const sd = items[i].discount_type != null && items[i].discount_value != null
         ? { type: items[i].discount_type!, value: items[i].discount_value! }
         : null
       flushSection(i, sd)
@@ -76,6 +76,33 @@ export function calcTotals(
   const total_paid = payments.reduce((s, p) => s + p.amount, 0)
 
   return { subtotal, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: total - total_paid }
+}
+
+export function getTaxNote(taxTreatment: string, lang: 'de' | 'en'): string | null {
+  if (taxTreatment === 'eu_reverse_charge') {
+    return lang === 'de'
+      ? 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)'
+      : 'Reverse charge — VAT to be accounted for by the recipient'
+  }
+  if (taxTreatment === 'non_eu') {
+    return lang === 'de'
+      ? 'Nicht steuerbar (Leistungsort außerhalb der EU)'
+      : 'Not taxable — place of supply outside the EU'
+  }
+  return null
+}
+
+type SectionItem = { line_type?: string | null; quantity: number | null; unit_price: number | null }
+
+export function calcSectionSubtotal(items: SectionItem[], upToIdx: number): number {
+  let sum = 0
+  for (let i = upToIdx - 1; i >= 0; i--) {
+    if ((items[i].line_type ?? 'item') === 'subtotal') break
+    if ((items[i].line_type ?? 'item') === 'item' && items[i].quantity != null && items[i].unit_price != null) {
+      sum += items[i].quantity! * items[i].unit_price!
+    }
+  }
+  return sum
 }
 
 export function formatMoney(amount: number, currency = 'EUR'): string {

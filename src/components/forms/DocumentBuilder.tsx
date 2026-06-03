@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
-import { calcTotals, formatMoney, addDays, today } from '@/lib/utils/document'
+import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils/document'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
@@ -241,11 +241,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     discount
   )
 
-const taxNote = taxTreatment === 'eu_reverse_charge'
-    ? (language === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers' : 'VAT liability transfers to the recipient (Reverse Charge)')
-    : taxTreatment === 'non_eu'
-    ? (language === 'de' ? 'Nicht steuerbar gem. § 3a UStG' : 'Not subject to Austrian VAT (§ 3a UStG)')
-    : null
+const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en')
 
   function buildItemsPayload(docId: string) {
     return lines.map((l, i) => ({
@@ -438,9 +434,10 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
   }
 
   async function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = () => resolve((reader.result as string).split(',')[1])
+      reader.onerror = () => reject(new Error('Failed to read PDF blob'))
       reader.readAsDataURL(blob)
     })
   }

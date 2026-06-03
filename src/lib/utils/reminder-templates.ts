@@ -11,23 +11,24 @@ export interface ReminderContext {
   owner: string
 }
 
+// Single-pass replacement prevents chained injection (e.g. a client name
+// containing "{{iban}}" being substituted again in a later pass).
 export function fillTemplate(template: string, ctx: ReminderContext): string {
-  return template
-    .replace(/\{\{invoice_number\}\}/g, ctx.invoiceNumber)
-    .replace(/\{\{client\}\}/g, ctx.clientName)
-    // amount aliases
-    .replace(/\{\{amount\}\}/g, ctx.amount)
-    .replace(/\{\{total\}\}/g, ctx.amount)
-    .replace(/\{\{balance_due\}\}/g, ctx.amount)
-    // date aliases
-    .replace(/\{\{due_date\}\}/g, ctx.dueDate)
-    .replace(/\{\{date\}\}/g, ctx.date)
-    .replace(/\{\{days_overdue\}\}/g, String(ctx.daysOverdue))
-    .replace(/\{\{iban\}\}/g, ctx.iban)
-    // sender aliases
-    .replace(/\{\{sender\}\}/g, ctx.sender)
-    .replace(/\{\{company\}\}/g, ctx.company)
-    .replace(/\{\{owner\}\}/g, ctx.owner)
+  const map: Record<string, string> = {
+    invoice_number: ctx.invoiceNumber,
+    client:         ctx.clientName,
+    amount:         ctx.amount,
+    total:          ctx.amount,
+    balance_due:    ctx.amount,
+    due_date:       ctx.dueDate,
+    date:           ctx.date,
+    days_overdue:   String(ctx.daysOverdue),
+    iban:           ctx.iban,
+    sender:         ctx.sender,
+    company:        ctx.company,
+    owner:          ctx.owner,
+  }
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => map[key] ?? `{{${key}}}`)
 }
 
 export const DEFAULT_SUBJECT_DE = 'Zahlungserinnerung: Rechnung {{invoice_number}}'

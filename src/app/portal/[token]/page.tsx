@@ -1,6 +1,7 @@
+import React from 'react'
 import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/service'
-import { calcTotals, formatMoney, formatDate } from '@/lib/utils/document'
+import { calcTotals, formatMoney, formatDate, calcSectionSubtotal } from '@/lib/utils/document'
 import { Download } from 'lucide-react'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language } from '@/types'
 
@@ -175,18 +176,34 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
                     )
                   }
                   if (lt === 'subtotal') {
-                    let sum = 0
-                    for (let j = i - 1; j >= 0; j--) {
-                      if ((items[j].line_type ?? 'item') === 'subtotal') break
-                      if ((items[j].line_type ?? 'item') === 'item' && items[j].quantity != null && items[j].unit_price != null) {
-                        sum += items[j].quantity! * items[j].unit_price!
-                      }
-                    }
+                    const gross = calcSectionSubtotal(items, i)
+                    const disc = item.discount_type != null && item.discount_value != null
+                      ? item.discount_type === 'percent'
+                        ? gross * (item.discount_value / 100)
+                        : Math.min(item.discount_value, gross)
+                      : 0
+                    const net = gross - disc
                     return (
-                      <tr key={i} className="border-b border-neutral-100 bg-neutral-50">
-                        <td colSpan={3} className="px-4 py-2 text-right text-xs text-neutral-400 uppercase tracking-wide font-medium">Subtotal</td>
-                        <td className="px-4 py-2 text-right font-semibold text-neutral-900">{fmt(sum)}</td>
-                      </tr>
+                      <React.Fragment key={i}>
+                        <tr className="border-b border-neutral-100 bg-neutral-50">
+                          <td colSpan={3} className="px-4 py-2 text-right text-xs text-neutral-400 uppercase tracking-wide font-medium">Subtotal</td>
+                          <td className={`px-4 py-2 text-right font-semibold ${disc > 0 ? 'line-through text-neutral-400' : 'text-neutral-900'}`}>{fmt(gross)}</td>
+                        </tr>
+                        {disc > 0 && (
+                          <>
+                            <tr className="border-b border-neutral-100 bg-neutral-50">
+                              <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-neutral-400">
+                                {item.discount_type === 'percent' ? `Discount (${item.discount_value}%)` : 'Discount'}
+                              </td>
+                              <td className="px-4 py-1.5 text-right text-xs text-neutral-500">−{fmt(disc)}</td>
+                            </tr>
+                            <tr className="border-b border-neutral-200 bg-neutral-50">
+                              <td colSpan={3} className="px-4 py-2 text-right text-xs text-neutral-500 uppercase tracking-wide font-semibold">Net</td>
+                              <td className="px-4 py-2 text-right font-bold text-neutral-900">{fmt(net)}</td>
+                            </tr>
+                          </>
+                        )}
+                      </React.Fragment>
                     )
                   }
 

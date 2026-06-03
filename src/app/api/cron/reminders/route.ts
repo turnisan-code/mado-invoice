@@ -5,7 +5,7 @@ import {
   DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
-import { formatMoney, calcTotals } from '@/lib/utils/document'
+import { formatMoney, calcTotals, getTaxNote } from '@/lib/utils/document'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import React from 'react'
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     const lang = client.language === 'en' ? 'en' : 'de'
     const dueDate = invoice.due_date ?? ''
     const daysOverdue = dueDate
-      ? Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000)
+      ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
       : 0
 
     const emailTotals = calcTotals(invoice.document_items ?? [], [])
@@ -82,11 +82,7 @@ export async function GET(req: NextRequest) {
       const totals = calcTotals(items, [])
       const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
       const invLang = (invoice.language ?? 'de') as Language
-      const taxNote = taxTreatment === 'eu_reverse_charge'
-        ? (invLang === 'de' ? 'Steuerschuldnerschaft des Leistungsempfängers' : 'VAT liability transfers to the recipient (Reverse Charge)')
-        : taxTreatment === 'non_eu'
-        ? (invLang === 'de' ? 'Nicht steuerbar gem. § 3a UStG' : 'Not subject to Austrian VAT (§ 3a UStG)')
-        : null
+      const taxNote = getTaxNote(taxTreatment, invLang)
       const docData = {
         number: invoice.number ?? 'DRAFT',
         date: invoice.date ?? '',
