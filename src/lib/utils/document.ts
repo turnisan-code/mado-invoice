@@ -1,6 +1,13 @@
 import { DocumentTotals, VatRate } from '@/types'
 
-type CalcItem = { line_type?: string | null; quantity: number | null; unit_price: number | null; vat_rate: number | null }
+type CalcItem = {
+  line_type?: string | null
+  quantity: number | null
+  unit_price: number | null
+  vat_rate: number | null
+  discount_type?: string | null
+  discount_value?: number | null
+}
 
 export function calcTotals(
   items: CalcItem[],
@@ -10,16 +17,46 @@ export function calcTotals(
   const vatMap = new Map<VatRate, { base: number; amount: number }>()
   let subtotal = 0
 
-  for (const item of items) {
-    if ((item.line_type ?? 'item') !== 'item') continue
-    if (item.quantity == null || item.unit_price == null || item.vat_rate == null) continue
-    const line = item.quantity * item.unit_price
-    subtotal += line
-    const vatAmt = line * (item.vat_rate / 100)
-    const rate = item.vat_rate as VatRate
-    const existing = vatMap.get(rate) ?? { base: 0, amount: 0 }
-    vatMap.set(rate, { base: existing.base + line, amount: existing.amount + vatAmt })
+  // Process items in sections bounded by 'subtotal' lines.
+  // Each section's items are scaled by the section's own discount before
+  // being added to the global totals.
+  let sectionStart = 0
+
+  function flushSection(end: number, sectionDiscount?: { type: string; value: number } | null) {
+    const sectionItems = items.slice(sectionStart, end).filter(
+      i => (i.line_type ?? 'item') === 'item' && i.quantity != null && i.unit_price != null && i.vat_rate != null
+    )
+    if (!sectionItems.length) return
+
+    const sectionSum = sectionItems.reduce((s, i) => s + i.quantity! * i.unit_price!, 0)
+    let scale = 1
+    if (sectionDiscount && sectionDiscount.value > 0 && sectionSum > 0) {
+      const discAmt = sectionDiscount.type === 'percent'
+        ? sectionSum * (sectionDiscount.value / 100)
+        : Math.min(sectionDiscount.value, sectionSum)
+      scale = (sectionSum - discAmt) / sectionSum
+    }
+
+    for (const item of sectionItems) {
+      const base = item.quantity! * item.unit_price! * scale
+      const rate = item.vat_rate as VatRate
+      subtotal += base
+      const vatAmt = base * (rate / 100)
+      const ex = vatMap.get(rate) ?? { base: 0, amount: 0 }
+      vatMap.set(rate, { base: ex.base + base, amount: ex.amount + vatAmt })
+    }
   }
+
+  for (let i = 0; i < items.length; i++) {
+    if ((items[i].line_type ?? 'item') === 'subtotal') {
+      const sd = items[i].discount_type && items[i].discount_value
+        ? { type: items[i].discount_type!, value: items[i].discount_value! }
+        : null
+      flushSection(i, sd)
+      sectionStart = i + 1
+    }
+  }
+  flushSection(items.length, null) // remaining items after last subtotal
 
   let vat_groups = Array.from(vatMap.entries())
     .map(([rate, v]) => ({ rate, ...v }))
