@@ -1223,25 +1223,46 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
 
           {/* Discount */}
           {discountType ? (
-            <div className="flex items-center justify-between gap-2 text-neutral-500 dark:text-neutral-400">
-              <div className="flex items-center gap-1.5">
-                <span>{language === 'de' ? 'Rabatt' : 'Discount'}</span>
-                <select value={discountType} onChange={e => setDiscountType(e.target.value as 'percent' | 'fixed')}
-                  className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-0.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
-                  <option value="percent">%</option>
-                  <option value="fixed">{currency}</option>
-                </select>
+            <div className="space-y-2 py-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-neutral-500 dark:text-neutral-400 text-xs shrink-0">{language === 'de' ? 'Rabatt' : 'Discount'}</span>
+                {/* % / flat toggle */}
+                <div className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
+                  <button type="button" onClick={() => setDiscountType('percent')}
+                    className={`px-2.5 py-1 transition-colors ${discountType === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                    %
+                  </button>
+                  <button type="button" onClick={() => setDiscountType('fixed')}
+                    className={`px-2.5 py-1 transition-colors ${discountType === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                    {currency}
+                  </button>
+                </div>
                 <input type="number" value={discountValue} min={0} step={discountType === 'percent' ? 1 : 0.01}
                   onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
-                  className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none" />
+                  className="w-20 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                <span className="flex-1 text-right text-neutral-500 dark:text-neutral-400">−{formatMoney(totals.discount_amount, currency)}</span>
                 <button type="button" onClick={() => { setDiscountType(null); setDiscountValue(0) }}
-                  className="text-neutral-300 hover:text-neutral-500"><X size={12} /></button>
+                  className="text-neutral-300 dark:text-neutral-600 hover:text-red-400 transition-colors shrink-0">
+                  <X size={13} />
+                </button>
               </div>
-              <span>−{formatMoney(totals.discount_amount, currency)}</span>
+              {/* Quick % chips */}
+              {discountType === 'percent' && (
+                <div className="flex gap-1.5 justify-end">
+                  {[5, 10, 15, 20, 25].map(p => (
+                    <button key={p} type="button" onClick={() => setDiscountValue(p)}
+                      className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${discountValue === p
+                        ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent'
+                        : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500'}`}>
+                      {p}%
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
-            <button type="button" onClick={() => setDiscountType('percent')}
-              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+            <button type="button" onClick={() => { setDiscountType('percent'); setDiscountValue(0) }}
+              className="w-full text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded-md py-1.5 transition-colors">
               + {language === 'de' ? 'Rabatt hinzufügen' : 'Add discount'}
             </button>
           )}
