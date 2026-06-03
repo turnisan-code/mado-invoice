@@ -287,21 +287,19 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
             </div>
           )}
 
-          {/* Quote accept/decline — only for sent quotes */}
-          {docType === 'quote' && doc.status === 'sent' && (
-            <QuoteActions token={token} lang={lang} />
-          )}
-
-          {/* Download PDF */}
-          <div className="flex justify-end">
+          {/* Bottom action bar */}
+          <div className="flex items-center justify-between gap-4 pt-2">
             <a
               href={`/portal/${token}/pdf`}
               download
-              className="inline-flex items-center gap-2 bg-neutral-900 text-white text-sm font-medium px-4 py-2.5 rounded-lg hover:bg-neutral-700 transition-colors"
+              className="inline-flex items-center gap-2 border border-neutral-200 text-neutral-600 text-sm px-4 py-2.5 rounded-lg hover:bg-neutral-50 transition-colors"
             >
               <Download size={15} />
               {t('download_pdf', lang)}
             </a>
+            {docType === 'quote' && doc.status === 'sent' && (
+              <QuoteActions token={token} lang={lang} />
+            )}
           </div>
 
         </div>
