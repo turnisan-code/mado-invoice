@@ -3,7 +3,7 @@ import { google } from 'googleapis'
 export type { ReminderContext } from './reminder-templates'
 export { fillTemplate, DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from './reminder-templates'
 
-function buildMime({ from, to, subject, body, pdfBase64, filename }: {
+export function buildMime({ from, to, subject, body, pdfBase64, filename }: {
   from: string; to: string; subject: string; body: string
   pdfBase64?: string; filename?: string
 }) {
