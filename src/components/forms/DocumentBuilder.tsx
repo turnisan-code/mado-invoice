@@ -235,6 +235,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       id: l.id, document_id: '', sort_order: 0, line_type: l.line_type, service_date: null,
       description: l.description, quantity: l.quantity, unit: l.unit,
       unit_price: l.unit_price, vat_rate: l.vat_rate, catalogue_item_id: l.catalogue_item_id,
+      discount_type: l.discount_type, discount_value: l.discount_value,
     })),
     doc?.payments,
     discount
