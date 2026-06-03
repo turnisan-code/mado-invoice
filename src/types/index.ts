@@ -147,6 +147,8 @@ export interface DocumentItem {
   unit_price: number | null
   vat_rate: VatRate | null
   catalogue_item_id: string | null
+  discount_type?: 'percent' | 'fixed' | null
+  discount_value?: number | null
 }
 
 export interface Payment {

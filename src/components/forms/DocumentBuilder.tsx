@@ -26,6 +26,8 @@ interface LineItem {
   unit_price: number
   vat_rate: VatRate
   catalogue_item_id: string | null
+  discount_type: 'percent' | 'fixed' | null
+  discount_value: number
 }
 
 interface Props {
@@ -43,11 +45,11 @@ const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 function makeId() { return Math.random().toString(36).slice(2) }
 
 function blankLine(): LineItem {
-  return { id: makeId(), line_type: 'item', description: '', service_date: null, quantity: 1, unit: 'flat', unit_price: 0, vat_rate: 20, catalogue_item_id: null }
+  return { id: makeId(), line_type: 'item', description: '', service_date: null, quantity: 1, unit: 'flat', unit_price: 0, vat_rate: 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
 }
 
 function blankSpecial(type: LineType): LineItem {
-  return { id: makeId(), line_type: type, description: '', service_date: null, quantity: 0, unit: 'flat', unit_price: 0, vat_rate: 0, catalogue_item_id: null }
+  return { id: makeId(), line_type: type, description: '', service_date: null, quantity: 0, unit: 'flat', unit_price: 0, vat_rate: 0, catalogue_item_id: null, discount_type: null, discount_value: 0 }
 }
 
 function calcSectionSubtotal(lines: LineItem[], upToIdx: number): number {
@@ -99,6 +101,8 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
           unit_price: i.unit_price ?? 0,
           vat_rate: (i.vat_rate ?? 20) as VatRate,
           catalogue_item_id: i.catalogue_item_id,
+          discount_type: (i.discount_type as 'percent' | 'fixed' | null) ?? null,
+          discount_value: i.discount_value ?? 0,
         }))
       : [blankLine()]
   )
@@ -254,6 +258,8 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
       unit_price: l.line_type === 'item' ? l.unit_price : null,
       vat_rate: l.line_type === 'item' ? l.vat_rate : null,
       catalogue_item_id: l.line_type === 'item' ? l.catalogue_item_id : null,
+      discount_type: l.line_type === 'subtotal' ? (l.discount_type || null) : null,
+      discount_value: l.line_type === 'subtotal' ? (l.discount_value || null) : null,
     }))
   }
 
@@ -856,13 +862,57 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
             }
 
             if (line.line_type === 'subtotal') {
-              const amount = calcSectionSubtotal(lines, idx)
+              const gross = calcSectionSubtotal(lines, idx)
+              const discAmt = line.discount_type && line.discount_value > 0
+                ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
+                : 0
+              const net = gross - discAmt
               return (
                 <div key={line.id} className="flex items-center gap-2 py-1">
                   <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
-                  <div className="flex-1 flex justify-end items-center gap-3 pr-1">
-                    <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
-                    <span className="text-sm font-medium">{formatMoney(amount, currency)}</span>
+                  <div className="flex-1 space-y-1.5 pr-1">
+                    <div className="flex justify-end items-center gap-3">
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
+                      <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-400 dark:text-neutral-500' : ''}`}>{formatMoney(gross, currency)}</span>
+                    </div>
+                    {/* Discount controls */}
+                    {line.discount_type ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent' })}
+                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>%</button>
+                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'fixed' })}
+                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>{currency}</button>
+                          </div>
+                          <input type="number" value={line.discount_value} min={0} step={line.discount_type === 'percent' ? 1 : 0.01}
+                            onChange={e => updateLine(line.id, { discount_value: parseFloat(e.target.value) || 0 })}
+                            className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 text-right" />
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-20 text-right">−{formatMoney(discAmt, currency)}</span>
+                          <button type="button" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })}
+                            className="text-neutral-300 hover:text-red-400 transition-colors"><X size={12} /></button>
+                        </div>
+                        {line.discount_type === 'percent' && (
+                          <div className="flex gap-1 justify-end">
+                            {[5, 10, 15, 20, 25].map(p => (
+                              <button key={p} type="button" onClick={() => updateLine(line.id, { discount_value: p })}
+                                className={`text-xs px-1.5 py-0.5 rounded-full border transition-colors ${line.discount_value === p ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:border-neutral-400'}`}>{p}%</button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex justify-end gap-3">
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Net</span>
+                          <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-end">
+                        <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
+                          className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 rounded px-2 py-0.5 transition-colors">
+                          + {language === 'de' ? 'Rabatt' : 'Discount'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {deleteBtn(line.id)}
                 </div>
@@ -1067,13 +1117,57 @@ const taxNote = taxTreatment === 'eu_reverse_charge'
             }
 
             if (line.line_type === 'subtotal') {
-              const amount = calcSectionSubtotal(lines, idx)
+              const gross = calcSectionSubtotal(lines, idx)
+              const discAmt = line.discount_type && line.discount_value > 0
+                ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
+                : 0
+              const net = gross - discAmt
               return (
-                <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
+                <div key={line.id} {...dragProps} className={`flex items-start gap-2 py-1.5 ${dragOverClass}`}>
                   {handle}
-                  <div className="flex-1 flex justify-end items-center gap-3 pr-1">
-                    <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
-                    <span className="text-sm font-medium">{formatMoney(amount, currency)}</span>
+                  <div className="flex-1 space-y-1.5 pr-1">
+                    <div className="flex justify-end items-center gap-3">
+                      <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
+                      <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-400 dark:text-neutral-500' : ''}`}>{formatMoney(gross, currency)}</span>
+                    </div>
+                    {/* Discount controls */}
+                    {line.discount_type ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-end gap-2">
+                          <div className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent' })}
+                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>%</button>
+                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'fixed' })}
+                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>{currency}</button>
+                          </div>
+                          <input type="number" value={line.discount_value} min={0} step={line.discount_type === 'percent' ? 1 : 0.01}
+                            onChange={e => updateLine(line.id, { discount_value: parseFloat(e.target.value) || 0 })}
+                            className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 text-right" />
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-24 text-right">−{formatMoney(discAmt, currency)}</span>
+                          <button type="button" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })}
+                            className="text-neutral-300 hover:text-red-400 transition-colors"><X size={12} /></button>
+                        </div>
+                        {line.discount_type === 'percent' && (
+                          <div className="flex gap-1 justify-end">
+                            {[5, 10, 15, 20, 25].map(p => (
+                              <button key={p} type="button" onClick={() => updateLine(line.id, { discount_value: p })}
+                                className={`text-xs px-1.5 py-0.5 rounded-full border transition-colors ${line.discount_value === p ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:border-neutral-400'}`}>{p}%</button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex justify-end gap-3">
+                          <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Net</span>
+                          <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-end">
+                        <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
+                          className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 rounded px-2 py-0.5 transition-colors">
+                          + {language === 'de' ? 'Rabatt' : 'Discount'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {deleteBtn(line.id)}
                 </div>

@@ -96,6 +96,8 @@ interface DocItem {
   unit: Unit | null
   unit_price: number | null
   vat_rate: VatRate | null
+  discount_type?: 'percent' | 'fixed' | null
+  discount_value?: number | null
 }
 
 interface DocData {
@@ -222,10 +224,31 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           }
 
           if (lt === 'subtotal') {
+            const gross = calcSectionSubtotal(doc.items, i)
+            const discAmt = item.discount_type && item.discount_value && item.discount_value > 0
+              ? item.discount_type === 'percent' ? gross * (item.discount_value / 100) : Math.min(item.discount_value, gross)
+              : 0
+            const net = gross - discAmt
             return (
-              <View key={i} style={s.subtotalRow}>
-                <Text style={s.subtotalLabel}>Subtotal</Text>
-                <Text style={s.subtotalValue}>{fmt(calcSectionSubtotal(doc.items, i))}</Text>
+              <View key={i}>
+                <View style={s.subtotalRow}>
+                  <Text style={s.subtotalLabel}>Subtotal</Text>
+                  <Text style={[s.subtotalValue, discAmt > 0 ? { color: '#9b9b9b', textDecoration: 'line-through' } as never : {}]}>{fmt(gross)}</Text>
+                </View>
+                {discAmt > 0 && (
+                  <>
+                    <View style={s.subtotalRow}>
+                      <Text style={s.subtotalLabel}>
+                        {item.discount_type === 'percent' ? `${L('discount', lang)} (${item.discount_value}%)` : L('discount', lang)}
+                      </Text>
+                      <Text style={s.subtotalValue}>−{fmt(discAmt)}</Text>
+                    </View>
+                    <View style={s.subtotalRow}>
+                      <Text style={[s.subtotalLabel, { fontFamily: 'Helvetica-Bold' }]}>Net</Text>
+                      <Text style={[s.subtotalValue, { fontFamily: 'Helvetica-Bold' }]}>{fmt(net)}</Text>
+                    </View>
+                  </>
+                )}
               </View>
             )
           }
