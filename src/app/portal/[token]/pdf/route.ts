@@ -45,7 +45,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     }
   }
 
-  const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang)
+  const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings as Settings)
 
   const docData = {
     number: doc.number ?? '',

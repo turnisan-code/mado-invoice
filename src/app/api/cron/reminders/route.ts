@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
       const totals = calcTotals(items, [])
       const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
       const invLang = (invoice.language ?? 'de') as Language
-      const taxNote = getTaxNote(taxTreatment, invLang)
+      const taxNote = getTaxNote(taxTreatment, invLang, settings as Settings)
       const docData = {
         number: invoice.number ?? 'DRAFT',
         date: invoice.date ?? '',
