@@ -241,7 +241,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     discount
   )
 
-const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en')
+const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   function buildItemsPayload(docId: string) {
     return lines.map((l, i) => ({

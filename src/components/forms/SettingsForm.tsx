@@ -223,6 +223,14 @@ export default function SettingsForm({ settings }: Props) {
   const [creditNoteFooterDe, setCreditNoteFooterDe] = useState(settings?.credit_note_footer_de ?? '')
   const [creditNoteFooterEn, setCreditNoteFooterEn] = useState(settings?.credit_note_footer_en ?? '')
 
+  // ── Tax note state ───────────────────────────────────────────────────────────
+  const [taxNotes, setTaxNotes] = useState({
+    reverse_charge_de: settings?.tax_note_reverse_charge_de ?? '',
+    reverse_charge_en: settings?.tax_note_reverse_charge_en ?? '',
+    non_eu_de: settings?.tax_note_non_eu_de ?? '',
+    non_eu_en: settings?.tax_note_non_eu_en ?? '',
+  })
+
   // ── Email templates state ────────────────────────────────────────────────────
   const [emailTpl, setEmailTpl] = useState({
     invoice:     { subject_de: settings?.email_subject_invoice_de ?? '',     body_de: settings?.email_body_invoice_de ?? '',     subject_en: settings?.email_subject_invoice_en ?? '',     body_en: settings?.email_body_invoice_en ?? '' },
@@ -380,6 +388,21 @@ export default function SettingsForm({ settings }: Props) {
     if (error) { toast.error(error.message); return }
     clearDirty('footer')
     toast.success('Footer saved.')
+  }
+
+  async function saveTaxNotes() {
+    if (!settings) return
+    setSaving('taxnotes')
+    const { error } = await supabase.from('settings').update({
+      tax_note_reverse_charge_de: taxNotes.reverse_charge_de || null,
+      tax_note_reverse_charge_en: taxNotes.reverse_charge_en || null,
+      tax_note_non_eu_de: taxNotes.non_eu_de || null,
+      tax_note_non_eu_en: taxNotes.non_eu_en || null,
+    }).eq('id', settings.id)
+    setSaving(null)
+    if (error) { toast.error(error.message); return }
+    clearDirty('taxnotes')
+    toast.success('Tax notes saved.')
   }
 
   async function saveTemplates() {
@@ -931,6 +954,67 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             )}
+          </SectionCard>
+
+          <SectionCard
+            title="Tax Notes"
+            description="Text printed below the totals when reverse charge or non-EU tax treatment applies. Leave blank to use the default."
+            dirty={!!dirty.taxnotes}
+            saving={saving === 'taxnotes'}
+            onSave={saveTaxNotes}
+          >
+            <div className="space-y-4">
+              <div>
+                <p className={`${lbl} mb-2`}>Reverse Charge (EU)</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className={lbl}>Deutsch</label>
+                    <input
+                      type="text"
+                      className={inp}
+                      placeholder="Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)"
+                      value={taxNotes.reverse_charge_de}
+                      onChange={e => { setTaxNotes(n => ({ ...n, reverse_charge_de: e.target.value })); markDirty('taxnotes') }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={lbl}>English</label>
+                    <input
+                      type="text"
+                      className={inp}
+                      placeholder="Reverse charge — VAT to be accounted for by the recipient"
+                      value={taxNotes.reverse_charge_en}
+                      onChange={e => { setTaxNotes(n => ({ ...n, reverse_charge_en: e.target.value })); markDirty('taxnotes') }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <p className={`${lbl} mb-2`}>Non-EU (not taxable)</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className={lbl}>Deutsch</label>
+                    <input
+                      type="text"
+                      className={inp}
+                      placeholder="Nicht steuerbar (Leistungsort außerhalb der EU)"
+                      value={taxNotes.non_eu_de}
+                      onChange={e => { setTaxNotes(n => ({ ...n, non_eu_de: e.target.value })); markDirty('taxnotes') }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={lbl}>English</label>
+                    <input
+                      type="text"
+                      className={inp}
+                      placeholder="Tax liability shifts to the recipient of the services."
+                      value={taxNotes.non_eu_en}
+                      onChange={e => { setTaxNotes(n => ({ ...n, non_eu_en: e.target.value })); markDirty('taxnotes') }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
           </SectionCard>
         </div>}
 

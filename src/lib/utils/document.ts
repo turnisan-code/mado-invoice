@@ -1,4 +1,4 @@
-import { DocumentTotals, VatRate } from '@/types'
+import { DocumentTotals, Settings, VatRate } from '@/types'
 
 type CalcItem = {
   line_type?: string | null
@@ -78,16 +78,18 @@ export function calcTotals(
   return { subtotal, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: total - total_paid }
 }
 
-export function getTaxNote(taxTreatment: string, lang: 'de' | 'en'): string | null {
+type TaxNoteSettings = Pick<Settings, 'tax_note_reverse_charge_de' | 'tax_note_reverse_charge_en' | 'tax_note_non_eu_de' | 'tax_note_non_eu_en'>
+
+export function getTaxNote(taxTreatment: string, lang: 'de' | 'en', settings?: TaxNoteSettings | null): string | null {
   if (taxTreatment === 'eu_reverse_charge') {
     return lang === 'de'
-      ? 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)'
-      : 'Reverse charge — VAT to be accounted for by the recipient'
+      ? (settings?.tax_note_reverse_charge_de || 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)')
+      : (settings?.tax_note_reverse_charge_en || 'Reverse charge — VAT to be accounted for by the recipient')
   }
   if (taxTreatment === 'non_eu') {
     return lang === 'de'
-      ? 'Nicht steuerbar (Leistungsort außerhalb der EU)'
-      : 'Not taxable — place of supply outside the EU'
+      ? (settings?.tax_note_non_eu_de || 'Nicht steuerbar (Leistungsort außerhalb der EU)')
+      : (settings?.tax_note_non_eu_en || 'Tax liability shifts to the recipient of the services.')
   }
   return null
 }

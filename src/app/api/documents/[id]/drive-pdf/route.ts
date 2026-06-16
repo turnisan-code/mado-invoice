@@ -48,7 +48,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     } catch { /* best-effort */ }
   }
 
-  const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang)
+  const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings as Settings)
 
   const docData = {
     number: doc.number ?? '',

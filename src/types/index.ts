@@ -42,6 +42,10 @@ export interface Settings {
   quote_footer_en: string | null
   credit_note_footer_de: string | null
   credit_note_footer_en: string | null
+  tax_note_reverse_charge_de: string | null
+  tax_note_reverse_charge_en: string | null
+  tax_note_non_eu_de: string | null
+  tax_note_non_eu_en: string | null
   gmail_email: string | null
   gmail_access_token: string | null
   gmail_refresh_token: string | null
