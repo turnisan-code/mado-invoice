@@ -115,7 +115,7 @@ export default async function DashboardPage() {
       subColor: overdue.length > 0 ? 'text-red-500' : undefined,
       icon: Wallet,
       color: 'text-amber-600 bg-amber-50 dark:bg-amber-950',
-      href: '/invoices?status=sent',
+      href: '/invoices?status=outstanding',
     },
     {
       label: 'Overdue',

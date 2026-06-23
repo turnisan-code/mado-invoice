@@ -15,7 +15,7 @@ const statusColor: Record<string, string> = {
   cancelled: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
 }
 
-const STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled']
+const STATUSES = ['outstanding', 'draft', 'sent', 'paid', 'overdue', 'cancelled']
 
 type SortKey = 'number' | 'client' | 'date' | 'due_date' | 'total' | 'status'
 type SortDir = 'asc' | 'desc'
@@ -70,10 +70,10 @@ function exportCSV(invoices: Invoice[]) {
   URL.revokeObjectURL(url)
 }
 
-export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
+export default function InvoiceList({ invoices, initialStatus }: { invoices: Invoice[]; initialStatus?: string }) {
   const router = useRouter()
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState(initialStatus ?? '')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'date', dir: 'desc' })
   const [page, setPage] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -87,7 +87,8 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
   const filtered = useMemo(() => {
     let list = invoices
-    if (status) list = list.filter(d => d.status === status)
+    if (status === 'outstanding') list = list.filter(d => d.status === 'sent' || d.status === 'overdue')
+    else if (status) list = list.filter(d => d.status === status)
     if (q) {
       const lq = q.toLowerCase()
       list = list.filter(d =>
@@ -220,7 +221,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
         >
           <option value="">All statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          {STATUSES.map(s => <option key={s} value={s}>{s === 'outstanding' ? 'Outstanding (sent + overdue)' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
         </select>
       </div>
 
