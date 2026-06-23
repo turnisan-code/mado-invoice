@@ -264,6 +264,7 @@ export default function SettingsForm({ settings }: Props) {
   } | null>(null)
   const [loadingAccounts, setLoadingAccounts] = useState(false)
   const [savingBookamat, setSavingBookamat] = useState(false)
+  const [editingBookamat, setEditingBookamat] = useState(false)
 
   // ── Last focused ref (for variable insertion) ────────────────────────────────
   const lastFocused = useRef<{ el: HTMLTextAreaElement | HTMLInputElement; setter: (v: string) => void } | null>(null)
@@ -490,6 +491,7 @@ export default function SettingsForm({ settings }: Props) {
     setSavingBookamat(false)
     if (error) { toast.error(error.message); return }
     setBookamatAccounts(null)
+    setEditingBookamat(false)
     toast.success('Bookamat connected.')
   }
 
@@ -1214,7 +1216,7 @@ export default function SettingsForm({ settings }: Props) {
             title="Bookamat"
             description="Automatically sync paid invoices to your Bookamat bookkeeping."
           >
-            {bookamatUsername && !bookamatAccounts ? (
+            {bookamatUsername && !bookamatAccounts && !editingBookamat ? (
               <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
                 <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
                   <CheckCircle size={14} />
@@ -1223,11 +1225,10 @@ export default function SettingsForm({ settings }: Props) {
                 </span>
                 <button
                   type="button"
-                  onClick={() => loadBookamatAccounts()}
-                  disabled={loadingAccounts}
+                  onClick={() => setEditingBookamat(true)}
                   className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
                 >
-                  {loadingAccounts ? 'Loading…' : 'Change'}
+                  Change
                 </button>
               </div>
             ) : (
