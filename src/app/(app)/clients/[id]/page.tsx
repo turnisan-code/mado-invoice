@@ -56,7 +56,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     .reduce((s, d) => s + calcTotals(d.document_items ?? [], d.payments ?? []).balance_due, 0)
   const invoiceCount = allDocs.filter(d => d.type === 'invoice').length
 
-  const initials = client.name.split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
+  const displayName = client.name || client.company || ''
+  const initials = displayName.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
 
   return (
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
@@ -70,8 +71,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <span className="text-sm font-semibold text-white dark:text-neutral-900">{initials}</span>
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold leading-tight">{client.name}</h1>
-            {client.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{client.company}</p>}
+            <h1 className="text-xl font-semibold leading-tight">{client.company || client.name}</h1>
+            {client.company && client.name && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{client.name}</p>}
           </div>
           <span className={`text-xs px-2.5 py-1 rounded-full font-medium ml-auto shrink-0 ${statusColor[client.status] ?? 'text-neutral-500 bg-neutral-100'}`}>
             {client.status}

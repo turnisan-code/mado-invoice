@@ -185,7 +185,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         <View style={s.billedSection}>
           <Text style={s.billedLabel}>{L('bill_to', lang)}</Text>
           <Text style={s.billedText}>
-            {client.company ? `${client.company}\n` : ''}{client.name}{'\n'}
+            {client.company ? `${client.company}\n` : ''}{client.name ? `${client.name}\n` : ''}
             {client.address_line1}{'\n'}
             {client.address_line2 ? `${client.address_line2}\n` : ''}
             {client.zip} {client.city}{'\n'}

@@ -74,12 +74,18 @@ export default function ClientForm({ client, onSaved }: Props) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    setSaving(true)
     const fd = new FormData(e.currentTarget)
+    const nameVal = (fd.get('name') as string).trim()
+    const companyVal = (fd.get('company') as string).trim()
+    if (!nameVal && !companyVal) {
+      toast.error('Enter a name or company name.')
+      return
+    }
+    setSaving(true)
     const tagsRaw = (fd.get('tags') as string).trim()
     const payload = {
-      name: fd.get('name') as string,
-      company: (fd.get('company') as string) || null,
+      name: nameVal,
+      company: companyVal || null,
       address_line1: fd.get('address_line1') as string,
       address_line2: (fd.get('address_line2') as string) || null,
       zip: fd.get('zip') as string,
@@ -114,7 +120,7 @@ export default function ClientForm({ client, onSaved }: Props) {
 
   async function handleDelete() {
     if (!client) return
-    if (!confirm(`Delete ${client.name}? This cannot be undone.`)) return
+    if (!confirm(`Delete ${client.company ?? client.name}? This cannot be undone.`)) return
     setDeleting(true)
     const { error } = await supabase.from('clients').delete().eq('id', client.id)
     if (error) { toast.error(error.message); setDeleting(false); return }
@@ -125,9 +131,10 @@ export default function ClientForm({ client, onSaved }: Props) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Name *" name="name" defaultValue={client?.name} required />
-        <Field label="Company" name="company" defaultValue={client?.company ?? ''} />
+        <Field label="Name" name="name" defaultValue={client?.name} placeholder="Contact name" />
+        <Field label="Company" name="company" defaultValue={client?.company ?? ''} placeholder="Company name" />
       </div>
+      <p className="text-xs text-neutral-400 dark:text-neutral-500 -mt-2">At least one of Name or Company is required.</p>
       <Field label="Address" name="address_line1" defaultValue={client?.address_line1} />
       <Field label="Address line 2" name="address_line2" defaultValue={client?.address_line2 ?? ''} />
       <div className="grid grid-cols-3 gap-3">

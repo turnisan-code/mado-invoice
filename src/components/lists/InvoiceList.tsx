@@ -85,9 +85,12 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
   }
 
+  const today = new Date().toISOString().split('T')[0]
+
   const filtered = useMemo(() => {
     let list = invoices
     if (status === 'outstanding') list = list.filter(d => d.status === 'sent' || d.status === 'overdue')
+    else if (status === 'overdue') list = list.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < today))
     else if (status) list = list.filter(d => d.status === status)
     if (q) {
       const lq = q.toLowerCase()

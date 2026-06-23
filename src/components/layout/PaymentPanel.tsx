@@ -191,38 +191,42 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
       )}
 
       {!fullyPaid && (
-        <div className="flex gap-2 pt-1">
-          <Input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-            className="text-sm w-36 shrink-0"
-          />
-          <Input
-            type="number"
-            placeholder={`Amount (${currency})`}
-            value={amount}
-            onChange={e => setAmount(e.target.value)}
-            className="text-sm w-36 shrink-0"
-            step="0.01"
-            min="0"
-          />
-          <Input
-            placeholder="Note (optional)"
-            value={note}
-            onChange={e => setNote(e.target.value)}
-            className="text-sm flex-1"
-          />
-          <Button
-            type="button"
-            onClick={addPayment}
-            disabled={saving}
-            size="sm"
-            className="shrink-0 flex items-center gap-1.5"
-          >
-            <Plus size={13} />
-            {saving ? 'Saving…' : 'Add payment'}
-          </Button>
+        <div className="space-y-2 pt-1">
+          <div className="flex gap-2">
+            <Input
+              type="date"
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              className="text-sm flex-1"
+            />
+            <Input
+              type="number"
+              placeholder={`Amount (${currency})`}
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="text-sm flex-1"
+              step="0.01"
+              min="0"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Note (optional)"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              className="text-sm flex-1"
+            />
+            <Button
+              type="button"
+              onClick={addPayment}
+              disabled={saving}
+              size="sm"
+              className="shrink-0 flex items-center gap-1.5"
+            >
+              <Plus size={13} />
+              {saving ? 'Saving…' : 'Add'}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -246,7 +250,7 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
             <button
               type="button"
               onClick={() => setShowBookamatPrompt(true)}
-              className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+              className="text-xs font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors flex items-center gap-1"
             >
               Sync to Bookamat →
             </button>

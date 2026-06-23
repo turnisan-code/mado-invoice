@@ -113,7 +113,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-2">{t('billed_to', lang)}</div>
               <div className="text-sm text-neutral-700 space-y-0.5">
                 {client.company && <div className="font-medium">{client.company}</div>}
-                <div className={client.company ? '' : 'font-medium'}>{client.name}</div>
+                {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
                 <div>{client.address_line1}</div>
                 {client.address_line2 && <div>{client.address_line2}</div>}
                 <div>{client.zip} {client.city}</div>
