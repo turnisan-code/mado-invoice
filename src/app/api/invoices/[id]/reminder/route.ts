@@ -38,7 +38,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
     : 0
 
-  const totals = calcTotals(invoice.document_items ?? [], [])
+  const docDiscount = invoice.discount_type && invoice.discount_value
+    ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
+    : null
+  const totals = calcTotals(invoice.document_items ?? [], [], docDiscount, invoice.tax_treatment)
 
   const ctx = {
     invoiceNumber: invoice.number ?? 'Draft',

@@ -25,7 +25,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   const payments = doc.payments ?? []
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments }
-  const totals = calcTotals(doc.document_items ?? [], payments)
+  const totals = calcTotals(
+    doc.document_items ?? [],
+    payments,
+    doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
+    doc.tax_treatment,
+  )
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">

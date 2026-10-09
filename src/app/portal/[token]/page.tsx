@@ -75,7 +75,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const items = (doc.document_items ?? []) as DocumentItem[]
   const payments = (doc.payments ?? []) as Payment[]
   const lang = (doc.language ?? 'de') as Language
-  const totals = calcTotals(items, payments, doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null)
+  const totals = calcTotals(items, payments, doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null, doc.tax_treatment)
   const fmt = (n: number) => formatMoney(n, doc.currency ?? 'EUR')
   const docType = doc.type as DocumentType
 
