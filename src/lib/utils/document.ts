@@ -12,8 +12,11 @@ type CalcItem = {
 export function calcTotals(
   items: CalcItem[],
   payments: { amount: number }[] = [],
-  discount?: { type: 'percent' | 'fixed'; value: number } | null
+  discount?: { type: 'percent' | 'fixed'; value: number } | null,
+  taxTreatment?: string | null
 ): DocumentTotals {
+  // Reverse charge / non-EU: lines keep their vat_rate, but no VAT is charged
+  const vatApplies = !taxTreatment || taxTreatment === 'at_vat'
   const vatMap = new Map<VatRate, { base: number; amount: number }>()
   let subtotal = 0
 
@@ -39,7 +42,7 @@ export function calcTotals(
 
     for (const item of sectionItems) {
       const base = item.quantity! * item.unit_price! * scale
-      const rate = item.vat_rate as VatRate
+      const rate: VatRate = vatApplies ? (item.vat_rate as VatRate) : 0
       subtotal += base
       const vatAmt = base * (rate / 100)
       const ex = vatMap.get(rate) ?? { base: 0, amount: 0 }

@@ -238,7 +238,8 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
       discount_type: l.discount_type, discount_value: l.discount_value,
     })),
     doc?.payments,
-    discount
+    discount,
+    taxTreatment
   )
 
 const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
@@ -1359,7 +1360,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             </button>
           )}
 
-          {totals.vat_groups.map(g => (
+          {taxTreatment === 'at_vat' && totals.vat_groups.map(g => (
             <div key={g.rate} className="flex justify-between text-neutral-500 dark:text-neutral-400">
               <span>USt. {g.rate}%</span>
               <span>{formatMoney(g.amount, currency)}</span>

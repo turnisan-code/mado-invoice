@@ -19,7 +19,7 @@ export default async function DashboardPage() {
   chartCutoff.setMonth(chartCutoff.getMonth() - 13)
   const chartCutoffStr = chartCutoff.toISOString().split('T')[0]
 
-  const itemSelect = 'id, number, status, date, due_date, currency, clients(name), document_items(line_type, quantity, unit_price, vat_rate), payments(amount, date)'
+  const itemSelect = 'id, number, status, date, due_date, currency, tax_treatment, discount_type, discount_value, clients(name), document_items(line_type, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, date)'
 
   const [{ data: activeInvoices }, { data: paidInvoices }, { data: quotes }] = await Promise.all([
     // Open/overdue invoices — no date cap needed, these are currently active
@@ -48,11 +48,14 @@ export default async function DashboardPage() {
   const active = activeInvoices ?? []
   const paid = paidInvoices ?? []
 
-  const getTotal = (doc: typeof active[0]) =>
-    calcTotals(doc.document_items ?? [], doc.payments ?? []).total
-
-  const getPaid = (doc: typeof paid[0]) =>
-    calcTotals(doc.document_items ?? [], doc.payments ?? []).total_paid
+  const docTotals = (doc: typeof active[0]) => calcTotals(
+    doc.document_items ?? [],
+    doc.payments ?? [],
+    doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
+    doc.tax_treatment,
+  )
+  const getTotal = (doc: typeof active[0]) => docTotals(doc).total
+  const getPaid = (doc: typeof paid[0]) => docTotals(doc).total_paid
 
   const open = active.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
   const overdue = active.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
@@ -229,7 +232,7 @@ export default async function DashboardPage() {
               <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">No paid invoices yet.</p>
             )}
             {recentPaid.map((inv) => {
-              const totals = calcTotals(inv.document_items ?? [], inv.payments ?? [])
+              const totals = docTotals(inv)
               const clientName = (inv.clients as unknown as { name: string } | null)?.name
               const lastPayment = [...(inv.payments ?? [])].sort((a, b) => b.date > a.date ? 1 : -1)[0]
               return (
