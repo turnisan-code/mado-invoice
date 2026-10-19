@@ -590,7 +590,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       : `${typeLabel[type].en} ${num} – ${settings.company_name}`
     const defaultBody = lang === 'de'
       ? `Guten Tag,\n\nanbei übermittle ich Ihnen ${typeLabel[type].de} ${num}.\n\nBei Fragen stehe ich Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen\n${settings.owner_name}`
-      : `Dear ${client.name},\n\nPlease find attached ${typeLabel[type].en} ${num}.\n\nDo not hesitate to contact me if you have any questions.\n\nKind regards,\n${settings.owner_name}`
+      : `Dear ${client.name || client.company},\n\nPlease find attached ${typeLabel[type].en} ${num}.\n\nDo not hesitate to contact me if you have any questions.\n\nKind regards,\n${settings.owner_name}`
 
     const subject = settings[subjectKey] ? sub(settings[subjectKey] as string) : defaultSubject
     const body    = settings[bodyKey]    ? sub(settings[bodyKey]    as string) : defaultBody
@@ -802,8 +802,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <select value={clientId} onChange={e => handleClientChange(e.target.value)}
             className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
             <option value="">Select client…</option>
-            {clients.sort((a, b) => a.name.localeCompare(b.name)).map(c => (
-              <option key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ''}</option>
+            {clients.sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)).map(c => (
+              <option key={c.id} value={c.id}>{c.company && c.name ? `${c.company} (${c.name})` : c.company || c.name}</option>
             ))}
           </select>
         </div>

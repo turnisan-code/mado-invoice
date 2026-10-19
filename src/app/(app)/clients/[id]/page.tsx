@@ -40,27 +40,34 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
   if (!client) notFound()
 
-  const { data: documents } = await supabase
-    .from('documents')
-    .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
-    .eq('client_id', id)
-    .order('date', { ascending: false })
-    .limit(50)
+  // The history list shows the 50 latest documents; the stats aggregate every invoice.
+  const [{ data: documents }, { data: invoices }] = await Promise.all([
+    supabase
+      .from('documents')
+      .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
+      .eq('client_id', id)
+      .order('date', { ascending: false })
+      .limit(50),
+    supabase
+      .from('documents')
+      .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)')
+      .eq('client_id', id)
+      .eq('type', 'invoice'),
+  ])
 
   const allDocs = documents ?? []
-  const docTotals = (d: (typeof allDocs)[number]) => calcTotals(
+  const allInvoices = invoices ?? []
+  const docTotals = (d: (typeof allInvoices)[number]) => calcTotals(
     d.document_items ?? [],
     d.payments ?? [],
     d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
     d.tax_treatment,
   )
-  const totalRevenue = allDocs
-    .filter(d => d.type === 'invoice')
-    .reduce((s, d) => s + docTotals(d).total_paid, 0)
-  const openBalance = allDocs
-    .filter(d => d.type === 'invoice' && (d.status === 'sent' || d.status === 'overdue'))
+  const totalRevenue = allInvoices.reduce((s, d) => s + docTotals(d).total_paid, 0)
+  const openBalance = allInvoices
+    .filter(d => d.status === 'sent' || d.status === 'overdue')
     .reduce((s, d) => s + docTotals(d).balance_due, 0)
-  const invoiceCount = allDocs.filter(d => d.type === 'invoice').length
+  const invoiceCount = allInvoices.length
 
   const displayName = client.name || client.company || ''
   const initials = displayName.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()

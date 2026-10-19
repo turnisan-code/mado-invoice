@@ -61,7 +61,7 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
     }
     return [...list].sort((a, b) => {
       let av = '', bv = ''
-      if (sort.key === 'name') { av = a.name; bv = b.name }
+      if (sort.key === 'name') { av = a.name || a.company || ''; bv = b.name || b.company || '' }
       else if (sort.key === 'company') { av = a.company ?? ''; bv = b.company ?? '' }
       else if (sort.key === 'country') { av = a.country ?? ''; bv = b.country ?? '' }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
@@ -132,8 +132,8 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
               className="flex items-center justify-between px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
             >
               <div className="min-w-0">
-                <p className="font-medium text-sm">{c.name}</p>
-                {c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
+                <p className="font-medium text-sm">{c.name || c.company}</p>
+                {c.name && c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
                 <div className="flex items-center gap-2 mt-1">
                   {c.tags.slice(0, 2).map(t => (
                     <span key={t} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{t}</span>
@@ -185,7 +185,7 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
             {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(c => (
               <tr key={c.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <td className="px-4 py-3">
-                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{c.name}</Link>
+                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{c.name || c.company}</Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.country ?? '—'}</td>
