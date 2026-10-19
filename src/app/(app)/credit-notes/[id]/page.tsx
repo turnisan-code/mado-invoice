@@ -5,7 +5,9 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
+import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import { toPublicSettings } from '@/lib/public-settings'
+import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -34,13 +36,17 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           <Link href="/credit-notes" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">
             <ArrowLeft size={16} />
           </Link>
-          <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+            {doc.issued_at && <p className="text-xs text-neutral-400 dark:text-neutral-500">Issued {formatDate(doc.issued_at)}</p>}
+          </div>
           {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">Storno zu {reference.number}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} />}
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
+          {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
           <DuplicateDocumentButton docId={doc.id} docType="credit_note" backTo="/credit-notes" />
           <DeleteDocumentButton id={doc.id} backTo="/credit-notes" docNumber={doc.number} docType="credit_note" />
         </div>

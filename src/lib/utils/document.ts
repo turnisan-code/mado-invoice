@@ -145,7 +145,7 @@ export function formatDate(date: string, lang: 'de' | 'en' = 'de'): string {
   const d = new Date(date)
   if (isNaN(d.getTime())) return date
   return new Intl.DateTimeFormat(lang === 'de' ? 'de-AT' : 'en-GB', {
-    day: '2-digit', month: '2-digit', year: 'numeric'
+    timeZone: 'Europe/Vienna', day: '2-digit', month: '2-digit', year: 'numeric'
   }).format(d)
 }
 
