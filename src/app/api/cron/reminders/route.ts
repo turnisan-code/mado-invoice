@@ -13,6 +13,8 @@ import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import React from 'react'
 import type { Settings, Client, TaxTreatment, Language, Currency } from '@/types'
+import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
+import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
 
 export const maxDuration = 60
 
@@ -48,7 +50,9 @@ export async function GET(req: NextRequest) {
   if (!invoices?.length) return NextResponse.json({ sent: 0, message: 'No overdue invoices to remind' })
 
   const todayDate = new Date(today())
+  const auth = getAuthorizedGoogle(settings, supabase)
   let sent = 0
+  let reauth = false
   const errors: string[] = []
 
   for (const invoice of invoices) {
@@ -158,34 +162,34 @@ export async function GET(req: NextRequest) {
 
     try {
       await sendReminderEmail({
-        accessToken: settings.gmail_access_token!,
-        refreshToken: settings.gmail_refresh_token!,
-        tokenExpiry: settings.gmail_token_expiry,
-        from: settings.gmail_email!,
+        auth,
+        from: settings.gmail_email,
         to: client.email,
         subject: fillTemplate(subjectTpl, ctx),
         body: fillTemplate(bodyTpl, ctx),
         pdfBase64,
         filename,
-        onTokenRefresh: async (tokens) => {
-          await supabase.from('settings').update({
-            gmail_access_token: tokens.access_token,
-            ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
-            gmail_token_expiry: tokens.expiry_date,
-          }).eq('id', settings.id)
-        },
       })
 
-      await supabase.from('documents')
+      const { error: markErr } = await supabase.from('documents')
         .update({ reminder_sent_at: new Date().toISOString() })
         .eq('id', invoice.id)
+      if (markErr) errors.push(`${invoice.number}: sent but reminder_sent_at not recorded (${markErr.message})`)
 
       sent++
     } catch (err) {
+      if (isGoogleAuthError(err)) {
+        // Every further send would fail the same way; stop and leave Settings showing the expired state.
+        await clearGoogleTokens(supabase, settings.id)
+        errors.push(`${invoice.number}: ${GOOGLE_REAUTH_MESSAGE}`)
+        reauth = true
+        break
+      }
       errors.push(`${invoice.number}: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
-  console.log(`[cron/reminders] sent=${sent} errors=${errors.length}`, errors)
-  return NextResponse.json({ sent, errors })
+  if (errors.length) console.error(`[cron/reminders] sent=${sent} errors=${errors.length}`, errors)
+  else console.log(`[cron/reminders] sent=${sent}`)
+  return NextResponse.json({ sent, errors, ...(reauth ? { code: GOOGLE_REAUTH_CODE } : {}) })
 }

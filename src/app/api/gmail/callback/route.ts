@@ -1,7 +1,7 @@
-import { google } from 'googleapis'
+import { google, type Auth } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getOAuthClient, OAUTH_STATE_COOKIE } from '@/lib/google/client'
+import { getOAuthClient, googleErrorMessage, OAUTH_STATE_COOKIE } from '@/lib/google/client'
 
 function clearState(res: NextResponse) {
   res.cookies.set(OAUTH_STATE_COOKIE.name, '', { maxAge: 0, path: OAUTH_STATE_COOKIE.path })
@@ -20,26 +20,43 @@ export async function GET(req: NextRequest) {
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  const failed = () => clearState(NextResponse.redirect(`${appUrl}/settings?gmail=error`))
+
   const code = req.nextUrl.searchParams.get('code')
-  if (!code) return clearState(NextResponse.redirect(`${appUrl}/settings?gmail=error`))
+  if (!code) return failed()
 
   const oauth2 = getOAuthClient()
-  const { tokens } = await oauth2.getToken(code)
-  oauth2.setCredentials(tokens)
-
-  // Fetch the Gmail address for display
-  const oauth2api = google.oauth2({ version: 'v2', auth: oauth2 })
-  const { data: userInfo } = await oauth2api.userinfo.get()
+  let tokens: Auth.Credentials
+  let email: string | null | undefined
+  try {
+    ;({ tokens } = await oauth2.getToken(code))
+    oauth2.setCredentials(tokens)
+    const { data: userInfo } = await google.oauth2({ version: 'v2', auth: oauth2 }).userinfo.get()
+    email = userInfo.email
+  } catch (err) {
+    console.error('[gmail/callback]', googleErrorMessage(err))
+    return failed()
+  }
+  if (!tokens.refresh_token) {
+    console.error('[gmail/callback] Google returned no refresh token')
+    return failed()
+  }
 
   const { data: settings } = await supabase.from('settings').select('id').single()
-  if (!settings) return clearState(NextResponse.redirect(`${appUrl}/settings?gmail=error`))
+  if (!settings) return failed()
 
-  await supabase.from('settings').update({
-    gmail_email: userInfo.email,
+  const { error } = await supabase.from('settings').update({
+    gmail_email: email,
     gmail_access_token: tokens.access_token,
     gmail_refresh_token: tokens.refresh_token,
     gmail_token_expiry: tokens.expiry_date,
+    gmail_connected_at: new Date().toISOString(),
+    gmail_scopes: tokens.scope ?? null,
   }).eq('id', settings.id)
+  if (error) {
+    console.error('[gmail/callback] could not store tokens:', error.message)
+    return failed()
+  }
 
   return clearState(NextResponse.redirect(`${appUrl}/settings?gmail=connected`))
 }

@@ -1,7 +1,7 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getOAuthClient } from '@/lib/google/client'
+import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -9,9 +9,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: settings } = await supabase.from('settings').select('*').single()
-  if (!settings?.gmail_refresh_token) {
-    return NextResponse.json({ error: 'Google not connected' }, { status: 400 })
-  }
+  if (!settings?.gmail_refresh_token) return googleNotConnected()
   if (!settings.drive_folder_id) {
     return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
   }
@@ -42,28 +40,14 @@ export async function POST(req: NextRequest) {
     existingFileId = doc?.drive_file_id ?? null
   }
 
-  const oauth2 = getOAuthClient()
-  oauth2.setCredentials({
-    access_token: settings.gmail_access_token,
-    refresh_token: settings.gmail_refresh_token,
-    expiry_date: settings.gmail_token_expiry,
-  })
-  oauth2.on('tokens', async (tokens) => {
-    await supabase.from('settings').update({
-      gmail_access_token: tokens.access_token,
-      ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
-      gmail_token_expiry: tokens.expiry_date,
-    }).eq('id', settings.id)
-  })
-
-  const drive = google.drive({ version: 'v3', auth: oauth2 })
+  const drive = google.drive({ version: 'v3', auth: getAuthorizedGoogle(settings, supabase) })
   const { PassThrough } = await import('stream')
 
   try {
     // 1. Verify stored file ID is still active (not trashed/deleted)
     if (existingFileId) {
       try {
-        const { data: check } = await drive.files.get({ fileId: existingFileId, fields: 'id,trashed' })
+        const { data: check } = await drive.files.get({ fileId: existingFileId, fields: 'id,trashed', supportsAllDrives: true })
         if (check.trashed) existingFileId = null
       } catch {
         existingFileId = null
@@ -78,6 +62,8 @@ export async function POST(req: NextRequest) {
         q: `name='${safe}' and '${settings.drive_folder_id}' in parents and trashed=false`,
         fields: 'files(id,webViewLink)',
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       })
       if (found.files && found.files.length > 0) {
         existingFileId = found.files[0].id ?? null
@@ -100,6 +86,7 @@ export async function POST(req: NextRequest) {
         fileId: existingFileId,
         media: { mimeType: 'application/pdf', body: stream },
         fields: 'id,webViewLink',
+        supportsAllDrives: true,
       })
       fileId = file.id
       webViewLink = file.webViewLink
@@ -111,6 +98,7 @@ export async function POST(req: NextRequest) {
         requestBody: { name: filename, parents: [settings.drive_folder_id] },
         media: { mimeType: 'application/pdf', body: stream },
         fields: 'id,webViewLink',
+        supportsAllDrives: true,
       })
       fileId = file.id
       webViewLink = file.webViewLink
@@ -120,9 +108,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ fileId, webViewLink })
-  } catch (err: unknown) {
-    const msg = (err as { message?: string })?.message ?? 'Unknown error'
-    console.error('[drive/upload]', msg)
-    return NextResponse.json({ error: msg }, { status: 500 })
+  } catch (err) {
+    return googleErrorResponse(err, supabase, settings.id, 'drive/upload')
   }
 }
