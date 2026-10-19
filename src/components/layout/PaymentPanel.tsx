@@ -252,7 +252,7 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
                 Reset sync
               </button>
             </div>
-          ) : (
+          ) : fullyPaid ? (
             <button
               type="button"
               onClick={() => setShowBookamatPrompt(true)}
@@ -260,6 +260,8 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
             >
               Sync to Bookamat →
             </button>
+          ) : (
+            <span className="text-xs text-neutral-400 dark:text-neutral-500">Sync to Bookamat becomes available once the invoice is fully paid</span>
           )}
         </div>
       )}
