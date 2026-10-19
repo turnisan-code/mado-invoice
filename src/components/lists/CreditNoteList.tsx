@@ -24,13 +24,15 @@ interface Doc {
   date: string | null
   currency: string | null
   clients: { name: string; company: string | null } | null
+  tax_treatment?: string | null
   document_items: DocItem[]
 }
 
-function calcTotal(items: DocItem[]) {
+function calcTotal(items: DocItem[], taxTreatment?: string | null) {
+  const vatApplies = !taxTreatment || taxTreatment === 'at_vat'
   return items.reduce((s, i) => {
     if (i.quantity == null || i.unit_price == null) return s
-    return s + i.quantity * i.unit_price * (1 + (i.vat_rate ?? 0) / 100)
+    return s + i.quantity * i.unit_price * (vatApplies ? 1 + (i.vat_rate ?? 0) / 100 : 1)
   }, 0)
 }
 
@@ -66,7 +68,7 @@ export default function CreditNoteList({ docs }: { docs: Doc[] }) {
       if (sort.key === 'number') { av = a.number ?? ''; bv = b.number ?? '' }
       else if (sort.key === 'client') { av = a.clients?.company ?? a.clients?.name ?? ''; bv = b.clients?.company ?? b.clients?.name ?? '' }
       else if (sort.key === 'date') { av = a.date ?? ''; bv = b.date ?? '' }
-      else if (sort.key === 'total') { av = calcTotal(a.document_items); bv = calcTotal(b.document_items) }
+      else if (sort.key === 'total') { av = calcTotal(a.document_items, a.tax_treatment); bv = calcTotal(b.document_items, b.tax_treatment) }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
       if (av < bv) return sort.dir === 'asc' ? -1 : 1
       if (av > bv) return sort.dir === 'asc' ? 1 : -1
@@ -137,7 +139,7 @@ export default function CreditNoteList({ docs }: { docs: Doc[] }) {
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
-                <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items), doc.currency ?? undefined)}</td>
+                <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items, doc.tax_treatment), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
                 </td>

@@ -45,7 +45,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Already synced', bookingId: doc.bookamat_booking_id }, { status: 409 })
   }
 
-  const totals = calcTotals(doc.document_items ?? [], doc.payments ?? [])
+  const totals = calcTotals(
+    doc.document_items ?? [],
+    doc.payments ?? [],
+    doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
+    doc.tax_treatment,
+  )
 
   const country = settings.bookamat_country ?? 'at'
   const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`

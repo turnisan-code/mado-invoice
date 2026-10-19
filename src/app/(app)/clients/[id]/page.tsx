@@ -42,18 +42,24 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const { data: documents } = await supabase
     .from('documents')
-    .select('id, type, number, date, status, currency, document_items(*), payments(*)')
+    .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
     .eq('client_id', id)
     .order('date', { ascending: false })
     .limit(50)
 
   const allDocs = documents ?? []
+  const docTotals = (d: (typeof allDocs)[number]) => calcTotals(
+    d.document_items ?? [],
+    d.payments ?? [],
+    d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
+    d.tax_treatment,
+  )
   const totalRevenue = allDocs
     .filter(d => d.type === 'invoice' && d.status === 'paid')
-    .reduce((s, d) => s + calcTotals(d.document_items ?? [], d.payments ?? []).total_paid, 0)
+    .reduce((s, d) => s + docTotals(d).total_paid, 0)
   const openBalance = allDocs
     .filter(d => d.type === 'invoice' && (d.status === 'sent' || d.status === 'overdue'))
-    .reduce((s, d) => s + calcTotals(d.document_items ?? [], d.payments ?? []).balance_due, 0)
+    .reduce((s, d) => s + docTotals(d).balance_due, 0)
   const invoiceCount = allDocs.filter(d => d.type === 'invoice').length
 
   const displayName = client.name || client.company || ''
@@ -128,7 +134,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               </div>
             )}
             {allDocs.map(doc => {
-              const totals = calcTotals(doc.document_items ?? [], doc.payments ?? [])
+              const totals = docTotals(doc)
               return (
                 <Link
                   key={doc.id}

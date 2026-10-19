@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   const items = (doc.document_items ?? []) as DocumentItem[]
   const payments = (doc.payments ?? []) as Payment[]
   const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null
-  const totals = calcTotals(items, payments, discount)
+  const totals = calcTotals(items, payments, discount, doc.tax_treatment)
 
   const lang = (doc.language ?? 'de') as Language
   let qrCodeDataUri: string | null = null

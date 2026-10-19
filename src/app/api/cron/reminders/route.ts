@@ -52,7 +52,10 @@ export async function GET(req: NextRequest) {
       ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
       : 0
 
-    const emailTotals = calcTotals(invoice.document_items ?? [], [])
+    const docDiscount = invoice.discount_type && invoice.discount_value
+      ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
+      : null
+    const emailTotals = calcTotals(invoice.document_items ?? [], [], docDiscount, invoice.tax_treatment)
 
     const ctx = {
       invoiceNumber: invoice.number ?? 'Draft',
@@ -79,7 +82,7 @@ export async function GET(req: NextRequest) {
     let filename: string | undefined
     try {
       const items = (invoice.document_items ?? [])
-      const totals = calcTotals(items, [])
+      const totals = calcTotals(items, [], docDiscount, invoice.tax_treatment)
       const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
       const invLang = (invoice.language ?? 'de') as Language
       const taxNote = getTaxNote(taxTreatment, invLang, settings as Settings)
