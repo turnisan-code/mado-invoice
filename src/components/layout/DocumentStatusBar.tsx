@@ -31,11 +31,12 @@ const itemColor: Record<string, string> = {
 }
 
 interface Props {
-  document: { id: string; status: string; type: string }
+  document: { id: string; status: string; type: string; number: string | null }
 }
 
 export default function DocumentStatusBar({ document: doc }: Props) {
   const [status, setStatus] = useState(doc.status)
+  const [seenStatus, setSeenStatus] = useState(doc.status)
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -43,7 +44,10 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   const supabase = createClient()
   const statuses = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
 
-  useEffect(() => { setStatus(doc.status) }, [doc.status])
+  if (doc.status !== seenStatus) {
+    setSeenStatus(doc.status)
+    setStatus(doc.status)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -54,8 +58,12 @@ export default function DocumentStatusBar({ document: doc }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // Every status beyond draft/cancelled means the document has been issued, which requires a number.
+  const needsNumber = (s: string) => !doc.number && s !== 'draft' && s !== 'cancelled'
+
   async function changeStatus(newStatus: string) {
-    if (DESTRUCTIVE.has(newStatus) && newStatus !== status) {
+    if (newStatus === status) { setOpen(false); return }
+    if (DESTRUCTIVE.has(newStatus) || needsNumber(newStatus)) {
       setConfirm(newStatus)
       setOpen(false)
       return
@@ -64,6 +72,10 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   }
 
   async function applyStatus(newStatus: string) {
+    if (needsNumber(newStatus)) {
+      const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
+      if (issueErr) { toast.error(issueErr.message); return }
+    }
     const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
     if (error) { toast.error(error.message); return }
     setStatus(newStatus)
@@ -105,7 +117,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
           <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
             <div>
               <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as {confirm}?</h3>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">This action is hard to reverse.</p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
+                {needsNumber(confirm)
+                  ? `This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${confirm}. Numbers cannot be taken back.`
+                  : 'This action is hard to reverse.'}
+              </p>
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirm(null)} className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">

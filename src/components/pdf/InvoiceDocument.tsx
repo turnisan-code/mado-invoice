@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import { formatMoney, formatDate } from '@/lib/utils/document'
+import { formatMoney, formatDate, orderItems } from '@/lib/utils/document'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 
 const s = StyleSheet.create({
@@ -203,7 +203,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         </View>
 
         {/* Line items */}
-        {doc.items.map((item, i) => {
+        {orderItems(doc.items).map((item, i) => {
           const lt = item.line_type ?? 'item'
 
           if (lt === 'page_break') return <View key={i} break />
@@ -226,7 +226,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           }
 
           if (lt === 'subtotal') {
-            const gross = calcSectionSubtotal(doc.items, i)
+            const gross = calcSectionSubtotal(orderItems(doc.items), i)
             const discAmt = item.discount_type && item.discount_value && item.discount_value > 0
               ? item.discount_type === 'percent' ? gross * (item.discount_value / 100) : Math.min(item.discount_value, gross)
               : 0

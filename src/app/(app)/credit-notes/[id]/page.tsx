@@ -13,7 +13,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   const supabase = await createClient()
 
   const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }] = await Promise.all([
-    supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).single(),
+    supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'credit_note').single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),

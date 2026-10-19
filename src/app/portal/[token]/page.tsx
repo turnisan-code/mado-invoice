@@ -2,7 +2,7 @@ import React from 'react'
 import { notFound } from 'next/navigation'
 import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
-import { calcTotals, formatMoney, formatDate, calcSectionSubtotal } from '@/lib/utils/document'
+import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems } from '@/lib/utils/document'
 import { Download } from 'lucide-react'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language } from '@/types'
 
@@ -72,7 +72,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   if (!settings) notFound()
 
   const client = doc.clients as unknown as Client
-  const items = (doc.document_items ?? []) as DocumentItem[]
+  const items = orderItems((doc.document_items ?? []) as DocumentItem[])
   const payments = (doc.payments ?? []) as Payment[]
   const lang = (doc.language ?? 'de') as Language
   const totals = calcTotals(items, payments, doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null, doc.tax_treatment)
