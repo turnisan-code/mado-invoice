@@ -6,6 +6,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import { toPublicSettings } from '@/lib/public-settings'
+import { fetchReference } from '@/lib/utils/document-reference'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
@@ -23,6 +24,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   if (!doc) notFound()
 
   const publicSettings = toPublicSettings(settings)
+  const reference = await fetchReference(supabase, doc.converted_from_id)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
@@ -33,6 +35,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
             <ArrowLeft size={16} />
           </Link>
           <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+          {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">Storno zu {reference.number}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
@@ -49,6 +52,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           clients={clients ?? []}
           catalogue={catalogue ?? []}
           document={docWithItems}
+          reference={reference}
         />
       </div>
     </div>

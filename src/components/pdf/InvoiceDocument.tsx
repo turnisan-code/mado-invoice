@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/render
 import { formatMoney, formatDate, orderItems } from '@/lib/utils/document'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
+import type { DocReference } from '@/lib/utils/document-reference'
 
 const s = StyleSheet.create({
   page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
@@ -71,6 +72,10 @@ const LABELS: Record<string, Record<'de' | 'en', string>> = {
   service_label: { de: 'Leistungsdatum:',      en: 'Service Date:' },
   period_label:  { de: 'Leistungszeitraum:',   en: 'Service period:' },
   credit_note_no:{ de: 'Gutschriftsnummer:',   en: 'Credit Note No.' },
+  storno:        { de: 'Stornorechnung',       en: 'Cancellation Invoice' },
+  storno_no:     { de: 'Storno-Nr.:',          en: 'Cancellation No.' },
+  storno_ref:    { de: 'Storno zu Rechnung',   en: 'Cancels invoice' },
+  dated:         { de: 'vom',                  en: 'dated' },
   section_sub:   { de: 'Zwischensumme',        en: 'Subtotal' },
   net:           { de: 'Netto',                en: 'Net' },
   net_of:        { de: 'davon Netto',          en: 'Net at' },
@@ -132,6 +137,7 @@ interface DocData {
   discount_value: number | null
   items: DocItem[]
   totals: DocumentTotals
+  reference?: DocReference | null
 }
 
 interface Props {
@@ -156,7 +162,12 @@ function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
-  const noLabel = doc.type === 'quote' ? L('quote_no', lang) : doc.type === 'credit_note' ? L('credit_note_no', lang) : L('invoice_no', lang)
+  const isStorno = doc.type === 'credit_note' && !!doc.reference
+  const title = isStorno ? L('storno', lang) : L(doc.type, lang)
+  const noLabel = doc.type === 'quote' ? L('quote_no', lang)
+    : isStorno ? L('storno_no', lang)
+    : doc.type === 'credit_note' ? L('credit_note_no', lang)
+    : L('invoice_no', lang)
 
   const footerVars: Record<string, string> = {
     invoice_number: doc.number,
@@ -189,9 +200,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             }
           </View>
           <View>
-            <Text style={s.docTitle}>{L(doc.type, lang)}</Text>
+            <Text style={s.docTitle}>{title}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
+            {!!doc.reference && (
+              <Text style={s.metaLine}>{L('storno_ref', lang)} {doc.reference.number} {L('dated', lang)} {formatDate(doc.reference.date, lang)}</Text>
+            )}
             {!!doc.service_date && (
               <Text style={s.metaLine}>
                 {doc.service_date_end && doc.service_date_end !== doc.service_date

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { calcTotals, getTaxNote } from '@/lib/utils/document'
+import { fetchReference } from '@/lib/utils/document-reference'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { google } from 'googleapis'
@@ -49,6 +50,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings as Settings)
+  const reference = await fetchReference(supabase, doc.converted_from_id)
 
   const docData = {
     number: doc.number ?? '',
@@ -66,14 +68,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     discount_value: doc.discount_value,
     items,
     totals,
+    reference,
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = await renderToBuffer(React.createElement(InvoiceDocument, {
     settings: settings as Settings,
     client,
     document: docData,
     qrCodeDataUri,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any)
 
   const filename = `${doc.number ?? 'document'}.pdf`

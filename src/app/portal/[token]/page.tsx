@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
 import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems } from '@/lib/utils/document'
+import { fetchReference } from '@/lib/utils/document-reference'
 import { Download } from 'lucide-react'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language } from '@/types'
 
@@ -53,6 +54,9 @@ const L: Record<string, { de: string; en: string }> = {
   notes:       { de: 'Hinweise',           en: 'Notes' },
   download_pdf:{ de: 'PDF herunterladen',  en: 'Download PDF' },
   uid:         { de: 'UID-Nr.',            en: 'VAT Reg.' },
+  storno:      { de: 'Stornorechnung',     en: 'Cancellation Invoice' },
+  storno_ref:  { de: 'Storno zu Rechnung', en: 'Cancels invoice' },
+  dated:       { de: 'vom',                en: 'dated' },
 }
 
 function t(key: string, lang: Language) { return L[key]?.[lang] ?? key }
@@ -71,6 +75,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
 
   const settings = (await supabase.from('settings').select('*').single()).data as Settings | null
   if (!settings) notFound()
+  const reference = await fetchReference(supabase, doc.converted_from_id)
 
   const client = doc.clients as unknown as Client
   const items = orderItems((doc.document_items ?? []) as DocumentItem[])
@@ -100,8 +105,11 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               </div>
             </div>
             <div className="text-right space-y-1">
-              <div className="text-2xl font-bold text-neutral-900">{DOC_TITLE[docType][lang]}</div>
+              <div className="text-2xl font-bold text-neutral-900">{docType === 'credit_note' && reference ? t('storno', lang) : DOC_TITLE[docType][lang]}</div>
               <div className="text-sm text-neutral-500">{doc.number}</div>
+              {reference && (
+                <div className="text-xs text-neutral-500">{t('storno_ref', lang)} {reference.number} {t('dated', lang)} {formatDate(reference.date, lang)}</div>
+              )}
               <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium ${STATUS_COLOR[doc.status] ?? ''}`}>
                 {STATUS_LABEL[doc.status]?.[lang] ?? doc.status}
               </span>

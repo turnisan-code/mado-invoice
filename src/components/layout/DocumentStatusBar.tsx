@@ -65,6 +65,8 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
   // Every status beyond draft/cancelled means the document has been issued, which requires a number.
   const needsNumber = (s: string) => !doc.number && s !== 'draft' && s !== 'cancelled'
   const recordsPayment = (s: string) => s === 'paid' && doc.type === 'invoice' && !!balanceDue && balanceDue > 0
+  // An issued invoice is cancelled with a Storno document, never by just flipping the status.
+  const createsStorno = (s: string) => s === 'cancelled' && doc.type === 'invoice' && !!doc.number
 
   async function changeStatus(newStatus: string) {
     if (newStatus === status) { setOpen(false); return }
@@ -77,6 +79,19 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
   }
 
   async function applyStatus(newStatus: string) {
+    if (createsStorno(newStatus)) {
+      const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancel: true }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { toast.error(data.error ?? 'Could not create the Storno'); return }
+      setConfirm(null)
+      toast.success('Invoice cancelled — issue the Storno and send it to the client.')
+      router.push(`/credit-notes/${data.creditNoteId}`)
+      return
+    }
     if (needsNumber(newStatus)) {
       const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
       if (issueErr) { toast.error(issueErr.message); return }
@@ -96,6 +111,7 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
 
   const confirmText = (s: string) => {
     const parts: string[] = []
+    if (createsStorno(s)) return `Creates a Stornorechnung that cancels ${doc.number} and marks this invoice as cancelled. You then issue the Storno and send it to the client.`
     if (needsNumber(s)) parts.push(`This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${s}. Numbers cannot be taken back.`)
     if (recordsPayment(s)) parts.push('The open balance is recorded as a payment dated today.')
     if (DESTRUCTIVE.has(s)) parts.push('This action is hard to reverse.')

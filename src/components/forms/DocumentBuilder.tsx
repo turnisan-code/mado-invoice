@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { calcTotals, formatMoney, addDays, today, getTaxNote, orderItems } from '@/lib/utils/document'
+import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
@@ -38,6 +39,7 @@ interface Props {
   catalogue: CatalogueItem[]
   document?: Document & { items?: DocumentItem[]; payments?: { id: string; date: string; amount: number; note: string | null }[] }
   defaultClientId?: string
+  reference?: DocReference | null
 }
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
@@ -75,7 +77,7 @@ export interface DocumentBuilderHandle {
 }
 
 const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
-  { type, settings, clients, catalogue, document: doc, defaultClientId }: Props,
+  { type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props,
   ref,
 ) {
   const router = useRouter()
@@ -339,6 +341,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       discount_type: discountType, discount_value: discountValue || null,
       items: lines.map(l => ({ ...l })),
       totals,
+      reference: reference ?? null,
     }
 
     // Generate EPC QR only for final PDFs (save/send), not preview
