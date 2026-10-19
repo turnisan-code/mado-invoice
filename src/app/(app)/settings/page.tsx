@@ -1,9 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import SettingsForm from '@/components/forms/SettingsForm'
+import { toPublicSettings } from '@/lib/public-settings'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
   const { data: settings } = await supabase.from('settings').select('*').single()
+  const publicSettings = settings ? toPublicSettings(settings) : null
 
   return (
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
@@ -11,7 +13,7 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold">Settings</h1>
         <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Manage your company profile, document settings, and integrations.</p>
       </div>
-      <SettingsForm settings={settings} />
+      <SettingsForm settings={publicSettings} />
     </div>
   )
 }

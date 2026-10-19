@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
+import { toPublicSettings } from '@/lib/public-settings'
 
 export default async function NewCreditNotePage({ searchParams }: { searchParams: Promise<{ client?: string }> }) {
   const { client } = await searchParams
@@ -17,7 +18,7 @@ export default async function NewCreditNotePage({ searchParams }: { searchParams
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">
         <DocumentBuilder
           type="credit_note"
-          settings={settings!}
+          settings={toPublicSettings(settings)}
           clients={clients ?? []}
           catalogue={catalogue ?? []}
           defaultClientId={client}

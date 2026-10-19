@@ -53,6 +53,9 @@ export async function POST(req: NextRequest) {
   )
 
   const country = settings.bookamat_country ?? 'at'
+  if (!/^[a-z]{2}$/.test(country)) {
+    return NextResponse.json({ error: 'Invalid Bookamat country in settings' }, { status: 400 })
+  }
   const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`
 
   const client = doc.clients as { name: string; company: string | null; uid_number: string | null } | null
@@ -72,6 +75,9 @@ export async function POST(req: NextRequest) {
 
   // Use payment date year for the fiscal year URL (not invoice date)
   const year = new Date(paymentDate).getFullYear()
+  if (!Number.isInteger(year) || year < 1000 || year > 9999) {
+    return NextResponse.json({ error: 'Invalid payment date' }, { status: 400 })
+  }
   const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
 
   const amounts = totals.vat_groups.map(g => {

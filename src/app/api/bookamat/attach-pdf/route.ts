@@ -7,8 +7,27 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const payload = await req.json()
-    const { bookingId, pdfBase64, filename, country, year } = payload
+    let payload: { bookingId?: unknown; pdfBase64?: unknown; filename?: unknown; country?: unknown; year?: unknown } | null
+    try {
+      payload = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    }
+
+    const { bookingId, pdfBase64, filename, country, year } = payload ?? {}
+    if (typeof pdfBase64 !== 'string' || !pdfBase64 || typeof filename !== 'string' || !filename) {
+      return NextResponse.json({ error: 'pdfBase64 and filename are required' }, { status: 400 })
+    }
+    if (typeof country !== 'string' || !/^[a-z]{2}$/.test(country)) {
+      return NextResponse.json({ error: 'Invalid country' }, { status: 400 })
+    }
+    if (!/^\d{4}$/.test(String(year))) {
+      return NextResponse.json({ error: 'Invalid year' }, { status: 400 })
+    }
+    const booking = Number(bookingId)
+    if (!Number.isInteger(booking)) {
+      return NextResponse.json({ error: 'Invalid bookingId' }, { status: 400 })
+    }
 
     const { data: settings } = await supabase
       .from('settings')
@@ -38,7 +57,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        booking: Number(bookingId),
+        booking,
         name: safeName,
         file: base64Data,
       }),

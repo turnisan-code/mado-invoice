@@ -5,6 +5,7 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
+import { toPublicSettings } from '@/lib/public-settings'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
@@ -21,6 +22,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
 
   if (!doc) notFound()
 
+  const publicSettings = toPublicSettings(settings)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
@@ -35,7 +37,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!settings?.drive_folder_id} />
+          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
           <DuplicateDocumentButton docId={doc.id} docType="credit_note" backTo="/credit-notes" />
           <DeleteDocumentButton id={doc.id} backTo="/credit-notes" docNumber={doc.number} docType="credit_note" />
         </div>
@@ -43,7 +45,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           type="credit_note"
-          settings={settings!}
+          settings={publicSettings}
           clients={clients ?? []}
           catalogue={catalogue ?? []}
           document={docWithItems}
