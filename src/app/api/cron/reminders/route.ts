@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
   fillTemplate, sendReminderEmail,
@@ -14,9 +15,12 @@ import type { Settings, Client, TaxTreatment, Language, Currency } from '@/types
 export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
-  // Verify Vercel cron secret
-  const auth = req.headers.get('authorization')
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  const secret = process.env.CRON_SECRET
+  if (!secret) return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
+
+  const expected = Buffer.from(`Bearer ${secret}`)
+  const provided = Buffer.from(req.headers.get('authorization') ?? '')
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
