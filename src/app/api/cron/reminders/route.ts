@@ -6,8 +6,9 @@ import {
   DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
-import { formatMoney, calcTotals, getTaxNote } from '@/lib/utils/document'
+import { formatMoney, calcTotals, getTaxNote, today } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
+import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import React from 'react'
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   // Find overdue invoices that haven't had a reminder sent, with client email
   const { data: invoices, error } = await supabase
     .from('documents')
-    .select('*, document_items(*), clients(*)')
+    .select('*, document_items(*), payments(*), clients(*)')
     .eq('type', 'invoice')
     .eq('status', 'overdue')
     .is('reminder_sent_at', null)
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!invoices?.length) return NextResponse.json({ sent: 0, message: 'No overdue invoices to remind' })
 
-  const today = new Date()
+  const todayDate = new Date(today())
   let sent = 0
   const errors: string[] = []
 
@@ -57,18 +58,20 @@ export async function GET(req: NextRequest) {
     const lang = client.language === 'en' ? 'en' : 'de'
     const dueDate = invoice.due_date ?? ''
     const daysOverdue = dueDate
-      ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
+      ? Math.max(0, Math.floor((todayDate.getTime() - new Date(dueDate).getTime()) / 86400000))
       : 0
 
     const docDiscount = invoice.discount_type && invoice.discount_value
       ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
       : null
-    const emailTotals = calcTotals(invoice.document_items ?? [], [], docDiscount, invoice.tax_treatment)
+    const emailTotals = calcTotals(invoice.document_items ?? [], invoice.payments ?? [], docDiscount, invoice.tax_treatment)
+    if (!invoice.number || emailTotals.balance_due <= 0.005) continue
 
     const ctx = {
-      invoiceNumber: invoice.number ?? 'Draft',
+      invoiceNumber: invoice.number,
       clientName: client.company ?? client.name,
-      amount: formatMoney(emailTotals.total, invoice.currency ?? 'EUR'),
+      amount: formatMoney(emailTotals.balance_due, invoice.currency ?? 'EUR'),
+      total: formatMoney(emailTotals.total, invoice.currency ?? 'EUR'),
       dueDate,
       date: invoice.date ?? '',
       daysOverdue,
@@ -90,7 +93,7 @@ export async function GET(req: NextRequest) {
     let filename: string | undefined
     try {
       const items = (invoice.document_items ?? [])
-      const totals = calcTotals(items, [], docDiscount, invoice.tax_treatment)
+      const totals = emailTotals
       const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
       const invLang = (invoice.language ?? 'de') as Language
       const taxNote = getTaxNote(taxTreatment, invLang, settings as Settings)
@@ -119,11 +122,25 @@ export async function GET(req: NextRequest) {
         })),
         totals,
       }
+      let qrCodeDataUri: string | null = null
+      if (settings.iban && totals.balance_due > 0) {
+        try {
+          qrCodeDataUri = await generateEpcQr({
+            iban: settings.iban,
+            bic: settings.bic ?? '',
+            name: settings.company_name,
+            amountEur: invoice.currency === 'EUR' ? totals.balance_due : undefined,
+            reference: invoice.number,
+          })
+        } catch {
+          // QR generation is best-effort
+        }
+      }
       const stream = await pdf(React.createElement(InvoiceDocument, {
         settings: settings as unknown as Settings,
         client: client as unknown as Client,
         document: docData,
-        qrCodeDataUri: null,
+        qrCodeDataUri,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any).toBuffer()
       const chunks: Buffer[] = []

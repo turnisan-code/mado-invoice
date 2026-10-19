@@ -24,6 +24,13 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (docErr || !doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
+  if (doc.type !== 'invoice' || !doc.number) {
+    return NextResponse.json({ error: 'Only issued invoices can be synced to Bookamat' }, { status: 400 })
+  }
+  // Bookamat records income on receipt (Ist-Besteuerung): one booking per fully paid invoice
+  if (doc.status !== 'paid') {
+    return NextResponse.json({ error: 'Only fully paid invoices can be synced — record the payment first' }, { status: 400 })
+  }
 
   const { data: settings, error: settingsErr } = await supabase
     .from('settings')
@@ -80,30 +87,24 @@ export async function POST(req: NextRequest) {
   }
   const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
 
-  const amounts = totals.vat_groups.map(g => {
-    const vatAccId = vatAccountMap[g.rate]
-    return {
-      bankaccount: settings.bookamat_bank_account_id,
-      costaccount: settings.bookamat_cost_account_id,
-      purchasetaxaccount: vatAccId ?? settings.bookamat_vat_account_0,
-      amount: (g.base + g.amount).toFixed(2),
-      tax_percent: g.rate.toFixed(2),
-      deductibility_tax_percent: '100.00',
-      deductibility_amount_percent: '100.00',
-    }
-  })
-
-  if (amounts.length === 0) {
-    amounts.push({
-      bankaccount: settings.bookamat_bank_account_id,
-      costaccount: settings.bookamat_cost_account_id,
-      purchasetaxaccount: settings.bookamat_vat_account_0 ?? settings.bookamat_bank_account_id,
-      amount: totals.total.toFixed(2),
-      tax_percent: '0.00',
-      deductibility_tax_percent: '100.00',
-      deductibility_amount_percent: '100.00',
-    })
+  if (totals.vat_groups.length === 0) {
+    return NextResponse.json({ error: 'Invoice has no line items to book' }, { status: 400 })
   }
+  // Reverse-charge / non-EU invoices arrive as a single 0 % group and book on the 0 % account.
+  const missing = totals.vat_groups.find(g => vatAccountMap[g.rate] == null)
+  if (missing) {
+    return NextResponse.json({ error: `No Bookamat VAT account configured for ${missing.rate} % — set it in Settings → Bookamat` }, { status: 400 })
+  }
+
+  const amounts = totals.vat_groups.map(g => ({
+    bankaccount: settings.bookamat_bank_account_id,
+    costaccount: settings.bookamat_cost_account_id,
+    purchasetaxaccount: vatAccountMap[g.rate]!,
+    amount: (g.base + g.amount).toFixed(2),
+    tax_percent: g.rate.toFixed(2),
+    deductibility_tax_percent: '100.00',
+    deductibility_amount_percent: '100.00',
+  }))
 
   const payload = {
     title,

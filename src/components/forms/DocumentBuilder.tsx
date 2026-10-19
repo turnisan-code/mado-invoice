@@ -71,7 +71,7 @@ const typeLabel: Record<DocumentType, { de: string; en: string }> = {
 const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
 
 export interface DocumentBuilderHandle {
-  buildPdfBlob: (numOverride?: string) => Promise<{ blob: Blob; number: string } | null>
+  buildPdfBlob: (numOverride?: string, includeQr?: boolean) => Promise<{ blob: Blob; number: string } | null>
 }
 
 const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
