@@ -2,6 +2,7 @@ import { DocumentTotals, Settings, VatRate } from '@/types'
 
 type CalcItem = {
   line_type?: string | null
+  sort_order?: number | null
   quantity: number | null
   unit_price: number | null
   vat_rate: number | null
@@ -9,12 +10,20 @@ type CalcItem = {
   discount_value?: number | null
 }
 
+// PostgREST returns embedded rows in storage order, which drifts from sort_order once
+// items are rewritten; section math and rendering depend on the real order.
+export function orderItems<T>(items: T[]): T[] {
+  const pos = (i: T) => (i as { sort_order?: number | null }).sort_order ?? 0
+  return [...items].sort((a, b) => pos(a) - pos(b))
+}
+
 export function calcTotals(
-  items: CalcItem[],
+  rawItems: CalcItem[],
   payments: { amount: number }[] = [],
   discount?: { type: 'percent' | 'fixed'; value: number } | null,
   taxTreatment?: string | null
 ): DocumentTotals {
+  const items = orderItems(rawItems)
   // Reverse charge / non-EU: lines keep their vat_rate, but no VAT is charged
   const vatApplies = !taxTreatment || taxTreatment === 'at_vat'
   const vatMap = new Map<VatRate, { base: number; amount: number }>()
@@ -123,12 +132,17 @@ export function formatDate(date: string, lang: 'de' | 'en' = 'de'): string {
   }).format(d)
 }
 
+// Local calendar dates: toISOString() would yield the UTC date, which is "yesterday"
+// in Vienna between midnight and 02:00 and shifts across DST changes.
+function toDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function addDays(date: string, days: number): string {
-  const d = new Date(date)
-  d.setDate(d.getDate() + days)
-  return d.toISOString().split('T')[0]
+  const [y, m, d] = (date || today()).split('-').map(Number)
+  return toDateString(new Date(y, m - 1, d + days))
 }
 
 export function today(): string {
-  return new Date().toISOString().split('T')[0]
+  return toDateString(new Date())
 }

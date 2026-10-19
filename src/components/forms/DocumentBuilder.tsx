@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
-import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils/document'
+import { calcTotals, formatMoney, addDays, today, getTaxNote, orderItems } from '@/lib/utils/document'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
@@ -67,6 +67,8 @@ const typeLabel: Record<DocumentType, { de: string; en: string }> = {
   credit_note: { de: 'Gutschrift', en: 'Credit Note' },
 }
 
+const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
+
 export interface DocumentBuilderHandle {
   buildPdfBlob: (numOverride?: string) => Promise<{ blob: Blob; number: string } | null>
 }
@@ -91,7 +93,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [discountValue, setDiscountValue] = useState(doc?.discount_value ?? 0)
   const [lines, setLines] = useState<LineItem[]>(
     doc?.items?.length
-      ? doc.items.map(i => ({
+      ? orderItems(doc.items).map(i => ({
           id: makeId(),
           line_type: (i.line_type ?? 'item') as LineType,
           description: i.description,
@@ -112,13 +114,16 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
-  const [showSentConfirm, setShowSentConfirm] = useState(false)
-  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; alreadySent?: boolean; uploadToDrive: boolean } | null>(null)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; uploadToDrive: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstRender = useRef(true)
+  const writeChain = useRef<Promise<void>>(Promise.resolve())
+  const issuingRef = useRef(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [pendingIssue, setPendingIssue] = useState<(() => Promise<void>) | null>(null)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
@@ -156,16 +161,24 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
 
   const client = clients.find(c => c.id === clientId)
   const discount = discountType && discountValue > 0 ? { type: discountType, value: discountValue } : null
+  const saveStatus = saveError
+    ? { text: `Not saved — ${saveError}`, cls: 'text-red-500' }
+    : autoSaving ? { text: 'Saving…', cls: '' }
+    : lastSaved ? { text: `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, cls: '' }
+    : null
+
+  function applyClientDefaults(c: Client) {
+    if (c.language) setLanguage(c.language)
+    if (c.currency) setCurrency(c.currency as Currency)
+    setTaxTreatment(c.tax_treatment as TaxTreatment)
+    if (!doc?.number) setDueDate(addDays(date || today(), c.payment_days ?? settings.default_payment_days))
+  }
 
   // Apply client defaults on mount when pre-selecting a client (e.g. navigating from client page)
   useEffect(() => {
     if (defaultClientId && !doc) {
       const c = clients.find(cl => cl.id === defaultClientId)
-      if (c) {
-        if (c.language) setLanguage(c.language)
-        if (c.currency) setCurrency(c.currency as Currency)
-        setTaxTreatment(c.tax_treatment as TaxTreatment)
-      }
+      if (c) applyClientDefaults(c)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -173,11 +186,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   function handleClientChange(id: string) {
     const c = clients.find(cl => cl.id === id)
     setClientId(id)
-    if (c) {
-      if (c.language) setLanguage(c.language)
-      if (c.currency) setCurrency(c.currency as Currency)
-      setTaxTreatment(c.tax_treatment as TaxTreatment)
-    }
+    if (c) applyClientDefaults(c)
   }
 
   function updateLine(id: string, patch: Partial<LineItem>) {
@@ -261,60 +270,60 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }))
   }
 
-  async function save(status: 'draft' | 'sent') {
-    if (!clientId) { toast.error('Select a client.'); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
-    setSaving(true)
-
-    const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'invoices'
-
-    const effectiveDate = (status === 'sent' && !date) ? today() : date
-    if (status === 'sent' && !date) setDate(effectiveDate)
-    const effectiveDueDate = (status === 'sent' && !dueDate && client)
-      ? addDays(effectiveDate, client.payment_days ?? 14)
-      : dueDate
-    if (status === 'sent' && !dueDate && client) setDueDate(effectiveDueDate)
-
-    const docFields = {
+  function currentDocFields(effectiveDate: string, effectiveDueDate: string | null) {
+    return {
       client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
-      due_date: effectiveDueDate || null, language, currency, tax_treatment: taxTreatment,
-      notes: notes || null, notes_internal: notesInternal || null, status,
+      due_date: effectiveDueDate, language, currency, tax_treatment: taxTreatment,
+      notes: notes || null, notes_internal: notesInternal || null,
       discount_type: discountType, discount_value: discountValue || null,
     }
+  }
 
+  // Runs writes strictly one after another so an autosave can never interleave with an explicit save.
+  function serialized<T>(fn: () => Promise<T>): Promise<T> {
+    const run = writeChain.current.then(fn, fn)
+    writeChain.current = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  // Writes header + items (inserting a draft for a new document) and returns the document id.
+  async function persist(forIssue: boolean): Promise<string | null> {
+    const effectiveDate = date || today()
+    const effectiveDueDate = dueDate || (forIssue && client ? addDays(effectiveDate, client.payment_days ?? settings.default_payment_days) : null)
+    const fields = currentDocFields(effectiveDate, effectiveDueDate)
+    let docId: string
     if (doc) {
-      // Existing doc: assign number only when first marking as sent
-      let numberUpdate: { number?: string } = {}
-      if (status === 'sent' && !doc.number) {
-        const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
-        if (numErr) { toast.error(numErr.message); setSaving(false); return }
-        numberUpdate = { number: numData }
-      }
-      const { error } = await supabase.from('documents').update({ ...docFields, ...numberUpdate }).eq('id', doc.id)
-      if (error) { toast.error(error.message); setSaving(false); return }
-      await supabase.from('document_items').delete().eq('document_id', doc.id)
-      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(doc.id))
-      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-      toast.success(status === 'sent' && !doc.number ? 'Issued & saved.' : 'Saved.')
-      router.refresh()
+      const { error } = await supabase.from('documents').update(fields).eq('id', doc.id)
+      if (error) { toast.error(error.message); return null }
+      docId = doc.id
     } else {
-      // New doc: only get a number if sending immediately
-      let number: string | null = null
-      if (status === 'sent') {
-        const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
-        if (numErr) { toast.error(numErr.message); setSaving(false); return }
-        number = numData
-      }
-      const { data: newDoc, error } = await supabase.from('documents').insert({
-        type, number, exchange_rate: 1, ...docFields,
-      }).select().single()
-      if (error) { toast.error(error.message); setSaving(false); return }
-      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(newDoc.id))
-      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return }
-      toast.success(status === 'draft' ? 'Draft saved.' : 'Created.')
-      router.push(`/${basePath}/${newDoc.id}`)
+      const { data: newDoc, error } = await supabase.from('documents')
+        .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
+        .select('id').single()
+      if (error) { toast.error(error.message); return null }
+      docId = newDoc.id
     }
+    const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: docId, p_items: buildItemsPayload(docId) })
+    if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); return null }
+    if (!date) setDate(effectiveDate)
+    if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
+    return docId
+  }
+
+  async function save(status: 'draft' | 'sent') {
+    if (status === 'sent') { requestSent(); return }
+    if (!clientId) { toast.error('Select a client.'); return }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    setSaving(true)
+    const id = await serialized(() => persist(false))
     setSaving(false)
+    if (!id) return
+    setSaveError(null)
+    setLastSaved(new Date())
+    toast.success('Draft saved.')
+    if (!doc) router.push(`/${PATHS[type]}/${id}`)
+    else router.refresh()
   }
 
   async function buildPdfBlob(numOverride?: string, includeQr = false) {
@@ -355,45 +364,48 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   useImperativeHandle(ref, () => ({ buildPdfBlob }))
 
-  async function ensureNumberAndSave(): Promise<{ number: string; newDocId?: string } | null> {
-    if (doc?.number) return { number: doc.number }
-    if (!clientId) { toast.error('Select a client.'); return null }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return null }
+  type Issued = { number: string; id: string; isNew: boolean }
 
+  // Persists, then assigns number + status 'sent' atomically (issue_document). Re-entrant calls are ignored.
+  async function issueDocument(): Promise<Issued | null> {
+    if (doc?.number) return { number: doc.number, id: doc.id, isNew: false }
+    if (issuingRef.current) return null
+    issuingRef.current = true
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     setSaving(true)
-    const { data: numData, error: numErr } = await supabase.rpc('next_document_number', { doc_type: type })
-    if (numErr) { toast.error(numErr.message); setSaving(false); return null }
-    const num: string = numData
-
-    const effectiveDate = date || today()
-    const effectiveDueDate = dueDate || (client ? addDays(effectiveDate, client.payment_days ?? 14) : null)
-    const docFields = {
-      client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
-      due_date: effectiveDueDate || null, language, currency, tax_treatment: taxTreatment,
-      notes: notes || null, notes_internal: notesInternal || null, status: 'sent' as const,
-      discount_type: discountType, discount_value: discountValue || null,
-    }
-
-    if (doc) {
-      const { error } = await supabase.from('documents').update({ ...docFields, number: num }).eq('id', doc.id)
-      if (error) { toast.error(error.message); setSaving(false); return null }
-      await supabase.from('document_items').delete().eq('document_id', doc.id)
-      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(doc.id))
-      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return null }
-      if (!date) setDate(effectiveDate)
-      if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
+    try {
+      return await serialized(async () => {
+        const id = await persist(true)
+        if (!id) return null
+        const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: id })
+        if (error) {
+          toast.error(error.message)
+          if (!doc) router.push(`/${PATHS[type]}/${id}`)
+          return null
+        }
+        setSaveError(null)
+        setLastSaved(new Date())
+        return { number: number as string, id, isNew: !doc }
+      })
+    } finally {
+      issuingRef.current = false
       setSaving(false)
-      return { number: num }
-    } else {
-      const { data: newDoc, error } = await supabase.from('documents').insert({
-        type, number: num, exchange_rate: 1, ...docFields,
-      }).select().single()
-      if (error) { toast.error(error.message); setSaving(false); return null }
-      const { error: itemsErr } = await supabase.from('document_items').insert(buildItemsPayload(newDoc.id))
-      if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); setSaving(false); return null }
-      setSaving(false)
-      return { number: num, newDocId: newDoc.id }
     }
+  }
+
+  // Issued documents run the action directly; drafts ask first, because issuing consumes
+  // the next number and marks the document as sent.
+  function withIssued(action: (issued: Issued) => Promise<void>) {
+    if (!clientId) { toast.error('Select a client.'); return }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
+    const run = async () => { const issued = await issueDocument(); if (issued) await action(issued) }
+    if (doc?.number) void run()
+    else setPendingIssue(() => run)
+  }
+
+  function afterIssue(issued: Issued) {
+    if (issued.isNew) router.push(`/${PATHS[type]}/${issued.id}`)
+    else router.refresh()
   }
 
   async function uploadToDrive(pdfBase64: string, filename: string, documentId?: string) {
@@ -420,18 +432,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
   }
 
-  async function saveToDrive() {
-    const saved = await ensureNumberAndSave()
-    if (!saved) return
-    const result = await buildPdfBlob(saved.number, true)
-    if (!result) return
-    const pdfBase64 = await blobToBase64(result.blob)
-    const docId = saved.newDocId ?? doc?.id
-    await uploadToDrive(pdfBase64, `${saved.number}.pdf`, docId)
-    if (saved.newDocId) {
-      const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
-      router.push(`/${basePath}/${saved.newDocId}`)
-    } else router.refresh()
+  function saveToDrive() {
+    if (!settings.drive_folder_id) { toast.error('No Drive folder configured. Set one in Settings → Google Drive.'); return }
+    withIssued(async issued => {
+      const result = await buildPdfBlob(issued.number, true)
+      if (!result) { afterIssue(issued); return }
+      await uploadToDrive(await blobToBase64(result.blob), `${issued.number}.pdf`, issued.id)
+      afterIssue(issued)
+    })
   }
 
   async function blobToBase64(blob: Blob): Promise<string> {
@@ -459,42 +467,37 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     setTimeout(() => URL.revokeObjectURL(url), 10000)
   }
 
-  async function savePdf() {
-    const saved = await ensureNumberAndSave()
-    if (!saved) return
-    const result = await buildPdfBlob(saved.number, true)
-    if (!result) return
-    const filename = `${saved.number}.pdf`
-
-    const pdfBase64 = await blobToBase64(result.blob)
-
-    if ('showSaveFilePicker' in window) {
-      try {
-        const handle = await (window as Window & typeof globalThis & { showSaveFilePicker: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
-          suggestedName: filename,
-          types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
-        })
-        const writable = await handle.createWritable()
-        await writable.write(result.blob)
-        await writable.close()
-        if (saved.newDocId) {
-          const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
-          router.push(`/${basePath}/${saved.newDocId}`)
-        } else router.refresh()
-        return
-      } catch (e) {
-        if ((e as Error).name === 'AbortError') return
-      }
-    }
-
-    const url = URL.createObjectURL(result.blob)
-    const a = Object.assign(document.createElement('a'), { href: url, download: filename })
-    a.click()
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    Object.assign(document.createElement('a'), { href: url, download: filename }).click()
     setTimeout(() => URL.revokeObjectURL(url), 10000)
-    if (saved.newDocId) {
-      const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
-      router.push(`/${basePath}/${saved.newDocId}`)
-    } else router.refresh()
+  }
+
+  function savePdf() {
+    withIssued(async issued => {
+      const result = await buildPdfBlob(issued.number, true)
+      if (!result) { afterIssue(issued); return }
+      const filename = `${issued.number}.pdf`
+
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as Window & typeof globalThis & { showSaveFilePicker: (o: object) => Promise<FileSystemFileHandle> }).showSaveFilePicker({
+            suggestedName: filename,
+            types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
+          })
+          const writable = await handle.createWritable()
+          await writable.write(result.blob)
+          await writable.close()
+          afterIssue(issued)
+          return
+        } catch (e) {
+          if ((e as Error).name === 'AbortError') { afterIssue(issued); return }
+        }
+      }
+
+      triggerDownload(result.blob, filename)
+      afterIssue(issued)
+    })
   }
 
   function buildEmailContent(numOverride?: string) {
@@ -534,36 +537,34 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     return { subject, body, num }
   }
 
-  async function openInEmail() {
-    if (!client) { toast.error('Select a client first.'); return }
-    const content = buildEmailContent()
-    if (!content) return
-    const mailLink = Object.assign(document.createElement('a'), {
-      href: `mailto:${client.email}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`
-    })
-    mailLink.click()
-    await downloadPdf()
-  }
-
-  async function sendViaGmail() {
+  function openInEmail() {
     if (!client) { toast.error('Select a client first.'); return }
     if (!client.email) { toast.error('Client has no email address.'); return }
-
-    const saved = await ensureNumberAndSave()
-    if (!saved) return
-
-    const content = buildEmailContent(saved.number)
-    if (!content) return
-    const pdfResult = await buildPdfBlob(saved.number, true)
-    if (!pdfResult) return
-
-    const reader = new FileReader()
-    const pdfBase64 = await new Promise<string>((resolve) => {
-      reader.onload = () => resolve((reader.result as string).split(',')[1])
-      reader.readAsDataURL(pdfResult.blob)
+    withIssued(async issued => {
+      const content = buildEmailContent(issued.number)
+      const result = await buildPdfBlob(issued.number, true)
+      if (!content || !result) { afterIssue(issued); return }
+      triggerDownload(result.blob, `${issued.number}.pdf`)
+      Object.assign(document.createElement('a'), {
+        href: `mailto:${client.email}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`,
+      }).click()
+      afterIssue(issued)
     })
+  }
 
-    setGmailPreview({ to: client.email, subject: content.subject, body: content.body, pdfBase64, filename: `${saved.number}.pdf`, newDocId: saved.newDocId, alreadySent: true, uploadToDrive: !!settings.drive_folder_id })
+  function sendViaGmail() {
+    if (!client) { toast.error('Select a client first.'); return }
+    if (!client.email) { toast.error('Client has no email address.'); return }
+    withIssued(async issued => {
+      const content = buildEmailContent(issued.number)
+      const pdfResult = await buildPdfBlob(issued.number, true)
+      if (!content || !pdfResult) { afterIssue(issued); return }
+      setGmailPreview({
+        to: client.email, subject: content.subject, body: content.body,
+        pdfBase64: await blobToBase64(pdfResult.blob), filename: `${issued.number}.pdf`,
+        newDocId: issued.isNew ? issued.id : undefined, uploadToDrive: !!settings.drive_folder_id,
+      })
+    })
   }
 
   async function confirmSendViaGmail() {
@@ -575,7 +576,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       body: JSON.stringify(gmailPreview),
     })
     setGmailSending(false)
-    setGmailPreview(null)
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -585,39 +585,44 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
     toast.success('Email sent via Gmail.')
     if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.newDocId ?? doc?.id)
-    if (gmailPreview.newDocId) {
-      const basePath = type === 'invoice' ? 'invoices' : type === 'quote' ? 'quotes' : 'credit-notes'
-      router.push(`/${basePath}/${gmailPreview.newDocId}`)
-    } else if (gmailPreview.alreadySent) {
-      router.refresh()
-    } else if (doc?.status === 'draft') {
-      requestSent()
-    }
+    closeGmailPreview()
+  }
+
+  // The document is already issued when the modal opens, so a new document must still land on its page.
+  function closeGmailPreview() {
+    const newDocId = gmailPreview?.newDocId
+    setGmailPreview(null)
+    if (newDocId) router.push(`/${PATHS[type]}/${newDocId}`)
+    else router.refresh()
   }
 
   function requestSent() {
-    if (!clientId) { toast.error('Select a client.'); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
-    setShowSentConfirm(true)
+    withIssued(async issued => {
+      toast.success(`Issued ${issued.number}.`)
+      afterIssue(issued)
+    })
   }
 
   const autoSave = useCallback(async () => {
-    if (!doc || !clientId || saving) return
+    if (!doc || !clientId || saving || issuingRef.current) return
+    if (!date) { setSaveError('Date is required'); return }
     setAutoSaving(true)
-    const { error } = await supabase.from('documents').update({
-      client_id: clientId, date, service_date: serviceDate || null,
-      due_date: dueDate || null, language, currency, tax_treatment: taxTreatment,
-      notes: notes || null, notes_internal: notesInternal || null,
-      discount_type: discountType, discount_value: discountValue || null,
-    }).eq('id', doc.id)
-    if (!error) {
-      await supabase.from('document_items').delete().eq('document_id', doc.id)
-      await supabase.from('document_items').insert(buildItemsPayload(doc.id))
+    const failure = await serialized(async () => {
+      const { error } = await supabase.from('documents').update(currentDocFields(date, dueDate || null)).eq('id', doc.id)
+      if (error) return error.message
+      const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: doc.id, p_items: buildItemsPayload(doc.id) })
+      return itemsErr ? itemsErr.message : null
+    })
+    if (failure) {
+      if (!saveError) toast.error(`Not saved: ${failure}`)
+      setSaveError(failure)
+    } else {
+      setSaveError(null)
       setLastSaved(new Date())
     }
     setAutoSaving(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, clientId, date, serviceDate, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving])
+  }, [doc, clientId, date, serviceDate, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving, saveError])
 
   useEffect(() => {
     if (!doc) return
@@ -693,7 +698,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               </label>
             )}
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setGmailPreview(null)} disabled={gmailSending}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={closeGmailPreview} disabled={gmailSending}>Cancel</Button>
               <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>
                 {gmailSending ? 'Sending…' : 'Send'}
               </Button>
@@ -702,19 +707,17 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         </div>
       )}
 
-      {/* Mark as sent confirmation */}
-      {showSentConfirm && (
+      {/* Issue confirmation */}
+      {pendingIssue && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full space-y-4">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as sent?</h3>
+            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Issue this {typeLabel[type].en.toLowerCase()}?</h3>
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              {!doc?.number
-                ? `This will issue a new ${type} number and mark it as sent. This cannot be undone.`
-                : `This will mark ${type} ${doc.number} as sent.`}
+              The next {typeLabel[type].en.toLowerCase()} number will be assigned and the document marked as sent. Numbers cannot be taken back.
             </p>
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setShowSentConfirm(false)}>Cancel</Button>
-              <Button type="button" onClick={() => { setShowSentConfirm(false); save('sent') }}>Confirm</Button>
+              <Button type="button" variant="outline" onClick={() => setPendingIssue(null)}>Cancel</Button>
+              <Button type="button" onClick={() => { const run = pendingIssue; setPendingIssue(null); void run() }}>Issue &amp; continue</Button>
             </div>
           </div>
         </div>
@@ -1436,20 +1439,20 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <Eye size={16} />
               <span className="text-[10px] font-medium">Preview</span>
             </button>
-            <button type="button" onClick={savePdf}
-              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+            <button type="button" onClick={savePdf} disabled={saving}
+              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Download size={16} />
               <span className="text-[10px] font-medium">PDF</span>
             </button>
             {settings.gmail_email && (
-              <button type="button" onClick={saveToDrive}
-                className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+              <button type="button" onClick={saveToDrive} disabled={saving}
+                className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <HardDrive size={16} />
                 <span className="text-[10px] font-medium">Drive</span>
               </button>
             )}
-            <button type="button" onClick={settings.gmail_email ? sendViaGmail : openInEmail}
-              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
+            <button type="button" onClick={settings.gmail_email ? sendViaGmail : openInEmail} disabled={saving}
+              className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Mail size={16} />
               <span className="text-[10px] font-medium">{settings.gmail_email ? 'Gmail' : 'Email'}</span>
             </button>
@@ -1468,9 +1471,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             )}
           </div>
           {/* Auto-save status */}
-          {doc && (autoSaving || lastSaved) && (
-            <p className="text-[10px] text-center text-neutral-400 dark:text-neutral-500 -mt-1">
-              {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+          {doc && saveStatus && (
+            <p className={`text-[10px] text-center -mt-1 ${saveStatus.cls || 'text-neutral-400 dark:text-neutral-500'}`}>
+              {saveStatus.text}
             </p>
           )}
         </div>
@@ -1480,27 +1483,27 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             <Eye size={13} /> Preview
           </Button>
           <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
-          <Button type="button" variant="outline" size="sm" onClick={savePdf} className="flex items-center gap-1.5">
+          <Button type="button" variant="outline" size="sm" onClick={savePdf} disabled={saving} className="flex items-center gap-1.5">
             <Download size={13} /> Download PDF
           </Button>
           {settings.gmail_email && (
-            <Button type="button" variant="outline" size="sm" onClick={saveToDrive} className="flex items-center gap-1.5">
+            <Button type="button" variant="outline" size="sm" onClick={saveToDrive} disabled={saving} className="flex items-center gap-1.5">
               <HardDrive size={13} /> Save to Drive
             </Button>
           )}
           {settings.gmail_email ? (
-            <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} className="flex items-center gap-1.5">
+            <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} disabled={saving} className="flex items-center gap-1.5">
               <Mail size={13} /> Send via Gmail
             </Button>
           ) : (
-            <Button type="button" variant="outline" size="sm" onClick={openInEmail} className="flex items-center gap-1.5">
+            <Button type="button" variant="outline" size="sm" onClick={openInEmail} disabled={saving} className="flex items-center gap-1.5">
               <Mail size={13} /> Send via Superhuman
             </Button>
           )}
           <div className="flex-1" />
-          {doc && (
-            <span className="text-xs text-neutral-400 dark:text-neutral-500 mr-1">
-              {autoSaving ? 'Saving…' : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+          {doc && saveStatus && (
+            <span className={`text-xs mr-1 ${saveStatus.cls || 'text-neutral-400 dark:text-neutral-500'}`}>
+              {saveStatus.text}
             </span>
           )}
           {!doc && (
