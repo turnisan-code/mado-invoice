@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Plus, ArrowUpDown, ArrowUp, ArrowDown, MessageSquareQuote } from 'lucide-react'
-import { formatMoney } from '@/lib/utils/document'
+import { formatMoney, calcTotals } from '@/lib/utils/document'
 
 const statusColor: Record<string, string> = {
   draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
@@ -18,7 +18,7 @@ const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled']
 type SortKey = 'number' | 'client' | 'date' | 'total' | 'status'
 type SortDir = 'asc' | 'desc'
 
-interface DocItem { quantity: number | null; unit_price: number | null; vat_rate: number | null }
+interface DocItem { line_type?: string | null; sort_order?: number | null; quantity: number | null; unit_price: number | null; vat_rate: number | null; discount_type?: string | null; discount_value?: number | null }
 interface Quote {
   id: string
   number: string | null
@@ -27,15 +27,13 @@ interface Quote {
   currency: string | null
   clients: { name: string; company: string | null } | null
   tax_treatment?: string | null
+  discount_type?: string | null
+  discount_value?: number | null
   document_items: DocItem[]
 }
 
-function calcTotal(items: DocItem[], taxTreatment?: string | null) {
-  const vatApplies = !taxTreatment || taxTreatment === 'at_vat'
-  return items.reduce((s, i) => {
-    if (i.quantity == null || i.unit_price == null) return s
-    return s + i.quantity * i.unit_price * (vatApplies ? 1 + (i.vat_rate ?? 0) / 100 : 1)
-  }, 0)
+function docTotal(d: Quote) {
+  return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
 }
 
 function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: SortDir } }) {
@@ -70,7 +68,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       if (sort.key === 'number') { av = a.number ?? ''; bv = b.number ?? '' }
       else if (sort.key === 'client') { av = a.clients?.company ?? a.clients?.name ?? ''; bv = b.clients?.company ?? b.clients?.name ?? '' }
       else if (sort.key === 'date') { av = a.date ?? ''; bv = b.date ?? '' }
-      else if (sort.key === 'total') { av = calcTotal(a.document_items, a.tax_treatment); bv = calcTotal(b.document_items, b.tax_treatment) }
+      else if (sort.key === 'total') { av = docTotal(a); bv = docTotal(b) }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
       if (av < bv) return sort.dir === 'asc' ? -1 : 1
       if (av > bv) return sort.dir === 'asc' ? 1 : -1
@@ -147,7 +145,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
               </div>
               <div className="flex flex-col items-end gap-1.5 ml-3 shrink-0">
-                <p className="font-semibold text-sm">{formatMoney(calcTotal(doc.document_items, doc.tax_treatment), doc.currency ?? undefined)}</p>
+                <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
               </div>
             </Link>
@@ -190,7 +188,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
-                <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items, doc.tax_treatment), doc.currency ?? undefined)}</td>
+                <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
                 </td>
