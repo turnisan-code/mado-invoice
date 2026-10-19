@@ -19,7 +19,9 @@ function servicePeriod(start: string | null, end: string | null) {
 }
 
 // One row per issued document; credit notes carry negative amounts so column sums are the
-// year's turnover. Paid/open only exist for invoices: the app records no refunds.
+// year's turnover. A voided credit note keeps its row (its number stays in the sequence) but no
+// amounts, so the sums agree with the UVA, which ignores it. A cancelled invoice keeps its amounts:
+// its Storno offsets them. Paid/open only exist for invoices: the app records no refunds.
 async function documentsCsv(supabase: Supabase, start: string, end: string) {
   const { data, error } = await supabase
     .from('documents')
@@ -39,17 +41,18 @@ async function documentsCsv(supabase: Supabase, start: string, end: string) {
       d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
       d.tax_treatment,
     )
-    const sign = d.type === 'credit_note' ? -1 : 1
     const isInvoice = d.type === 'invoice'
+    const voided = !isInvoice && d.status === 'cancelled'
+    const amount = (n: number) => voided ? null : (isInvoice ? n : -n)
     return [
       TYPE_LABEL[d.type] ?? d.type,
       d.number,
       csvDate(d.date),
       servicePeriod(d.service_date, d.service_date_end),
       clientLabel(d.clients as unknown as ClientRef),
-      ...RATES.map(r => sign * (t.vat_groups.find(g => g.rate === r)?.base ?? 0)),
-      sign * t.total_vat,
-      sign * t.total,
+      ...RATES.map(r => amount(t.vat_groups.find(g => g.rate === r)?.base ?? 0)),
+      amount(t.total_vat),
+      amount(t.total),
       isInvoice ? t.total_paid : null,
       isInvoice ? (d.status === 'cancelled' ? 0 : t.balance_due) : null,
       d.status,
