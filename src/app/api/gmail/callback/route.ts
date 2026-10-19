@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
   let tokens: Auth.Credentials
   let email: string | null | undefined
   try {
-    ;({ tokens } = await oauth2.getToken(code))
+    tokens = (await oauth2.getToken(code)).tokens
     oauth2.setCredentials(tokens)
     const { data: userInfo } = await google.oauth2({ version: 'v2', auth: oauth2 }).userinfo.get()
     email = userInfo.email

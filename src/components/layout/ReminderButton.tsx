@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Bell, BellRing } from 'lucide-react'
+import { toastApiError } from '@/lib/google/toast'
 
 interface Props {
   documentId: string
@@ -32,8 +33,7 @@ export default function ReminderButton({ documentId, reminderSentAt, gmailConfig
     })
     setSending(false)
     if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
-      toast.error(`Could not send reminder: ${error}`)
+      toastApiError(await res.json().catch(() => ({})), 'Could not send reminder: ', 'Failed')
       return
     }
     const { sentAt: ts } = await res.json()
