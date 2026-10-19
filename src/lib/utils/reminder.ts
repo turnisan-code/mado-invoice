@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import type { GoogleAuth } from '@/lib/google/client'
 
 export type { ReminderContext } from './reminder-templates'
 export { fillTemplate, DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from './reminder-templates'
@@ -48,39 +49,17 @@ export function buildMime({ from, to, subject, body, pdfBase64, filename }: {
 }
 
 export async function sendReminderEmail({
-  accessToken, refreshToken, tokenExpiry,
-  from, to, subject, body, pdfBase64, filename,
-  onTokenRefresh,
+  auth, from, to, subject, body, pdfBase64, filename,
 }: {
-  accessToken: string
-  refreshToken: string
-  tokenExpiry: number | null
+  auth: GoogleAuth
   from: string
   to: string
   subject: string
   body: string
   pdfBase64?: string
   filename?: string
-  onTokenRefresh?: (tokens: { access_token: string | null; refresh_token?: string | null; expiry_date?: number | null }) => Promise<void>
 }) {
-  const oauth2 = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/gmail/callback`,
-  )
-  oauth2.setCredentials({ access_token: accessToken, refresh_token: refreshToken, expiry_date: tokenExpiry ?? undefined })
-
-  if (onTokenRefresh) {
-    oauth2.on('tokens', async (tokens) => {
-      await onTokenRefresh({
-        access_token: tokens.access_token ?? null,
-        refresh_token: tokens.refresh_token,
-        expiry_date: tokens.expiry_date,
-      })
-    })
-  }
-
-  const gmail = google.gmail({ version: 'v1', auth: oauth2 })
+  const gmail = google.gmail({ version: 'v1', auth })
   const raw = buildMime({ from, to, subject, body, pdfBase64, filename })
   await gmail.users.messages.send({ userId: 'me', requestBody: { raw } })
 }

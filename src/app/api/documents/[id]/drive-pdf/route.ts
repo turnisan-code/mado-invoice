@@ -5,7 +5,7 @@ import { fetchReference } from '@/lib/utils/document-reference'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { renderToBuffer } from '@react-pdf/renderer'
 import { google } from 'googleapis'
-import { getOAuthClient } from '@/lib/google/client'
+import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language, Currency, TaxTreatment } from '@/types'
 import React from 'react'
@@ -25,7 +25,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
   if (!settings.drive_folder_id) return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
-  if (!settings.gmail_refresh_token) return NextResponse.json({ error: 'Google not connected' }, { status: 400 })
+  if (!settings.gmail_refresh_token) return googleNotConnected()
 
   const client = doc.clients as unknown as Client
   const items = (doc.document_items ?? []) as DocumentItem[]
@@ -81,79 +81,73 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const filename = `${doc.number ?? 'document'}.pdf`
 
-  const oauth2 = getOAuthClient()
-  oauth2.setCredentials({
-    access_token: settings.gmail_access_token,
-    refresh_token: settings.gmail_refresh_token,
-    expiry_date: settings.gmail_token_expiry,
-  })
-  oauth2.on('tokens', async (tokens) => {
-    await supabase.from('settings').update({
-      gmail_access_token: tokens.access_token,
-      ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
-      gmail_token_expiry: tokens.expiry_date,
-    }).eq('id', settings.id)
-  })
-
-  const drive = google.drive({ version: 'v3', auth: oauth2 })
+  const drive = google.drive({ version: 'v3', auth: getAuthorizedGoogle(settings, supabase) })
   const { PassThrough } = await import('stream')
 
-  // 1. Verify stored file ID is still active (not trashed/deleted)
-  let activeFileId: string | null = doc.drive_file_id ?? null
-  if (activeFileId) {
-    try {
-      const { data: check } = await drive.files.get({ fileId: activeFileId, fields: 'id,trashed' })
-      if (check.trashed) activeFileId = null
-    } catch {
-      activeFileId = null
-    }
-  }
-
-  // 2. If no stored ID, search the folder for a file with the same name
-  if (!activeFileId && settings.drive_folder_id) {
-    const safe = filename.replace(/'/g, "\\'")
-    const { data: found } = await drive.files.list({
-      q: `name='${safe}' and '${settings.drive_folder_id}' in parents and trashed=false`,
-      fields: 'files(id,webViewLink)',
-      pageSize: 1,
-    })
-    if (found.files && found.files.length > 0) {
-      activeFileId = found.files[0].id ?? null
-      if (activeFileId) {
-        await supabase.from('documents').update({ drive_file_id: activeFileId }).eq('id', id)
+  try {
+    // 1. Verify stored file ID is still active (not trashed/deleted)
+    let activeFileId: string | null = doc.drive_file_id ?? null
+    if (activeFileId) {
+      try {
+        const { data: check } = await drive.files.get({ fileId: activeFileId, fields: 'id,trashed', supportsAllDrives: true })
+        if (check.trashed) activeFileId = null
+      } catch {
+        activeFileId = null
       }
     }
-  }
 
-  let fileId: string | null | undefined
-  let webViewLink: string | null | undefined
-
-  if (activeFileId) {
-    // Active file — update content in-place
-    const stream = new PassThrough()
-    stream.end(buffer)
-    const { data: file } = await drive.files.update({
-      fileId: activeFileId,
-      media: { mimeType: 'application/pdf', body: stream },
-      fields: 'id,webViewLink',
-    })
-    fileId = file.id
-    webViewLink = file.webViewLink
-  } else {
-    // No active file — create new and persist the ID
-    const stream = new PassThrough()
-    stream.end(buffer)
-    const { data: file } = await drive.files.create({
-      requestBody: { name: filename, parents: [settings.drive_folder_id] },
-      media: { mimeType: 'application/pdf', body: stream },
-      fields: 'id,webViewLink',
-    })
-    fileId = file.id
-    webViewLink = file.webViewLink
-    if (fileId) {
-      await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', id)
+    // 2. If no stored ID, search the folder for a file with the same name
+    if (!activeFileId && settings.drive_folder_id) {
+      const safe = filename.replace(/'/g, "\\'")
+      const { data: found } = await drive.files.list({
+        q: `name='${safe}' and '${settings.drive_folder_id}' in parents and trashed=false`,
+        fields: 'files(id,webViewLink)',
+        pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      })
+      if (found.files && found.files.length > 0) {
+        activeFileId = found.files[0].id ?? null
+        if (activeFileId) {
+          await supabase.from('documents').update({ drive_file_id: activeFileId }).eq('id', id)
+        }
+      }
     }
-  }
 
-  return NextResponse.json({ fileId, webViewLink })
+    let fileId: string | null | undefined
+    let webViewLink: string | null | undefined
+
+    if (activeFileId) {
+      // Active file — update content in-place
+      const stream = new PassThrough()
+      stream.end(buffer)
+      const { data: file } = await drive.files.update({
+        fileId: activeFileId,
+        media: { mimeType: 'application/pdf', body: stream },
+        fields: 'id,webViewLink',
+        supportsAllDrives: true,
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+    } else {
+      // No active file — create new and persist the ID
+      const stream = new PassThrough()
+      stream.end(buffer)
+      const { data: file } = await drive.files.create({
+        requestBody: { name: filename, parents: [settings.drive_folder_id] },
+        media: { mimeType: 'application/pdf', body: stream },
+        fields: 'id,webViewLink',
+        supportsAllDrives: true,
+      })
+      fileId = file.id
+      webViewLink = file.webViewLink
+      if (fileId) {
+        await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', id)
+      }
+    }
+
+    return NextResponse.json({ fileId, webViewLink })
+  } catch (err) {
+    return googleErrorResponse(err, supabase, settings.id, 'drive-pdf')
+  }
 }

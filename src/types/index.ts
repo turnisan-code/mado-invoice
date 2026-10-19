@@ -50,6 +50,8 @@ export interface Settings {
   gmail_access_token: string | null
   gmail_refresh_token: string | null
   gmail_token_expiry: number | null
+  gmail_connected_at: string | null
+  gmail_scopes: string | null
   drive_folder_id: string | null
   drive_folder_name: string | null
   bookamat_username: string | null
@@ -137,6 +139,7 @@ export interface Document {
   discount_value: number | null
   bookamat_booking_id?: string | null
   reminder_sent_at?: string | null
+  sent_at?: string | null
   share_token?: string | null
   drive_file_id?: string | null
   issued_at?: string | null
