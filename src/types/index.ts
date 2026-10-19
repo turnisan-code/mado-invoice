@@ -122,6 +122,7 @@ export interface Document {
   client?: Client
   date: string
   service_date: string | null
+  service_date_end?: string | null
   due_date: string | null
   status: DocumentStatus
   language: Language

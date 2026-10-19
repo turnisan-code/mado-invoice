@@ -98,6 +98,7 @@ export async function GET(req: NextRequest) {
         number: invoice.number ?? 'DRAFT',
         date: invoice.date ?? '',
         service_date: invoice.service_date ?? null,
+        service_date_end: invoice.service_date_end ?? null,
         due_date: invoice.due_date ?? null,
         type: invoice.type,
         language: invLang,
