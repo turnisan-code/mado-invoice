@@ -165,8 +165,9 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
       toast.error(`Delete failed: ${error}`)
       return
     }
-    const { deleted } = await res.json()
-    toast.success(`${deleted} invoice${deleted !== 1 ? 's' : ''} deleted.`)
+    const { deleted, skipped } = await res.json()
+    toast.success(`${deleted} draft${deleted !== 1 ? 's' : ''} deleted.`)
+    if (skipped) toast.info(`${skipped} issued invoice${skipped !== 1 ? 's were' : ' was'} kept — issued documents cannot be deleted, cancel them instead.`)
     clearSelection()
     router.refresh()
   }
@@ -416,7 +417,13 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
             <div>
               <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{bulkConfirm.label} {selected.size} invoice{selected.size !== 1 ? 's' : ''}?</h3>
               {bulkConfirm.action === 'delete' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">This cannot be undone.</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Only drafts are deleted — issued invoices are kept. This cannot be undone.</p>
+              )}
+              {bulkConfirm.action === 'paid' && (
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">The open balance of each invoice is recorded as a payment dated today.</p>
+              )}
+              {bulkConfirm.action === 'sent' && (
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Drafts get the next invoice number assigned.</p>
               )}
             </div>
             <div className="flex gap-2 justify-end">

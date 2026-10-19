@@ -723,6 +723,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         </div>
       )}
 
+      {doc?.number && doc.status !== 'draft' && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <strong>{doc.number} is issued.</strong> Edits here change a document your client may already have — for corrections after sending, cancel it and issue a corrected one.
+        </div>
+      )}
+
       {/* Client & dates */}
       <div className="space-y-4">
         <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Client & Dates</p>

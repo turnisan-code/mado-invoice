@@ -6,48 +6,28 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
 
-export default function DeleteDocumentButton({ id, backTo, docNumber, docType }: {
-  id: string; backTo: string; docNumber: string | null; docType: string
-}) {
+interface Props {
+  id: string
+  backTo: string
+  docNumber: string | null
+  docType: string
+}
+
+// Issued (numbered) documents are never deleted — they have to be kept for seven years
+// and their number must stay unique. They are cancelled instead; only drafts can go.
+export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
-  async function handleDelete() {
-    if (!confirm('Delete this document? This cannot be undone.')) return
-    setLoading(true)
+  if (docNumber) return null
 
+  async function handleDelete() {
+    if (!confirm('Delete this draft? This cannot be undone.')) return
+    setLoading(true)
     const { error } = await supabase.from('documents').delete().eq('id', id)
     if (error) { toast.error(error.message); setLoading(false); return }
-
-    // Counter restore only applies to numbered (issued) documents
-    if (docNumber) {
-      const counterField = docType === 'invoice' ? 'next_invoice_number'
-        : docType === 'quote' ? 'next_quote_number'
-        : 'next_credit_note_number'
-
-      const { data: settings } = await supabase.from('settings').select(`id, ${counterField}`).single() as { data: Record<string, unknown> | null }
-      const currentCounter = settings?.[counterField] as number | undefined
-      const seqMatch = docNumber.match(/(\d+)$/)
-      const seqNum = seqMatch ? parseInt(seqMatch[1], 10) : null
-
-      if (currentCounter !== undefined && seqNum !== null && seqNum === currentCounter - 1) {
-        const restore = confirm(
-          `Restore the ${docType} counter from ${currentCounter} back to ${seqNum} to avoid a gap in numbering?`
-        )
-        if (restore) {
-          await supabase.from('settings').update({ [counterField]: seqNum }).eq('id', settings!.id)
-          toast.success('Deleted and counter restored.')
-        } else {
-          toast.success('Deleted. Gap left in numbering.')
-        }
-      } else {
-        toast.success('Deleted.')
-      }
-    } else {
-      toast.success('Draft deleted.')
-    }
-
+    toast.success('Draft deleted.')
     router.push(backTo)
   }
 
