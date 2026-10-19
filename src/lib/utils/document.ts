@@ -92,6 +92,14 @@ export function calcTotals(
     return { rate: g.rate, base, amount: roundCents(base * (g.rate / 100)) }
   })
   const net = roundCents(subtotal)
+  // Per-rate bases are rounded individually; push any cent of drift into the largest group so
+  // the printed "davon Netto" rows sum exactly to Netto − Rabatt.
+  const baseDrift = roundCents(net - discount_amount - vat_groups.reduce((s, g) => s + g.base, 0))
+  if (baseDrift !== 0 && vat_groups.length) {
+    const largest = vat_groups.reduce((a, b) => (b.base > a.base ? b : a))
+    largest.base = roundCents(largest.base + baseDrift)
+    largest.amount = roundCents(largest.base * (largest.rate / 100))
+  }
   const total_vat = roundCents(vat_groups.reduce((s, g) => s + g.amount, 0))
   const total = roundCents(net - discount_amount + total_vat)
   const total_paid = roundCents(payments.reduce((s, p) => s + p.amount, 0))

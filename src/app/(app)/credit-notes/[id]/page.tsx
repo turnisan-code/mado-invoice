@@ -24,7 +24,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   if (!doc) notFound()
 
   const publicSettings = toPublicSettings(settings)
-  const reference = await fetchReference(supabase, doc.converted_from_id)
+  const reference = await fetchReference(supabase, doc)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (

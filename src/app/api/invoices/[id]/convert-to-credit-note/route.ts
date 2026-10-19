@@ -44,6 +44,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     discount_type: invoice.discount_type,
     discount_value: invoice.discount_value,
     converted_from_id: invoice.id,
+    cancels_document_id: cancel ? invoice.id : null,
   }).select('id').single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -65,8 +66,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 })
 
   if (cancel) {
-    const { error: cancelErr } = await supabase.from('documents').update({ status: 'cancelled' }).eq('id', invoice.id)
+    // Conditional update: if a concurrent request already cancelled the invoice, this Storno loses and is removed.
+    const { data: cancelled, error: cancelErr } = await supabase
+      .from('documents')
+      .update({ status: 'cancelled' })
+      .eq('id', invoice.id)
+      .neq('status', 'cancelled')
+      .select('id')
     if (cancelErr) return NextResponse.json({ error: cancelErr.message }, { status: 500 })
+    if (!cancelled?.length) {
+      await supabase.from('documents').delete().eq('id', creditNote.id)
+      return NextResponse.json({ error: 'Invoice is already cancelled' }, { status: 409 })
+    }
   }
 
   return NextResponse.json({ creditNoteId: creditNote.id })

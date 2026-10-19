@@ -47,7 +47,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   }
 
   const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings as Settings)
-  const reference = await fetchReference(supabase, doc.converted_from_id)
+  const reference = await fetchReference(supabase, doc)
 
   const docData = {
     number: doc.number ?? '',

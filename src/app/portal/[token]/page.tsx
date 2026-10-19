@@ -75,7 +75,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
 
   const settings = (await supabase.from('settings').select('*').single()).data as Settings | null
   if (!settings) notFound()
-  const reference = await fetchReference(supabase, doc.converted_from_id)
+  const reference = await fetchReference(supabase, doc)
 
   const client = doc.clients as unknown as Client
   const items = orderItems((doc.document_items ?? []) as DocumentItem[])
@@ -107,7 +107,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
             <div className="text-right space-y-1">
               <div className="text-2xl font-bold text-neutral-900">{docType === 'credit_note' && reference ? t('storno', lang) : DOC_TITLE[docType][lang]}</div>
               <div className="text-sm text-neutral-500">{doc.number}</div>
-              {reference && (
+              {docType === 'credit_note' && reference && (
                 <div className="text-xs text-neutral-500">{t('storno_ref', lang)} {reference.number} {t('dated', lang)} {formatDate(reference.date, lang)}</div>
               )}
               <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium ${STATUS_COLOR[doc.status] ?? ''}`}>

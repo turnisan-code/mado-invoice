@@ -404,7 +404,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   function withIssued(action: (issued: Issued) => Promise<void>) {
     if (!clientId) { toast.error('Select a client.'); return }
     if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
-    const run = async () => { const issued = await issueDocument(); if (issued) await action(issued) }
+    const run = async () => {
+      const issued = await issueDocument()
+      if (!issued) return
+      // A freshly issued document navigates away when the action finishes; keep the toolbar
+      // locked until then so a second click cannot create and issue another document.
+      if (issued.isNew) setSaving(true)
+      try { await action(issued) } finally { if (issued.isNew) setSaving(false) }
+    }
     if (doc?.number) void run()
     else setPendingIssue(() => run)
   }

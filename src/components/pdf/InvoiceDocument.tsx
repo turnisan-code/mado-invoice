@@ -203,7 +203,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.docTitle}>{title}</Text>
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
-            {!!doc.reference && (
+            {isStorno && !!doc.reference && (
               <Text style={s.metaLine}>{L('storno_ref', lang)} {doc.reference.number} {L('dated', lang)} {formatDate(doc.reference.date, lang)}</Text>
             )}
             {!!doc.service_date && (

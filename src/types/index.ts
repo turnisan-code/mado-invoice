@@ -132,6 +132,7 @@ export interface Document {
   notes: string | null
   notes_internal: string | null
   converted_from_id: string | null
+  cancels_document_id?: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
   bookamat_booking_id?: string | null
