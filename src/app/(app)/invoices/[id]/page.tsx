@@ -5,8 +5,9 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import InvoicePageClient from '@/components/layout/InvoicePageClient'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
+import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteButton'
-import { calcTotals } from '@/lib/utils/document'
+import { calcTotals, formatDate } from '@/lib/utils/document'
 import { toPublicSettings } from '@/lib/public-settings'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -41,12 +42,16 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <Link href="/invoices" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">
             <ArrowLeft size={16} />
           </Link>
-          <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
+            {doc.issued_at && <p className="text-xs text-neutral-400 dark:text-neutral-500">Issued {formatDate(doc.issued_at)}</p>}
+          </div>
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} />}
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
+          {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
           <ConvertToCreditNoteButton invoiceId={doc.id} />
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
           <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />

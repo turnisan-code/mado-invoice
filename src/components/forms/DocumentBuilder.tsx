@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHand
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive, Eye, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Download, X, GripVertical, Calendar, Mail, HardDrive, Eye, ChevronRight, Archive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -76,6 +76,29 @@ export interface DocumentBuilderHandle {
   buildPdfBlob: (numOverride?: string, includeQr?: boolean) => Promise<{ blob: Blob; number: string } | null>
 }
 
+async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? res.statusText)
+  return data as T
+}
+
+function errorMessage(e: unknown) {
+  return e instanceof Error ? e.message : 'Unknown error'
+}
+
+function notifyDriveUpload(webViewLink?: string | null) {
+  toast.success(
+    webViewLink
+      ? <span>Uploaded to Drive — <a href={webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>
+      : 'Uploaded to Drive.',
+    { duration: 5000 }
+  )
+}
+
 const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
   { type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props,
   ref,
@@ -118,7 +141,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
-  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; uploadToDrive: boolean } | null>(null)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -370,11 +393,28 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   useImperativeHandle(ref, () => ({ buildPdfBlob }))
 
-  type Issued = { number: string; id: string; isNew: boolean }
+  type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean }
+
+  // Stores the final PDF as the frozen issued copy and, when Google is connected, archives a
+  // server-rendered copy to Drive. Failures are reported but never block issuing.
+  async function archiveIssued(id: string, number: string): Promise<{ snapshot: boolean; drive: boolean }> {
+    const result = await buildPdfBlob(number, true)
+    const snapshot = result
+      ? postJson(`/api/documents/${id}/snapshot`, { pdfBase64: await blobToBase64(result.blob) })
+      : null
+    const drive = settings.drive_folder_id && settings.gmail_connected
+      ? postJson<{ webViewLink?: string | null }>(`/api/documents/${id}/drive-pdf`)
+      : null
+    const [snap, drv] = await Promise.allSettled([snapshot, drive])
+    if (snap.status === 'rejected') toast.error(`PDF snapshot failed: ${errorMessage(snap.reason)}`)
+    if (drv.status === 'rejected') toast.error(`Drive upload failed: ${errorMessage(drv.reason)}`)
+    else if (drv.value) notifyDriveUpload(drv.value.webViewLink)
+    return { snapshot: snap.status === 'fulfilled' && !!snap.value, drive: drv.status === 'fulfilled' && !!drv.value }
+  }
 
   // Persists, then assigns number + status 'sent' atomically (issue_document). Re-entrant calls are ignored.
   async function issueDocument(): Promise<Issued | null> {
-    if (doc?.number) return { number: doc.number, id: doc.id, isNew: false }
+    if (doc?.number) return { number: doc.number, id: doc.id, isNew: false, driveArchived: false }
     if (issuingRef.current) return null
     issuingRef.current = true
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
@@ -391,12 +431,23 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         }
         setSaveError(null)
         setLastSaved(new Date())
-        return { number: number as string, id, isNew: !doc }
+        const archived = await archiveIssued(id, number as string)
+        return { number: number as string, id, isNew: !doc, driveArchived: archived.drive }
       })
     } finally {
       issuingRef.current = false
       setSaving(false)
     }
+  }
+
+  // For documents issued without the builder (status menu, bulk actions, before snapshots existed).
+  function archiveNow() {
+    if (!doc?.number) return
+    const { id, number } = doc
+    setSaving(true)
+    void serialized(() => archiveIssued(id, number))
+      .then(archived => { if (archived.snapshot) { toast.success('Issued PDF archived.'); router.refresh() } })
+      .finally(() => setSaving(false))
   }
 
   // Issued documents run the action directly; drafts ask first, because issuing consumes
@@ -433,12 +484,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     })
     if (res.ok) {
       const { webViewLink } = await res.json()
-      toast.success(
-        webViewLink
-          ? <span>Uploaded to Drive — <a href={webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>
-          : 'Uploaded to Drive.',
-        { duration: 5000 }
-      )
+      notifyDriveUpload(webViewLink)
     } else {
       const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
       toast.error(`Drive upload failed: ${error}`)
@@ -448,6 +494,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   function saveToDrive() {
     if (!settings.drive_folder_id) { toast.error('No Drive folder configured. Set one in Settings → Google Drive.'); return }
     withIssued(async issued => {
+      // Issuing just archived to Drive; a second upload would only overwrite the same file.
+      if (issued.driveArchived) { afterIssue(issued); return }
       const result = await buildPdfBlob(issued.number, true)
       if (!result) { afterIssue(issued); return }
       await uploadToDrive(await blobToBase64(result.blob), `${issued.number}.pdf`, issued.id)
@@ -575,7 +623,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       setGmailPreview({
         to: client.email, subject: content.subject, body: content.body,
         pdfBase64: await blobToBase64(pdfResult.blob), filename: `${issued.number}.pdf`,
-        newDocId: issued.isNew ? issued.id : undefined, uploadToDrive: !!settings.drive_folder_id,
+        newDocId: issued.isNew ? issued.id : undefined,
+        uploadToDrive: !!settings.drive_folder_id && !issued.driveArchived, driveArchived: issued.driveArchived,
       })
     })
   }
@@ -699,7 +748,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               </div>
               <p className="text-xs text-neutral-400 dark:text-neutral-500">PDF attached: {gmailPreview.filename}</p>
             </div>
-            {settings.drive_folder_id && (
+            {settings.drive_folder_id && (gmailPreview.driveArchived ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Archived to Google Drive when issued.</p>
+            ) : (
               <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
                 <input
                   type="checkbox"
@@ -709,7 +760,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 />
                 Also save to Google Drive
               </label>
-            )}
+            ))}
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={closeGmailPreview} disabled={gmailSending}>Cancel</Button>
               <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>
@@ -726,7 +777,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full space-y-4">
             <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Issue this {typeLabel[type].en.toLowerCase()}?</h3>
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              The next {typeLabel[type].en.toLowerCase()} number will be assigned and the document marked as sent. Numbers cannot be taken back.
+              The next {typeLabel[type].en.toLowerCase()} number will be assigned, the document marked as sent and the final PDF stored as the issued copy. Numbers cannot be taken back.
             </p>
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={() => setPendingIssue(null)}>Cancel</Button>
@@ -1479,6 +1530,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <Mail size={16} />
               <span className="text-[10px] font-medium">{settings.gmail_email ? 'Gmail' : 'Email'}</span>
             </button>
+            {doc?.number && !doc.pdf_path && (
+              <button type="button" onClick={archiveNow} disabled={saving}
+                className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
+                <Archive size={16} />
+                <span className="text-[10px] font-medium">Archive</span>
+              </button>
+            )}
           </div>
           {/* Primary CTAs */}
           <div className="flex gap-2">
@@ -1521,6 +1579,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           ) : (
             <Button type="button" variant="outline" size="sm" onClick={openInEmail} disabled={saving} className="flex items-center gap-1.5">
               <Mail size={13} /> Send via Superhuman
+            </Button>
+          )}
+          {doc?.number && !doc.pdf_path && (
+            <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="flex items-center gap-1.5">
+              <Archive size={13} /> Archive PDF
             </Button>
           )}
           <div className="flex-1" />
