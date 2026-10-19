@@ -11,9 +11,9 @@ export default function ConvertToCreditNoteButton({ invoiceId }: { invoiceId: st
   const router = useRouter()
 
   async function convert() {
-    if (!confirm('Create a credit note from this invoice? A draft credit note with the same line items will be created.')) return
+    if (!confirm('Create a credit note from this invoice? A draft credit note with the same line items will be created (the invoice stays as it is — to cancel it, set its status to cancelled instead).')) return
     setLoading(true)
-    const res = await fetch(`/api/invoices/${invoiceId}/convert-to-credit-note`, { method: 'POST' })
+    const res = await fetch(`/api/invoices/${invoiceId}/convert-to-credit-note`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
     const data = await res.json()
     if (!res.ok) { toast.error(data.error); setLoading(false); return }
     toast.success('Credit note created.')

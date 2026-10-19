@@ -19,6 +19,8 @@ interface Payment {
 
 interface Props {
   documentId: string
+  number: string | null
+  status: string
   total: number
   payments: Payment[]
   currency: Currency
@@ -27,7 +29,7 @@ interface Props {
   generatePdfForBookamat?: () => Promise<{ base64: string; filename: string } | null>
 }
 
-export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, generatePdfForBookamat }: Props) {
+export default function PaymentPanel({ documentId, number, status, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, generatePdfForBookamat }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
   // Payments can also be added elsewhere on the page (status pill → paid); follow server refreshes.
   const [seenInitial, setSeenInitial] = useState(initial)
@@ -49,7 +51,13 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
   const balanceDue = total - totalPaid
   const fullyPaid = balanceDue <= 0.005
 
+  // Payments belong to issued, live invoices: a draft has no legal number yet and a cancelled
+  // invoice has been replaced by its Storno.
+  const canRecord = !!number && status !== 'cancelled'
+
   async function addPayment() {
+    if (!number) { toast.error('Issue the invoice before recording a payment.'); return }
+    if (status === 'cancelled') { toast.error('This invoice is cancelled — record payments on the replacement invoice.'); return }
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { toast.error('Enter a valid amount.'); return }
     setSaving(true)
@@ -89,7 +97,7 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
     setPayments(next)
 
     const newTotal = next.reduce((s, p) => s + p.amount, 0)
-    if (newTotal < total - 0.005) {
+    if (status === 'paid' && newTotal < total - 0.005) {
       await supabase.from('documents').update({ status: 'sent' }).eq('id', documentId)
     }
 
@@ -196,7 +204,10 @@ export default function PaymentPanel({ documentId, total, payments: initial, cur
         </div>
       )}
 
-      {!fullyPaid && (
+      {!fullyPaid && !number && (
+        <p className="text-xs text-neutral-400 dark:text-neutral-500 pt-1">Issue the invoice before recording payments.</p>
+      )}
+      {!fullyPaid && canRecord && (
         <div className="space-y-2 pt-1">
           <div className="flex gap-2">
             <Input

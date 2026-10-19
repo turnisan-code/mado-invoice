@@ -144,8 +144,9 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
       toast.error(`Bulk update failed: ${error}`)
       return
     }
-    const { updated } = await res.json()
+    const { updated, skipped } = await res.json()
     toast.success(`${updated} invoice${updated !== 1 ? 's' : ''} marked as ${newStatus}.`)
+    if (skipped) toast.info(`${skipped} invoice${skipped !== 1 ? 's were' : ' was'} left alone (already ${newStatus === 'sent' ? 'issued' : 'paid or cancelled'}).`)
     clearSelection()
     router.refresh()
   }
@@ -420,10 +421,10 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
                 <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Only drafts are deleted — issued invoices are kept. This cannot be undone.</p>
               )}
               {bulkConfirm.action === 'paid' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">The open balance of each invoice is recorded as a payment dated today.</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">The open balance of each invoice is recorded as a payment dated today. Invoices that are already paid or cancelled are left alone; drafts are issued first.</p>
               )}
               {bulkConfirm.action === 'sent' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Drafts get the next invoice number assigned.</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Drafts get the next invoice number assigned; invoices that are already issued are left alone.</p>
               )}
             </div>
             <div className="flex gap-2 justify-end">

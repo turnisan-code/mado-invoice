@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { calcTotals, formatMoney, addDays, today, getTaxNote, orderItems } from '@/lib/utils/document'
+import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
@@ -38,6 +39,7 @@ interface Props {
   catalogue: CatalogueItem[]
   document?: Document & { items?: DocumentItem[]; payments?: { id: string; date: string; amount: number; note: string | null }[] }
   defaultClientId?: string
+  reference?: DocReference | null
 }
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
@@ -75,7 +77,7 @@ export interface DocumentBuilderHandle {
 }
 
 const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
-  { type, settings, clients, catalogue, document: doc, defaultClientId }: Props,
+  { type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props,
   ref,
 ) {
   const router = useRouter()
@@ -339,6 +341,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       discount_type: discountType, discount_value: discountValue || null,
       items: lines.map(l => ({ ...l })),
       totals,
+      reference: reference ?? null,
     }
 
     // Generate EPC QR only for final PDFs (save/send), not preview
@@ -401,7 +404,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   function withIssued(action: (issued: Issued) => Promise<void>) {
     if (!clientId) { toast.error('Select a client.'); return }
     if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
-    const run = async () => { const issued = await issueDocument(); if (issued) await action(issued) }
+    const run = async () => {
+      const issued = await issueDocument()
+      if (!issued) return
+      // A freshly issued document navigates away when the action finishes; keep the toolbar
+      // locked until then so a second click cannot create and issue another document.
+      if (issued.isNew) setSaving(true)
+      try { await action(issued) } finally { if (issued.isNew) setSaving(false) }
+    }
     if (doc?.number) void run()
     else setPendingIssue(() => run)
   }
