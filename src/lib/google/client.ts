@@ -1,5 +1,7 @@
 import { google } from 'googleapis'
 
+export const OAUTH_STATE_COOKIE = { name: 'gmail_oauth_state', path: '/api/gmail' } as const
+
 export function getOAuthClient() {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
