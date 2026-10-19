@@ -29,6 +29,12 @@ interface Props {
 
 export default function PaymentPanel({ documentId, total, payments: initial, currency, bookamatConfigured, bookamatBookingId, generatePdfForBookamat }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
+  // Payments can also be added elsewhere on the page (status pill → paid); follow server refreshes.
+  const [seenInitial, setSeenInitial] = useState(initial)
+  if (initial !== seenInitial) {
+    setSeenInitial(initial)
+    setPayments(initial)
+  }
   const [date, setDate] = useState(today())
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
