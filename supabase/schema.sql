@@ -187,10 +187,32 @@ alter table documents       enable row level security;
 alter table document_items  enable row level security;
 alter table payments        enable row level security;
 
--- Single authenticated user owns everything
-create policy "owner" on settings        for all using (auth.role() = 'authenticated');
-create policy "owner" on clients         for all using (auth.role() = 'authenticated');
-create policy "owner" on catalogue_items for all using (auth.role() = 'authenticated');
-create policy "owner" on documents       for all using (auth.role() = 'authenticated');
-create policy "owner" on document_items  for all using (auth.role() = 'authenticated');
-create policy "owner" on payments        for all using (auth.role() = 'authenticated');
+-- Only users listed in app_users may touch data. Any user can sign up against
+-- the Supabase project, so auth.role() = 'authenticated' alone is not enough.
+create table app_users (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+
+alter table app_users enable row level security;
+create policy "own row" on app_users for select to authenticated using (user_id = auth.uid());
+
+-- Re-run this line after creating the owner account in Supabase Auth.
+insert into app_users(user_id) select id from auth.users on conflict do nothing;
+
+create or replace function is_app_user()
+returns boolean
+language sql stable security definer
+set search_path = public
+as $$
+  select exists (select 1 from app_users where user_id = auth.uid())
+$$;
+
+revoke execute on function is_app_user() from public, anon;
+grant execute on function is_app_user() to authenticated;
+
+create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on clients         for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on catalogue_items for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on documents       for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on document_items  for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on payments        for all to authenticated using (is_app_user()) with check (is_app_user());
