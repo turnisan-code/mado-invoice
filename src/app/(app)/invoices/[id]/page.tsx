@@ -7,6 +7,7 @@ import InvoicePageClient from '@/components/layout/InvoicePageClient'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteButton'
 import { calcTotals } from '@/lib/utils/document'
+import { toPublicSettings } from '@/lib/public-settings'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
@@ -23,6 +24,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   if (!doc) notFound()
 
+  const publicSettings = toPublicSettings(settings)
   const payments = doc.payments ?? []
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments }
   const totals = calcTotals(doc.document_items ?? [], payments)
@@ -39,7 +41,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!settings?.drive_folder_id} />
+          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
           <ConvertToCreditNoteButton invoiceId={doc.id} />
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
           <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
@@ -47,14 +49,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       </div>
       <InvoicePageClient
         type="invoice"
-        settings={settings!}
+        settings={publicSettings}
         clients={clients ?? []}
         catalogue={catalogue ?? []}
         document={docWithItems}
         total={totals.total}
         payments={payments}
         currency={doc.currency ?? 'EUR'}
-        bookamatConfigured={!!(settings?.bookamat_username && settings?.bookamat_api_key && settings?.bookamat_bank_account_id)}
+        bookamatConfigured={publicSettings.bookamat_configured && !!publicSettings.bookamat_bank_account_id}
         bookamatBookingId={doc.bookamat_booking_id ?? null}
         reminderSentAt={doc.reminder_sent_at ?? null}
       />

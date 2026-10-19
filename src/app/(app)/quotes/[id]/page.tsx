@@ -6,6 +6,7 @@ import ConvertToInvoiceButton from '@/components/layout/ConvertToInvoiceButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
+import { toPublicSettings } from '@/lib/public-settings'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
@@ -22,6 +23,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
 
   if (!doc) notFound()
 
+  const publicSettings = toPublicSettings(settings)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
@@ -36,7 +38,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
-          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!settings?.drive_folder_id} />
+          <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
           {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
             <ConvertToInvoiceButton quoteId={doc.id} />
           )}
@@ -47,7 +49,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           type="quote"
-          settings={settings!}
+          settings={publicSettings}
           clients={clients ?? []}
           catalogue={catalogue ?? []}
           document={docWithItems}

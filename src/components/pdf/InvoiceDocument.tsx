@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
 import { formatMoney, formatDate } from '@/lib/utils/document'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
+import type { SecretSettingsKey } from '@/lib/public-settings'
 
 const s = StyleSheet.create({
   page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
@@ -118,7 +119,7 @@ interface DocData {
 }
 
 interface Props {
-  settings: Settings
+  settings: Omit<Settings, SecretSettingsKey>
   client: Client
   document: DocData
   qrCodeDataUri?: string | null

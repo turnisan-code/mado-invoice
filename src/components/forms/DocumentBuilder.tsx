@@ -14,7 +14,8 @@ import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
-import type { Client, CatalogueItem, Document, DocumentItem, Settings, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
+import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
+import type { PublicSettings } from '@/lib/public-settings'
 
 interface LineItem {
   id: string
@@ -32,7 +33,7 @@ interface LineItem {
 
 interface Props {
   type: DocumentType
-  settings: Settings
+  settings: PublicSettings
   clients: Client[]
   catalogue: CatalogueItem[]
   document?: Document & { items?: DocumentItem[]; payments?: { id: string; date: string; amount: number; note: string | null }[] }
