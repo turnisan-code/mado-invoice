@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   let file: { id?: string | null; name?: string | null; mimeType?: string | null }
   try {
-    ;({ data: file } = await drive.files.get({ fileId: folderId, fields: 'id,name,mimeType', supportsAllDrives: true }))
+    file = (await drive.files.get({ fileId: folderId, fields: 'id,name,mimeType', supportsAllDrives: true })).data
   } catch (err) {
     if (isGoogleNotFound(err)) {
       return NextResponse.json({ error: 'Folder not found — check the ID and that it belongs to the connected Google account' }, { status: 400 })
