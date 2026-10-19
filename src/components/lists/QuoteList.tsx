@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, MessageSquareQuote } from 'lucide-react'
-import { formatMoney, calcTotals } from '@/lib/utils/document'
+import { useRouter } from 'next/navigation'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, MessageSquareQuote, CheckSquare, Square, Download, Send, X } from 'lucide-react'
+import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
+import { toast } from 'sonner'
 
 const statusColor: Record<string, string> = {
   draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
@@ -15,7 +18,7 @@ const statusColor: Record<string, string> = {
 
 const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled']
 
-type SortKey = 'number' | 'client' | 'date' | 'total' | 'status'
+type SortKey = 'number' | 'client' | 'date' | 'due_date' | 'total' | 'status'
 type SortDir = 'asc' | 'desc'
 
 interface DocItem { line_type?: string | null; sort_order?: number | null; quantity: number | null; unit_price: number | null; vat_rate: number | null; discount_type?: string | null; discount_value?: number | null }
@@ -24,6 +27,7 @@ interface Quote {
   number: string | null
   status: string
   date: string | null
+  due_date: string | null
   currency: string | null
   clients: { name: string; company: string | null } | null
   tax_treatment?: string | null
@@ -36,23 +40,60 @@ function docTotal(d: Quote) {
   return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
 }
 
+function isExpired(d: Quote, todayStr: string) {
+  return d.status === 'sent' && !!d.due_date && d.due_date < todayStr
+}
+
 function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: SortDir } }) {
   if (sort.key !== col) return <ArrowUpDown size={12} className="opacity-30" />
   return sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
 }
 
+function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label: string; sort: { key: SortKey; dir: SortDir }; onSort: (key: SortKey) => void; className?: string }) {
+  return (
+    <th
+      className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`}
+      onClick={() => onSort(col)}
+    >
+      <span className={`flex items-center gap-1 ${className.includes('text-right') ? 'justify-end' : ''}`}>{label}<SortIcon col={col} sort={sort} /></span>
+    </th>
+  )
+}
+
 const PAGE_SIZE = 25
 
+function exportCSV(quotes: Quote[], todayStr: string) {
+  const rows = quotes.map(d => [
+    d.number ?? '',
+    d.clients?.name ?? '',
+    d.clients?.company ?? '',
+    csvDate(d.date),
+    csvDate(d.due_date),
+    docTotal(d),
+    d.currency ?? 'EUR',
+    isExpired(d, todayStr) ? 'expired' : d.status,
+  ])
+  downloadCsv(`quotes-${todayStr}.csv`, toCsv(['Number', 'Client', 'Company', 'Date', 'Valid until', 'Total', 'Currency', 'Status'], rows))
+}
+
 export default function QuoteList({ quotes }: { quotes: Quote[] }) {
+  const router = useRouter()
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'date', dir: 'desc' })
   const [page, setPage] = useState(0)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState(false)
+
+  const clearSelection = useCallback(() => setSelected(new Set()), [])
 
   function toggleSort(key: SortKey) {
     setPage(0)
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
   }
+
+  const todayStr = today()
 
   const filtered = useMemo(() => {
     let list = quotes
@@ -68,6 +109,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       if (sort.key === 'number') { av = a.number ?? ''; bv = b.number ?? '' }
       else if (sort.key === 'client') { av = a.clients?.company ?? a.clients?.name ?? ''; bv = b.clients?.company ?? b.clients?.name ?? '' }
       else if (sort.key === 'date') { av = a.date ?? ''; bv = b.date ?? '' }
+      else if (sort.key === 'due_date') { av = a.due_date ?? ''; bv = b.due_date ?? '' }
       else if (sort.key === 'total') { av = docTotal(a); bv = docTotal(b) }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
       if (av < bv) return sort.dir === 'asc' ? -1 : 1
@@ -76,36 +118,81 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
     })
   }, [quotes, q, status, sort])
 
-  function Th({ col, label, className = '' }: { col: SortKey; label: string; className?: string }) {
-    return (
-      <th
-        className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`}
-        onClick={() => toggleSort(col)}
-      >
-        <span className="flex items-center gap-1">{label}<SortIcon col={col} sort={sort} /></span>
-      </th>
-    )
+  const pageItems = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const allPageSelected = pageItems.length > 0 && pageItems.every(d => selected.has(d.id))
+  const selectedVisible = useMemo(() => filtered.filter(d => selected.has(d.id)), [filtered, selected])
+  const selectedCount = selectedVisible.length
+  const hasSelection = selectedCount > 0
+
+  function toggleAll() {
+    if (allPageSelected) {
+      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.delete(d.id)); return n })
+    } else {
+      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.add(d.id)); return n })
+    }
+  }
+
+  function toggleOne(id: string) {
+    setSelected(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
+
+  async function bulkMarkSent() {
+    setBulkLoading(true)
+    setBulkConfirm(false)
+    const ids = selectedVisible.map(d => d.id)
+    const res = await fetch('/api/quotes/bulk', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, status: 'sent' }),
+    })
+    setBulkLoading(false)
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
+      toast.error(`Bulk update failed: ${error}`)
+      return
+    }
+    const { updated, skipped } = await res.json()
+    toast.success(`${updated} quote${updated !== 1 ? 's' : ''} marked as sent.`)
+    if (skipped) toast.info(`${skipped} quote${skipped !== 1 ? 's were' : ' was'} left alone (already issued).`)
+    clearSelection()
+    router.refresh()
+  }
+
+  function handleExport() {
+    const toExport = hasSelection ? selectedVisible : filtered
+    exportCSV(toExport, todayStr)
+    toast.success(`Exported ${toExport.length} quote${toExport.length !== 1 ? 's' : ''} to CSV.`)
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Quotes</h1>
-        <Link href="/quotes/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-          <Plus size={14} /> New Quote
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            title="Export CSV"
+            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
+          >
+            <Download size={14} />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+          <Link href="/quotes/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
+            <Plus size={14} /> New Quote
+          </Link>
+        </div>
       </div>
 
       <div className="flex gap-3 flex-wrap">
         <input
           value={q}
-          onChange={e => { setQ(e.target.value); setPage(0) }}
+          onChange={e => { setQ(e.target.value); setPage(0); clearSelection() }}
           placeholder="Search number or client…"
           className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         />
         <select
           value={status}
-          onChange={e => { setStatus(e.target.value); setPage(0) }}
+          onChange={e => { setStatus(e.target.value); setPage(0); clearSelection() }}
           className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
         >
           <option value="">All statuses</option>
@@ -129,26 +216,40 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
               )}
             </div>
           )}
-          {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
-            <Link
+          {pageItems.map(doc => (
+            <div
               key={doc.id}
-              href={`/quotes/${doc.id}`}
-              className="flex items-center justify-between px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+              className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
             >
-              <div className="min-w-0">
-                <p className="font-medium text-sm">
-                  {doc.number ?? <span className="text-neutral-400">Draft</span>}
-                </p>
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
-                  {doc.clients?.company ?? doc.clients?.name ?? '—'}
-                </p>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
-              </div>
-              <div className="flex flex-col items-end gap-1.5 ml-3 shrink-0">
-                <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
-              </div>
-            </Link>
+              <button
+                onClick={() => toggleOne(doc.id)}
+                className="shrink-0 text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 transition-colors"
+              >
+                {selected.has(doc.id)
+                  ? <CheckSquare size={16} className="text-blue-500" />
+                  : <Square size={16} />
+                }
+              </button>
+              <Link href={`/quotes/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">
+                    {doc.number ?? <span className="text-neutral-400">Draft</span>}
+                  </p>
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
+                    {doc.clients?.company ?? doc.clients?.name ?? '—'}
+                  </p>
+                  <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
+                    {doc.date ?? '—'}{doc.due_date && <> · valid until {doc.due_date}</>}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                  <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isExpired(doc, todayStr) ? statusColor.rejected : statusColor[doc.status] ?? ''}`}>
+                    {isExpired(doc, todayStr) ? 'expired' : doc.status}
+                  </span>
+                </div>
+              </Link>
+            </div>
           ))}
         </div>
 
@@ -156,17 +257,26 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
         <table className="hidden sm:table w-full text-sm">
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
-              <Th col="number" label="Number" className="text-left" />
-              <Th col="client" label="Client" className="text-left" />
-              <Th col="date" label="Date" className="text-left" />
-              <Th col="total" label="Total" className="text-right" />
-              <Th col="status" label="Status" className="text-left" />
+              <th className="pl-4 py-3 w-8">
+                <button onClick={toggleAll} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                  {allPageSelected
+                    ? <CheckSquare size={14} className="text-blue-500" />
+                    : <Square size={14} />
+                  }
+                </button>
+              </th>
+              <Th col="number" label="Number" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="client" label="Client" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="date" label="Date" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="due_date" label="Valid until" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="total" label="Total" sort={sort} onSort={toggleSort} className="text-right" />
+              <Th col="status" label="Status" sort={sort} onSort={toggleSort} className="text-left" />
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-16 text-center">
+                <td colSpan={7} className="px-4 py-16 text-center">
                   <MessageSquareQuote size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
                   <p className="text-sm text-neutral-400 dark:text-neutral-500">
                     {q || status ? 'No quotes match your filters.' : 'No quotes yet.'}
@@ -179,8 +289,16 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 </td>
               </tr>
             )}
-            {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(doc => (
-              <tr key={doc.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+            {pageItems.map(doc => (
+              <tr key={doc.id} className={`transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}>
+                <td className="pl-4 py-3 w-8">
+                  <button onClick={() => toggleOne(doc.id)} className="text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 transition-colors">
+                    {selected.has(doc.id)
+                      ? <CheckSquare size={14} className="text-blue-500" />
+                      : <Square size={14} />
+                    }
+                  </button>
+                </td>
                 <td className="px-4 py-3">
                   <Link href={`/quotes/${doc.id}`} className="font-medium hover:underline">
                     {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}
@@ -188,6 +306,14 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
+                  <span className="flex items-center gap-2">
+                    {doc.due_date ?? '—'}
+                    {isExpired(doc, todayStr) && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor.rejected}`}>expired</span>
+                    )}
+                  </span>
+                </td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
@@ -207,6 +333,71 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
           </div>
         )}
       </div>
+
+      {/* Bulk action bar */}
+      <div
+        className={`fixed left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
+        style={{ bottom: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="max-w-5xl mx-auto px-4 pb-[4.5rem] md:pb-6">
+          <div className="bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
+            <span className="text-sm font-medium shrink-0">
+              {selectedCount} selected
+            </span>
+            <div className="flex items-center gap-2 flex-1 flex-wrap">
+              <button
+                onClick={() => setBulkConfirm(true)}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+              >
+                <Send size={12} /> Mark Sent
+              </button>
+              <button
+                onClick={() => {
+                  exportCSV(selectedVisible, todayStr)
+                  toast.success(`Exported ${selectedCount} quote${selectedCount !== 1 ? 's' : ''}.`)
+                }}
+                disabled={bulkLoading}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/20 dark:bg-neutral-900/20 hover:bg-white/30 dark:hover:bg-neutral-900/30 transition-colors disabled:opacity-50"
+              >
+                <Download size={12} /> Export CSV
+              </button>
+            </div>
+            <button
+              onClick={clearSelection}
+              className="shrink-0 p-1.5 rounded-lg hover:bg-white/20 dark:hover:bg-neutral-900/20 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bulk action confirmation */}
+      {bulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
+            <div>
+              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as sent {selectedCount} quote{selectedCount !== 1 ? 's' : ''}?</h3>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Drafts get the next quote number assigned; quotes that are already issued are left alone.</p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setBulkConfirm(false)}
+                className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={bulkMarkSent}
+                className="text-sm px-3 py-1.5 rounded-md text-white transition-colors bg-neutral-900 dark:bg-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
