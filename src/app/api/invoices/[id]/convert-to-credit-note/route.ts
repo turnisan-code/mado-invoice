@@ -22,6 +22,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     client_id: invoice.client_id,
     date: new Date().toISOString().split('T')[0],
     service_date: invoice.service_date,
+    service_date_end: invoice.service_date_end,
     due_date: null,
     status: 'draft',
     language: invoice.language,

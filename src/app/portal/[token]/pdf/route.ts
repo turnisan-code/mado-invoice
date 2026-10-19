@@ -51,6 +51,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     number: doc.number ?? '',
     date: doc.date,
     service_date: doc.service_date,
+    service_date_end: doc.service_date_end ?? null,
     due_date: doc.due_date,
     type: doc.type as DocumentType,
     language: lang,

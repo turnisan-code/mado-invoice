@@ -38,6 +38,7 @@ const L: Record<string, { de: string; en: string }> = {
   due_date:    { de: 'Fälligkeitsdatum',   en: 'Due date' },
   valid_until: { de: 'Gültig bis',         en: 'Valid until' },
   service_date:{ de: 'Leistungsdatum',     en: 'Service date' },
+  service_period:{ de: 'Leistungszeitraum', en: 'Service period' },
   description: { de: 'Beschreibung',       en: 'Description' },
   qty:         { de: 'Menge',              en: 'Qty' },
   rate:        { de: 'Preis',              en: 'Rate' },
@@ -128,8 +129,11 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               </div>
               {doc.service_date && (
                 <div className="flex justify-between">
-                  <span className="text-neutral-500">{t('service_date', lang)}</span>
-                  <span className="font-medium">{formatDate(doc.service_date, lang)}</span>
+                  <span className="text-neutral-500">{doc.service_date_end && doc.service_date_end !== doc.service_date ? t('service_period', lang) : t('service_date', lang)}</span>
+                  <span className="font-medium">
+                    {formatDate(doc.service_date, lang)}
+                    {doc.service_date_end && doc.service_date_end !== doc.service_date ? ` – ${formatDate(doc.service_date_end, lang)}` : ''}
+                  </span>
                 </div>
               )}
               {doc.due_date && (
