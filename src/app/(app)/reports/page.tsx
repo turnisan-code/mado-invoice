@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { calcTotals, formatMoney, formatDate, roundCents, today } from '@/lib/utils/document'
 import ReportControls from '@/components/layout/ReportControls'
 import { Suspense } from 'react'
+import { Download } from 'lucide-react'
 
 const KZ: Record<number, { base: string; vat: string }> = {
   20: { base: 'KZ 022 — 20 % Normalsteuersatz, Bemessungsgrundlage', vat: 'USt 20 %' },
@@ -177,6 +178,21 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <Row label="Nettoumsatz gesamt (inkl. nicht steuerbar)" value={formatMoney(netTotal)} />
           <Row label="Umsatzsteuer" value={formatMoney(totalVat)} />
           <Row label="Bruttoeinnahmen" value={formatMoney(roundCents(netTotal + totalVat))} bold />
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+        <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
+          <span className="font-medium text-sm">Export für Steuerberater</span>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">CSV für Excel (de-AT): alle ausgestellten Rechnungen und Gutschriften bzw. alle Zahlungseingänge des Jahres {year}.</p>
+        </div>
+        <div className="px-5 py-4 flex gap-3 flex-wrap">
+          <a href={`/api/export/accounting?year=${year}&kind=documents`} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
+            <Download size={14} /> Belege {year}
+          </a>
+          <a href={`/api/export/accounting?year=${year}&kind=payments`} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
+            <Download size={14} /> Zahlungen {year}
+          </a>
         </div>
       </div>
 
