@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2 } from 'lucide-react'
-import { formatMoney } from '@/lib/utils/document'
+import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toast } from 'sonner'
 
 const statusColor: Record<string, string> = {
@@ -20,7 +20,7 @@ const STATUSES = ['outstanding', 'draft', 'sent', 'paid', 'overdue', 'cancelled'
 type SortKey = 'number' | 'client' | 'date' | 'due_date' | 'total' | 'status'
 type SortDir = 'asc' | 'desc'
 
-interface DocItem { line_type?: string; quantity: number | null; unit_price: number | null; vat_rate: number | null }
+interface DocItem { line_type?: string | null; sort_order?: number | null; quantity: number | null; unit_price: number | null; vat_rate: number | null; discount_type?: string | null; discount_value?: number | null }
 interface Invoice {
   id: string
   number: string | null
@@ -30,15 +30,13 @@ interface Invoice {
   currency: string | null
   clients: { name: string; company: string | null } | null
   tax_treatment?: string | null
+  discount_type?: string | null
+  discount_value?: number | null
   document_items: DocItem[]
 }
 
-function calcTotal(items: DocItem[], taxTreatment?: string | null) {
-  const vatApplies = !taxTreatment || taxTreatment === 'at_vat'
-  return items.reduce((s, i) => {
-    if (i.quantity == null || i.unit_price == null) return s
-    return s + i.quantity * i.unit_price * (vatApplies ? 1 + (i.vat_rate ?? 0) / 100 : 1)
-  }, 0)
+function docTotal(d: Invoice) {
+  return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
 }
 
 function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: SortDir } }) {
@@ -57,7 +55,7 @@ function exportCSV(invoices: Invoice[]) {
       inv.clients?.company ?? '',
       inv.date ?? '',
       inv.due_date ?? '',
-      calcTotal(inv.document_items, inv.tax_treatment).toFixed(2),
+      docTotal(inv).toFixed(2),
       inv.currency ?? 'EUR',
       inv.status,
     ]),
@@ -87,12 +85,12 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' })
   }
 
-  const today = new Date().toISOString().split('T')[0]
+  const todayStr = today()
 
   const filtered = useMemo(() => {
     let list = invoices
     if (status === 'outstanding') list = list.filter(d => d.status === 'sent' || d.status === 'overdue')
-    else if (status === 'overdue') list = list.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < today))
+    else if (status === 'overdue') list = list.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < todayStr))
     else if (status) list = list.filter(d => d.status === status)
     if (q) {
       const lq = q.toLowerCase()
@@ -106,7 +104,7 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
       else if (sort.key === 'client') { av = a.clients?.company ?? a.clients?.name ?? ''; bv = b.clients?.company ?? b.clients?.name ?? '' }
       else if (sort.key === 'date') { av = a.date ?? ''; bv = b.date ?? '' }
       else if (sort.key === 'due_date') { av = a.due_date ?? ''; bv = b.due_date ?? '' }
-      else if (sort.key === 'total') { av = calcTotal(a.document_items, a.tax_treatment); bv = calcTotal(b.document_items, b.tax_treatment) }
+      else if (sort.key === 'total') { av = docTotal(a); bv = docTotal(b) }
       else if (sort.key === 'status') { av = a.status; bv = b.status }
       if (av < bv) return sort.dir === 'asc' ? -1 : 1
       if (av > bv) return sort.dir === 'asc' ? 1 : -1
@@ -271,7 +269,7 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
                   <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                  <p className="font-semibold text-sm">{formatMoney(calcTotal(doc.document_items, doc.tax_treatment), doc.currency ?? undefined)}</p>
+                  <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
                 </div>
               </Link>
@@ -336,7 +334,7 @@ export default function InvoiceList({ invoices, initialStatus }: { invoices: Inv
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.due_date ?? '—'}</td>
-                <td className="px-4 py-3 text-right font-medium">{formatMoney(calcTotal(doc.document_items, doc.tax_treatment), doc.currency ?? undefined)}</td>
+                <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
                 </td>

@@ -6,7 +6,7 @@ export default async function QuotesPage() {
 
   const { data: docs } = await supabase
     .from('documents')
-    .select('*, clients(name, company), document_items(line_type, quantity, unit_price, vat_rate)')
+    .select('*, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)')
     .eq('type', 'quote')
     .order('date', { ascending: false })
 

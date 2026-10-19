@@ -1,65 +1,115 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatMoney } from '@/lib/utils/document'
+import { calcTotals, formatMoney, formatDate, roundCents, today } from '@/lib/utils/document'
 import ReportControls from '@/components/layout/ReportControls'
 import { Suspense } from 'react'
 
+const KZ: Record<number, { base: string; vat: string }> = {
+  20: { base: 'KZ 022 — 20 % Normalsteuersatz, Bemessungsgrundlage', vat: 'USt 20 %' },
+  13: { base: 'KZ 006 — 13 % ermäßigter Steuersatz, Bemessungsgrundlage', vat: 'USt 13 %' },
+  10: { base: 'KZ 029 — 10 % ermäßigter Steuersatz, Bemessungsgrundlage', vat: 'USt 10 %' },
+  0:  { base: 'Steuerfreie Umsätze 0 %, Bemessungsgrundlage', vat: 'USt 0 %' },
+}
+
+function periodFor(year: number, quarter: number) {
+  if (quarter === 0) return { start: `${year}-01-01`, end: `${year}-12-31`, label: `Jahr ${year}` }
+  const m1 = (quarter - 1) * 3 + 1
+  const m3 = quarter * 3
+  const lastDay = new Date(year, m3, 0).getDate()
+  return {
+    start: `${year}-${String(m1).padStart(2, '0')}-01`,
+    end: `${year}-${String(m3).padStart(2, '0')}-${lastDay}`,
+    label: `Q${quarter} ${year}`,
+  }
+}
+
+type DocRow = {
+  id: string
+  tax_treatment: string | null
+  discount_type: string | null
+  discount_value: number | null
+  document_items: Parameters<typeof calcTotals>[0]
+}
+function docTotals(d: DocRow) {
+  return calcTotals(
+    d.document_items ?? [],
+    [],
+    d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
+    d.tax_treatment,
+  )
+}
+
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ year?: string; quarter?: string }> }) {
   const { year: yearParam, quarter: quarterParam } = await searchParams
-  const currentYear = new Date().getFullYear()
-  const year = parseInt(yearParam ?? String(currentYear), 10)
-  const quarter = parseInt(quarterParam ?? String(Math.ceil((new Date().getMonth() + 1) / 3)), 10)
-
-  const qStart = `${year}-${String((quarter - 1) * 3 + 1).padStart(2, '0')}-01`
-  const qEndMonth = quarter * 3
-  const qEnd = `${year}-${String(qEndMonth).padStart(2, '0')}-${qEndMonth === 3 || qEndMonth === 12 ? 31 : qEndMonth === 6 ? 30 : qEndMonth === 9 ? 30 : 31}`
+  const now = today()
+  const currentYear = Number(now.slice(0, 4))
+  const year = parseInt(yearParam ?? '', 10) || currentYear
+  const quarter = quarterParam === 'all' ? 0 : (parseInt(quarterParam ?? '', 10) || Math.ceil(Number(now.slice(5, 7)) / 3))
+  const period = periodFor(year, quarter)
 
   const supabase = await createClient()
-  const { data: docs } = await supabase
-    .from('documents')
-    .select('*, document_items(*)')
-    .eq('type', 'invoice')
-    .in('status', ['sent', 'paid', 'overdue'])
-    .gte('date', qStart)
-    .lte('date', qEnd)
+  const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
+  const [{ data: payments }, { data: creditNotes }] = await Promise.all([
+    supabase
+      .from('payments')
+      .select(`amount, date, document_id, documents!inner(id, type, tax_treatment, discount_type, discount_value, ${itemCols})`)
+      .eq('documents.type', 'invoice')
+      .gte('date', period.start)
+      .lte('date', period.end),
+    supabase
+      .from('documents')
+      .select(`id, date, tax_treatment, discount_type, discount_value, ${itemCols}`)
+      .eq('type', 'credit_note')
+      .eq('status', 'sent')
+      .gte('date', period.start)
+      .lte('date', period.end),
+  ])
 
-  const yearDocs = docs ?? []
+  const vat: Record<number, { base: number; vat: number }> = {}
+  let rcBase = 0
+  let nonEuBase = 0
+  const invoiceIds = new Set<string>()
 
-  type VatGroup = { base: number; vat: number }
-  let subtotal = 0
-  const vatMap: Record<string, VatGroup> = {}
-  let reverseChargeBase = 0
-  let nonEUBase = 0
-
-  for (const doc of yearDocs) {
-    for (const item of (doc.document_items ?? [])) {
-      if (item.quantity == null || item.unit_price == null) continue
-      const net = item.quantity * item.unit_price
-      if (net === 0) continue
-      subtotal += net
-      if (doc.tax_treatment === 'at_vat') {
-        const key = String(item.vat_rate ?? 0)
-        if (!vatMap[key]) vatMap[key] = { base: 0, vat: 0 }
-        vatMap[key].base += net
-        vatMap[key].vat += net * ((item.vat_rate ?? 0) / 100)
-      } else if (doc.tax_treatment === 'eu_reverse_charge') {
-        reverseChargeBase += net
-      } else {
-        nonEUBase += net
+  function add(d: DocRow, share: number) {
+    const t = docTotals(d)
+    const net = t.subtotal - t.discount_amount
+    if (d.tax_treatment === 'eu_reverse_charge') rcBase += net * share
+    else if (d.tax_treatment === 'non_eu') nonEuBase += net * share
+    else {
+      for (const g of t.vat_groups) {
+        vat[g.rate] = vat[g.rate] ?? { base: 0, vat: 0 }
+        vat[g.rate].base += g.base * share
+        vat[g.rate].vat += g.amount * share
       }
     }
   }
 
-  const totalVat = Object.values(vatMap).reduce((s, g) => s + g.vat, 0)
-  const gross = subtotal + totalVat
+  // Ist-Besteuerung: a payment counts in the period it was received, partial payments
+  // proportionally. Credit notes are deducted in the period of their document date.
+  for (const p of payments ?? []) {
+    const d = p.documents as unknown as DocRow
+    const total = docTotals(d).total
+    if (!total) continue
+    invoiceIds.add(d.id)
+    add(d, p.amount / total)
+  }
+  for (const cn of creditNotes ?? []) add(cn as unknown as DocRow, -1)
 
+  const rates = Object.keys(vat).map(Number).sort((a, b) => b - a)
+  const taxableBase = roundCents(rates.reduce((s, r) => s + vat[r].base, 0))
+  const totalVat = roundCents(rates.reduce((s, r) => s + vat[r].vat, 0))
+  rcBase = roundCents(rcBase)
+  nonEuBase = roundCents(nonEuBase)
+  const netTotal = roundCents(taxableBase + rcBase + nonEuBase)
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
+  const paymentCount = payments?.length ?? 0
+  const creditNoteCount = creditNotes?.length ?? 0
 
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold">VAT Report</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Copy these figures into FinanzOnline.</p>
+          <h1 className="text-2xl font-semibold">UVA-Report</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Ist-Besteuerung — Beträge nach Zahlungseingang, zum Übertragen in FinanzOnline.</p>
         </div>
         <Suspense>
           <ReportControls year={year} quarter={quarter} years={years} />
@@ -67,7 +117,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-800">
-        Period: <strong>{qStart}</strong> – <strong>{qEnd}</strong> · {yearDocs.length} invoice{yearDocs.length !== 1 ? 's' : ''} included (sent, paid, overdue)
+        Zeitraum <strong>{period.label}</strong> ({formatDate(period.start)} – {formatDate(period.end)}) · {paymentCount} Zahlungseingang{paymentCount !== 1 ? 'e' : ''} auf {invoiceIds.size} Rechnung{invoiceIds.size !== 1 ? 'en' : ''}
+        {creditNoteCount > 0 && <> · {creditNoteCount} Gutschrift{creditNoteCount !== 1 ? 'en' : ''} abgezogen</>}
       </div>
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
@@ -75,50 +126,54 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <span className="font-medium text-sm">Umsatzsteuervoranmeldung (UVA)</span>
         </div>
         <div className="divide-y divide-neutral-50 dark:divide-neutral-800 text-sm">
-          <Row label="Gesamtumsatz netto (Kennzahl 000)" value={formatMoney(subtotal)} />
-          {Object.entries(vatMap).sort(([a], [b]) => parseInt(b) - parseInt(a)).map(([rate, g]) => (
-            <div key={rate}>
-              <Row label={`Steuerpflichtige Umsätze ${rate}% (Bemessungsgrundlage)`} value={formatMoney(g.base)} />
-              <Row label={`USt. ${rate}%`} value={formatMoney(g.vat)} bold />
+          <Row label="KZ 000 — Gesamtbetrag der Bemessungsgrundlage (steuerbare Umsätze)" value={formatMoney(taxableBase)} />
+          {rates.map(r => (
+            <div key={r}>
+              <Row label={KZ[r]?.base ?? `${r} % — Bemessungsgrundlage`} value={formatMoney(roundCents(vat[r].base))} />
+              <Row label={KZ[r]?.vat ?? `USt ${r} %`} value={formatMoney(roundCents(vat[r].vat))} bold />
             </div>
           ))}
-          {reverseChargeBase > 0 && <Row label="Innergemeinschaftliche Leistungen (Reverse Charge)" value={formatMoney(reverseChargeBase)} note="→ ZM meldepflichtig" />}
-          {nonEUBase > 0 && <Row label="Nicht steuerbare Auslandsumsätze (Non-EU)" value={formatMoney(nonEUBase)} />}
+          {rcBase !== 0 && <Row label="Nicht steuerbar — Reverse Charge EU (B2B-Leistungen)" value={formatMoney(rcBase)} note="nicht in KZ 000 · in der ZM melden" />}
+          {nonEuBase !== 0 && <Row label="Nicht steuerbar — Drittland" value={formatMoney(nonEuBase)} note="nicht in KZ 000" />}
           <div className="px-5 py-4 flex justify-between items-center bg-neutral-50 dark:bg-neutral-800">
-            <span className="font-semibold">Zahllast USt gesamt</span>
+            <span className="font-semibold">Umsatzsteuer gesamt (vor Vorsteuer)</span>
             <span className="font-semibold text-base">{formatMoney(totalVat)}</span>
           </div>
         </div>
       </div>
 
-      {reverseChargeBase > 0 && (
+      {rcBase !== 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-800">
-          <strong>Zusammenfassende Meldung (ZM):</strong> EU Reverse Charge volume this quarter: {formatMoney(reverseChargeBase)}. Report this in FinanzOnline under ZM.
+          <strong>Zusammenfassende Meldung (ZM):</strong> Reverse-Charge-Leistungen an EU-Unternehmer in diesem Zeitraum: {formatMoney(rcBase)}. In FinanzOnline je Empfänger-UID melden.
         </div>
       )}
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
         <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
-          <span className="font-medium text-sm">Summary</span>
+          <span className="font-medium text-sm">Zusammenfassung</span>
         </div>
         <div className="divide-y divide-neutral-50 dark:divide-neutral-800 text-sm">
-          <Row label="Net revenue" value={formatMoney(subtotal)} />
-          <Row label="VAT collected" value={formatMoney(totalVat)} />
-          <Row label="Gross revenue" value={formatMoney(gross)} bold />
+          <Row label="Nettoumsatz gesamt (inkl. nicht steuerbar)" value={formatMoney(netTotal)} />
+          <Row label="Umsatzsteuer" value={formatMoney(totalVat)} />
+          <Row label="Bruttoeinnahmen" value={formatMoney(roundCents(netTotal + totalVat))} bold />
         </div>
       </div>
+
+      <p className="text-xs text-neutral-400 dark:text-neutral-500">
+        Teilzahlungen werden anteilig berücksichtigt, Gutschriften mit ihrem Belegdatum abgezogen. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
+      </p>
     </div>
   )
 }
 
 function Row({ label, value, bold = false, note }: { label: string; value: string; bold?: boolean; note?: string }) {
   return (
-    <div className="px-5 py-3 flex justify-between items-center">
+    <div className="px-5 py-3 flex justify-between items-center gap-4">
       <div>
         <span className={bold ? 'font-medium' : 'text-neutral-600 dark:text-neutral-400'}>{label}</span>
         {note && <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">{note}</span>}
       </div>
-      <span className={bold ? 'font-semibold' : ''}>{value}</span>
+      <span className={`shrink-0 ${bold ? 'font-semibold' : ''}`}>{value}</span>
     </div>
   )
 }

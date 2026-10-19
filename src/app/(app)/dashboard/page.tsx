@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { calcTotals } from '@/lib/utils/document'
-import { formatMoney } from '@/lib/utils/document'
+import { calcTotals, formatMoney, today } from '@/lib/utils/document'
 import { FileText, CheckCircle, AlertTriangle, TrendingUp, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
@@ -8,45 +7,28 @@ import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
 export default async function DashboardPage() {
   const supabase = await createClient()
 
-  const now = new Date().toISOString().split('T')[0]
+  const now = today()
   const thisMonth = now.slice(0, 7)
   const thisYear = now.slice(0, 4)
-  const lastMonthDate = new Date(); lastMonthDate.setMonth(lastMonthDate.getMonth() - 1)
-  const lastMonth = lastMonthDate.toISOString().slice(0, 7)
-
+  const [ny, nm] = now.split('-').map(Number)
+  const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const lastMonth = ym(new Date(ny, nm - 2, 1))
   // 13 months back covers the full 12-month chart window + last month's stats
-  const chartCutoff = new Date()
-  chartCutoff.setMonth(chartCutoff.getMonth() - 13)
-  const chartCutoffStr = chartCutoff.toISOString().split('T')[0]
+  const chartCutoff = `${ym(new Date(ny, nm - 14, 1))}-01`
 
-  const itemSelect = 'id, number, status, date, due_date, currency, tax_treatment, discount_type, discount_value, clients(name), document_items(line_type, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, date)'
+  const itemSelect = 'id, number, status, date, due_date, currency, tax_treatment, discount_type, discount_value, clients(name), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, date)'
 
-  const [{ data: activeInvoices }, { data: paidInvoices }, { data: quotes }] = await Promise.all([
-    // Open/overdue invoices — no date cap needed, these are currently active
-    supabase
-      .from('documents')
-      .select(itemSelect)
-      .eq('type', 'invoice')
-      .in('status', ['sent', 'overdue']),
-    // Paid invoices from the last 13 months — for chart, stats, and recently paid panel
-    supabase
-      .from('documents')
-      .select(itemSelect)
-      .eq('type', 'invoice')
-      .eq('status', 'paid')
-      .gte('date', chartCutoffStr)
-      .order('date', { ascending: false }),
-    supabase
-      .from('documents')
-      .select('id, number, status, date, clients(name)')
-      .eq('type', 'quote')
-      .in('status', ['draft', 'sent'])
-      .order('date', { ascending: false })
-      .limit(5),
+  const [{ data: activeInvoices }, { data: paidInvoices }, { data: recentPayments }, { data: quotes }] = await Promise.all([
+    supabase.from('documents').select(itemSelect).eq('type', 'invoice').in('status', ['sent', 'overdue']),
+    supabase.from('documents').select(itemSelect).eq('type', 'invoice').eq('status', 'paid').order('date', { ascending: false }).limit(6),
+    // Revenue is cash-based (Ist-Besteuerung): every payment in the window counts, whatever the invoice status
+    supabase.from('payments').select('amount, date, document_id, documents!inner(type)').eq('documents.type', 'invoice').gte('date', chartCutoff),
+    supabase.from('documents').select('id, number, status, date, clients(name)').eq('type', 'quote').in('status', ['draft', 'sent']).order('date', { ascending: false }).limit(5),
   ])
 
   const active = activeInvoices ?? []
   const paid = paidInvoices ?? []
+  const payments = (recentPayments ?? []) as unknown as { amount: number; date: string; document_id: string }[]
 
   const docTotals = (doc: typeof active[0]) => calcTotals(
     doc.document_items ?? [],
@@ -54,57 +36,44 @@ export default async function DashboardPage() {
     doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
     doc.tax_treatment,
   )
-  const getTotal = (doc: typeof active[0]) => docTotals(doc).total
-  const getPaid = (doc: typeof paid[0]) => docTotals(doc).total_paid
 
   const open = active.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
   const overdue = active.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
 
-  // Compute overdue total once — reused in KPI card and alert banner
-  const overdueTotal = overdue.reduce((s, d) => s + getTotal(d), 0)
-  const openTotal = open.reduce((s, d) => s + getTotal(d), 0)
+  // Outstanding money is what is still unpaid, not the invoice totals
+  const overdueTotal = overdue.reduce((s, d) => s + docTotals(d).balance_due, 0)
+  const openTotal = open.reduce((s, d) => s + docTotals(d).balance_due, 0)
   const outstanding = overdueTotal + openTotal
   const outstandingCount = open.length + overdue.length
 
-  const oldestOverdueDays = overdue.length > 0
-    ? Math.max(...overdue.filter(i => i.due_date).map(i =>
-        Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)
-      ))
+  const withDueDate = overdue.filter(i => i.due_date)
+  const oldestOverdueDays = withDueDate.length
+    ? Math.max(...withDueDate.map(i => Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)))
     : null
 
-  const paidThisMonth = paid.filter(i =>
-    (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(thisMonth))
-  )
-  const paidLastMonth = paid.filter(i =>
-    (i.payments ?? []).some((p: { date: string }) => p.date?.startsWith(lastMonth))
-  )
-  const revenueThisMonth = paidThisMonth.reduce((s, d) => s + getPaid(d), 0)
-  const revenueLastMonth = paidLastMonth.reduce((s, d) => s + getPaid(d), 0)
+  const inMonth = (m: string) => payments.filter(p => p.date?.startsWith(m))
+  const sum = (ps: { amount: number }[]) => ps.reduce((s, p) => s + p.amount, 0)
+  const revenueThisMonth = sum(inMonth(thisMonth))
+  const revenueLastMonth = sum(inMonth(lastMonth))
+  const paidThisMonthCount = new Set(inMonth(thisMonth).map(p => p.document_id)).size
   const momDelta = revenueLastMonth > 0
     ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100)
     : null
-  const revenueThisYear = paid
-    .filter(i => i.date?.startsWith(thisYear))
-    .reduce((s, doc) => s + getPaid(doc), 0)
+  const revenueThisYear = sum(payments.filter(p => p.date?.startsWith(thisYear)))
 
-  const recentPaid = paid.slice(0, 6)
+  const recentPaid = paid
 
-  // Build last 12 months bar chart data from payment dates
+  // Last 12 months bar chart from payment dates
   const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  const today = new Date()
   const months: MonthData[] = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(today.getFullYear(), today.getMonth() - 11 + i, 1)
-    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    return { label: monthLabels[d.getMonth()], yearMonth: ym, revenue: 0, current: ym === thisMonth }
+    const d = new Date(ny, nm - 12 + i, 1)
+    const key = ym(d)
+    return { label: monthLabels[d.getMonth()], yearMonth: key, revenue: 0, current: key === thisMonth }
   })
   const monthMap = new Map(months.map((m, i) => [m.yearMonth, i]))
-
-  for (const inv of paid) {
-    for (const p of (inv.payments ?? []) as { amount: number; date: string }[]) {
-      if (!p.date) continue
-      const idx = monthMap.get(p.date.slice(0, 7))
-      if (idx !== undefined) months[idx].revenue += p.amount
-    }
+  for (const p of payments) {
+    const idx = p.date ? monthMap.get(p.date.slice(0, 7)) : undefined
+    if (idx !== undefined) months[idx].revenue += p.amount
   }
 
   const chartCurrency = (active[0] ?? paid[0])?.currency ?? 'EUR'
@@ -132,7 +101,7 @@ export default async function DashboardPage() {
     },
     {
       label: 'Paid this month',
-      value: paidThisMonth.length,
+      value: paidThisMonthCount,
       amount: revenueThisMonth,
       sub: momDelta != null ? `${momDelta >= 0 ? '+' : ''}${momDelta}% vs last month` : null,
       subColor: undefined,
