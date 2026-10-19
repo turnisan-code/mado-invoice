@@ -10,11 +10,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: existing } = await supabase
     .from('documents')
-    .select('share_token')
+    .select('share_token, number')
     .eq('id', id)
     .single()
 
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!existing.number) return NextResponse.json({ error: 'Only issued documents can be shared' }, { status: 400 })
 
   const token = existing.share_token ?? randomUUID()
 

@@ -30,8 +30,8 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
       if (!res.ok) throw new Error(data.error)
       setToken(data.token)
       setOpen(true)
-    } catch {
-      toast.error('Failed to generate link')
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : 'Failed to generate link')
     } finally {
       setLoading(false)
     }
