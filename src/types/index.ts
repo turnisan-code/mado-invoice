@@ -7,6 +7,8 @@ export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' 
 export type VatRate = 0 | 10 | 13 | 20
 export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
 export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
+// 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer.
+export type PaymentKind = 'payment' | 'skonto' | 'writeoff'
 
 export interface Settings {
   id: string
@@ -83,6 +85,14 @@ export interface Settings {
   email_body_reminder_de: string | null
   email_subject_reminder_en: string | null
   email_body_reminder_en: string | null
+  reminders_enabled: boolean
+  reminder_grace_days: number
+  reminder_interval_days: number
+  reminder_max_level: number
+  reminder_fee: number
+  reminder_interest_rate: number
+  default_skonto_percent: number | null
+  default_skonto_days: number | null
 }
 
 export interface Client {
@@ -105,6 +115,7 @@ export interface Client {
   status: ClientStatus
   tags: string[]
   notes: string | null
+  reminders_opt_out: boolean
 }
 
 export interface CatalogueItem {
@@ -143,6 +154,9 @@ export interface Document {
   discount_value: number | null
   bookamat_booking_id?: string | null
   reminder_sent_at?: string | null
+  reminder_level?: number
+  skonto_percent?: number | null
+  skonto_days?: number | null
   sent_at?: string | null
   share_token?: string | null
   drive_file_id?: string | null
@@ -174,6 +188,16 @@ export interface Payment {
   date: string
   amount: number
   note: string | null
+  kind: PaymentKind
+}
+
+export interface ReminderLogEntry {
+  id: string
+  document_id: string
+  level: number
+  sent_at: string
+  to_email: string | null
+  subject: string | null
 }
 
 export interface DocumentTotals {
