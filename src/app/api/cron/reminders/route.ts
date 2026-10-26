@@ -105,6 +105,8 @@ export async function GET(req: NextRequest) {
         tax_note: taxNote,
         discount_type: invoice.discount_type ?? null,
         discount_value: invoice.discount_value ?? null,
+        skonto_percent: invoice.skonto_percent ?? null,
+        skonto_days: invoice.skonto_days ?? null,
         items: items.map((i: Record<string, unknown>) => ({
           line_type: i.line_type,
           description: i.description as string,

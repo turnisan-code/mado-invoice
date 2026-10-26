@@ -221,6 +221,12 @@ export default function SettingsForm({ settings }: Props) {
     default_language:     settings?.default_language ?? 'de',
   })
 
+  // ── Payment terms state ──────────────────────────────────────────────────────
+  const [terms, setTerms] = useState({
+    default_skonto_percent: settings?.default_skonto_percent != null ? String(settings.default_skonto_percent) : '',
+    default_skonto_days:    settings?.default_skonto_days != null ? String(settings.default_skonto_days) : '',
+  })
+
   // ── Reminders state ──────────────────────────────────────────────────────────
   const [reminders, setReminders] = useState({
     reminders_enabled:      settings?.reminders_enabled ?? true,
@@ -400,6 +406,21 @@ export default function SettingsForm({ settings }: Props) {
     if (error) { toast.error(error.message); return }
     clearDirty('defaults')
     toast.success('Defaults saved.')
+  }
+
+  async function saveTerms() {
+    if (!settings) return
+    setSaving('terms')
+    const percent = parseFloat(terms.default_skonto_percent)
+    const days = parseInt(terms.default_skonto_days, 10)
+    const { error } = await supabase.from('settings').update({
+      default_skonto_percent: percent > 0 ? Math.min(percent, 100) : null,
+      default_skonto_days:    days >= 0 ? days : null,
+    }).eq('id', settings.id)
+    setSaving(null)
+    if (error) { toast.error(error.message); return }
+    clearDirty('terms')
+    toast.success('Payment terms saved.')
   }
 
   async function saveReminders() {
@@ -911,6 +932,31 @@ export default function SettingsForm({ settings }: Props) {
                   <option value="en">English</option>
                 </select>
                 <p className="text-xs text-neutral-400 dark:text-neutral-500">Language for new documents</p>
+              </div>
+            </div>
+          </SectionCard>
+
+          <div className="h-5" />
+
+          <SectionCard
+            title="Payment terms"
+            description="Skonto pre-filled on new invoices and printed under the totals: “Bei Zahlung bis … x % Skonto”."
+            dirty={!!dirty.terms}
+            saving={saving === 'terms'}
+            onSave={saveTerms}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Skonto (%)</label>
+                <input type="number" min={0} max={100} step="0.5" className={inp} value={terms.default_skonto_percent} placeholder="none"
+                  onChange={e => { setTerms(t => ({ ...t, default_skonto_percent: e.target.value })); markDirty('terms') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Off the gross total; leave empty for no Skonto</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Skonto period (days)</label>
+                <input type="number" min={0} className={inp} value={terms.default_skonto_days}
+                  onChange={e => { setTerms(t => ({ ...t, default_skonto_days: e.target.value })); markDirty('terms') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Counted from the invoice date</p>
               </div>
             </div>
           </SectionCard>
