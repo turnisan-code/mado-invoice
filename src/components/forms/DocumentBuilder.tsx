@@ -125,6 +125,13 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [notesInternal, setNotesInternal] = useState(doc?.notes_internal ?? '')
   const [discountType, setDiscountType] = useState<'percent' | 'fixed' | null>(doc?.discount_type ?? null)
   const [discountValue, setDiscountValue] = useState(doc?.discount_value ?? 0)
+  // Skonto only exists on invoices; new ones start from the settings defaults.
+  const [skontoPercent, setSkontoPercent] = useState<number | ''>(
+    doc ? (doc.skonto_percent ?? '') : type === 'invoice' ? (settings.default_skonto_percent ?? '') : ''
+  )
+  const [skontoDays, setSkontoDays] = useState<number | ''>(
+    doc ? (doc.skonto_days ?? '') : type === 'invoice' ? (settings.default_skonto_days ?? '') : ''
+  )
   const [lines, setLines] = useState<LineItem[]>(
     doc?.items?.length
       ? orderItems(doc.items).map(i => ({
@@ -304,6 +311,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }))
   }
 
+  const skontoFields = type === 'invoice' && skontoPercent !== '' && skontoPercent > 0
+    ? { skonto_percent: skontoPercent, skonto_days: skontoDays === '' ? null : skontoDays }
+    : { skonto_percent: null, skonto_days: null }
+
   function currentDocFields(effectiveDate: string, effectiveDueDate: string | null) {
     return {
       client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
@@ -311,6 +322,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       due_date: effectiveDueDate, language, currency, tax_treatment: taxTreatment,
       notes: notes || null, notes_internal: notesInternal || null,
       discount_type: discountType, discount_value: discountValue || null,
+      ...skontoFields,
     }
   }
 
@@ -369,6 +381,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       type, language, currency, tax_treatment: taxTreatment,
       notes: notes || null, tax_note: taxNote,
       discount_type: discountType, discount_value: discountValue || null,
+      ...skontoFields,
       items: lines.map(l => ({ ...l })),
       totals,
       reference: reference ?? null,
@@ -689,7 +702,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
     setAutoSaving(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, clientId, date, serviceDate, serviceDateEnd, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving, saveError])
+  }, [doc, clientId, date, serviceDate, serviceDateEnd, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, skontoPercent, skontoDays, lines, saving, saveError])
 
   useEffect(() => {
     if (!doc) return
@@ -872,6 +885,20 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <Label>Service to</Label>
               <Input type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} className="text-sm" />
             </div>
+            {type === 'invoice' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Skonto %</Label>
+                  <Input type="number" min={0} max={100} step="0.5" value={skontoPercent} placeholder="none"
+                    onChange={e => setSkontoPercent(e.target.value === '' ? '' : Number(e.target.value))} className="text-sm" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Skonto days</Label>
+                  <Input type="number" min={0} step="1" value={skontoDays} placeholder="from date"
+                    onChange={e => setSkontoDays(e.target.value === '' ? '' : Number(e.target.value))} className="text-sm" />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
