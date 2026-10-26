@@ -160,7 +160,11 @@ export function addDays(date: string, days: number): string {
   return toDateString(new Date(y, m - 1, d + days))
 }
 
-// The owner works in Vienna and the servers run in UTC, so "today" is always the Vienna date.
+// The owner works in Vienna and the servers run in UTC, so calendar dates are always Vienna dates.
+export function viennaDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+
 export function today(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  return viennaDate(new Date())
 }

@@ -16,11 +16,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const { id } = await params
   const supabase = await createClient()
 
-  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }] = await Promise.all([
+  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { data: reminderLog }] = await Promise.all([
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'invoice').single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
+    supabase.from('reminder_log').select('*').eq('document_id', id).order('sent_at', { ascending: false }),
   ])
 
   if (!doc) notFound()
@@ -69,6 +70,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         bookamatConfigured={publicSettings.bookamat_configured && !!publicSettings.bookamat_bank_account_id}
         bookamatBookingId={doc.bookamat_booking_id ?? null}
         reminderSentAt={doc.reminder_sent_at ?? null}
+        reminderLevel={doc.reminder_level ?? 0}
+        reminderLog={reminderLog ?? []}
       />
     </div>
   )
