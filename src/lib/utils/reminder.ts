@@ -2,7 +2,10 @@ import { google } from 'googleapis'
 import type { GoogleAuth } from '@/lib/google/client'
 
 export type { ReminderContext } from './reminder-templates'
-export { fillTemplate, DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from './reminder-templates'
+export {
+  fillTemplate, buildReminderContext, reminderTemplates, reminderTitle, nextReminderLevel, daysBetween,
+  DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
+} from './reminder-templates'
 
 export function buildMime({ from, to, subject, body, pdfBase64, filename }: {
   from: string; to: string; subject: string; body: string

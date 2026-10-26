@@ -122,6 +122,7 @@ export default function ClientForm({ client, onSaved }: Props) {
       status: fd.get('status') as string,
       tags: tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
       notes: (fd.get('notes') as string) || null,
+      reminders_opt_out: fd.get('reminders_opt_out') === 'on',
     }
 
     if (client) {
@@ -219,6 +220,14 @@ export default function ClientForm({ client, onSaved }: Props) {
         <Label>Notes</Label>
         <Textarea name="notes" defaultValue={client?.notes ?? ''} rows={3} className="resize-none text-sm" />
       </div>
+
+      <label className="flex items-start gap-2.5 text-sm cursor-pointer">
+        <input type="checkbox" name="reminders_opt_out" defaultChecked={client?.reminders_opt_out ?? false} className="mt-0.5 accent-neutral-900 dark:accent-white" />
+        <span>
+          <span className="font-medium text-neutral-800 dark:text-neutral-200">No automatic reminders</span>
+          <span className="block text-xs text-neutral-400 dark:text-neutral-500">The daily reminder run skips this client&apos;s overdue invoices; you can still send reminders by hand.</span>
+        </span>
+      </label>
 
       <div className="flex items-center justify-between pt-2">
         {client && (

@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { timingSafeEqual } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
-  fillTemplate, sendReminderEmail,
-  DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
-  DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
+  fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, daysBetween,
 } from '@/lib/utils/reminder'
-import { formatMoney, calcTotals, getTaxNote, today } from '@/lib/utils/document'
+import { calcTotals, getTaxNote, today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { pdf } from '@react-pdf/renderer'
@@ -37,19 +35,24 @@ export async function GET(req: NextRequest) {
   if (!settings?.gmail_refresh_token || !settings?.gmail_email) {
     return NextResponse.json({ skipped: 'Gmail not configured', overdueMarked: true })
   }
+  if (!settings.reminders_enabled) return NextResponse.json({ skipped: 'Reminders disabled', overdueMarked: true })
 
-  // Find overdue invoices that haven't had a reminder sent, with client email
+  const maxLevel = Math.max(1, settings.reminder_max_level ?? 3)
+  const graceDays = settings.reminder_grace_days ?? 7
+  const intervalDays = settings.reminder_interval_days ?? 14
+  const now = today()
+
+  // Overdue invoices that have not reached the last dunning level yet, with their client.
   const { data: invoices, error } = await supabase
     .from('documents')
     .select('*, document_items(*), payments(*), clients(*)')
     .eq('type', 'invoice')
     .eq('status', 'overdue')
-    .is('reminder_sent_at', null)
+    .lt('reminder_level', maxLevel)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!invoices?.length) return NextResponse.json({ sent: 0, message: 'No overdue invoices to remind' })
 
-  const todayDate = new Date(today())
   const auth = getAuthorizedGoogle(settings, supabase)
   let sent = 0
   let reauth = false
@@ -57,40 +60,27 @@ export async function GET(req: NextRequest) {
 
   for (const invoice of invoices) {
     const client = invoice.clients
-    if (!client?.email) continue
+    if (!client?.email || client.reminders_opt_out || !invoice.number || !invoice.due_date) continue
+
+    // First reminder only once the grace period after the due date has passed; every further
+    // level only once the interval since the previous reminder has passed.
+    const level = (invoice.reminder_level ?? 0) + 1
+    if (level === 1) {
+      if (now < addDays(invoice.due_date, graceDays)) continue
+    } else if (invoice.reminder_sent_at && daysBetween(viennaDate(new Date(invoice.reminder_sent_at)), now) < intervalDays) {
+      continue
+    }
 
     const lang = client.language === 'en' ? 'en' : 'de'
-    const dueDate = invoice.due_date ?? ''
-    const daysOverdue = dueDate
-      ? Math.max(0, Math.floor((todayDate.getTime() - new Date(dueDate).getTime()) / 86400000))
-      : 0
-
     const docDiscount = invoice.discount_type && invoice.discount_value
       ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
       : null
     const emailTotals = calcTotals(invoice.document_items ?? [], invoice.payments ?? [], docDiscount, invoice.tax_treatment)
-    if (!invoice.number || emailTotals.balance_due <= 0.005) continue
+    if (emailTotals.balance_due <= 0.005) continue
 
-    const ctx = {
-      invoiceNumber: invoice.number,
-      clientName: client.company ?? client.name,
-      amount: formatMoney(emailTotals.balance_due, invoice.currency ?? 'EUR'),
-      total: formatMoney(emailTotals.total, invoice.currency ?? 'EUR'),
-      dueDate,
-      date: invoice.date ?? '',
-      daysOverdue,
-      iban: settings.iban ?? '',
-      sender: settings.company_name ?? settings.owner_name ?? '',
-      company: settings.company_name ?? '',
-      owner: settings.owner_name ?? '',
-    }
-
-    const subjectTpl = lang === 'en'
-      ? (settings.email_subject_reminder_en || DEFAULT_SUBJECT_EN)
-      : (settings.email_subject_reminder_de || DEFAULT_SUBJECT_DE)
-    const bodyTpl = lang === 'en'
-      ? (settings.email_body_reminder_en || DEFAULT_BODY_EN)
-      : (settings.email_body_reminder_de || DEFAULT_BODY_DE)
+    const ctx = buildReminderContext({ invoice, client, settings, totals: emailTotals, level, lang })
+    const tpl = reminderTemplates(settings, lang)
+    const subject = fillTemplate(tpl.subject, ctx)
 
     // Generate PDF server-side
     let pdfBase64: string | undefined
@@ -165,16 +155,19 @@ export async function GET(req: NextRequest) {
         auth,
         from: settings.gmail_email,
         to: client.email,
-        subject: fillTemplate(subjectTpl, ctx),
-        body: fillTemplate(bodyTpl, ctx),
+        subject,
+        body: fillTemplate(tpl.body, ctx),
         pdfBase64,
         filename,
       })
 
-      const { error: markErr } = await supabase.from('documents')
-        .update({ reminder_sent_at: new Date().toISOString() })
-        .eq('id', invoice.id)
-      if (markErr) errors.push(`${invoice.number}: sent but reminder_sent_at not recorded (${markErr.message})`)
+      const sentAt = new Date().toISOString()
+      const [{ error: markErr }, { error: logErr }] = await Promise.all([
+        supabase.from('documents').update({ reminder_sent_at: sentAt, reminder_level: level }).eq('id', invoice.id),
+        supabase.from('reminder_log').insert({ document_id: invoice.id, level, sent_at: sentAt, to_email: client.email, subject }),
+      ])
+      if (markErr) errors.push(`${invoice.number}: sent but reminder level not recorded (${markErr.message})`)
+      if (logErr) errors.push(`${invoice.number}: sent but reminder_log not written (${logErr.message})`)
 
       sent++
     } catch (err) {

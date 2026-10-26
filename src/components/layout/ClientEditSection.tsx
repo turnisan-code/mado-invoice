@@ -78,6 +78,12 @@ export default function ClientEditSection({ client }: { client: Client }) {
         <span className="text-xs text-neutral-400 dark:text-neutral-500">Language</span>
         <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{client.language === 'en' ? 'English' : 'Deutsch'}</span>
       </div>
+      {client.reminders_opt_out && (
+        <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
+          <span className="text-xs text-neutral-400 dark:text-neutral-500">Automatic reminders</span>
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Off</span>
+        </div>
+      )}
 
       {/* Notes */}
       {client.notes && (
