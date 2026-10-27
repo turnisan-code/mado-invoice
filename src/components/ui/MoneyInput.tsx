@@ -20,7 +20,10 @@ export function parseLocaleNumber(raw: string): number | null {
   } else if (commas) {
     normalized = commas === 1 ? s.replace(',', '.') : s.replace(/,/g, '')
   } else {
-    normalized = dots === 1 ? s : s.replace(/\./g, '')
+    // A lone dot followed by exactly three digits is the Austrian thousands dot ("1.500" = 1500);
+    // a comma stays the decimal separator ("1,500" = 1.5).
+    const thousandsDot = dots === 1 && /^-?\d+\.\d{3}$/.test(s)
+    normalized = dots === 1 && !thousandsDot ? s : s.replace(/\./g, '')
   }
   if (!/^-?(\d+\.?\d*|\.\d+)$/.test(normalized)) return null
   const n = Number(normalized)
