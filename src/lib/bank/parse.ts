@@ -266,12 +266,13 @@ export function guessMapping(header: string[]): CsvMapping {
   return mapping
 }
 
+// A date column and an amount (or credit / debit) column are the least a mapping needs.
+const isMapped = (m: CsvMapping) => m.date !== null && (m.amount !== null || m.credit !== null || m.debit !== null)
+
 export function applyMapping(rows: string[][], mapping: CsvMapping): { transactions: BankTransaction[]; warnings: string[] } {
   const transactions: BankTransaction[] = []
   const warnings: string[] = []
-  if (mapping.date === null || (mapping.amount === null && mapping.credit === null && mapping.debit === null)) {
-    return { transactions, warnings: ['unmapped'] }
-  }
+  if (!isMapped(mapping)) return { transactions, warnings: ['unmapped'] }
   rows.forEach((row, i) => {
     const n = i + 1
     const cell = (idx: number | null) => (idx === null ? '' : (row[idx] ?? '')).trim()
@@ -316,16 +317,21 @@ function tableRows(all: string[][], headerIdx: number, limit?: number): string[]
 
 // Bank exports open with account lines ("Konto;AT61…;EUR" / "Inhaber;Max;EUR") that look like a
 // narrow table of their own. Among the lines with at least three filled cells, the header is the
-// one whose following rows parse best as date + amount under the guessed mapping; ties go to the
-// candidate followed by the longest run of rows of its width, then to the earlier line.
+// one whose following rows parse best as date + amount under the guessed mapping. When no candidate
+// parses a row (a statement without bookings), the one whose guessed mapping has a date and an
+// amount column at all wins; then the candidate followed by the longest run of rows of its width,
+// then the earlier line.
 function findHeader(all: string[][]): number {
-  let best = { idx: -1, score: -1, run: -1 }
+  let best = { idx: -1, score: -1, mapped: false, run: -1 }
   for (let i = 0; i < all.length; i++) {
     if (filled(all[i]) < 3) continue
-    const score = applyMapping(tableRows(all, i, SAMPLE_ROWS), guessMapping(all[i])).transactions.length
+    const mapping = guessMapping(all[i])
+    const mapped = isMapped(mapping)
+    const score = applyMapping(tableRows(all, i, SAMPLE_ROWS), mapping).transactions.length
     let run = 0
     while (i + 1 + run < all.length && all[i + 1 + run].length === all[i].length) run++
-    if (score > best.score || (score === best.score && run > best.run)) best = { idx: i, score, run }
+    const better = score !== best.score ? score > best.score : mapped !== best.mapped ? mapped : run > best.run
+    if (better) best = { idx: i, score, mapped, run }
   }
   return best.idx
 }

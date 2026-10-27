@@ -33,8 +33,16 @@ export interface MatchRow {
 
 const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
-// "2026-001" must not match "2026-0012": the normalised number may not touch another digit.
-const numberPattern = (number: string) => new RegExp(`(?<!\\d)${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\d)`)
+// Remittance text with every run of separators collapsed to one space: "Nr.2026-001." → "NR 2026 001".
+const flatten = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()
+
+const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+// The number's characters in order, each pair optionally split by one separator, so "2026-001" is
+// found in "RE2026-001", "2026/001", "2026 001" and "2026-001/2". A digit glued to either end
+// continues the number instead ("2026-0012", "12026-001", "02026-001"), so those do not match.
+const numberPattern = (number: string) =>
+  new RegExp(`(?<![0-9])${number.split('').map(escapeRe).join(' ?')}(?![0-9])`)
 
 // Legal forms and filler words carry no identity: "GmbH" or "und" would match every company.
 const NOISE = new Set(['gmbh', 'eu', 'kg', 'og', 'ag', 'ltd', 'inc', 'llc', 'mbh', 'und', 'and', 'the', 'der', 'die', 'das', 'von', 'van'])
@@ -71,7 +79,8 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
     if (tx.amount <= 0) { rows.push({ ...base, status: 'debit' }); continue }
     if (!open.length) { rows.push({ ...base, status: 'nothing_open' }); continue }
 
-    const haystack = `${alnum(tx.text)}|${alnum(tx.reference ?? '')}`
+    // Text and reference are searched separately so a number cannot span the two fields.
+    const haystacks = [flatten(tx.text), flatten(tx.reference ?? '')].filter(Boolean)
     const counterparty = nameTokens(tx.counterparty)
     let best: { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number } | null = null
 
@@ -84,7 +93,7 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       const reasons: MatchReason[] = []
 
       const pattern = numberPatterns.get(inv.id)
-      if (pattern && pattern.test(haystack)) { score += 100; reasons.push('number') }
+      if (pattern && haystacks.some(h => pattern.test(h))) { score += 100; reasons.push('number') }
 
       if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }
