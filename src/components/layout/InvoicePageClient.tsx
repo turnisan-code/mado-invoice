@@ -62,9 +62,12 @@ export default function InvoicePageClient({
         documentId={document.id}
         number={document.number ?? null}
         status={document.status}
+        date={document.date}
         total={total}
         payments={payments}
         currency={currency}
+        skontoPercent={document.skonto_percent ?? null}
+        skontoDays={document.skonto_days ?? null}
         bookamatConfigured={bookamatConfigured}
         bookamatBookingId={bookamatBookingId}
         generatePdfForBookamat={generatePdfBase64}

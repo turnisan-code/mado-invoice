@@ -21,8 +21,9 @@ export default async function DashboardPage() {
   const [{ data: activeInvoices }, { data: paidInvoices }, { data: recentPayments }, { data: quotes }] = await Promise.all([
     supabase.from('documents').select(itemSelect).eq('type', 'invoice').in('status', ['sent', 'overdue']),
     supabase.from('documents').select(itemSelect).eq('type', 'invoice').eq('status', 'paid').order('date', { ascending: false }).limit(6),
-    // Revenue is cash-based (Ist-Besteuerung): every payment in the window counts, whatever the invoice status
-    supabase.from('payments').select('amount, date, document_id, documents!inner(type)').eq('documents.type', 'invoice').gte('date', chartCutoff),
+    // Revenue is cash-based (Ist-Besteuerung): every money payment in the window counts, whatever the
+    // invoice status; Skonto and write-offs close invoices without revenue
+    supabase.from('payments').select('amount, date, document_id, documents!inner(type)').eq('documents.type', 'invoice').eq('kind', 'payment').gte('date', chartCutoff),
     supabase.from('documents').select('id, number, status, date, clients(name)').eq('type', 'quote').in('status', ['draft', 'sent']).order('date', { ascending: false }).limit(5),
   ])
 
