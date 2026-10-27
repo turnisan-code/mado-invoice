@@ -8,6 +8,7 @@ import { formatDate } from '@/lib/utils/document'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
 import type { Client, CatalogueItem, Document, Currency, Payment, ReminderLogEntry } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
+import { useT } from '@/lib/i18n/client'
 
 interface Props {
   type: 'invoice'
@@ -30,6 +31,7 @@ export default function InvoicePageClient({
   bookamatConfigured, bookamatBookingId, reminderSentAt, reminderLevel, reminderLog,
 }: Props) {
   const builderRef = useRef<DocumentBuilderHandle>(null)
+  const { t, lang } = useT()
 
   async function generatePdfBase64(): Promise<{ base64: string; filename: string } | null> {
     if (!builderRef.current) return null
@@ -75,7 +77,7 @@ export default function InvoicePageClient({
       {(showReminder || reminderLog.length > 0) && (
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-3">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Reminders</h2>
+            <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{t('reminders.title')}</h2>
             {showReminder && (
               <ReminderButton
                 documentId={document.id}
@@ -91,8 +93,8 @@ export default function InvoicePageClient({
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
               {reminderLog.map(entry => (
                 <div key={entry.id} className="flex items-center py-2 gap-3">
-                  <span className="text-neutral-400 dark:text-neutral-500 w-24 shrink-0">{formatDate(entry.sent_at)}</span>
-                  <span className="font-medium">{reminderTitle(entry.level, 'de')}</span>
+                  <span className="text-neutral-400 dark:text-neutral-500 w-24 shrink-0">{formatDate(entry.sent_at, lang)}</span>
+                  <span className="font-medium">{reminderTitle(entry.level, lang)}</span>
                   {entry.to_email && <span className="text-neutral-400 dark:text-neutral-500 flex-1 truncate">{entry.to_email}</span>}
                 </div>
               ))}

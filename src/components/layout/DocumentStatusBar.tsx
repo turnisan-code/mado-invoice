@@ -6,6 +6,8 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useT } from '@/lib/i18n/client'
+import type { DictKey } from '@/lib/i18n'
 
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -45,9 +47,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
   const allStatuses: readonly string[] = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
   // An issued document keeps its number: it can be cancelled, never un-issued.
   const statuses = allStatuses.filter(s => !(doc.number && s === 'draft'))
+  const statusLabel = (s: string) => t(`status.${s}` as DictKey)
 
   if (doc.status !== seenStatus) {
     setSeenStatus(doc.status)
@@ -92,9 +96,9 @@ export default function DocumentStatusBar({ document: doc }: Props) {
           body: JSON.stringify({ cancel: true }),
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) { toast.error(data.error ?? 'Could not create the Storno'); return }
+        if (!res.ok) { toast.error(data.error ?? t('statusBar.stornoFailed')); return }
         setConfirm(null)
-        toast.success('Invoice cancelled — issue the Storno and send it to the client.')
+        toast.success(t('statusBar.invoiceCancelled'))
         router.push(`/credit-notes/${data.creditNoteId}`)
         return
       }
@@ -105,8 +109,8 @@ export default function DocumentStatusBar({ document: doc }: Props) {
           body: JSON.stringify({ ids: [doc.id], status: 'paid' }),
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) { toast.error(data.error ?? 'Could not mark as paid'); return }
-        if (!data.updated) { toast.error('This invoice cannot be marked as paid in its current status.'); return }
+        if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
+        if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
       } else {
         if (needsNumber(newStatus)) {
           const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
@@ -119,7 +123,7 @@ export default function DocumentStatusBar({ document: doc }: Props) {
       setOpen(false)
       setConfirm(null)
       router.refresh()
-      toast.success(recordsPayment(newStatus) ? 'Marked as paid — open balance recorded as a payment.' : `Status updated to ${newStatus}.`)
+      toast.success(recordsPayment(newStatus) ? t('statusBar.markedPaid') : t('statusBar.statusUpdated', { status: statusLabel(newStatus) }))
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -127,11 +131,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   }
 
   const confirmText = (s: string) => {
-    if (createsStorno(s)) return `Creates a Stornorechnung that cancels ${doc.number} and marks this invoice as cancelled. You then issue the Storno and send it to the client.`
+    if (createsStorno(s)) return t('statusBar.confirmStorno', { number: doc.number ?? '' })
     const parts: string[] = []
-    if (needsNumber(s)) parts.push(`This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${s}. Numbers cannot be taken back.`)
-    if (recordsPayment(s)) parts.push('The open balance is recorded as a payment dated today.')
-    if (DESTRUCTIVE.has(s)) parts.push('This action is hard to reverse.')
+    if (needsNumber(s)) parts.push(t('statusBar.confirmNumber', { number: t(`docTypeNumber.${doc.type}` as DictKey), status: statusLabel(s) }))
+    if (recordsPayment(s)) parts.push(t('statusBar.confirmPayment'))
+    if (DESTRUCTIVE.has(s)) parts.push(t('statusBar.confirmDestructive'))
     return parts.join(' ')
   }
 
@@ -142,15 +146,15 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         onClick={() => setOpen(o => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Status: ${status}. Change status`}
+        aria-label={t('statusBar.statusAria', { status: statusLabel(status) })}
         className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${statusColor[status] ?? ''}`}
       >
-        {status}
+        {statusLabel(status)}
         <ChevronDown size={11} className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
-        <div role="menu" aria-label="Change status" className="absolute top-full left-0 mt-1.5 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 min-w-36 overflow-hidden">
+        <div role="menu" aria-label={t('statusBar.changeStatus')} className="absolute top-full left-0 mt-1.5 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 min-w-36 overflow-hidden">
           {statuses.map(s => (
             <button
               key={s}
@@ -162,7 +166,7 @@ export default function DocumentStatusBar({ document: doc }: Props) {
                 ${s === status ? 'font-medium' : ''}
                 ${itemColor[s] ?? 'text-neutral-700 dark:text-neutral-300'}`}
             >
-              {s}
+              {statusLabel(s)}
               {s === status && <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />}
             </button>
           ))}
@@ -171,9 +175,9 @@ export default function DocumentStatusBar({ document: doc }: Props) {
 
       <ConfirmDialog
         open={!!confirm}
-        title={`Mark as ${confirm}?`}
+        title={confirm ? t('statusBar.markAsTitle', { status: statusLabel(confirm) }) : ''}
         description={confirm ? confirmText(confirm) : undefined}
-        confirmLabel={busy ? 'Working…' : 'Confirm'}
+        confirmLabel={busy ? t('common.working') : t('common.confirm')}
         destructive={!!confirm && DESTRUCTIVE.has(confirm)}
         busy={busy}
         onConfirm={() => { if (confirm) void applyStatus(confirm) }}

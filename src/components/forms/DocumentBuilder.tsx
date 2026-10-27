@@ -20,6 +20,7 @@ import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { useT } from '@/lib/i18n/client'
 
 interface LineItem {
   id: string
@@ -117,6 +118,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
 ) {
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
 
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
   const [date, setDate] = useState(doc?.date ?? today())
@@ -514,7 +516,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       const { webViewLink } = await res.json()
       notifyDriveUpload(webViewLink)
     } else {
-      toastApiError(await res.json().catch(() => ({})), 'Drive upload failed: ')
+      toastApiError(t, await res.json().catch(() => ({})), 'Drive upload failed: ')
     }
   }
 
@@ -667,7 +669,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     setGmailSending(false)
 
     if (!res.ok) {
-      toastApiError(await res.json().catch(() => ({})), '', 'Failed to send email.')
+      toastApiError(t, await res.json().catch(() => ({})), '', 'Failed to send email.')
       return
     }
 

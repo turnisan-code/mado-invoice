@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useT } from '@/lib/i18n/client'
 
 interface Props {
   id: string
@@ -21,6 +22,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
   const [confirming, setConfirming] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
 
   if (docNumber) return null
 
@@ -28,7 +30,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
     setLoading(true)
     const { error } = await supabase.from('documents').delete().eq('id', id)
     if (error) { toast.error(error.message); setLoading(false); setConfirming(false); return }
-    toast.success('Draft deleted.')
+    toast.success(t('documents.draftDeleted'))
     router.push(backTo)
   }
 
@@ -41,13 +43,13 @@ export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
         className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors ml-auto disabled:opacity-50"
       >
         <Trash2 size={14} />
-        <span className="sr-only sm:not-sr-only">{loading ? 'Deleting…' : 'Delete'}</span>
+        <span className="sr-only sm:not-sr-only">{loading ? t('common.deleting') : t('common.delete')}</span>
       </button>
       <ConfirmDialog
         open={confirming}
-        title="Delete this draft?"
-        description="This cannot be undone."
-        confirmLabel={loading ? 'Deleting…' : 'Delete'}
+        title={t('documents.deleteDraftTitle')}
+        description={t('documents.cannotUndo')}
+        confirmLabel={loading ? t('common.deleting') : t('common.delete')}
         destructive
         busy={loading}
         onConfirm={handleDelete}

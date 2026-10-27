@@ -593,7 +593,7 @@ export default function SettingsForm({ settings }: Props) {
     const res = await fetch('/api/gmail/auth', { method: 'DELETE' })
     setDisconnecting(false)
     if (!res.ok) {
-      toastApiError(await res.json().catch(() => ({})), '', 'Could not disconnect.')
+      toastApiError(t, await res.json().catch(() => ({})), '', 'Could not disconnect.')
       setConfirmDisconnect(false)
       return
     }
