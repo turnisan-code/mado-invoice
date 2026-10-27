@@ -260,6 +260,13 @@ export default function SettingsForm({ settings }: Props) {
     ui_language:                 (settings?.ui_language ?? 'en') as UiLang,
   })
   const [defaultsErrors, setDefaultsErrors] = useState<{ default_payment_days?: string; default_quote_validity_days?: string }>({})
+  // The sidebar toggle changes the UI language outside this form; follow it so a later Defaults save
+  // never writes the language the page was loaded with back over the user's choice.
+  const [seenLang, setSeenLang] = useState(lang)
+  if (lang !== seenLang) {
+    setSeenLang(lang)
+    setDefaults(d => ({ ...d, ui_language: lang }))
+  }
 
   // ── Payment terms state ──────────────────────────────────────────────────────
   const [terms, setTerms] = useState({
@@ -484,7 +491,7 @@ export default function SettingsForm({ settings }: Props) {
       default_unit:                defaults.default_unit,
       default_tax_treatment:       defaults.default_tax_treatment,
       default_quote_validity_days: validityDays,
-      ui_language:                 defaults.ui_language,
+      ...(defaults.ui_language !== lang ? { ui_language: defaults.ui_language } : {}),
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
