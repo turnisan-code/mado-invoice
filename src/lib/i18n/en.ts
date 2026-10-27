@@ -74,6 +74,7 @@ export const en = {
     somethingWrong: 'Something went wrong',
     pageNotLoaded: 'This page could not be loaded. Nothing was lost — try again, or go back to the dashboard.',
     rootNotLoaded: 'The page could not be loaded. Nothing was lost — try again, or go back to the dashboard.',
+    appNotLoaded: 'Mado Invoice could not be loaded. Nothing was lost — try again, or reload the page.',
     reference: 'Reference: {digest}',
     notFound: 'Not found',
     notFoundDescription: 'This document or page does not exist or was deleted.',

@@ -76,6 +76,7 @@ export const de = {
     somethingWrong: 'Etwas ist schiefgelaufen',
     pageNotLoaded: 'Diese Seite konnte nicht geladen werden. Es ist nichts verloren gegangen — erneut versuchen oder zurück zum Dashboard.',
     rootNotLoaded: 'Die Seite konnte nicht geladen werden. Es ist nichts verloren gegangen — erneut versuchen oder zurück zum Dashboard.',
+    appNotLoaded: 'Mado Invoice konnte nicht geladen werden. Es ist nichts verloren gegangen — erneut versuchen oder die Seite neu laden.',
     reference: 'Referenz: {digest}',
     notFound: 'Nicht gefunden',
     notFoundDescription: 'Dieses Dokument oder diese Seite existiert nicht oder wurde gelöscht.',
