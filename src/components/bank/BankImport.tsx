@@ -5,12 +5,13 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileText, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatDate, formatMoney } from '@/lib/utils/document'
+import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import { applyMapping, decodeStatement, parseStatement } from '@/lib/bank/parse'
 import { matchTransactions, type MatchRow, type OpenInvoice } from '@/lib/bank/match'
 import type { BankTransaction, CsvMapping, ParsedStatement } from '@/lib/bank/types'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
-import { n, type TFn, type UiLang } from '@/lib/i18n'
+import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 
 interface Props {
   invoices: OpenInvoice[]
@@ -18,11 +19,18 @@ interface Props {
   bookamatConfigured: boolean
 }
 
-interface ImportResult {
+interface ImportResponse {
   imported: number
   duplicates: number
   paid: string[]
   errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled'; message: string }[]
+}
+
+interface InvoiceLabel { id: string; number: string; client: string }
+
+interface ImportResult extends ImportResponse {
+  /** Labels captured when the import started: after router.refresh() the paid invoices leave `invoices`. */
+  invoices: InvoiceLabel[]
 }
 
 const SELECT_CLS = 'w-full min-w-0 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
@@ -136,7 +144,10 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
   const [skippedOpen, setSkippedOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [confirmOverpay, setConfirmOverpay] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+
+  const plural = (count: number, one: DictKey, other: DictKey) => n(count, t(one, { count }), t(other, { count }))
 
   const imported = useMemo(() => new Set(importedRefs), [importedRefs])
   const invoiceById = useMemo(() => new Map(invoices.map(i => [i.id, i])), [invoices])
@@ -154,6 +165,21 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
   const currency = credits.find(r => r.transaction.currency)?.transaction.currency ?? null
   const assignable = credits.filter(r => !!invoiceFor(r))
   const allChecked = assignable.length > 0 && assignable.every(isChecked)
+
+  // Selected credits (with their Skonto) per invoice against the balance the page loaded with:
+  // a manual re-assignment or two ticks on one invoice can exceed it, like an overpayment in PaymentPanel.
+  const assigned = new Map<string, number>()
+  for (const r of chosen) {
+    const id = invoiceFor(r)!
+    assigned.set(id, roundCents((assigned.get(id) ?? 0) + r.transaction.amount + skontoFor(r)))
+  }
+  const excessFor = (invoiceId: string | null) => {
+    const inv = invoiceId ? invoiceById.get(invoiceId) : undefined
+    const sum = invoiceId ? assigned.get(invoiceId) : undefined
+    return inv && sum !== undefined ? Math.max(0, roundCents(sum - inv.balance)) : 0
+  }
+  const overpaid = [...assigned.keys()].filter(id => excessFor(id) > 0.005)
+  const excessTotal = roundCents(overpaid.reduce((s, id) => s + excessFor(id), 0))
 
   function resetReview() {
     setEdits({})
@@ -198,7 +224,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
     setSelection(Object.fromEntries(assignable.map(r => [r.transaction.id, checked])))
   }
 
-  async function doImport() {
+  async function doImport(allowOverpayment = false) {
     const payload = chosen.map(r => ({
       transaction_id: r.transaction.id,
       document_id: invoiceFor(r)!,
@@ -208,6 +234,13 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
       skonto_amount: skontoFor(r),
     }))
     if (!payload.length) return
+    if (excessTotal > 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
+    setConfirmOverpay(false)
+    // Snapshot the labels now: router.refresh() below drops the invoices this import pays off.
+    const labels: InvoiceLabel[] = [...new Set(payload.map(p => p.document_id))].flatMap(id => {
+      const inv = invoiceById.get(id)
+      return inv ? [{ id, number: inv.number, client: inv.clientCompany || inv.clientName }] : []
+    })
     setBusy(true)
     const res = await fetch('/api/payments/import', {
       method: 'POST',
@@ -220,7 +253,8 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
       toast.error(t('bankImport.importFailed', { error }))
       return
     }
-    setResult(await res.json())
+    const response: ImportResponse = await res.json()
+    setResult({ ...response, invoices: labels })
     router.refresh()
   }
 
@@ -261,6 +295,16 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
     )
   }
 
+  function overpayLine(r: MatchRow) {
+    const excess = isChecked(r) ? excessFor(invoiceFor(r)) : 0
+    if (excess <= 0.005) return null
+    return (
+      <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+        <AlertTriangle size={12} className="shrink-0" /> {t('bankImport.overpayHint', { amount: money(excess, r.transaction.currency) })}
+      </p>
+    )
+  }
+
   function rowCheckbox(r: MatchRow) {
     return (
       <input
@@ -276,9 +320,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
 
   const statusLabel = (r: MatchRow) => r.status === 'debit' ? t('bankImport.statusDebit') : r.status === 'imported' ? t('bankImport.statusImported') : t('bankImport.statusNothingOpen')
   const skippedSummary = [
-    [skipped.filter(r => r.status === 'debit').length, 'bankImport.skippedDebits'],
-    [skipped.filter(r => r.status === 'imported').length, 'bankImport.skippedImported'],
-    [skipped.filter(r => r.status === 'nothing_open').length, 'bankImport.skippedNothingOpen'],
+    [skipped.filter(r => r.status === 'debit').length, 'bankImport.skippedDebitsOne', 'bankImport.skippedDebitsOther'],
+    [skipped.filter(r => r.status === 'imported').length, 'bankImport.skippedImportedOne', 'bankImport.skippedImportedOther'],
+    [skipped.filter(r => r.status === 'nothing_open').length, 'bankImport.skippedNothingOpenOne', 'bankImport.skippedNothingOpenOther'],
   ] as const
   const warnings = parsed?.warnings ?? []
 
@@ -290,9 +334,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
           <h2 className="text-base font-semibold">{t('bankImport.resultTitle')}</h2>
         </div>
         <ul className="text-sm space-y-1">
-          <li>{n(result.imported, t('bankImport.resultImportedOne', { count: result.imported }), t('bankImport.resultImportedOther', { count: result.imported }))}</li>
-          {result.duplicates > 0 && <li className="text-neutral-500 dark:text-neutral-400">{t('bankImport.resultDuplicates', { count: result.duplicates })}</li>}
-          {result.errors.length > 0 && <li className="text-red-600 dark:text-red-400">{t('bankImport.resultErrors', { count: result.errors.length })}</li>}
+          <li>{plural(result.imported, 'bankImport.resultImportedOne', 'bankImport.resultImportedOther')}</li>
+          {result.duplicates > 0 && <li className="text-neutral-500 dark:text-neutral-400">{plural(result.duplicates, 'bankImport.resultDuplicatesOne', 'bankImport.resultDuplicatesOther')}</li>}
+          {result.errors.length > 0 && <li className="text-red-600 dark:text-red-400">{plural(result.errors.length, 'bankImport.resultErrorsOne', 'bankImport.resultErrorsOther')}</li>}
         </ul>
         {result.errors.length > 0 && (
           <ul className="text-xs text-neutral-600 dark:text-neutral-300 space-y-1">
@@ -311,13 +355,16 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
           <div>
             <h3 className="text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1.5">{t('bankImport.resultPaid')}</h3>
             <ul className="flex flex-wrap gap-2">
-              {result.paid.map(id => (
-                <li key={id}>
-                  <Link href={`/invoices/${id}`} className="text-sm px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300 hover:underline underline-offset-2">
-                    {invoiceById.get(id)?.number ?? id}
-                  </Link>
-                </li>
-              ))}
+              {result.paid.map(id => {
+                const inv = result.invoices.find(i => i.id === id)
+                return (
+                  <li key={id}>
+                    <Link href={`/invoices/${id}`} className="text-sm px-2.5 py-1 rounded-md bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-300 hover:underline underline-offset-2">
+                      {inv ? [inv.number, inv.client].filter(Boolean).join(' · ') : id}
+                    </Link>
+                  </li>
+                )
+              })}
             </ul>
             {bookamatConfigured && <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">{t('bankImport.bookamatHint')}</p>}
           </div>
@@ -354,7 +401,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 {parsed.format === 'camt' ? t('bankImport.formatCamt') : t('bankImport.formatCsv')}
                 {' · '}
-                {n(parsed.transactions.length, t('bankImport.transactionsOne', { count: parsed.transactions.length }), t('bankImport.transactionsOther', { count: parsed.transactions.length }))}
+                {plural(parsed.transactions.length, 'bankImport.transactionsOne', 'bankImport.transactionsOther')}
               </p>
             </div>
             <button type="button" onClick={reset} aria-label={t('bankImport.changeFile')} title={t('bankImport.changeFile')} className="h-11 w-11 -mr-3 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
@@ -377,7 +424,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
             <p className="font-medium flex items-center gap-1.5"><AlertTriangle size={13} /> {t('bankImport.warningsTitle')}</p>
             <ul className="mt-1 space-y-0.5 list-disc pl-4">
               {warnings.slice(0, MAX_WARNINGS).map((w, i) => <li key={i}>{warningText(w, t)}</li>)}
-              {warnings.length > MAX_WARNINGS && <li className="list-none -ml-4">{t('bankImport.moreWarnings', { count: warnings.length - MAX_WARNINGS })}</li>}
+              {warnings.length > MAX_WARNINGS && <li className="list-none -ml-4">{plural(warnings.length - MAX_WARNINGS, 'bankImport.moreWarningsOne', 'bankImport.moreWarningsOther')}</li>}
             </ul>
           </div>
         )}
@@ -423,6 +470,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
                         {pill(r)}
                       </div>
                       {skontoLine(r)}
+                      {overpayLine(r)}
                     </div>
                   ))}
                 </div>
@@ -453,6 +501,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
                         <td className="px-3 py-2.5 align-top space-y-1.5">
                           {invoiceSelect(r)}
                           {skontoLine(r)}
+                          {overpayLine(r)}
                         </td>
                         <td className="px-3 pr-4 py-3 align-top">{pill(r)}</td>
                       </tr>
@@ -473,7 +522,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
                   {skippedOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   <span className="font-medium">{t('bankImport.skippedTitle')}</span>
                   <span className="truncate">
-                    · {skippedSummary.filter(([count]) => count > 0).map(([count, key]) => t(key, { count })).join(' · ')}
+                    · {skippedSummary.filter(([count]) => count > 0).map(([count, one, other]) => plural(count, one, other)).join(' · ')}
                   </span>
                 </button>
                 {skippedOpen && (
@@ -496,13 +545,28 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
 
           <div className="sticky bottom-0 z-10 -mx-4 sm:mx-0 px-4 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t sm:border sm:rounded-xl border-neutral-200 dark:border-neutral-700 flex items-center justify-between gap-3">
             <p className="text-sm min-w-0 truncate">
-              <span className="font-medium">{t('bankImport.selected', { count: chosen.length })}</span>
+              <span className="font-medium">{plural(chosen.length, 'bankImport.selectedOne', 'bankImport.selectedOther')}</span>
               <span className="text-neutral-500 dark:text-neutral-400"> · {money(chosenTotal, currency)}</span>
+              {excessTotal > 0.005 && <span className="text-amber-600 dark:text-amber-400"> · {t('bankImport.overpayHint', { amount: money(excessTotal, currency) })}</span>}
             </p>
             <button type="button" onClick={() => void doImport()} disabled={!chosen.length || busy} className={BTN_PRIMARY}>
               {busy ? t('bankImport.importing') : t('bankImport.importButton')}
             </button>
           </div>
+
+          <ConfirmDialog
+            open={confirmOverpay}
+            title={t('bankImport.overpayTitle')}
+            description={n(
+              overpaid.length,
+              t('bankImport.overpayDescOne', { amount: money(excessTotal, currency) }),
+              t('bankImport.overpayDescOther', { count: overpaid.length, amount: money(excessTotal, currency) }),
+            )}
+            confirmLabel={t('bankImport.importAnyway')}
+            busy={busy}
+            onConfirm={() => void doImport(true)}
+            onCancel={() => setConfirmOverpay(false)}
+          />
         </>
       )}
     </div>

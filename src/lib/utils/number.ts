@@ -32,6 +32,6 @@ export function formatLocaleNumber(n: number | null, decimals: number): string {
   return new Intl.NumberFormat('de-AT', { minimumFractionDigits: 0, maximumFractionDigits: decimals, useGrouping: false }).format(n)
 }
 
-// Same rule as utils/document.ts, repeated here because that module imports '@/types' and
-// cannot be loaded by node for verification.
+// The one definition; utils/document.ts re-exports it (that module imports '@/types' and
+// cannot be loaded by node for verification).
 export const roundCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
