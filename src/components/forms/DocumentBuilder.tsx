@@ -48,8 +48,14 @@ const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
-function blankLine(): LineItem {
-  return { id: makeId(), line_type: 'item', description: '', service_date: null, quantity: 1, unit: 'flat', unit_price: 0, vat_rate: 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
+function blankLine(settings: PublicSettings): LineItem {
+  return { id: makeId(), line_type: 'item', description: '', service_date: null, quantity: 1, unit: settings.default_unit ?? 'flat', unit_price: 0, vat_rate: settings.default_vat_rate ?? 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
+}
+
+// Quotes carry their validity period in due_date; invoices and credit notes a payment term.
+function termDays(type: DocumentType, settings: PublicSettings, client?: Client | null): number {
+  if (type === 'quote') return settings.default_quote_validity_days ?? 14
+  return client?.payment_days ?? settings.default_payment_days
 }
 
 function blankSpecial(type: LineType): LineItem {
@@ -111,10 +117,10 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [date, setDate] = useState(doc?.date ?? today())
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
   const [serviceDateEnd, setServiceDateEnd] = useState(doc?.service_date_end ?? '')
-  const [dueDate, setDueDate] = useState(doc?.due_date ?? addDays(today(), settings.default_payment_days))
+  const [dueDate, setDueDate] = useState(doc?.due_date ?? addDays(today(), termDays(type, settings)))
   const [language, setLanguage] = useState<Language>(doc?.language ?? settings.default_language as Language ?? 'de')
   const [currency, setCurrency] = useState<Currency>(doc?.currency ?? 'EUR')
-  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>(doc?.tax_treatment as TaxTreatment ?? 'at_vat')
+  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>((doc?.tax_treatment as TaxTreatment | undefined) ?? settings.default_tax_treatment ?? 'at_vat')
   const [notes, setNotes] = useState(doc?.notes ?? '')
   const [notesInternal, setNotesInternal] = useState(doc?.notes_internal ?? '')
   const [discountType, setDiscountType] = useState<'percent' | 'fixed' | null>(doc?.discount_type ?? null)
@@ -134,7 +140,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
           discount_type: (i.discount_type as 'percent' | 'fixed' | null) ?? null,
           discount_value: i.discount_value ?? 0,
         }))
-      : [blankLine()]
+      : [blankLine(settings)]
   )
   const [saving, setSaving] = useState(false)
   const [showCatalogue, setShowCatalogue] = useState(false)
@@ -199,7 +205,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     if (c.language) setLanguage(c.language)
     if (c.currency) setCurrency(c.currency as Currency)
     setTaxTreatment(c.tax_treatment as TaxTreatment)
-    if (!doc?.number) setDueDate(addDays(date || today(), c.payment_days ?? settings.default_payment_days))
+    if (!doc?.number) setDueDate(addDays(date || today(), termDays(type, settings, c)))
   }
 
   // Apply client defaults on mount when pre-selecting a client (e.g. navigating from client page)
@@ -227,7 +233,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
 
   function addLine(lt: LineType) {
     setShowCatalogue(false)
-    setLines(ls => [...ls, lt === 'item' ? blankLine() : blankSpecial(lt)])
+    setLines(ls => [...ls, lt === 'item' ? blankLine(settings) : blankSpecial(lt)])
   }
 
   async function saveNewCatalogueItem(lineId: string) {
@@ -318,7 +324,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   // Writes header + items (inserting a draft for a new document) and returns the document id.
   async function persist(forIssue: boolean): Promise<string | null> {
     const effectiveDate = date || today()
-    const effectiveDueDate = dueDate || (forIssue && client ? addDays(effectiveDate, client.payment_days ?? settings.default_payment_days) : null)
+    const effectiveDueDate = dueDate || (forIssue && client ? addDays(effectiveDate, termDays(type, settings, client)) : null)
     const fields = currentDocFields(effectiveDate, effectiveDueDate)
     let docId: string
     if (doc) {

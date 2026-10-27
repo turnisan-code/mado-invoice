@@ -35,6 +35,10 @@ export interface Settings {
   credit_note_number_format: string
   default_payment_days: number
   default_language: Language
+  default_vat_rate: VatRate
+  default_unit: Unit
+  default_tax_treatment: TaxTreatment
+  default_quote_validity_days: number
   logo_url: string | null
   invoice_footer_de: string | null
   invoice_footer_en: string | null

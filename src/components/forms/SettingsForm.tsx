@@ -8,12 +8,35 @@ import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, Credi
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { isValidBic, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
+import type { TaxTreatment, Unit, VatRate } from '@/types'
 
 interface Props { settings: PublicSettings | null }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
 const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
 const lbl = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
+const err = 'text-xs text-red-600 dark:text-red-400'
+
+// @react-pdf/image decodes only PNG and JPEG; a WebP, GIF or HEIC logo would break every PDF.
+const LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg' }
+const LOGO_MAX_BYTES = 2 * 1024 * 1024
+
+const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
+const VAT_RATES: VatRate[] = [0, 10, 13, 20]
+const TAX_TREATMENTS: { value: TaxTreatment; label: string }[] = [
+  { value: 'at_vat',            label: 'Austrian VAT' },
+  { value: 'eu_reverse_charge', label: 'EU Reverse Charge' },
+  { value: 'non_eu',            label: 'Non-EU (no VAT)' },
+]
+
+type CounterKey = 'next_invoice_number' | 'next_quote_number' | 'next_credit_note_number'
+
+// Whole days 0–365, or null when the input is not one.
+function parseDays(value: string): number | null {
+  const n = /^\d{1,3}$/.test(value.trim()) ? Number(value) : NaN
+  return n >= 0 && n <= 365 ? n : null
+}
 
 // ── Variable chip sets ─────────────────────────────────────────────────────────
 // Used in the PDF footer section (server-side substitution supports these)
@@ -188,6 +211,7 @@ export default function SettingsForm({ settings }: Props) {
     country:       settings?.country ?? 'Austria',
     uid_number:    settings?.uid_number ?? '',
   })
+  const [contactErrors, setContactErrors] = useState<{ uid_number?: string }>({})
 
   // ── Banking state ────────────────────────────────────────────────────────────
   const [banking, setBanking] = useState({
@@ -195,6 +219,7 @@ export default function SettingsForm({ settings }: Props) {
     bic:       settings?.bic ?? '',
     bank_name: settings?.bank_name ?? '',
   })
+  const [bankingErrors, setBankingErrors] = useState<{ iban?: string; bic?: string }>({})
 
   // ── Documents state ──────────────────────────────────────────────────────────
   const [docs, setDocs] = useState({
@@ -208,12 +233,20 @@ export default function SettingsForm({ settings }: Props) {
     quote_number_format:         settings?.quote_number_format ?? '{prefix}-{YYYY}-{NNN}',
     credit_note_number_format:   settings?.credit_note_number_format ?? '{prefix}-{YYYY}-{NNN}',
   })
+  // Only counters the user edited are written back, so a save never rolls back a number issued since page load.
+  const editedCounters = useRef(new Set<CounterKey>())
+  const [docsErrors, setDocsErrors] = useState<Partial<Record<CounterKey, string>>>({})
 
   // ── Defaults state ───────────────────────────────────────────────────────────
   const [defaults, setDefaults] = useState({
-    default_payment_days: String(settings?.default_payment_days ?? 14),
-    default_language:     settings?.default_language ?? 'de',
+    default_payment_days:        String(settings?.default_payment_days ?? 14),
+    default_language:            settings?.default_language ?? 'de',
+    default_vat_rate:            String(settings?.default_vat_rate ?? 20),
+    default_unit:                (settings?.default_unit ?? 'flat') as Unit,
+    default_tax_treatment:       (settings?.default_tax_treatment ?? 'at_vat') as TaxTreatment,
+    default_quote_validity_days: String(settings?.default_quote_validity_days ?? 14),
   })
+  const [defaultsErrors, setDefaultsErrors] = useState<{ default_payment_days?: string; default_quote_validity_days?: string }>({})
 
   // ── Footer state ─────────────────────────────────────────────────────────────
   const [footerDocTab, setFooterDocTab] = useState<'invoice' | 'quote' | 'credit_note'>('invoice')
@@ -285,6 +318,16 @@ export default function SettingsForm({ settings }: Props) {
     lastFocused.current = { el, setter }
   }
 
+  // A chip must never land in a field that is no longer shown: forget the target whenever the view changes.
+  function forgetFocused() {
+    lastFocused.current = null
+  }
+
+  function selectSection(id: string) {
+    forgetFocused()
+    setActiveSection(id)
+  }
+
   function insertVar(token: string) {
     const target = lastFocused.current
     if (!target) return
@@ -310,8 +353,8 @@ export default function SettingsForm({ settings }: Props) {
     if (!settings) return
     setSaving('brand')
     const { error } = await supabase.from('settings').update({
-      company_name: biz.company_name || null,
-      owner_name:   biz.owner_name   || null,
+      company_name: biz.company_name,
+      owner_name:   biz.owner_name,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
@@ -321,64 +364,95 @@ export default function SettingsForm({ settings }: Props) {
 
   async function saveContact() {
     if (!settings) return
+    const uid = normalizeVatId(contact.uid_number)
+    if (uid && !isValidVatId(uid)) { setContactErrors({ uid_number: 'Enter a valid UID-Nummer, e.g. ATU12345678.' }); return }
+    setContactErrors({})
     setSaving('contact')
     const { error } = await supabase.from('settings').update({
-      email:         contact.email         || null,
+      email:         contact.email,
       phone:         contact.phone         || null,
       website:       contact.website       || null,
-      address_line1: contact.address_line1 || null,
+      address_line1: contact.address_line1,
       address_line2: contact.address_line2 || null,
-      zip:           contact.zip           || null,
-      city:          contact.city          || null,
-      country:       contact.country       || null,
-      uid_number:    contact.uid_number    || null,
+      zip:           contact.zip,
+      city:          contact.city,
+      country:       contact.country,
+      uid_number:    uid,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
+    setContact(c => ({ ...c, uid_number: uid }))
     clearDirty('contact')
     toast.success('Contact & address saved.')
   }
 
   async function saveBankingSection() {
     if (!settings) return
+    const iban = normalizeIban(banking.iban)
+    const bic = normalizeBic(banking.bic)
+    const errors: { iban?: string; bic?: string } = {}
+    if (iban && !isValidIban(iban)) errors.iban = 'This IBAN is not valid — check the country code, length and digits.'
+    if (bic && !isValidBic(bic)) errors.bic = 'A BIC has 8 or 11 characters, e.g. RLNWATWW.'
+    setBankingErrors(errors)
+    if (errors.iban || errors.bic) return
     setSaving('banking')
     const { error } = await supabase.from('settings').update({
-      iban:      banking.iban      || null,
-      bic:       banking.bic       || null,
+      iban,
+      bic,
       bank_name: banking.bank_name || null,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
+    setBanking(b => ({ ...b, iban, bic }))
     clearDirty('banking')
     toast.success('Banking saved.')
   }
 
   async function saveDocsSection() {
     if (!settings) return
+    const counters: Partial<Record<CounterKey, number>> = {}
+    const errors: Partial<Record<CounterKey, string>> = {}
+    for (const key of editedCounters.current) {
+      const n = /^\d+$/.test(docs[key].trim()) ? Number(docs[key]) : NaN
+      if (n >= 1) counters[key] = n
+      else errors[key] = 'Next number must be a whole number of at least 1.'
+    }
+    setDocsErrors(errors)
+    if (Object.keys(errors).length) return
     setSaving('docs')
     const { error } = await supabase.from('settings').update({
       invoice_prefix:              docs.invoice_prefix,
       quote_prefix:                docs.quote_prefix,
       credit_note_prefix:          docs.credit_note_prefix,
-      next_invoice_number:         parseInt(docs.next_invoice_number, 10) || 1,
-      next_quote_number:           parseInt(docs.next_quote_number, 10) || 1,
-      next_credit_note_number:     parseInt(docs.next_credit_note_number, 10) || 1,
       invoice_number_format:       docs.invoice_number_format || '{prefix}-{YYYY}-{NNN}',
       quote_number_format:         docs.quote_number_format || '{prefix}-{YYYY}-{NNN}',
       credit_note_number_format:   docs.credit_note_number_format || '{prefix}-{YYYY}-{NNN}',
+      ...counters,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
+    editedCounters.current.clear()
     clearDirty('docs')
     toast.success('Numbering saved.')
   }
 
   async function saveDefaults() {
     if (!settings) return
+    const paymentDays = parseDays(defaults.default_payment_days)
+    const validityDays = parseDays(defaults.default_quote_validity_days)
+    const errors: { default_payment_days?: string; default_quote_validity_days?: string } = {}
+    if (paymentDays === null) errors.default_payment_days = 'Enter a whole number of days between 0 and 365.'
+    if (validityDays === null) errors.default_quote_validity_days = 'Enter a whole number of days between 0 and 365.'
+    setDefaultsErrors(errors)
+    if (paymentDays === null || validityDays === null) return
     setSaving('defaults')
     const { error } = await supabase.from('settings').update({
-      default_payment_days: parseInt(defaults.default_payment_days, 10) || 14,
-      default_language:     defaults.default_language,
+      default_payment_days:        paymentDays,
+      default_language:            defaults.default_language,
+      default_vat_rate:            Number(defaults.default_vat_rate),
+      default_unit:                defaults.default_unit,
+      default_tax_treatment:       defaults.default_tax_treatment,
+      default_quote_validity_days: validityDays,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
@@ -516,19 +590,38 @@ export default function SettingsForm({ settings }: Props) {
     toast.success('Bookamat connected.')
   }
 
+  async function removeBookamatKey() {
+    if (!settings) return
+    if (!confirm('Remove the stored Bookamat API key? Syncing stops until a new key is saved.')) return
+    setSavingBookamat(true)
+    const { error } = await supabase.from('settings').update({ bookamat_api_key: null }).eq('id', settings.id)
+    setSavingBookamat(false)
+    if (error) { toast.error(error.message); return }
+    setBookamatKeySaved(false)
+    setBookamatApiKey('')
+    setBookamatAccounts(null)
+    setEditingBookamat(true)
+    toast.success('Bookamat API key removed.')
+  }
+
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const input = e.target
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file || !settings) return
+    const ext = LOGO_TYPES[file.type]
+    if (!ext) { toast.error('The logo must be a PNG or JPEG file — other formats cannot be embedded in the PDF.'); return }
+    if (file.size > LOGO_MAX_BYTES) { toast.error('The logo must be 2 MB or smaller.'); return }
     setUploadingLogo(true)
-    const ext = file.name.split('.').pop()
     const path = `logo.${ext}`
-    const { error } = await supabase.storage.from('logos').upload(path, file, { upsert: true })
+    const { error } = await supabase.storage.from('logos').upload(path, file, { upsert: true, contentType: file.type })
     if (error) { toast.error(error.message); setUploadingLogo(false); return }
     const { data } = supabase.storage.from('logos').getPublicUrl(path)
     const url = `${data.publicUrl}?t=${Date.now()}`
-    await supabase.from('settings').update({ logo_url: url }).eq('id', settings!.id)
-    setLogoUrl(url)
+    const { error: saveError } = await supabase.from('settings').update({ logo_url: url }).eq('id', settings.id)
     setUploadingLogo(false)
+    if (saveError) { toast.error(saveError.message); return }
+    setLogoUrl(url)
     toast.success('Logo uploaded.')
   }
 
@@ -594,7 +687,7 @@ export default function SettingsForm({ settings }: Props) {
           <button
             key={id}
             type="button"
-            onClick={() => setActiveSection(id)}
+            onClick={() => selectSection(id)}
             className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors text-left w-full ${
               activeSection === id
                 ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
@@ -617,7 +710,7 @@ export default function SettingsForm({ settings }: Props) {
               <button
                 key={id}
                 type="button"
-                onClick={() => setActiveSection(id)}
+                onClick={() => selectSection(id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${
                   activeSection === id
                     ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
@@ -663,9 +756,9 @@ export default function SettingsForm({ settings }: Props) {
               <div className="space-y-1.5">
                 <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
                   {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
-                  <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
                 </label>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">PNG or SVG, transparent background</p>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">PNG or JPEG up to 2 MB, transparent background</p>
               </div>
             </div>
 
@@ -757,9 +850,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
               <div className="space-y-1.5">
                 <label className={lbl}>UID-Nummer</label>
-                <input className={inp} value={contact.uid_number}
-                  onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); markDirty('contact') }}
+                <input className={inp} value={contact.uid_number} aria-invalid={!!contactErrors.uid_number || undefined}
+                  onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); setContactErrors({}); markDirty('contact') }}
                   placeholder="ATU…" />
+                {contactErrors.uid_number && <p className={err}>{contactErrors.uid_number}</p>}
               </div>
             </div>
           </SectionCard>
@@ -776,16 +870,18 @@ export default function SettingsForm({ settings }: Props) {
           >
             <div className="space-y-1.5">
               <label className={lbl}>IBAN</label>
-              <input className={inp} value={banking.iban}
-                onChange={e => { setBanking(b => ({ ...b, iban: e.target.value })); markDirty('banking') }}
+              <input className={inp} value={banking.iban} aria-invalid={!!bankingErrors.iban || undefined}
+                onChange={e => { setBanking(b => ({ ...b, iban: e.target.value })); setBankingErrors(er => ({ ...er, iban: undefined })); markDirty('banking') }}
                 placeholder="AT12 3456 7890 1234 5678" />
+              {bankingErrors.iban && <p className={err}>{bankingErrors.iban}</p>}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl}>BIC</label>
-                <input className={inp} value={banking.bic}
-                  onChange={e => { setBanking(b => ({ ...b, bic: e.target.value })); markDirty('banking') }}
+                <input className={inp} value={banking.bic} aria-invalid={!!bankingErrors.bic || undefined}
+                  onChange={e => { setBanking(b => ({ ...b, bic: e.target.value })); setBankingErrors(er => ({ ...er, bic: undefined })); markDirty('banking') }}
                   placeholder="RLNWATWW" />
+                {bankingErrors.bic && <p className={err}>{bankingErrors.bic}</p>}
               </div>
               <div className="space-y-1.5">
                 <label className={lbl}>Bank name</label>
@@ -801,7 +897,7 @@ export default function SettingsForm({ settings }: Props) {
         {activeSection === 'numbering' && <div>
           <SectionCard
             title="Numbering"
-            description="Set the format for each document type. Use tokens to build the pattern."
+            description="Set the format for each document type. Use tokens to build the pattern. Next # is only written when you change it."
             dirty={!!dirty.docs}
             saving={saving === 'docs'}
             onSave={saveDocsSection}
@@ -837,13 +933,14 @@ export default function SettingsForm({ settings }: Props) {
                   <input className={inp} value={docs[row.fmtKey]}
                     onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
                     placeholder="{prefix}-{YYYY}-{NNN}" />
-                  <input type="number" min="1" className={inp} value={docs[row.numKey]}
-                    onChange={e => { setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                  <input type="number" min="1" className={inp} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
+                    onChange={e => { editedCounters.current.add(row.numKey); setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
                 </div>
                 <div className="pl-[112px]">
                   <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
                     → {previewFormat(docs[row.fmtKey], docs[row.prefixKey], docs[row.numKey])}
                   </span>
+                  {docsErrors[row.numKey] && <p className={`${err} mt-1`}>{docsErrors[row.numKey]}</p>}
                 </div>
               </div>
             ))}
@@ -863,10 +960,22 @@ export default function SettingsForm({ settings }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl}>Payment days</label>
-                <input type="number" className={inp} value={defaults.default_payment_days}
+                <input type="number" min="0" max="365" className={inp} value={defaults.default_payment_days} aria-invalid={!!defaultsErrors.default_payment_days || undefined}
                   onChange={e => { setDefaults(d => ({ ...d, default_payment_days: e.target.value })); markDirty('defaults') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Days until invoice is due</p>
+                {defaultsErrors.default_payment_days
+                  ? <p className={err}>{defaultsErrors.default_payment_days}</p>
+                  : <p className="text-xs text-neutral-400 dark:text-neutral-500">Days until invoice is due</p>}
               </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Quote validity</label>
+                <input type="number" min="0" max="365" className={inp} value={defaults.default_quote_validity_days} aria-invalid={!!defaultsErrors.default_quote_validity_days || undefined}
+                  onChange={e => { setDefaults(d => ({ ...d, default_quote_validity_days: e.target.value })); markDirty('defaults') }} />
+                {defaultsErrors.default_quote_validity_days
+                  ? <p className={err}>{defaultsErrors.default_quote_validity_days}</p>
+                  : <p className="text-xs text-neutral-400 dark:text-neutral-500">Days a new quote stays valid</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl}>Language</label>
                 <select
@@ -878,6 +987,41 @@ export default function SettingsForm({ settings }: Props) {
                   <option value="en">English</option>
                 </select>
                 <p className="text-xs text-neutral-400 dark:text-neutral-500">Language for new documents</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Tax treatment</label>
+                <select
+                  value={defaults.default_tax_treatment}
+                  onChange={e => { setDefaults(d => ({ ...d, default_tax_treatment: e.target.value as TaxTreatment })); markDirty('defaults') }}
+                  className={inp}
+                >
+                  {TAX_TREATMENTS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Pre-selected on a new document until a client is chosen</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>VAT rate</label>
+                <select
+                  value={defaults.default_vat_rate}
+                  onChange={e => { setDefaults(d => ({ ...d, default_vat_rate: e.target.value })); markDirty('defaults') }}
+                  className={inp}
+                >
+                  {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                </select>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">VAT rate for new line items</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Unit</label>
+                <select
+                  value={defaults.default_unit}
+                  onChange={e => { setDefaults(d => ({ ...d, default_unit: e.target.value as Unit })); markDirty('defaults') }}
+                  className={inp}
+                >
+                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Unit for new line items</p>
               </div>
             </div>
           </SectionCard>
@@ -897,7 +1041,7 @@ export default function SettingsForm({ settings }: Props) {
             <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
               {(['invoice', 'quote', 'credit_note'] as const).map(t => (
                 <button key={t} type="button"
-                  onClick={() => setFooterDocTab(t)}
+                  onClick={() => { forgetFocused(); setFooterDocTab(t) }}
                   className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${footerDocTab === t ? 'bg-white dark:bg-neutral-900 shadow-sm text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'}`}>
                   {t === 'invoice' ? 'Invoice' : t === 'quote' ? 'Quote' : 'Credit Note'}
                 </button>
@@ -908,7 +1052,7 @@ export default function SettingsForm({ settings }: Props) {
               Focus a text field, then click a variable to insert it at the cursor.
             </p>
             {footerDocTab === 'invoice' ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div key="invoice" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl}>Deutsch</label>
                   <textarea
@@ -931,7 +1075,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             ) : footerDocTab === 'quote' ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div key="quote" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl}>Deutsch</label>
                   <textarea
@@ -954,7 +1098,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-4">
+              <div key="credit_note" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl}>Deutsch</label>
                   <textarea
@@ -1056,7 +1200,7 @@ export default function SettingsForm({ settings }: Props) {
                 <button
                   key={type}
                   type="button"
-                  onClick={() => setActiveDocTab(type)}
+                  onClick={() => { forgetFocused(); setActiveDocTab(type) }}
                   className={`px-3 h-7 text-xs font-medium rounded-md transition-colors ${
                     activeDocTab === type
                       ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
@@ -1074,7 +1218,7 @@ export default function SettingsForm({ settings }: Props) {
                 <button
                   key={lang}
                   type="button"
-                  onClick={() => setActiveLang(lang)}
+                  onClick={() => { forgetFocused(); setActiveLang(lang) }}
                   className={`px-3 h-6 text-xs font-medium rounded-md transition-colors ${
                     activeLang === lang
                       ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
@@ -1103,6 +1247,7 @@ export default function SettingsForm({ settings }: Props) {
             <div className="space-y-1.5">
               <label className={lbl}>Subject</label>
               <input
+                key={`${activeDocTab}-${activeLang}`}
                 ref={subjectRef}
                 className={inp}
                 value={tpl[subjectKey]}
@@ -1120,6 +1265,7 @@ export default function SettingsForm({ settings }: Props) {
             <div className="space-y-1.5">
               <label className={lbl}>Body</label>
               <textarea
+                key={`${activeDocTab}-${activeLang}`}
                 ref={bodyRef}
                 value={tpl[bodyKey]}
                 onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
@@ -1266,13 +1412,25 @@ export default function SettingsForm({ settings }: Props) {
                   <span>{bookamatUsername}</span>
                   {bookamatBankId && <span className="text-green-600/60 dark:text-green-400/60">· accounts configured</span>}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setEditingBookamat(true)}
-                  className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
-                >
-                  Change
-                </button>
+                <span className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingBookamat(true)}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
+                  >
+                    Change
+                  </button>
+                  {bookamatKeySaved && (
+                    <button
+                      type="button"
+                      onClick={removeBookamatKey}
+                      disabled={savingBookamat}
+                      className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                    >
+                      Remove key
+                    </button>
+                  )}
+                </span>
               </div>
             ) : (
               <div className="space-y-3">
@@ -1296,6 +1454,16 @@ export default function SettingsForm({ settings }: Props) {
                       placeholder={bookamatKeySaved ? '•••••••• (saved)' : 'From Mein Account → API'}
                       className={inp}
                     />
+                    {bookamatKeySaved && (
+                      <button
+                        type="button"
+                        onClick={removeBookamatKey}
+                        disabled={savingBookamat}
+                        className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                      >
+                        Remove saved key
+                      </button>
+                    )}
                   </div>
                 </div>
 
