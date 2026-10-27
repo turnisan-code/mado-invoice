@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { timingSafeEqual } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/service'
+import { authorizeCron } from '@/lib/utils/cron'
 import {
   fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, daysBetween,
 } from '@/lib/utils/reminder'
@@ -17,14 +17,8 @@ import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
 export const maxDuration = 60
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
-
-  const expected = Buffer.from(`Bearer ${secret}`)
-  const provided = Buffer.from(req.headers.get('authorization') ?? '')
-  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const denied = authorizeCron(req)
+  if (denied) return denied
 
   const supabase = createServiceClient()
 
