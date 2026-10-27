@@ -3,9 +3,12 @@ import { calcTotals, formatMoney, today } from '@/lib/utils/document'
 import { FileText, CheckCircle, AlertTriangle, TrendingUp, Wallet } from 'lucide-react'
 import Link from 'next/link'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
+import { getT } from '@/lib/i18n/server'
+import { n, type DictKey } from '@/lib/i18n'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
+  const { t } = await getT()
 
   const now = today()
   const thisMonth = now.slice(0, 7)
@@ -65,7 +68,7 @@ export default async function DashboardPage() {
   const recentPaid = paid
 
   // Last 12 months bar chart from payment dates
-  const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const monthLabels = t('dashboard.months').split(',')
   const months: MonthData[] = Array.from({ length: 12 }, (_, i) => {
     const d = new Date(ny, nm - 12 + i, 1)
     const key = ym(d)
@@ -81,37 +84,37 @@ export default async function DashboardPage() {
 
   const stats = [
     {
-      label: 'Outstanding',
+      label: t('dashboard.outstanding'),
       value: outstandingCount,
       amount: outstanding,
-      sub: overdue.length > 0 ? `${overdue.length} overdue` : null,
+      sub: overdue.length > 0 ? t('dashboard.overdueCount', { count: overdue.length }) : null,
       subColor: overdue.length > 0 ? 'text-red-500' : undefined,
       icon: Wallet,
       color: 'text-amber-600 bg-amber-50 dark:bg-amber-950',
       href: '/invoices?status=outstanding',
     },
     {
-      label: 'Overdue',
+      label: t('dashboard.overdue'),
       value: overdue.length,
       amount: overdueTotal,
-      sub: oldestOverdueDays != null ? `oldest: ${oldestOverdueDays}d` : null,
+      sub: oldestOverdueDays != null ? t('dashboard.oldest', { days: oldestOverdueDays }) : null,
       subColor: undefined,
       icon: AlertTriangle,
       color: 'text-red-600 bg-red-50 dark:bg-red-950',
       href: '/invoices?status=overdue',
     },
     {
-      label: 'Paid this month',
+      label: t('dashboard.paidThisMonth'),
       value: paidThisMonthCount,
       amount: revenueThisMonth,
-      sub: momDelta != null ? `${momDelta >= 0 ? '+' : ''}${momDelta}% vs last month` : null,
+      sub: momDelta != null ? t('dashboard.vsLastMonth', { delta: `${momDelta >= 0 ? '+' : ''}${momDelta}` }) : null,
       subColor: undefined,
       icon: CheckCircle,
       color: 'text-green-600 bg-green-50 dark:bg-green-950',
       href: null,
     },
     {
-      label: `Revenue ${thisYear}`,
+      label: t('dashboard.revenueYear', { year: thisYear }),
       value: null,
       amount: revenueThisYear,
       sub: null,
@@ -122,9 +125,7 @@ export default async function DashboardPage() {
     },
   ]
 
-  const statusLabel: Record<string, string> = {
-    draft: 'Draft', sent: 'Sent', paid: 'Paid', overdue: 'Overdue', cancelled: 'Cancelled'
-  }
+  const statusLabel = (status: string) => t(`status.${status}` as DictKey)
   const statusColor: Record<string, string> = {
     draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
     sent: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
@@ -136,13 +137,13 @@ export default async function DashboardPage() {
   return (
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Dashboard</h1>
+        <h1 className="text-2xl font-semibold">{t('dashboard.title')}</h1>
         <div className="flex gap-2">
           <Link href="/quotes/new" className="text-sm px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-            New Quote
+            {t('dashboard.newQuote')}
           </Link>
           <Link href="/invoices/new" className="text-sm px-3 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-            New Invoice
+            {t('dashboard.newInvoice')}
           </Link>
         </div>
       </div>
@@ -179,8 +180,8 @@ export default async function DashboardPage() {
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
         <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
           <div>
-            <span className="font-medium text-sm">Monthly Revenue</span>
-            <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">last 12 months</span>
+            <span className="font-medium text-sm">{t('dashboard.monthlyRevenue')}</span>
+            <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">{t('dashboard.last12Months')}</span>
           </div>
           <span className="text-sm font-semibold">{formatMoney(revenueThisYear, chartCurrency)}</span>
         </div>
@@ -194,12 +195,12 @@ export default async function DashboardPage() {
         {/* Recently paid */}
         <div className="lg:col-span-2 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
           <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-            <span className="font-medium text-sm">Recently Paid</span>
-            <Link href="/invoices?status=paid" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">View all →</Link>
+            <span className="font-medium text-sm">{t('dashboard.recentlyPaid')}</span>
+            <Link href="/invoices?status=paid" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">{t('common.viewAll')}</Link>
           </div>
           <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {recentPaid.length === 0 && (
-              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">No paid invoices yet.</p>
+              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">{t('dashboard.noPaidInvoices')}</p>
             )}
             {recentPaid.map((inv) => {
               const totals = docTotals(inv)
@@ -218,7 +219,7 @@ export default async function DashboardPage() {
                     )}
                   </div>
                   <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300">
-                    Paid
+                    {t('status.paid')}
                   </span>
                 </Link>
               )
@@ -229,12 +230,12 @@ export default async function DashboardPage() {
         {/* Pending quotes */}
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
           <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-            <span className="font-medium text-sm">Pending Quotes</span>
-            <Link href="/quotes" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">View all →</Link>
+            <span className="font-medium text-sm">{t('dashboard.pendingQuotes')}</span>
+            <Link href="/quotes" className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300">{t('common.viewAll')}</Link>
           </div>
           <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {(quotes?.length ?? 0) === 0 && (
-              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">No pending quotes.</p>
+              <p className="px-5 py-8 text-sm text-neutral-400 dark:text-neutral-500 text-center">{t('dashboard.noPendingQuotes')}</p>
             )}
             {quotes?.map((q) => {
               const clientName = (q.clients as unknown as { name: string } | null)?.name
@@ -245,7 +246,7 @@ export default async function DashboardPage() {
                     {clientName && <div className="text-xs text-neutral-400 dark:text-neutral-500">{clientName}</div>}
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${statusColor[q.status] ?? ''}`}>
-                    {statusLabel[q.status] ?? q.status}
+                    {statusLabel(q.status)}
                   </span>
                 </Link>
               )
@@ -259,8 +260,8 @@ export default async function DashboardPage() {
         <Link href="/invoices?status=overdue" className="flex items-center gap-3 px-4 py-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-sm text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60 transition-colors">
           <AlertTriangle size={15} className="shrink-0" />
           <span>
-            <strong>{overdue.length} overdue invoice{overdue.length !== 1 ? 's' : ''}</strong>
-            {' '}— {formatMoney(overdueTotal)} outstanding. Send reminders or record payments.
+            <strong>{n(overdue.length, t('dashboard.overdueAlertOne', { count: overdue.length }), t('dashboard.overdueAlertOther', { count: overdue.length }))}</strong>
+            {' '}{t('dashboard.overdueAlertTail', { amount: formatMoney(overdueTotal) })}
           </span>
         </Link>
       )}
