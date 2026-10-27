@@ -17,6 +17,8 @@ interface Props {
   invoices: OpenInvoice[]
   importedRefs: string[]
   bookamatConfigured: boolean
+  /** Quote and credit-note prefixes: their numbers in a remittance text are never an invoice. */
+  otherPrefixes: string[]
 }
 
 interface ImportResponse {
@@ -131,7 +133,7 @@ function MappingEditor({ header, rows, mapping, onChange, t }: { header: string[
   )
 }
 
-export default function BankImport({ invoices, importedRefs, bookamatConfigured }: Props) {
+export default function BankImport({ invoices, importedRefs, bookamatConfigured, otherPrefixes }: Props) {
   const { t, lang } = useT()
   const router = useRouter()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -151,7 +153,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured 
 
   const imported = useMemo(() => new Set(importedRefs), [importedRefs])
   const invoiceById = useMemo(() => new Map(invoices.map(i => [i.id, i])), [invoices])
-  const rows = useMemo(() => (parsed ? matchTransactions(parsed.transactions, invoices, imported) : []), [parsed, invoices, imported])
+  const rows = useMemo(() => (parsed ? matchTransactions(parsed.transactions, invoices, imported, { otherPrefixes }) : []), [parsed, invoices, imported, otherPrefixes])
   const txById = useMemo(() => new Map(rows.map(r => [r.transaction.id, r.transaction])), [rows])
   const credits = rows.filter(r => r.status === 'match' || r.status === 'unmatched')
   const skipped = rows.filter(r => r.status !== 'match' && r.status !== 'unmatched')

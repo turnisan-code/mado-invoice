@@ -36,13 +36,19 @@ const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Short words a payer puts before a bare invoice number ("Rechnung Nr. 2026-001", "Zahlung für
-// 2026-001"). Any other short letter run directly before the digits ("A-2026-003", "G-2026-001",
-// "KD2026001", "EUR 2026001") is another document's prefix or a unit, so the digits are not this invoice.
-const ALLOWED_WORDS = new Set([
-  'R', 'RE', 'RG', 'RN', 'NR', 'NO', 'INV', 'REF', 'RNR', 'BILL', 'FACT', 'FAKT',
-  'FÜR', 'FUR', 'VON', 'VOM', 'AUS', 'LT', 'ZU', 'ZUM', 'ZUR', 'PER', 'DER', 'DIE', 'DAS', 'DEN', 'DEM', 'UND', 'MIT',
-  'FOR', 'OF', 'TO', 'THE', 'AND', 'ID',
-])
+// 2026-001"). Other one- or two-letter runs directly before the digits ("A-2026-003", "G-2026-001",
+// "KD2026001") are another document's prefix, so the digits are not this invoice.
+const ALLOWED_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'NR', 'NO', 'ID', 'U', 'ZU', 'FA', 'VS', 'TZ', 'ER', 'AR', 'LT', 'OF', 'TO'])
+
+// Labels of numbers that are never the invoice number: other document types, the payer's own
+// references, bank and tax identifiers, phone numbers, currencies. Matched as word stems.
+const DENIED_STEMS = [
+  'ANGEBOT', 'OFFERT', 'KOSTENVORANSCHLAG', 'KV', 'QUOTE', 'ESTIMATE', 'GUTSCHRIFT', 'GS', 'CREDIT', 'STORNO',
+  'BESTELL', 'AUFTRAG', 'ORDER', 'PO', 'AB', 'LIEFERSCHEIN', 'LS', 'PROJEKT', 'PROJECT', 'VERTRAG', 'CONTRACT',
+  'KUNDE', 'KDNR', 'KD', 'CUSTOMER', 'CLIENT', 'MITGLIED', 'MEMBER', 'MREF', 'MANDAT', 'EREF', 'CREF',
+  'IBAN', 'BIC', 'KONTO', 'ACCOUNT', 'ACC', 'BLZ', 'UID', 'ATU', 'SVNR', 'STEUERNR', 'STNR', 'TAX', 'VAT',
+  'TEL', 'MOBIL', 'HANDY', 'PHONE', 'FAX', 'EUR', 'USD', 'CHF', 'GBP',
+]
 
 // The characters in order over the upper-cased text, any run of separators between them but no
 // decimal or thousands separator between two digits, so "2026-001" is found in "RE2026-001",
@@ -76,11 +82,26 @@ function numberMatcher(raw: string): NumberMatcher | null {
   return { full, digits, prefix, short: digitPart.replace(/[^0-9]/g, '').length < 4 }
 }
 
+const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c)
+
+// The letters directly before a position, skipping separators; a backwards scan so a long run of
+// separators costs nothing.
+function trailingWord(text: string): string {
+  let end = text.length
+  while (end > 0 && !isWordChar(text[end - 1])) end--
+  let start = end
+  while (start > 0 && /\p{L}/u.test(text[start - 1])) start--
+  return text.slice(start, end)
+}
+
+interface FindOptions { ownPrefix: string; otherPrefixes: Set<string> }
+
 // Finds the invoice number in a remittance text and rules out digits that belong to something else:
 // a date ("12.03.2026 100,00" is not invoice 2026-100, "2026-03-12" is not 20260312), IBAN groups,
-// another document's prefix, or an amount's decimals. `split` reports a number whose digits were only
-// found separated by spaces, which is weaker evidence than "2026-001" or "2026001".
-function findNumber(text: string, re: RegExp, ownPrefix: string): { split: boolean } | null {
+// another document's number or the payer's own reference, or an amount's decimals. `split` reports
+// a number whose digits were only found with whitespace in between, which is weaker evidence than
+// "2026-001" or "2026001".
+function findNumber(text: string, re: RegExp, { ownPrefix, otherPrefixes }: FindOptions): { split: boolean } | null {
   const upper = text.toUpperCase()
   re.lastIndex = 0
   let m: RegExpExecArray | null
@@ -88,15 +109,23 @@ function findNumber(text: string, re: RegExp, ownPrefix: string): { split: boole
     const hit = m[0]
     const before = upper.slice(0, m.index)
     const after = upper.slice(m.index + hit.length)
-    const split = /\d\s+\d/.test(hit)
-    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(hit)) continue
+    const split = /\d\D*\s\D*\d/.test(hit)
+    if (/^\d{4}[-/. ]\d{1,2}[-/. ]\d{1,2}$/.test(hit)) continue
     if (/^[0-9]/.test(hit)) {
       if (/(?<!\d)\d{1,2}[./]\s*$/.test(before)) continue
-      if (/IBAN[\s:]*[A-Z]{2}\d{2}\s*$/.test(before)) continue
-      const word = before.replace(/[^\p{L}\p{N}]+$/u, '').match(/\p{L}+$/u)?.[0]
-      if (word && word.length <= 3 && word !== ownPrefix && !ALLOWED_WORDS.has(word)) continue
+      if (/IBAN[\s:]*[A-Z]{2}\s*\d{2}[\d\s]*$/.test(before) || /(?<!\p{L})[A-Z]{2}\d{2}(\s+\d{4})*\s+$/u.test(before)) continue
+      // An Austrian mobile prefix right before the digits: "0664/2026001", "+43 664 2026001".
+      if (/(?:^|\D)(?:\+43\s*|0)6\d{2}\s*[/ -]*$/.test(before)) continue
+      const word = trailingWord(before)
+      if (word && word !== ownPrefix) {
+        if (otherPrefixes.has(word) || DENIED_STEMS.some(stem => word.startsWith(stem))) continue
+        if (word.length <= 2 && !ALLOWED_WORDS.has(word)) continue
+      }
     }
-    if (split && /^[,.]\d{2}(?!\d)/.test(after)) continue
+    const bare = /^\d+$/.test(hit)
+    if ((split || bare) && /^[,.]\d{2}(?!\d)/.test(after)) continue
+    // A plain digit run next to a currency is an amount ("Betrag 26001 EUR", "€ 26001").
+    if (bare && (/^\s*(?:€|EUR\b)/.test(after) || /€\s*$/.test(before))) continue
     return { split }
   }
   return null
@@ -119,7 +148,13 @@ function addDaysIso(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10)
 }
 
-export function matchTransactions(transactions: BankTransaction[], invoices: OpenInvoice[], importedRefs: Set<string>): MatchRow[] {
+export interface MatchOptions {
+  /** Prefixes of the other document types (quote, credit note): their numbers are never an invoice. */
+  otherPrefixes?: string[]
+}
+
+export function matchTransactions(transactions: BankTransaction[], invoices: OpenInvoice[], importedRefs: Set<string>, options: MatchOptions = {}): MatchRow[] {
+  const otherPrefixes = new Set((options.otherPrefixes ?? []).map(alnum).filter(Boolean))
   const open = invoices.filter(i => i.balance > 0.005)
   // Running balance: an invoice can absorb several credits only while something is still open.
   const remaining = new Map(open.map(i => [i.id, i.balance]))
@@ -147,8 +182,9 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       const reasons: MatchReason[] = []
 
       const matcher = matchers.get(inv.id)
+      const find: FindOptions = { ownPrefix: matcher?.prefix ?? '', otherPrefixes }
       const hit = matcher
-        ? haystacks.map(h => findNumber(h, matcher.full, matcher.prefix) ?? (matcher.digits ? findNumber(h, matcher.digits, matcher.prefix) : null)).find(Boolean)
+        ? haystacks.map(h => findNumber(h, matcher.full, find) ?? (matcher.digits ? findNumber(h, matcher.digits, find) : null)).find(Boolean)
         : null
       if (hit) { score += hit.split || matcher!.short ? 70 : 100; reasons.push('number') }
 

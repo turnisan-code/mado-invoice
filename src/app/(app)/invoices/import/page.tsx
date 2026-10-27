@@ -15,7 +15,7 @@ export default async function BankImportPage() {
   const [{ data: docs }, { data: refs }, { data: settings }] = await Promise.all([
     supabase.from('documents').select(INVOICE_COLS).eq('type', 'invoice').in('status', ['sent', 'overdue']).not('number', 'is', null).order('date', { ascending: true }),
     supabase.from('payments').select('import_ref').not('import_ref', 'is', null),
-    supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id').single(),
+    supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, quote_prefix, credit_note_prefix').single(),
   ])
 
   // Oldest first, so a client's repeated credits settle their invoices in order.
@@ -57,7 +57,7 @@ export default async function BankImportPage() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{t('bankImport.intro')}</p>
         </div>
       </div>
-      <BankImport invoices={invoices} importedRefs={importedRefs} bookamatConfigured={bookamatConfigured} />
+      <BankImport invoices={invoices} importedRefs={importedRefs} bookamatConfigured={bookamatConfigured} otherPrefixes={[settings?.quote_prefix ?? 'A', settings?.credit_note_prefix ?? 'G']} />
     </div>
   )
 }
