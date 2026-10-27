@@ -60,6 +60,12 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
     const data = await res.json().catch(() => ({}))
     setBusyId(null)
     if (!res.ok) {
+      if (data.code === 'template_cancelled') {
+        // The generator paused the schedule; refresh so the row shows it.
+        toast.error(t('recurring.templateCancelled'))
+        router.refresh()
+        return
+      }
       toast.error(data.code === 'inactive' ? t('recurring.generateInactive') : (data.error || t('recurring.generateFailed')))
       return
     }

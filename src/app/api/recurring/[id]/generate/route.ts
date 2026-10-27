@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { generateDueSchedules } from '@/lib/utils/recurring'
 import { today } from '@/lib/utils/document'
 
+export const maxDuration = 60
+
 // "Generate now": creates the schedule's upcoming invoice before its date (plus any missed
 // periods) and answers with the newest document id.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -17,6 +19,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const { generated, errors } = await generateDueSchedules(supabase, today(), { scheduleId: id, force: true })
   if (!generated.length) {
+    // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.
+    if (errors.some(e => e.code === 'template_cancelled')) return NextResponse.json({ error: 'Template invoice is cancelled', code: 'template_cancelled' }, { status: 409 })
     if (errors.length) return NextResponse.json({ error: errors.map(e => e.message).join('; ') }, { status: 500 })
     return NextResponse.json({ documentId: null, generated: 0 })
   }

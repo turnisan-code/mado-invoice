@@ -179,8 +179,9 @@ create table documents (
   discount_value      numeric,
   notes               text,
   notes_internal      text,
-  -- Generic provenance (quote → invoice, invoice → credit note).
-  converted_from_id   uuid references documents(id),
+  -- Generic provenance (quote → invoice, invoice → credit note, template → recurring invoice).
+  -- SET NULL so a deleted draft template keeps the invoices generated from it.
+  converted_from_id   uuid references documents(id) on delete set null,
   -- Schedule that generated this invoice (FK added after recurring_schedules below).
   recurring_schedule_id uuid,
   -- Set only on a Storno credit note, so a plain credit note is never labelled as one.

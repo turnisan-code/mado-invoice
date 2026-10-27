@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
 
   const result = await generateDueSchedules(createServiceClient(), today())
 
-  if (result.errors.length) console.error(`[cron/recurring] generated=${result.generated.length} errors=${result.errors.length}`, result.errors)
-  else console.log(`[cron/recurring] generated=${result.generated.length}`)
+  const counts = `generated=${result.generated.length} skipped=${result.skipped.length}`
+  if (result.errors.length) console.error(`[cron/recurring] ${counts} errors=${result.errors.length}`, result.errors)
+  else console.log(`[cron/recurring] ${counts}`)
   return NextResponse.json(result)
 }

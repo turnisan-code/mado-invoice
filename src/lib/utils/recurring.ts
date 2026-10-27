@@ -67,21 +67,25 @@ export function defaultNextDate(today: string): string {
 
 export interface GenerateResult {
   generated: { scheduleId: string; documentId: string; date: string }[]
-  errors: { scheduleId: string; message: string }[]
+  // Periods that already existed (retry after a crash, overlapping runs), so the cron log shows them.
+  skipped: { scheduleId: string; date: string; skipped: 'already_generated' }[]
+  errors: { scheduleId: string; message: string; code?: 'template_cancelled' }[]
 }
 
 type SourceDocument = Record<string, unknown> & {
   id: string
   client_id: string
+  status: string
   document_items: Record<string, unknown>[] | null
   clients: { payment_days: number | null } | null
 }
 
 // Copies the template invoice into a new draft dated `date`. Returns null when that period
 // already exists (unique index documents_recurring_period_key), which a retry after a crash hits.
-async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string): Promise<string | null> {
+async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<string | null> {
   const period = servicePeriod(date, schedule.interval, schedule.in_advance, schedule.anchor_day)
-  const paymentDays = source.clients?.payment_days ?? 14
+  // Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
+  const paymentDays = source.clients?.payment_days ?? defaultPaymentDays ?? 14
 
   const { data: doc, error } = await supabase.from('documents').insert({
     type: 'invoice',
@@ -123,7 +127,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   return doc.id as string
 }
 
-async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, result: GenerateResult) {
+async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, result: GenerateResult) {
   const { data: source, error } = await supabase
     .from('documents')
     .select('*, document_items(*), clients(payment_days)')
@@ -131,8 +135,16 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
     .single()
   if (error || !source) throw new Error(error?.message ?? 'Template invoice not found')
 
+  // A template cancelled (Storno) after the schedule was created must not be copied any
+  // further: pause the schedule and report it instead of generating.
+  if ((source as SourceDocument).status === 'cancelled') {
+    const { error: pauseErr } = await supabase.from('recurring_schedules').update({ active: false }).eq('id', schedule.id)
+    if (pauseErr) throw new Error(pauseErr.message)
+    result.errors.push({ scheduleId: schedule.id, message: 'template cancelled', code: 'template_cancelled' })
+    return
+  }
+
   let next = schedule.next_date
-  let lastDocumentId = schedule.last_document_id
   for (let i = 0; i < MAX_PERIODS_PER_RUN; i++) {
     // The manual button generates the upcoming period regardless of date; after that only catch-up.
     if (!(force && i === 0) && next > asOf) break
@@ -142,22 +154,29 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       break
     }
 
-    const documentId = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next)
+    const documentId = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
     if (documentId) {
-      lastDocumentId = documentId
       result.generated.push({ scheduleId: schedule.id, documentId, date: next })
       if (schedule.mode === 'issue') {
         const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: documentId })
         if (issueErr) result.errors.push({ scheduleId: schedule.id, message: `${next}: created as draft, issuing failed (${issueErr.message})` })
       }
+    } else {
+      result.skipped.push({ scheduleId: schedule.id, date: next, skipped: 'already_generated' })
     }
 
+    // Only what this iteration changed goes into the update: last_* only when a document was
+    // created here (an overlapping run must not overwrite them with a stale id) and active only
+    // when the schedule ended, so a Pause clicked mid-run is not undone.
     const advanced = advanceDate(next, schedule.interval, schedule.anchor_day)
     const ended = !!schedule.end_date && advanced > schedule.end_date
-    const { error: updErr } = await supabase
-      .from('recurring_schedules')
-      .update({ next_date: advanced, last_generated_at: new Date().toISOString(), last_document_id: lastDocumentId, active: !ended })
-      .eq('id', schedule.id)
+    const patch: Partial<RecurringSchedule> = { next_date: advanced }
+    if (documentId) {
+      patch.last_document_id = documentId
+      patch.last_generated_at = new Date().toISOString()
+    }
+    if (ended) patch.active = false
+    const { error: updErr } = await supabase.from('recurring_schedules').update(patch).eq('id', schedule.id)
     if (updErr) throw new Error(updErr.message)
 
     next = advanced
@@ -173,7 +192,11 @@ export async function generateDueSchedules(
   asOf: string,
   opts: { scheduleId?: string; force?: boolean } = {},
 ): Promise<GenerateResult> {
-  const result: GenerateResult = { generated: [], errors: [] }
+  const result: GenerateResult = { generated: [], skipped: [], errors: [] }
+
+  // Due-date fallback for clients without payment terms, loaded once for the whole run.
+  const { data: settings } = await supabase.from('settings').select('default_payment_days').maybeSingle()
+  const defaultPaymentDays: number | null = settings?.default_payment_days ?? null
 
   let query = supabase.from('recurring_schedules').select('*').eq('active', true)
   if (opts.scheduleId) query = query.eq('id', opts.scheduleId)
@@ -186,7 +209,7 @@ export async function generateDueSchedules(
 
   for (const schedule of (schedules ?? []) as RecurringSchedule[]) {
     try {
-      await runSchedule(supabase, schedule, asOf, !!opts.force, result)
+      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, result)
     } catch (err) {
       result.errors.push({ scheduleId: schedule.id, message: err instanceof Error ? err.message : String(err) })
     }
