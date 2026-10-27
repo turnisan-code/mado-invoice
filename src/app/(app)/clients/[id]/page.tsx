@@ -76,7 +76,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-start gap-4">
-        <Link href="/clients" className="mt-1 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">
+        <Link href="/clients" aria-label="Back to clients" className="h-11 w-11 -mx-3.5 -mb-3.5 -mt-2.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
           <ArrowLeft size={16} />
         </Link>
         <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -94,7 +94,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4">
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Total revenue</p>
           <p className="text-lg font-semibold">{formatMoney(totalRevenue, client.currency)}</p>

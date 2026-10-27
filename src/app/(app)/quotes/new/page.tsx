@@ -15,7 +15,7 @@ export default async function NewQuotePage({ searchParams }: { searchParams: Pro
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <h1 className="text-2xl font-semibold">New Quote</h1>
-      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6">
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           type="quote"
           settings={toPublicSettings(settings)}

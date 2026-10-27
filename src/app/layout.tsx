@@ -8,6 +8,10 @@ const geist = Geist({ subsets: ["latin"] });
 
 export const viewport: Viewport = {
   viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' },
+  ],
 }
 
 export const metadata: Metadata = {
@@ -26,7 +30,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${geist.className} min-h-full`}>
         <ThemeProvider>
           {children}
-          <Toaster richColors position="top-right" />
+          <Toaster
+            richColors
+            position="top-right"
+            mobileOffset={{ top: 'calc(env(safe-area-inset-top) + 12px)', left: 12, right: 12 }}
+          />
         </ThemeProvider>
       </body>
     </html>
