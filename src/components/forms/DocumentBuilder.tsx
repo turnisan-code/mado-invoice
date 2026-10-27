@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, useEffect, useCallback, useId, forwardRef, useImperativeHandle } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
+import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Dialog, ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { calcTotals, formatMoney, addDays, today, getTaxNote, orderItems } from '@/lib/utils/document'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
@@ -45,6 +47,9 @@ interface Props {
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
+
+const SELECT_CLS = 'w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
+const LINE_SELECT_CLS = 'h-9 sm:h-8 min-w-0 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
@@ -153,6 +158,9 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [showCatalogue, setShowCatalogue] = useState(false)
   const [cataloguePos, setCataloguePos] = useState<{ top?: number; bottom?: number; left: number }>({ top: 0, left: 0 })
   const [activeLine, setActiveLine] = useState<string | null>(null)
+  const [catalogueHighlight, setCatalogueHighlight] = useState(-1)
+  const uid = useId()
+  const listboxId = `${uid}-catalogue`
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
   const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; documentId: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
@@ -725,49 +733,265 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   }, [autoSave, doc, save])
 
   const deleteBtn = (id: string) => (
-    <button type="button" onClick={() => removeLine(id)}
-      className="h-9 w-8 flex items-center justify-center text-neutral-300 hover:text-red-500 transition-colors shrink-0">
+    <button type="button" onClick={() => removeLine(id)} aria-label="Remove line"
+      className="h-11 w-11 sm:h-9 sm:w-8 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0">
       <Trash2 size={14} />
     </button>
   )
 
+  function catalogueMatches(line: LineItem) {
+    const q = line.description.toLowerCase()
+    return catalogueItems.filter(i => {
+      if (!i.active) return false
+      const n = catalogueName(i).toLowerCase()
+      return !q || n.includes(q) || i.name_de.toLowerCase().includes(q) || (i.name_en ?? '').toLowerCase().includes(q)
+    })
+  }
+
+  function openCatalogue(line: LineItem, el: HTMLInputElement, mobile: boolean) {
+    setActiveLine(line.id)
+    setShowCatalogue(true)
+    setCatalogueHighlight(-1)
+    const rect = el.getBoundingClientRect()
+    const flipUp = rect.bottom + 288 > window.innerHeight
+    const left = mobile ? 16 : rect.left
+    setCataloguePos(flipUp ? { bottom: window.innerHeight - rect.top + 4, left } : { top: rect.bottom + 4, left })
+  }
+
+  function closeCatalogue() {
+    setShowCatalogue(false)
+    setAddingItem(false)
+  }
+
+  const catalogueOpenFor = (line: LineItem) => showCatalogue && activeLine === line.id
+
+  // The popup closes once focus has left both the description input and the popup itself.
+  function handleCatalogueBlur(e: React.FocusEvent<HTMLDivElement>) {
+    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget as Node)) return
+    closeCatalogue()
+  }
+
+  function handleCatalogueKeyDown(e: React.KeyboardEvent<HTMLInputElement>, line: LineItem, mobile: boolean) {
+    if (!catalogueOpenFor(line)) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); openCatalogue(line, e.currentTarget, mobile) }
+      return
+    }
+    const matches = catalogueMatches(line)
+    const count = matches.length + 1
+    if (e.key === 'ArrowDown') { e.preventDefault(); setCatalogueHighlight(h => (h + 1) % count) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setCatalogueHighlight(h => (h <= 0 ? count - 1 : h - 1)) }
+    else if (e.key === 'Escape') { e.preventDefault(); closeCatalogue() }
+    else if (e.key === 'Enter' && catalogueHighlight >= 0) {
+      e.preventDefault()
+      if (catalogueHighlight < matches.length) pickCatalogueItem(matches[catalogueHighlight], line.id)
+      else setAddingItem(true)
+    }
+  }
+
+  // The phone and desktop layouts both stay mounted, so each gets its own listbox ids.
+  const catalogueListId = (mobile: boolean) => `${listboxId}-${mobile ? 'm' : 'd'}`
+
+  function descriptionProps(line: LineItem, mobile: boolean) {
+    const open = catalogueOpenFor(line)
+    const lbId = catalogueListId(mobile)
+    return {
+      value: line.description,
+      placeholder: 'Description…',
+      'aria-label': 'Description',
+      role: 'combobox' as const,
+      'aria-expanded': open,
+      'aria-controls': open ? lbId : undefined,
+      'aria-autocomplete': 'list' as const,
+      'aria-activedescendant': open && catalogueHighlight >= 0 && catalogueHighlight < catalogueMatches(line).length ? `${lbId}-${catalogueHighlight}` : undefined,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+        updateLine(line.id, { description: e.target.value })
+        setCatalogueHighlight(-1)
+        if (!open) openCatalogue(line, e.currentTarget, mobile)
+      },
+      onFocus: (e: React.FocusEvent<HTMLInputElement>) => openCatalogue(line, e.currentTarget, mobile),
+      onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => handleCatalogueKeyDown(e, line, mobile),
+    }
+  }
+
+  const popupFieldCls = 'text-base md:text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100'
+
+  function cataloguePopup(line: LineItem, mobile: boolean) {
+    if (!catalogueOpenFor(line)) return null
+    const matches = catalogueMatches(line)
+    const newHighlighted = catalogueHighlight === matches.length
+    const lbId = catalogueListId(mobile)
+    return (
+      <div
+        className={`fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto ${mobile ? '' : 'w-96 max-w-[calc(100vw-2rem)]'}`}
+        style={mobile ? { ...cataloguePos, width: 'calc(100vw - 2rem)' } : cataloguePos}
+      >
+        <div role="listbox" id={lbId} aria-label="Catalogue items">
+          {matches.length === 0 && (
+            <p className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400 text-center">No items found</p>
+          )}
+          {matches.map((item, i) => (
+            <button
+              key={item.id}
+              type="button"
+              role="option"
+              id={`${lbId}-${i}`}
+              aria-selected={catalogueHighlight === i}
+              tabIndex={-1}
+              onMouseDown={e => e.preventDefault()}
+              onMouseEnter={() => setCatalogueHighlight(i)}
+              onClick={() => pickCatalogueItem(item, line.id)}
+              className={`w-full text-left px-3 ${mobile ? 'py-2.5' : 'py-2'} text-sm flex justify-between items-center gap-3 ${catalogueHighlight === i ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
+            >
+              <span className="min-w-0 truncate">{catalogueName(item)}</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{formatMoney(item.default_price)}/{item.unit}</span>
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-neutral-100 dark:border-neutral-800">
+          {addingItem ? (
+            <div className="p-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" aria-label="Name (DE)" autoFocus className={popupFieldCls} />
+                <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" aria-label="Name (EN)" className={popupFieldCls} />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <MoneyInput value={newItemDraft.default_price} onValueChange={n => setNewItemDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder="Price" aria-label="Price" className="h-7 px-2 md:text-xs" />
+                <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label="Unit" className={`${popupFieldCls} px-1`}>
+                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+                <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} aria-label="VAT rate" className={`${popupFieldCls} px-1`}>
+                  {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                </select>
+              </div>
+              <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" aria-label="Category (optional)" className={popupFieldCls} />
+              <div className="flex gap-2">
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => saveNewCatalogueItem(line.id)} className="text-xs px-2.5 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-700 dark:hover:bg-neutral-200">Add &amp; use</button>
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => setAddingItem(false)} className="text-xs px-2.5 py-1.5 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              tabIndex={-1}
+              onMouseDown={e => e.preventDefault()}
+              onMouseEnter={() => setCatalogueHighlight(matches.length)}
+              onClick={() => setAddingItem(true)}
+              className={`w-full text-left px-3 py-2.5 text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5 ${newHighlighted ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
+            >
+              <Plus size={12} /> New catalogue item…
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const discountToggle = (active: boolean) =>
+    `px-2 py-1 sm:py-0.5 transition-colors ${active ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400'}`
+  const discountChip = (active: boolean) =>
+    `text-xs px-2 py-1 sm:px-1.5 sm:py-0.5 rounded-full border transition-colors ${active ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500'}`
+  const removeDiscountBtn = 'h-9 w-9 -my-2 sm:h-7 sm:w-7 sm:-my-1 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0'
+
+  const sectionDiscount = (line: LineItem, idx: number) => {
+    const gross = calcSectionSubtotal(lines, idx)
+    const discAmt = line.discount_type && line.discount_value > 0
+      ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
+      : 0
+    const net = gross - discAmt
+    return (
+      <div className="flex-1 space-y-1.5 pr-1 min-w-0">
+        <div className="flex justify-end items-center gap-3">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Subtotal</span>
+          <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-500 dark:text-neutral-400' : ''}`}>{formatMoney(gross, currency)}</span>
+        </div>
+        {line.discount_type ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-end gap-2 flex-wrap">
+              <div role="group" aria-label="Discount type" className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+                <button type="button" aria-pressed={line.discount_type === 'percent'} onClick={() => updateLine(line.id, { discount_type: 'percent' })} className={discountToggle(line.discount_type === 'percent')}>%</button>
+                <button type="button" aria-pressed={line.discount_type === 'fixed'} onClick={() => updateLine(line.id, { discount_type: 'fixed' })} className={discountToggle(line.discount_type === 'fixed')}>{currency}</button>
+              </div>
+              <MoneyInput
+                value={line.discount_value}
+                onValueChange={n => updateLine(line.id, { discount_value: n ?? 0 })}
+                aria-label="Section discount"
+                className="w-20 h-8 sm:h-7 md:text-xs text-right"
+              />
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 w-20 sm:w-24 text-right">−{formatMoney(discAmt, currency)}</span>
+              <button type="button" aria-label="Remove discount" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })} className={removeDiscountBtn}><X size={13} /></button>
+            </div>
+            {line.discount_type === 'percent' && (
+              <div className="flex gap-1 justify-end flex-wrap">
+                {[5, 10, 15, 20, 25].map(p => (
+                  <button key={p} type="button" aria-pressed={line.discount_value === p} onClick={() => updateLine(line.id, { discount_value: p })} className={discountChip(line.discount_value === p)}>{p}%</button>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Net</span>
+              <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-end">
+            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
+              className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded px-2 py-1 sm:py-0.5 transition-colors">
+              + {language === 'de' ? 'Rabatt' : 'Discount'}
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
+
   return (
     <div className="space-y-6">
       {/* Gmail send preview */}
-      {gmailPreview && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 w-full max-w-lg space-y-4">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Review email</h3>
+      <Dialog
+        open={!!gmailPreview}
+        onClose={closeGmailPreview}
+        title="Review email"
+        busy={gmailSending}
+        panelClassName="max-w-lg"
+      >
+        {gmailPreview && (
+          <>
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</label>
+                <label htmlFor={`${uid}-gmail-to`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</label>
                 <input
+                  id={`${uid}-gmail-to`}
+                  type="email"
                   value={gmailPreview.to}
                   onChange={e => setGmailPreview(p => p ? { ...p, to: e.target.value } : p)}
-                  className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                  className="w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Subject</label>
+                <label htmlFor={`${uid}-gmail-subject`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Subject</label>
                 <input
+                  id={`${uid}-gmail-subject`}
                   value={gmailPreview.subject}
                   onChange={e => setGmailPreview(p => p ? { ...p, subject: e.target.value } : p)}
-                  className="w-full text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+                  className="w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Body</label>
+                <label htmlFor={`${uid}-gmail-body`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Body</label>
                 <textarea
+                  id={`${uid}-gmail-body`}
                   value={gmailPreview.body}
                   onChange={e => setGmailPreview(p => p ? { ...p, body: e.target.value } : p)}
                   rows={7}
-                  className="w-full text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
+                  className="w-full text-base md:text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
                 />
               </div>
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">PDF attached: {gmailPreview.filename}</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">PDF attached: {gmailPreview.filename}</p>
             </div>
             {settings.drive_folder_id && (gmailPreview.driveArchived ? (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">Archived to Google Drive when issued.</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">Archived to Google Drive when issued.</p>
             ) : (
               <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
                 <input
@@ -785,25 +1009,19 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 {gmailSending ? 'Sending…' : 'Send'}
               </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Dialog>
 
       {/* Issue confirmation */}
-      {pendingIssue && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full space-y-4">
-            <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Issue this {typeLabel[type].en.toLowerCase()}?</h3>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">
-              The next {typeLabel[type].en.toLowerCase()} number will be assigned, the document marked as sent and the final PDF stored as the issued copy. Numbers cannot be taken back.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setPendingIssue(null)}>Cancel</Button>
-              <Button type="button" onClick={() => { const run = pendingIssue; setPendingIssue(null); void run() }}>Issue &amp; continue</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!pendingIssue}
+        title={`Issue this ${typeLabel[type].en.toLowerCase()}?`}
+        description={`The next ${typeLabel[type].en.toLowerCase()} number will be assigned, the document marked as sent and the final PDF stored as the issued copy. Numbers cannot be taken back.`}
+        confirmLabel="Issue & continue"
+        onConfirm={() => { const run = pendingIssue; setPendingIssue(null); if (run) void run() }}
+        onCancel={() => setPendingIssue(null)}
+      />
 
       {doc?.number && doc.status !== 'draft' && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
@@ -813,13 +1031,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
       {/* Client & dates */}
       <div className="space-y-4">
-        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Client & Dates</p>
+        <p className={captionCls}>Client & Dates</p>
 
         {/* Client selector — full width always */}
         <div className="space-y-1.5">
-          <Label>Client *</Label>
-          <select value={clientId} onChange={e => handleClientChange(e.target.value)}
-            className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400">
+          <Label htmlFor={`${uid}-client`}>Client *</Label>
+          <select id={`${uid}-client`} value={clientId} onChange={e => handleClientChange(e.target.value)} className={SELECT_CLS}>
             <option value="">Select client…</option>
             {clients.sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)).map(c => (
               <option key={c.id} value={c.id}>{c.company && c.name ? `${c.company} (${c.name})` : c.company || c.name}</option>
@@ -830,12 +1047,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Date + Due date */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 space-y-1.5">
-            <Label>Date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-sm h-10 w-full" />
+            <Label htmlFor={`${uid}-date`}>Date</Label>
+            <Input id={`${uid}-date`} type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 w-full" />
           </div>
           <div className="flex-1 space-y-1.5">
-            <Label>{type === 'invoice' ? 'Due date' : 'Valid until'}</Label>
-            <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="text-sm h-10 w-full" />
+            <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? 'Due date' : 'Valid until'}</Label>
+            <Input id={`${uid}-due`} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="h-10 w-full" />
           </div>
         </div>
 
@@ -844,7 +1061,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <button
             type="button"
             onClick={() => setShowDetails(d => !d)}
-            className="sm:hidden flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors mb-3"
+            aria-expanded={showDetails}
+            className="sm:hidden flex items-center gap-1.5 text-xs py-2 -my-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors mb-3"
           >
             <ChevronRight size={13} className={`transition-transform ${showDetails ? 'rotate-90' : ''}`} />
             {showDetails ? 'Hide details' : 'Language, currency & tax'}
@@ -852,50 +1070,47 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
           <div className={`grid grid-cols-2 sm:grid-cols-5 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
             <div className="space-y-1.5">
-              <Label>Language</Label>
-              <select value={language} onChange={e => setLanguage(e.target.value as Language)}
-                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+              <Label htmlFor={`${uid}-language`}>Language</Label>
+              <select id={`${uid}-language`} value={language} onChange={e => setLanguage(e.target.value as Language)} className={SELECT_CLS}>
                 <option value="de">Deutsch</option>
                 <option value="en">English</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Currency</Label>
-              <select value={currency} onChange={e => setCurrency(e.target.value as Currency)}
-                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+              <Label htmlFor={`${uid}-currency`}>Currency</Label>
+              <select id={`${uid}-currency`} value={currency} onChange={e => setCurrency(e.target.value as Currency)} className={SELECT_CLS}>
                 <option value="EUR">EUR</option>
                 <option value="USD">USD</option>
                 <option value="GBP">GBP</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Tax treatment</Label>
-              <select value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)}
-                className="w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+              <Label htmlFor={`${uid}-tax`}>Tax treatment</Label>
+              <select id={`${uid}-tax`} value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)} className={SELECT_CLS}>
                 <option value="at_vat">Austrian VAT</option>
                 <option value="eu_reverse_charge">Reverse Charge (EU)</option>
                 <option value="non_eu">Non-EU (no VAT)</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Service from</Label>
-              <Input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className="text-sm" />
+              <Label htmlFor={`${uid}-service-from`}>Service from</Label>
+              <Input id={`${uid}-service-from`} type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>Service to</Label>
-              <Input type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} className="text-sm" />
+              <Label htmlFor={`${uid}-service-to`}>Service to</Label>
+              <Input id={`${uid}-service-to`} type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} />
             </div>
             {type === 'invoice' && (
               <>
                 <div className="space-y-1.5">
-                  <Label>Skonto %</Label>
-                  <Input type="number" min={0} max={100} step="0.5" value={skontoPercent} placeholder="none"
-                    onChange={e => setSkontoPercent(e.target.value === '' ? '' : Number(e.target.value))} className="text-sm" />
+                  <Label htmlFor={`${uid}-skonto-percent`}>Skonto %</Label>
+                  <MoneyInput id={`${uid}-skonto-percent`} value={skontoPercent === '' ? null : skontoPercent} placeholder="none"
+                    onValueChange={n => setSkontoPercent(n === null ? '' : n)} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Skonto days</Label>
-                  <Input type="number" min={0} step="1" value={skontoDays} placeholder="from date"
-                    onChange={e => setSkontoDays(e.target.value === '' ? '' : Number(e.target.value))} className="text-sm" />
+                  <Label htmlFor={`${uid}-skonto-days`}>Skonto days</Label>
+                  <MoneyInput id={`${uid}-skonto-days`} integer value={skontoDays === '' ? null : skontoDays} placeholder="from date"
+                    onValueChange={n => setSkontoDays(n === null ? '' : n)} />
                 </div>
               </>
             )}
@@ -903,7 +1118,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         </div>
 
         {taxNote && (
-          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+          <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-md px-3 py-2">
             {taxNote}
           </div>
         )}
@@ -913,14 +1128,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
       {/* Line items */}
       <div className="space-y-1.5">
-        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Line Items</p>
+        <p className={`${captionCls} mb-3`}>Line Items</p>
         {/* Mobile card layout */}
         <div className="sm:hidden space-y-0">
           {lines.map((line, idx) => {
             if (line.line_type === 'separator') {
               return (
                 <div key={line.id} className="flex items-center gap-2 py-1">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <div className="flex-1 border-t border-neutral-200 dark:border-neutral-700" />
                   {deleteBtn(line.id)}
                 </div>
@@ -930,9 +1145,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             if (line.line_type === 'page_break') {
               return (
                 <div key={line.id} className="flex items-center gap-2 py-1">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
-                  <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0 px-1">Page break</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">Page break</span>
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
                   {deleteBtn(line.id)}
                 </div>
@@ -942,12 +1157,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             if (line.line_type === 'heading') {
               return (
                 <div key={line.id} className="flex items-center gap-2">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Section heading…"
-                    className="flex-1 text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
+                    aria-label="Section heading"
+                    className="flex-1 min-w-0 text-base md:text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -957,12 +1173,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             if (line.line_type === 'text') {
               return (
                 <div key={line.id} className="flex items-center gap-2">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Note…"
-                    className="flex-1 text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
+                    aria-label="Note"
+                    className="flex-1 min-w-0 text-base md:text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -970,58 +1187,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             }
 
             if (line.line_type === 'subtotal') {
-              const gross = calcSectionSubtotal(lines, idx)
-              const discAmt = line.discount_type && line.discount_value > 0
-                ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
-                : 0
-              const net = gross - discAmt
               return (
                 <div key={line.id} className="flex items-center gap-2 py-1">
-                  <GripVertical size={14} className="text-neutral-300 dark:text-neutral-600 shrink-0" />
-                  <div className="flex-1 space-y-1.5 pr-1">
-                    <div className="flex justify-end items-center gap-3">
-                      <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
-                      <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-400 dark:text-neutral-500' : ''}`}>{formatMoney(gross, currency)}</span>
-                    </div>
-                    {/* Discount controls */}
-                    {line.discount_type ? (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
-                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent' })}
-                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>%</button>
-                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'fixed' })}
-                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>{currency}</button>
-                          </div>
-                          <input type="number" value={line.discount_value} min={0} step={line.discount_type === 'percent' ? 1 : 0.01}
-                            onChange={e => updateLine(line.id, { discount_value: parseFloat(e.target.value) || 0 })}
-                            className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 text-right" />
-                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-20 text-right">−{formatMoney(discAmt, currency)}</span>
-                          <button type="button" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })}
-                            className="text-neutral-300 hover:text-red-400 transition-colors"><X size={12} /></button>
-                        </div>
-                        {line.discount_type === 'percent' && (
-                          <div className="flex gap-1 justify-end">
-                            {[5, 10, 15, 20, 25].map(p => (
-                              <button key={p} type="button" onClick={() => updateLine(line.id, { discount_value: p })}
-                                className={`text-xs px-1.5 py-0.5 rounded-full border transition-colors ${line.discount_value === p ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:border-neutral-400'}`}>{p}%</button>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex justify-end gap-3">
-                          <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Net</span>
-                          <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-end">
-                        <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
-                          className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 rounded px-2 py-0.5 transition-colors">
-                          + {language === 'de' ? 'Rabatt' : 'Discount'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
+                  {sectionDiscount(line, idx)}
                   {deleteBtn(line.id)}
                 </div>
               )
@@ -1032,108 +1201,40 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <div key={line.id} className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-3 space-y-3 mb-2">
                 {/* Description + delete */}
                 <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <Input
-                      value={line.description}
-                      onChange={e => updateLine(line.id, { description: e.target.value })}
-                      placeholder="Description…"
-                      className="text-sm w-full"
-                      onFocus={e => {
-                        setActiveLine(line.id)
-                        setShowCatalogue(true)
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        const flipUp = rect.bottom + 288 > window.innerHeight
-                        setCataloguePos(flipUp
-                          ? { bottom: window.innerHeight - rect.top + 4, left: 16 }
-                          : { top: rect.bottom + 4, left: 16 }
-                        )
-                      }}
-                    />
-                    {showCatalogue && activeLine === line.id && (
-                      <>
-                        <div className="fixed inset-0 z-40" onMouseDown={() => setShowCatalogue(false)} />
-                        <div className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={{ ...cataloguePos, width: 'calc(100vw - 2rem)' }}>
-                          {(() => {
-                            const q = line.description.toLowerCase()
-                            const matches = catalogueItems.filter(i => {
-                              if (!i.active) return false
-                              const n = catalogueName(i).toLowerCase()
-                              return !q || n.includes(q) || i.name_de.toLowerCase().includes(q) || (i.name_en ?? '').toLowerCase().includes(q)
-                            })
-                            if (matches.length === 0) return (
-                              <p className="px-3 py-4 text-xs text-neutral-400 dark:text-neutral-500 text-center">No items found</p>
-                            )
-                            return matches.map(item => (
-                              <button key={item.id} type="button"
-                                className="w-full text-left px-3 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
-                                onMouseDown={() => pickCatalogueItem(item, line.id)}>
-                                <span>{catalogueName(item)}</span>
-                                <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
-                              </button>
-                            ))
-                          })()}
-                          <div className="border-t border-neutral-100 dark:border-neutral-800">
-                            {addingItem ? (
-                              <div className="p-3 space-y-2">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                  <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                </div>
-                                <div className="grid grid-cols-3 gap-2">
-                                  <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                  <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                                  </select>
-                                  <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                    {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                                  </select>
-                                </div>
-                                <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                <div className="flex gap-2">
-                                  <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
-                                  <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
-                                <Plus size={12} /> New catalogue item…
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </>
-                    )}
+                  <div className="relative flex-1 min-w-0" onBlur={handleCatalogueBlur}>
+                    <Input {...descriptionProps(line, true)} className="w-full" />
+                    {cataloguePopup(line, true)}
                   </div>
                   {deleteBtn(line.id)}
                 </div>
                 {/* Qty × Unit | Price */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500">Qty × Unit</p>
+                    <label htmlFor={`${uid}-qty-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">Qty × Unit</label>
                     <div className="flex gap-1.5">
-                      <Input type="number" value={line.quantity} min={0} step={0.25}
-                        onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
-                        className="w-14 text-sm shrink-0" />
-                      <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
-                        className="flex-1 h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none min-w-0">
+                      <MoneyInput id={`${uid}-qty-${line.id}`} value={line.quantity} decimals={4}
+                        onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })}
+                        className="w-16 shrink-0" />
+                      <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label="Unit"
+                        className={`${LINE_SELECT_CLS} flex-1`}>
                         {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                       </select>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500">Price</p>
-                    <Input type="number" value={line.unit_price} min={0} step={0.01}
-                      onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
-                      className="text-sm w-full" />
+                    <label htmlFor={`${uid}-price-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">Price</label>
+                    <MoneyInput id={`${uid}-price-${line.id}`} value={line.unit_price}
+                      onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })}
+                      className="w-full" />
                   </div>
                 </div>
                 {/* VAT + service date */}
                 <div className="flex items-end gap-3">
                   <div className="space-y-1 flex-1">
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500">VAT</p>
-                    <select value={line.vat_rate}
+                    <label htmlFor={`${uid}-vat-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">VAT</label>
+                    <select id={`${uid}-vat-${line.id}`} value={line.vat_rate}
                       onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
-                      className="w-full h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                      className={`${LINE_SELECT_CLS} w-full`}>
                       {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                     </select>
                   </div>
@@ -1141,9 +1242,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
                     title={line.service_date ?? 'Set service date'}
-                    className={`h-9 w-10 flex items-center justify-center rounded-md border transition-colors ${line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400'}`}
+                    aria-label={line.service_date ? `Service date ${line.service_date}` : 'Set service date'}
+                    aria-expanded={activeDateLine === line.id}
+                    className={`h-11 w-11 flex items-center justify-center rounded-md border transition-colors ${line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
-                    <Calendar size={15} />
+                    <Calendar size={16} />
                   </button>
                 </div>
               </div>
@@ -1154,7 +1257,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Desktop grid layout */}
         <div className="hidden sm:block overflow-x-auto -mx-1 px-1">
         <div className="min-w-[560px]">
-        <div className="grid gap-2 text-xs font-medium text-neutral-400 dark:text-neutral-500 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
+        <div className="grid gap-2 text-xs font-medium text-neutral-500 dark:text-neutral-400 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
           <span /><span>Description</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span /><span />
         </div>
 
@@ -1169,7 +1272,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             }
             const dragOverClass = dragOver === idx ? 'border-t-2 border-blue-400' : ''
             const handle = (
-              <GripVertical size={14} className="text-neutral-300 cursor-grab shrink-0 mt-2.5" />
+              <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 cursor-grab shrink-0 mt-2.5" />
             )
 
             if (line.line_type === 'separator') {
@@ -1187,7 +1290,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
                   {handle}
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
-                  <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0 px-1">Page break</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">Page break</span>
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
                   {deleteBtn(line.id)}
                 </div>
@@ -1202,7 +1305,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Section heading…"
-                    className="flex-1 text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
+                    aria-label="Section heading"
+                    className="flex-1 min-w-0 text-base md:text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -1217,7 +1321,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
                     placeholder="Note…"
-                    className="flex-1 text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
+                    aria-label="Note"
+                    className="flex-1 min-w-0 text-base md:text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
                 </div>
@@ -1225,58 +1330,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             }
 
             if (line.line_type === 'subtotal') {
-              const gross = calcSectionSubtotal(lines, idx)
-              const discAmt = line.discount_type && line.discount_value > 0
-                ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
-                : 0
-              const net = gross - discAmt
               return (
                 <div key={line.id} {...dragProps} className={`flex items-start gap-2 py-1.5 ${dragOverClass}`}>
                   {handle}
-                  <div className="flex-1 space-y-1.5 pr-1">
-                    <div className="flex justify-end items-center gap-3">
-                      <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Subtotal</span>
-                      <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-400 dark:text-neutral-500' : ''}`}>{formatMoney(gross, currency)}</span>
-                    </div>
-                    {/* Discount controls */}
-                    {line.discount_type ? (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-end gap-2">
-                          <div className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
-                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent' })}
-                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>%</button>
-                            <button type="button" onClick={() => updateLine(line.id, { discount_type: 'fixed' })}
-                              className={`px-2 py-0.5 transition-colors ${line.discount_type === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500'}`}>{currency}</button>
-                          </div>
-                          <input type="number" value={line.discount_value} min={0} step={line.discount_type === 'percent' ? 1 : 0.01}
-                            onChange={e => updateLine(line.id, { discount_value: parseFloat(e.target.value) || 0 })}
-                            className="w-16 text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1.5 py-0.5 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 text-right" />
-                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-24 text-right">−{formatMoney(discAmt, currency)}</span>
-                          <button type="button" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })}
-                            className="text-neutral-300 hover:text-red-400 transition-colors"><X size={12} /></button>
-                        </div>
-                        {line.discount_type === 'percent' && (
-                          <div className="flex gap-1 justify-end">
-                            {[5, 10, 15, 20, 25].map(p => (
-                              <button key={p} type="button" onClick={() => updateLine(line.id, { discount_value: p })}
-                                className={`text-xs px-1.5 py-0.5 rounded-full border transition-colors ${line.discount_value === p ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 hover:border-neutral-400'}`}>{p}%</button>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex justify-end gap-3">
-                          <span className="text-xs text-neutral-400 dark:text-neutral-500 uppercase tracking-wide">Net</span>
-                          <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex justify-end">
-                        <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
-                          className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 rounded px-2 py-0.5 transition-colors">
-                          + {language === 'de' ? 'Rabatt' : 'Discount'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {sectionDiscount(line, idx)}
                   {deleteBtn(line.id)}
                 </div>
               )
@@ -1287,98 +1344,29 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <div key={line.id} className={dragOverClass}>
                 <div {...dragProps} className="grid gap-2 items-start" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
                   {handle}
-                  <div className="relative">
-                    <Input
-                      value={line.description}
-                      onChange={e => updateLine(line.id, { description: e.target.value })}
-                      placeholder="Description…"
-                      className="text-sm"
-                      onFocus={e => {
-                        setActiveLine(line.id)
-                        setShowCatalogue(true)
-                        const rect = e.currentTarget.getBoundingClientRect()
-                        const flipUp = rect.bottom + 288 > window.innerHeight
-                        setCataloguePos(flipUp
-                          ? { bottom: window.innerHeight - rect.top + 4, left: rect.left }
-                          : { top: rect.bottom + 4, left: rect.left }
-                        )
-                      }}
-                    />
-                    {showCatalogue && activeLine === line.id && (
-                      <>
-                      <div className="fixed inset-0 z-40" onMouseDown={() => setShowCatalogue(false)} />
-                      <div className="fixed z-50 w-96 max-w-[calc(100vw-2rem)] bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto" style={cataloguePos}>
-                        {(() => {
-                          const q = line.description.toLowerCase()
-                          const matches = catalogueItems.filter(i => {
-                            if (!i.active) return false
-                            const n = catalogueName(i).toLowerCase()
-                            return !q || n.includes(q) || i.name_de.toLowerCase().includes(q) || (i.name_en ?? '').toLowerCase().includes(q)
-                          })
-                          if (matches.length === 0) return (
-                            <p className="px-3 py-4 text-xs text-neutral-400 dark:text-neutral-500 text-center">No items found</p>
-                          )
-                          return matches.map(item => (
-                            <button key={item.id} type="button"
-                              className="w-full text-left px-3 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-sm flex justify-between items-center"
-                              onMouseDown={() => pickCatalogueItem(item, line.id)}>
-                              <span>{catalogueName(item)}</span>
-                              <span className="text-xs text-neutral-400 dark:text-neutral-500">{formatMoney(item.default_price)}/{item.unit}</span>
-                            </button>
-                          ))
-                        })()}
-                        <div className="border-t border-neutral-100 dark:border-neutral-800">
-                          {addingItem ? (
-                            <div className="p-3 space-y-2">
-                              <div className="grid grid-cols-2 gap-2">
-                                <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                              </div>
-                              <div className="grid grid-cols-3 gap-2">
-                                <input type="number" value={newItemDraft.default_price} onChange={e => setNewItemDraft(d => ({ ...d, default_price: parseFloat(e.target.value) || 0 }))} placeholder="Price" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                                <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                                </select>
-                                <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-1 py-1 bg-white dark:bg-neutral-900 dark:text-neutral-100">
-                                  {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                                </select>
-                              </div>
-                              <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" className="text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100" />
-                              <div className="flex gap-2">
-                                <button type="button" onMouseDown={() => saveNewCatalogueItem(line.id)} className="text-xs px-2 py-1 bg-neutral-900 text-white rounded hover:bg-neutral-700">Add & use</button>
-                                <button type="button" onMouseDown={() => setAddingItem(false)} className="text-xs px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button type="button" onMouseDown={() => setAddingItem(true)} className="w-full text-left px-3 py-2 text-xs text-neutral-400 dark:text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center gap-1.5">
-                              <Plus size={12} /> New catalogue item…
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      </>
-                    )}
+                  <div className="relative min-w-0" onBlur={handleCatalogueBlur}>
+                    <Input {...descriptionProps(line, false)} />
+                    {cataloguePopup(line, false)}
                   </div>
-                  <Input type="number" value={line.quantity} min={0} step={0.25}
-                    onChange={e => updateLine(line.id, { quantity: parseFloat(e.target.value) || 0 })}
-                    className="text-sm" />
-                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })}
-                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                  <MoneyInput value={line.quantity} decimals={4} aria-label="Quantity"
+                    onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })} />
+                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label="Unit" className={LINE_SELECT_CLS}>
                     {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
-                  <Input type="number" value={line.unit_price} min={0} step={0.01}
-                    onChange={e => updateLine(line.id, { unit_price: parseFloat(e.target.value) || 0 })}
-                    className="text-sm" />
-                  <select value={line.vat_rate}
+                  <MoneyInput value={line.unit_price} aria-label="Unit price"
+                    onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })} />
+                  <select value={line.vat_rate} aria-label="VAT rate"
                     onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
-                    className="h-9 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none">
+                    className={LINE_SELECT_CLS}>
                     {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                   </select>
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
                     title={line.service_date ?? 'Set service date'}
-                    className={`h-9 w-6 flex items-center justify-center transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-300 hover:text-neutral-500'}`}
+                    aria-label={line.service_date ? `Service date ${line.service_date}` : 'Set service date'}
+                    aria-expanded={activeDateLine === line.id}
+                    className={`h-9 w-6 flex items-center justify-center rounded-md transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
                     <Calendar size={13} />
                   </button>
@@ -1394,7 +1382,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Add row controls */}
         <div className="flex items-center gap-1 pt-3 flex-wrap">
           <button type="button" onClick={() => addLine('item')}
-            className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+            className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
             <Plus size={13} /> Add line
           </button>
           <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-700 mx-1.5" />
@@ -1406,7 +1394,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             ['page_break', 'Page break'],
           ] as [LineType, string][]).map(([lt, label]) => (
             <button key={lt} type="button" onClick={() => addLine(lt as LineType)}
-              className="text-xs px-2 py-1 rounded text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              className="text-xs px-2 py-2 sm:py-1 rounded text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
               + {label}
             </button>
           ))}
@@ -1426,36 +1414,30 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           {/* Discount */}
           {discountType ? (
             <div className="space-y-2 py-0.5">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-neutral-500 dark:text-neutral-400 text-xs shrink-0">{language === 'de' ? 'Rabatt' : 'Discount'}</span>
                 {/* % / flat toggle */}
-                <div className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
-                  <button type="button" onClick={() => setDiscountType('percent')}
-                    className={`px-2.5 py-1 transition-colors ${discountType === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                <div role="group" aria-label="Discount type" className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
+                  <button type="button" aria-pressed={discountType === 'percent'} onClick={() => setDiscountType('percent')}
+                    className={`px-2.5 py-1.5 sm:py-1 transition-colors ${discountType === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
                     %
                   </button>
-                  <button type="button" onClick={() => setDiscountType('fixed')}
-                    className={`px-2.5 py-1 transition-colors ${discountType === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
+                  <button type="button" aria-pressed={discountType === 'fixed'} onClick={() => setDiscountType('fixed')}
+                    className={`px-2.5 py-1.5 sm:py-1 transition-colors ${discountType === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
                     {currency}
                   </button>
                 </div>
-                <input type="number" value={discountValue} min={0} step={discountType === 'percent' ? 1 : 0.01}
-                  onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)}
-                  className="w-20 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400" />
+                <MoneyInput value={discountValue} onValueChange={n => setDiscountValue(n ?? 0)} aria-label="Discount value" className="w-20 text-right" />
                 <span className="flex-1 text-right text-neutral-500 dark:text-neutral-400">−{formatMoney(totals.discount_amount, currency)}</span>
-                <button type="button" onClick={() => { setDiscountType(null); setDiscountValue(0) }}
-                  className="text-neutral-300 dark:text-neutral-600 hover:text-red-400 transition-colors shrink-0">
+                <button type="button" aria-label="Remove discount" onClick={() => { setDiscountType(null); setDiscountValue(0) }} className={removeDiscountBtn}>
                   <X size={13} />
                 </button>
               </div>
               {/* Quick % chips */}
               {discountType === 'percent' && (
-                <div className="flex gap-1.5 justify-end">
+                <div className="flex gap-1.5 justify-end flex-wrap">
                   {[5, 10, 15, 20, 25].map(p => (
-                    <button key={p} type="button" onClick={() => setDiscountValue(p)}
-                      className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${discountValue === p
-                        ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent'
-                        : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500'}`}>
+                    <button key={p} type="button" aria-pressed={discountValue === p} onClick={() => setDiscountValue(p)} className={discountChip(discountValue === p)}>
                       {p}%
                     </button>
                   ))}
@@ -1464,7 +1446,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             </div>
           ) : (
             <button type="button" onClick={() => { setDiscountType('percent'); setDiscountValue(0) }}
-              className="w-full text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded-md py-1.5 transition-colors">
+              className="w-full text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded-md py-2 sm:py-1.5 transition-colors">
               + {language === 'de' ? 'Rabatt hinzufügen' : 'Add discount'}
             </button>
           )}
@@ -1486,7 +1468,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <span>{language === 'de' ? 'Bezahlt' : 'Paid'}</span>
                 <span>−{formatMoney(totals.total_paid, currency)}</span>
               </div>
-              <div className={`flex justify-between font-semibold ${totals.balance_due > 0.005 ? 'text-amber-600' : 'text-green-600'}`}>
+              <div className={`flex justify-between font-semibold ${totals.balance_due > 0.005 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
                 <span>{language === 'de' ? 'Offen' : 'Balance due'}</span>
                 <span>{formatMoney(totals.balance_due, currency)}</span>
               </div>
@@ -1497,15 +1479,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
       {/* Notes */}
       <div>
-        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-3">Notes</p>
+        <p className={`${captionCls} mb-3`}>Notes</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none text-sm" />
+            <Label htmlFor={`${uid}-notes`}>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
+            <Textarea id={`${uid}-notes`} value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none" />
           </div>
           <div className="space-y-1.5">
-            <Label>Internal notes</Label>
-            <Textarea value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none text-sm" placeholder="Not printed on PDF…" />
+            <Label htmlFor={`${uid}-notes-internal`}>Internal notes</Label>
+            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none" placeholder="Not printed on PDF…" />
           </div>
         </div>
       </div>
@@ -1514,18 +1496,25 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       {activeDateLine && datePop && (() => {
         const line = lines.find(l => l.id === activeDateLine && l.line_type === 'item')
         if (!line) return null
+        const closeDatePop = () => { setActiveDateLine(null); setDatePop(null) }
         return (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => { setActiveDateLine(null); setDatePop(null) }} />
-            <div className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg p-3 space-y-2" style={datePop}>
-              <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Service date</p>
-              <Input type="date" value={line.service_date ?? ''}
+            <div className="fixed inset-0 z-40" onClick={closeDatePop} />
+            <div
+              role="dialog"
+              aria-label="Service date"
+              className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg p-3 space-y-2"
+              style={datePop}
+              onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeDatePop() } }}
+            >
+              <label htmlFor={`${uid}-service-date-${line.id}`} className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">Service date</label>
+              <Input id={`${uid}-service-date-${line.id}`} type="date" value={line.service_date ?? ''}
                 onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
-                className="text-xs w-40" autoFocus />
+                className="w-44" autoFocus />
               {line.service_date && (
                 <button type="button"
-                  onClick={() => { updateLine(line.id, { service_date: null }); setActiveDateLine(null); setDatePop(null) }}
-                  className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-red-500 transition-colors">
+                  onClick={() => { updateLine(line.id, { service_date: null }); closeDatePop() }}
+                  className="text-xs py-2 -my-1 text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
                   Clear date
                 </button>
               )}
@@ -1534,39 +1523,39 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         )
       })()}
 
-      {/* Sticky action bar */}
-      <div className="sticky bottom-0 -mx-6 -mb-6 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700">
+      {/* Sticky action bar — on phones it sits above the fixed bottom tab bar */}
+      <div className="sticky bottom-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:bottom-0 -mx-4 -mb-4 sm:-mx-6 sm:-mb-6 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t border-neutral-200 dark:border-neutral-700">
         {/* Mobile layout */}
-        <div className="sm:hidden px-4 pt-3 pb-5 space-y-3">
+        <div className="sm:hidden px-4 pt-3 pb-4 space-y-3">
           {/* Utility toolbar — segmented icon + label buttons */}
           <div className="flex rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden divide-x divide-neutral-200 dark:divide-neutral-700">
             <button type="button" onClick={downloadPdf}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
               <Eye size={16} />
-              <span className="text-[10px] font-medium">Preview</span>
+              <span className="text-[11px] font-medium">Preview</span>
             </button>
             <button type="button" onClick={savePdf} disabled={saving}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Download size={16} />
-              <span className="text-[10px] font-medium">PDF</span>
+              <span className="text-[11px] font-medium">PDF</span>
             </button>
             {settings.gmail_connected && (
               <button type="button" onClick={saveToDrive} disabled={saving}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <HardDrive size={16} />
-                <span className="text-[10px] font-medium">Drive</span>
+                <span className="text-[11px] font-medium">Drive</span>
               </button>
             )}
             <button type="button" onClick={settings.gmail_connected ? sendViaGmail : openInEmail} disabled={saving}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Mail size={16} />
-              <span className="text-[10px] font-medium">{settings.gmail_connected ? 'Gmail' : 'Email'}</span>
+              <span className="text-[11px] font-medium">{settings.gmail_connected ? 'Gmail' : 'Email'}</span>
             </button>
             {doc?.number && !doc.pdf_path && (
               <button type="button" onClick={archiveNow} disabled={saving}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <Archive size={16} />
-                <span className="text-[10px] font-medium">Archive</span>
+                <span className="text-[11px] font-medium">Archive</span>
               </button>
             )}
           </div>
@@ -1585,14 +1574,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           </div>
           {/* Auto-save status */}
           {doc && saveStatus && (
-            <p className={`text-[10px] text-center -mt-1 ${saveStatus.cls || 'text-neutral-400 dark:text-neutral-500'}`}>
+            <p aria-live="polite" className={`text-[11px] text-center -mt-1 ${saveStatus.cls || 'text-neutral-500 dark:text-neutral-400'}`}>
               {saveStatus.text}
             </p>
           )}
         </div>
         {/* Desktop layout */}
         <div className="hidden sm:flex items-center gap-3 px-6 py-4">
-          <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500">
+          <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
             <Eye size={13} /> Preview
           </Button>
           <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
@@ -1620,7 +1609,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           )}
           <div className="flex-1" />
           {doc && saveStatus && (
-            <span className={`text-xs mr-1 ${saveStatus.cls || 'text-neutral-400 dark:text-neutral-500'}`}>
+            <span aria-live="polite" className={`text-xs mr-1 ${saveStatus.cls || 'text-neutral-500 dark:text-neutral-400'}`}>
               {saveStatus.text}
             </span>
           )}

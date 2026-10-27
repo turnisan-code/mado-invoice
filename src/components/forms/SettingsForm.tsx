@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -8,13 +8,15 @@ import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, Credi
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { MoneyInput } from '@/components/ui/MoneyInput'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import type { TaxTreatment, Unit, VatRate } from '@/types'
 
 interface Props { settings: PublicSettings | null }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
-const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
+const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
 const lbl = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
 const err = 'text-xs text-red-600 dark:text-red-400'
 
@@ -124,7 +126,7 @@ function SectionCard({
     <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
       <div className="px-6 py-4 border-b border-neutral-100 dark:border-neutral-800">
         <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</p>
-        {description && <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{description}</p>}
+        {description && <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{description}</p>}
       </div>
       <div className="px-6 py-5 space-y-4">
         {children}
@@ -151,7 +153,7 @@ function IntegrationCard({ title, description, children }: { title: string; desc
     <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
       <div className="px-6 py-4 border-b border-neutral-100 dark:border-neutral-800">
         <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</p>
-        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{description}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{description}</p>
       </div>
       <div className="px-6 py-5">
         {children}
@@ -182,6 +184,7 @@ function VarChips({ vars, onInsert }: { vars: { token: string; label: string }[]
 export default function SettingsForm({ settings }: Props) {
   const supabase = createClient()
   const searchParams = useSearchParams()
+  const uid = useId()
 
   // Per-section dirty tracking
   const [dirty, setDirty] = useState<Record<string, boolean>>({})
@@ -574,15 +577,20 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   // ── Integration handlers ─────────────────────────────────────────────────────
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+  const [confirmRemoveKey, setConfirmRemoveKey] = useState(false)
+
   async function disconnectGoogle() {
     setDisconnecting(true)
     const res = await fetch('/api/gmail/auth', { method: 'DELETE' })
     setDisconnecting(false)
     if (!res.ok) {
       toastApiError(await res.json().catch(() => ({})), '', 'Could not disconnect.')
+      setConfirmDisconnect(false)
       return
     }
     setGoogle({ email: null, connected: false, connectedAt: null, scopes: null })
+    setConfirmDisconnect(false)
     toast.success('Google account disconnected.')
   }
 
@@ -646,10 +654,10 @@ export default function SettingsForm({ settings }: Props) {
 
   async function removeBookamatKey() {
     if (!settings) return
-    if (!confirm('Remove the stored Bookamat API key? Syncing stops until a new key is saved.')) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({ bookamat_api_key: null }).eq('id', settings.id)
     setSavingBookamat(false)
+    setConfirmRemoveKey(false)
     if (error) { toast.error(error.message); return }
     setBookamatKeySaved(false)
     setBookamatApiKey('')
@@ -742,6 +750,7 @@ export default function SettingsForm({ settings }: Props) {
             key={id}
             type="button"
             onClick={() => selectSection(id)}
+            aria-current={activeSection === id ? 'true' : undefined}
             className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-sm transition-colors text-left w-full ${
               activeSection === id
                 ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
@@ -765,7 +774,8 @@ export default function SettingsForm({ settings }: Props) {
                 key={id}
                 type="button"
                 onClick={() => selectSection(id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors ${
+                aria-current={activeSection === id ? 'true' : undefined}
+                className={`flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-sm whitespace-nowrap transition-colors ${
                   activeSection === id
                     ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
                     : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'
@@ -797,30 +807,31 @@ export default function SettingsForm({ settings }: Props) {
                   <button
                     type="button"
                     onClick={removeLogo}
-                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
+                    aria-label="Remove logo"
+                    className="absolute -top-2.5 -right-2.5 h-7 w-7 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
                   >
-                    <X size={10} className="text-neutral-600 dark:text-neutral-300" />
+                    <X size={12} className="text-neutral-600 dark:text-neutral-300" />
                   </button>
                 </div>
               ) : (
                 <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">
-                  <span className="text-[10px] text-neutral-300 dark:text-neutral-600 text-center leading-tight px-1">No logo</span>
+                  <span className="text-[10px] text-neutral-400 dark:text-neutral-500 text-center leading-tight px-1">No logo</span>
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
+                <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 focus-within:ring-2 focus-within:ring-ring/60 transition-colors text-neutral-700 dark:text-neutral-300">
                   {uploadingLogo ? 'Uploading…' : logoUrl ? 'Replace logo' : 'Upload logo'}
-                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
+                  <input type="file" accept="image/png,image/jpeg" className="sr-only" onChange={handleLogoUpload} disabled={uploadingLogo} aria-label={logoUrl ? 'Replace logo' : 'Upload logo'} />
                 </label>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">PNG or JPEG up to 2 MB, transparent background</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">PNG or JPEG up to 2 MB, transparent background</p>
               </div>
             </div>
 
             {/* Company & owner name */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Company name</label>
-                <input
+                <label className={lbl} htmlFor={`${uid}-biz-company_name`}>Company name</label>
+                <input id={`${uid}-biz-company_name`}
                   className={inp}
                   value={biz.company_name}
                   onChange={e => { setBiz(b => ({ ...b, company_name: e.target.value })); markDirty('brand') }}
@@ -828,8 +839,8 @@ export default function SettingsForm({ settings }: Props) {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Owner name</label>
-                <input
+                <label className={lbl} htmlFor={`${uid}-biz-owner_name`}>Owner name</label>
+                <input id={`${uid}-biz-owner_name`}
                   className={inp}
                   value={biz.owner_name}
                   onChange={e => { setBiz(b => ({ ...b, owner_name: e.target.value })); markDirty('brand') }}
@@ -851,60 +862,60 @@ export default function SettingsForm({ settings }: Props) {
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Email</label>
-                <input type="email" className={inp} value={contact.email}
+                <label className={lbl} htmlFor={`${uid}-contact-email`}>Email</label>
+                <input id={`${uid}-contact-email`} type="email" className={inp} value={contact.email}
                   onChange={e => { setContact(c => ({ ...c, email: e.target.value })); markDirty('contact') }}
                   placeholder="billing@company.com" />
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Phone</label>
-                <input className={inp} value={contact.phone}
+                <label className={lbl} htmlFor={`${uid}-contact-phone`}>Phone</label>
+                <input id={`${uid}-contact-phone`} className={inp} value={contact.phone}
                   onChange={e => { setContact(c => ({ ...c, phone: e.target.value })); markDirty('contact') }}
                   placeholder="+43 1 234 5678" />
               </div>
             </div>
             <div className="space-y-1.5">
-              <label className={lbl}>Website</label>
-              <input className={inp} value={contact.website}
+              <label className={lbl} htmlFor={`${uid}-contact-website`}>Website</label>
+              <input id={`${uid}-contact-website`} className={inp} value={contact.website}
                 onChange={e => { setContact(c => ({ ...c, website: e.target.value })); markDirty('contact') }}
                 placeholder="https://company.com" />
             </div>
             <div className="space-y-1.5">
-              <label className={lbl}>Address</label>
-              <input className={inp} value={contact.address_line1}
+              <label className={lbl} htmlFor={`${uid}-contact-address_line1`}>Address</label>
+              <input id={`${uid}-contact-address_line1`} className={inp} value={contact.address_line1}
                 onChange={e => { setContact(c => ({ ...c, address_line1: e.target.value })); markDirty('contact') }}
                 placeholder="Musterstraße 1" />
             </div>
             <div className="space-y-1.5">
-              <label className={lbl}>Address line 2</label>
-              <input className={inp} value={contact.address_line2}
+              <label className={lbl} htmlFor={`${uid}-contact-address_line2`}>Address line 2</label>
+              <input id={`${uid}-contact-address_line2`} className={inp} value={contact.address_line2}
                 onChange={e => { setContact(c => ({ ...c, address_line2: e.target.value })); markDirty('contact') }}
                 placeholder="Top 5" />
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>ZIP</label>
-                <input className={inp} value={contact.zip}
+                <label className={lbl} htmlFor={`${uid}-contact-zip`}>ZIP</label>
+                <input id={`${uid}-contact-zip`} className={inp} value={contact.zip}
                   onChange={e => { setContact(c => ({ ...c, zip: e.target.value })); markDirty('contact') }}
                   placeholder="1010" />
               </div>
               <div className="space-y-1.5 col-span-2">
-                <label className={lbl}>City</label>
-                <input className={inp} value={contact.city}
+                <label className={lbl} htmlFor={`${uid}-contact-city`}>City</label>
+                <input id={`${uid}-contact-city`} className={inp} value={contact.city}
                   onChange={e => { setContact(c => ({ ...c, city: e.target.value })); markDirty('contact') }}
                   placeholder="Vienna" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Country</label>
-                <input className={inp} value={contact.country}
+                <label className={lbl} htmlFor={`${uid}-contact-country`}>Country</label>
+                <input id={`${uid}-contact-country`} className={inp} value={contact.country}
                   onChange={e => { setContact(c => ({ ...c, country: e.target.value })); markDirty('contact') }}
                   placeholder="Austria" />
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>UID-Nummer</label>
-                <input className={inp} value={contact.uid_number} aria-invalid={!!contactErrors.uid_number || undefined}
+                <label className={lbl} htmlFor={`${uid}-contact-uid_number`}>UID-Nummer</label>
+                <input id={`${uid}-contact-uid_number`} className={inp} value={contact.uid_number} aria-invalid={!!contactErrors.uid_number || undefined}
                   onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); setContactErrors({}); markDirty('contact') }}
                   placeholder="ATU…" />
                 {contactErrors.uid_number && <p className={err}>{contactErrors.uid_number}</p>}
@@ -923,23 +934,23 @@ export default function SettingsForm({ settings }: Props) {
             onSave={saveBankingSection}
           >
             <div className="space-y-1.5">
-              <label className={lbl}>IBAN</label>
-              <input className={inp} value={banking.iban} aria-invalid={!!bankingErrors.iban || undefined}
+              <label className={lbl} htmlFor={`${uid}-banking-iban`}>IBAN</label>
+              <input id={`${uid}-banking-iban`} className={inp} value={banking.iban} aria-invalid={!!bankingErrors.iban || undefined}
                 onChange={e => { setBanking(b => ({ ...b, iban: e.target.value })); setBankingErrors(er => ({ ...er, iban: undefined })); markDirty('banking') }}
                 placeholder="AT12 3456 7890 1234 5678" />
               {bankingErrors.iban && <p className={err}>{bankingErrors.iban}</p>}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>BIC</label>
-                <input className={inp} value={banking.bic} aria-invalid={!!bankingErrors.bic || undefined}
+                <label className={lbl} htmlFor={`${uid}-banking-bic`}>BIC</label>
+                <input id={`${uid}-banking-bic`} className={inp} value={banking.bic} aria-invalid={!!bankingErrors.bic || undefined}
                   onChange={e => { setBanking(b => ({ ...b, bic: e.target.value })); setBankingErrors(er => ({ ...er, bic: undefined })); markDirty('banking') }}
                   placeholder="RLNWATWW" />
                 {bankingErrors.bic && <p className={err}>{bankingErrors.bic}</p>}
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Bank name</label>
-                <input className={inp} value={banking.bank_name}
+                <label className={lbl} htmlFor={`${uid}-banking-bank_name`}>Bank name</label>
+                <input id={`${uid}-banking-bank_name`} className={inp} value={banking.bank_name}
                   onChange={e => { setBanking(b => ({ ...b, bank_name: e.target.value })); markDirty('banking') }}
                   placeholder="Raiffeisen" />
               </div>
@@ -957,7 +968,7 @@ export default function SettingsForm({ settings }: Props) {
             onSave={saveDocsSection}
           >
             {/* Token reference */}
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-neutral-400 dark:text-neutral-500 pb-1">
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-neutral-500 dark:text-neutral-400 pb-1">
               <span className="text-neutral-500 dark:text-neutral-400 font-sans font-medium not-italic mr-1">Tokens:</span>
               {['{prefix}','{YYYY}','{YY}','{MM}','{NNN}','{NN}','{N}','{NNNN}'].map(t => (
                 <span key={t}>{t}</span>
@@ -965,7 +976,7 @@ export default function SettingsForm({ settings }: Props) {
             </div>
 
             {/* Column headers */}
-            <div className="grid grid-cols-[100px_72px_1fr_72px] gap-3 items-center pb-1 border-b border-neutral-100 dark:border-neutral-800">
+            <div className="hidden sm:grid grid-cols-[100px_72px_1fr_72px] gap-3 items-center pb-1 border-b border-neutral-100 dark:border-neutral-800">
               <span className={lbl}></span>
               <span className={lbl}>Prefix</span>
               <span className={lbl}>Format template</span>
@@ -979,19 +990,28 @@ export default function SettingsForm({ settings }: Props) {
               { label: 'Credit note', prefixKey: 'credit_note_prefix' as const, fmtKey: 'credit_note_number_format' as const, numKey: 'next_credit_note_number' as const },
             ]).map(row => (
               <div key={row.prefixKey} className="space-y-1.5">
-                <div className="grid grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
-                  <span className="text-sm text-neutral-700 dark:text-neutral-300">{row.label}</span>
-                  <input className={inp} value={docs[row.prefixKey]}
-                    onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }}
-                    placeholder="R" />
-                  <input className={inp} value={docs[row.fmtKey]}
-                    onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
-                    placeholder="{prefix}-{YYYY}-{NNN}" />
-                  <input type="number" min="1" className={inp} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
-                    onChange={e => { editedCounters.current.add(row.numKey); setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                <div className="grid grid-cols-[1fr_2fr] sm:grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
+                  <span className="col-span-2 sm:col-span-1 text-sm font-medium sm:font-normal text-neutral-700 dark:text-neutral-300">{row.label}</span>
+                  <div className="space-y-1 min-w-0">
+                    <label htmlFor={`${uid}-${row.prefixKey}`} className={`${lbl} sm:sr-only`}>Prefix</label>
+                    <input id={`${uid}-${row.prefixKey}`} className={`${inp} min-w-0`} value={docs[row.prefixKey]}
+                      onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }}
+                      placeholder="R" />
+                  </div>
+                  <div className="space-y-1 min-w-0">
+                    <label htmlFor={`${uid}-${row.fmtKey}`} className={`${lbl} sm:sr-only`}>Format template</label>
+                    <input id={`${uid}-${row.fmtKey}`} className={`${inp} min-w-0`} value={docs[row.fmtKey]}
+                      onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
+                      placeholder="{prefix}-{YYYY}-{NNN}" />
+                  </div>
+                  <div className="space-y-1 min-w-0 col-span-2 sm:col-span-1">
+                    <label htmlFor={`${uid}-${row.numKey}`} className={`${lbl} sm:sr-only`}>Next #</label>
+                    <input id={`${uid}-${row.numKey}`} type="text" inputMode="numeric" pattern="[0-9]*" className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
+                      onChange={e => { editedCounters.current.add(row.numKey); setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                  </div>
                 </div>
-                <div className="pl-[112px]">
-                  <span className="text-xs font-mono text-neutral-400 dark:text-neutral-500">
+                <div className="sm:pl-[112px]">
+                  <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
                     → {previewFormat(docs[row.fmtKey], docs[row.prefixKey], docs[row.numKey])}
                   </span>
                   {docsErrors[row.numKey] && <p className={`${err} mt-1`}>{docsErrors[row.numKey]}</p>}
@@ -1013,26 +1033,26 @@ export default function SettingsForm({ settings }: Props) {
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Payment days</label>
-                <input type="number" min="0" max="365" className={inp} value={defaults.default_payment_days} aria-invalid={!!defaultsErrors.default_payment_days || undefined}
+                <label className={lbl} htmlFor={`${uid}-defaults-default_payment_days`}>Payment days</label>
+                <input id={`${uid}-defaults-default_payment_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={defaults.default_payment_days} aria-invalid={!!defaultsErrors.default_payment_days || undefined}
                   onChange={e => { setDefaults(d => ({ ...d, default_payment_days: e.target.value })); markDirty('defaults') }} />
                 {defaultsErrors.default_payment_days
                   ? <p className={err}>{defaultsErrors.default_payment_days}</p>
-                  : <p className="text-xs text-neutral-400 dark:text-neutral-500">Days until invoice is due</p>}
+                  : <p className="text-xs text-neutral-500 dark:text-neutral-400">Days until invoice is due</p>}
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Quote validity</label>
-                <input type="number" min="0" max="365" className={inp} value={defaults.default_quote_validity_days} aria-invalid={!!defaultsErrors.default_quote_validity_days || undefined}
+                <label className={lbl} htmlFor={`${uid}-defaults-default_quote_validity_days`}>Quote validity</label>
+                <input id={`${uid}-defaults-default_quote_validity_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={defaults.default_quote_validity_days} aria-invalid={!!defaultsErrors.default_quote_validity_days || undefined}
                   onChange={e => { setDefaults(d => ({ ...d, default_quote_validity_days: e.target.value })); markDirty('defaults') }} />
                 {defaultsErrors.default_quote_validity_days
                   ? <p className={err}>{defaultsErrors.default_quote_validity_days}</p>
-                  : <p className="text-xs text-neutral-400 dark:text-neutral-500">Days a new quote stays valid</p>}
+                  : <p className="text-xs text-neutral-500 dark:text-neutral-400">Days a new quote stays valid</p>}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Language</label>
-                <select
+                <label className={lbl} htmlFor={`${uid}-defaults-default_language`}>Language</label>
+                <select id={`${uid}-defaults-default_language`}
                   value={defaults.default_language}
                   onChange={e => { setDefaults(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('defaults') }}
                   className={inp}
@@ -1040,42 +1060,42 @@ export default function SettingsForm({ settings }: Props) {
                   <option value="de">Deutsch</option>
                   <option value="en">English</option>
                 </select>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Language for new documents</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Language for new documents</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Tax treatment</label>
-                <select
+                <label className={lbl} htmlFor={`${uid}-defaults-default_tax_treatment`}>Tax treatment</label>
+                <select id={`${uid}-defaults-default_tax_treatment`}
                   value={defaults.default_tax_treatment}
                   onChange={e => { setDefaults(d => ({ ...d, default_tax_treatment: e.target.value as TaxTreatment })); markDirty('defaults') }}
                   className={inp}
                 >
                   {TAX_TREATMENTS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Pre-selected on a new document until a client is chosen</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Pre-selected on a new document until a client is chosen</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>VAT rate</label>
-                <select
+                <label className={lbl} htmlFor={`${uid}-defaults-default_vat_rate`}>VAT rate</label>
+                <select id={`${uid}-defaults-default_vat_rate`}
                   value={defaults.default_vat_rate}
                   onChange={e => { setDefaults(d => ({ ...d, default_vat_rate: e.target.value })); markDirty('defaults') }}
                   className={inp}
                 >
                   {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                 </select>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">VAT rate for new line items</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">VAT rate for new line items</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Unit</label>
-                <select
+                <label className={lbl} htmlFor={`${uid}-defaults-default_unit`}>Unit</label>
+                <select id={`${uid}-defaults-default_unit`}
                   value={defaults.default_unit}
                   onChange={e => { setDefaults(d => ({ ...d, default_unit: e.target.value as Unit })); markDirty('defaults') }}
                   className={inp}
                 >
                   {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Unit for new line items</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Unit for new line items</p>
               </div>
             </div>
           </SectionCard>
@@ -1091,16 +1111,16 @@ export default function SettingsForm({ settings }: Props) {
           >
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Skonto (%)</label>
-                <input type="number" min={0} max={100} step="0.5" className={inp} value={terms.default_skonto_percent} placeholder="none"
-                  onChange={e => { setTerms(t => ({ ...t, default_skonto_percent: e.target.value })); markDirty('terms') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Off the gross total; leave empty for no Skonto</p>
+                <label className={lbl} htmlFor={`${uid}-terms-default_skonto_percent`}>Skonto (%)</label>
+                <MoneyInput id={`${uid}-terms-default_skonto_percent`} className={inp} value={terms.default_skonto_percent === '' ? null : Number(terms.default_skonto_percent)} placeholder="none"
+                  onValueChange={n => { setTerms(t => ({ ...t, default_skonto_percent: n === null ? '' : String(n) })); markDirty('terms') }} />
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Off the gross total; leave empty for no Skonto</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Skonto period (days)</label>
-                <input type="number" min={0} className={inp} value={terms.default_skonto_days}
+                <label className={lbl} htmlFor={`${uid}-terms-default_skonto_days`}>Skonto period (days)</label>
+                <input id={`${uid}-terms-default_skonto_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={terms.default_skonto_days}
                   onChange={e => { setTerms(t => ({ ...t, default_skonto_days: e.target.value })); markDirty('terms') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Counted from the invoice date</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Counted from the invoice date</p>
               </div>
             </div>
           </SectionCard>
@@ -1122,34 +1142,34 @@ export default function SettingsForm({ settings }: Props) {
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <label className={lbl}>Grace period (days)</label>
-                <input type="number" min={0} className={inp} value={reminders.reminder_grace_days}
+                <label className={lbl} htmlFor={`${uid}-reminders-reminder_grace_days`}>Grace period (days)</label>
+                <input id={`${uid}-reminders-reminder_grace_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={reminders.reminder_grace_days}
                   onChange={e => { setReminders(r => ({ ...r, reminder_grace_days: e.target.value })); markDirty('reminders') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">After the due date before the first reminder; also the new deadline in each email</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">After the due date before the first reminder; also the new deadline in each email</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Interval (days)</label>
-                <input type="number" min={1} className={inp} value={reminders.reminder_interval_days}
+                <label className={lbl} htmlFor={`${uid}-reminders-reminder_interval_days`}>Interval (days)</label>
+                <input id={`${uid}-reminders-reminder_interval_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={reminders.reminder_interval_days}
                   onChange={e => { setReminders(r => ({ ...r, reminder_interval_days: e.target.value })); markDirty('reminders') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Between one level and the next</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Between one level and the next</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Highest level</label>
-                <input type="number" min={1} max={9} className={inp} value={reminders.reminder_max_level}
+                <label className={lbl} htmlFor={`${uid}-reminders-reminder_max_level`}>Highest level</label>
+                <input id={`${uid}-reminders-reminder_max_level`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={reminders.reminder_max_level}
                   onChange={e => { setReminders(r => ({ ...r, reminder_max_level: e.target.value })); markDirty('reminders') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung</p>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Mahnspesen (EUR)</label>
-                <input type="number" min={0} step="0.01" className={inp} value={reminders.reminder_fee}
-                  onChange={e => { setReminders(r => ({ ...r, reminder_fee: e.target.value })); markDirty('reminders') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">Charged from the 1. Mahnung on as {'{{fee}}'}</p>
+                <label className={lbl} htmlFor={`${uid}-reminders-reminder_fee`}>Mahnspesen (EUR)</label>
+                <MoneyInput id={`${uid}-reminders-reminder_fee`} className={inp} value={reminders.reminder_fee === '' ? null : Number(reminders.reminder_fee)}
+                  onValueChange={n => { setReminders(r => ({ ...r, reminder_fee: n === null ? '' : String(n) })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Charged from the 1. Mahnung on as {'{{fee}}'}</p>
               </div>
               <div className="space-y-1.5">
-                <label className={lbl}>Verzugszinsen (% p.a.)</label>
-                <input type="number" min={0} step="0.1" className={inp} value={reminders.reminder_interest_rate}
-                  onChange={e => { setReminders(r => ({ ...r, reminder_interest_rate: e.target.value })); markDirty('reminders') }} />
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">On the open balance for the days overdue, as {'{{interest}}'}</p>
+                <label className={lbl} htmlFor={`${uid}-reminders-reminder_interest_rate`}>Verzugszinsen (% p.a.)</label>
+                <MoneyInput id={`${uid}-reminders-reminder_interest_rate`} className={inp} value={reminders.reminder_interest_rate === '' ? null : Number(reminders.reminder_interest_rate)}
+                  onValueChange={n => { setReminders(r => ({ ...r, reminder_interest_rate: n === null ? '' : String(n) })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">On the open balance for the days overdue, as {'{{interest}}'}</p>
               </div>
             </div>
           </SectionCard>
@@ -1169,6 +1189,7 @@ export default function SettingsForm({ settings }: Props) {
             <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
               {(['invoice', 'quote', 'credit_note'] as const).map(t => (
                 <button key={t} type="button"
+                  aria-pressed={footerDocTab === t}
                   onClick={() => { forgetFocused(); setFooterDocTab(t) }}
                   className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${footerDocTab === t ? 'bg-white dark:bg-neutral-900 shadow-sm text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'}`}>
                   {t === 'invoice' ? 'Invoice' : t === 'quote' ? 'Quote' : 'Credit Note'}
@@ -1176,75 +1197,75 @@ export default function SettingsForm({ settings }: Props) {
               ))}
             </div>
             <VarChips vars={FOOTER_VARS} onInsert={insertVar} />
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 -mt-1">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1">
               Focus a text field, then click a variable to insert it at the cursor.
             </p>
             {footerDocTab === 'invoice' ? (
               <div key="invoice" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className={lbl}>Deutsch</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-footerDe`}>Deutsch</label>
+                  <textarea id={`${uid}-footerDe`}
                     value={footerDe}
                     onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className={lbl}>English</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-footerEn`}>English</label>
+                  <textarea id={`${uid}-footerEn`}
                     value={footerEn}
                     onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
               </div>
             ) : footerDocTab === 'quote' ? (
               <div key="quote" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className={lbl}>Deutsch</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-quoteFooterDe`}>Deutsch</label>
+                  <textarea id={`${uid}-quoteFooterDe`}
                     value={quoteFooterDe}
                     onChange={e => { setQuoteFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className={lbl}>English</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-quoteFooterEn`}>English</label>
+                  <textarea id={`${uid}-quoteFooterEn`}
                     value={quoteFooterEn}
                     onChange={e => { setQuoteFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
               </div>
             ) : (
               <div key="credit_note" className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className={lbl}>Deutsch</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-creditNoteFooterDe`}>Deutsch</label>
+                  <textarea id={`${uid}-creditNoteFooterDe`}
                     value={creditNoteFooterDe}
                     onChange={e => { setCreditNoteFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setCreditNoteFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className={lbl}>English</label>
-                  <textarea
+                  <label className={lbl} htmlFor={`${uid}-creditNoteFooterEn`}>English</label>
+                  <textarea id={`${uid}-creditNoteFooterEn`}
                     value={creditNoteFooterEn}
                     onChange={e => { setCreditNoteFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setCreditNoteFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
                   />
                 </div>
               </div>
@@ -1263,8 +1284,8 @@ export default function SettingsForm({ settings }: Props) {
                 <p className={`${lbl} mb-2`}>Reverse Charge (EU)</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className={lbl}>Deutsch</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-taxNotes-reverse_charge_de`}>Deutsch</label>
+                    <input id={`${uid}-taxNotes-reverse_charge_de`}
                       type="text"
                       className={inp}
                       placeholder="Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)"
@@ -1273,8 +1294,8 @@ export default function SettingsForm({ settings }: Props) {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={lbl}>English</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-taxNotes-reverse_charge_en`}>English</label>
+                    <input id={`${uid}-taxNotes-reverse_charge_en`}
                       type="text"
                       className={inp}
                       placeholder="Reverse charge — VAT to be accounted for by the recipient"
@@ -1288,8 +1309,8 @@ export default function SettingsForm({ settings }: Props) {
                 <p className={`${lbl} mb-2`}>Non-EU (not taxable)</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className={lbl}>Deutsch</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-taxNotes-non_eu_de`}>Deutsch</label>
+                    <input id={`${uid}-taxNotes-non_eu_de`}
                       type="text"
                       className={inp}
                       placeholder="Nicht steuerbar (Leistungsort außerhalb der EU)"
@@ -1298,8 +1319,8 @@ export default function SettingsForm({ settings }: Props) {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={lbl}>English</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-taxNotes-non_eu_en`}>English</label>
+                    <input id={`${uid}-taxNotes-non_eu_en`}
                       type="text"
                       className={inp}
                       placeholder="Tax liability shifts to the recipient of the services."
@@ -1328,6 +1349,7 @@ export default function SettingsForm({ settings }: Props) {
                 <button
                   key={type}
                   type="button"
+                  aria-pressed={activeDocTab === type}
                   onClick={() => { forgetFocused(); setActiveDocTab(type) }}
                   className={`px-3 h-7 text-xs font-medium rounded-md transition-colors ${
                     activeDocTab === type
@@ -1346,6 +1368,7 @@ export default function SettingsForm({ settings }: Props) {
                 <button
                   key={lang}
                   type="button"
+                  aria-pressed={activeLang === lang}
                   onClick={() => { forgetFocused(); setActiveLang(lang) }}
                   className={`px-3 h-6 text-xs font-medium rounded-md transition-colors ${
                     activeLang === lang
@@ -1364,7 +1387,7 @@ export default function SettingsForm({ settings }: Props) {
               onInsert={insertTplVar}
             />
             {activeDocTab === 'reminder' && (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
                 One template serves every level. A line whose variables are all empty (e.g. &quot;Mahnspesen: {'{{fee}}'}&quot; on a Zahlungserinnerung) is left out of the email.
               </p>
             )}
@@ -1378,8 +1401,8 @@ export default function SettingsForm({ settings }: Props) {
 
             {/* Subject */}
             <div className="space-y-1.5">
-              <label className={lbl}>Subject</label>
-              <input
+              <label className={lbl} htmlFor={`${uid}-tpl-subjectKey`}>Subject</label>
+              <input id={`${uid}-tpl-subjectKey`}
                 key={`${activeDocTab}-${activeLang}`}
                 ref={subjectRef}
                 className={inp}
@@ -1396,8 +1419,8 @@ export default function SettingsForm({ settings }: Props) {
 
             {/* Body */}
             <div className="space-y-1.5">
-              <label className={lbl}>Body</label>
-              <textarea
+              <label className={lbl} htmlFor={`${uid}-tpl-bodyKey`}>Body</label>
+              <textarea id={`${uid}-tpl-bodyKey`}
                 key={`${activeDocTab}-${activeLang}`}
                 ref={bodyRef}
                 value={tpl[bodyKey]}
@@ -1409,7 +1432,7 @@ export default function SettingsForm({ settings }: Props) {
                   activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_BODY_EN :
                   undefined
                 }
-                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
               />
             </div>
           </SectionCard>
@@ -1419,7 +1442,7 @@ export default function SettingsForm({ settings }: Props) {
         {activeSection === 'integrations' && <div className="space-y-3">
           <div className="px-1 pb-1">
             <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Integrations</p>
-            <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Connect external services to automate your workflow.</p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">Connect external services to automate your workflow.</p>
           </div>
 
           {/* Google account (Gmail + Drive grant) */}
@@ -1436,14 +1459,14 @@ export default function SettingsForm({ settings }: Props) {
                   </span>
                   <button
                     type="button"
-                    onClick={disconnectGoogle}
+                    onClick={() => setConfirmDisconnect(true)}
                     disabled={disconnecting}
-                    className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
+                    className="text-xs px-2 py-2 -my-2 -mr-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors"
                   >
                     {disconnecting ? 'Disconnecting…' : 'Disconnect'}
                   </button>
                 </div>
-                <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
                   {google.connectedAt
                     ? `Connected ${new Date(google.connectedAt).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
                     : 'Connected'}
@@ -1461,9 +1484,9 @@ export default function SettingsForm({ settings }: Props) {
                   </span>
                   <button
                     type="button"
-                    onClick={disconnectGoogle}
+                    onClick={() => setConfirmDisconnect(true)}
                     disabled={disconnecting}
-                    className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
+                    className="text-xs px-2 py-2 -my-2 -mr-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors"
                   >
                     {disconnecting ? 'Removing…' : 'Remove'}
                   </button>
@@ -1491,7 +1514,7 @@ export default function SettingsForm({ settings }: Props) {
             description="Auto-upload PDFs to a Drive folder when you send or download an invoice."
           >
             {!google.connected ? (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect your Google account first to enable Drive.</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">Connect your Google account first to enable Drive.</p>
             ) : (
               <div className="space-y-3">
                 {!driveScopeGranted && (
@@ -1501,8 +1524,8 @@ export default function SettingsForm({ settings }: Props) {
                   </p>
                 )}
                 <div className="space-y-1.5">
-                  <label className={lbl}>Folder URL or ID</label>
-                  <input
+                  <label className={lbl} htmlFor={`${uid}-driveFolder`}>Folder URL or ID</label>
+                  <input id={`${uid}-driveFolder`}
                     type="text"
                     value={driveFolder}
                     onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true); setDriveError(null) }}
@@ -1549,16 +1572,16 @@ export default function SettingsForm({ settings }: Props) {
                   <button
                     type="button"
                     onClick={() => setEditingBookamat(true)}
-                    className="text-xs text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300 transition-colors"
+                    className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
                   >
                     Change
                   </button>
                   {bookamatKeySaved && (
                     <button
                       type="button"
-                      onClick={removeBookamatKey}
+                      onClick={() => setConfirmRemoveKey(true)}
                       disabled={savingBookamat}
-                      className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                      className="text-xs px-2 py-2 -my-2 -mr-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                     >
                       Remove key
                     </button>
@@ -1569,8 +1592,8 @@ export default function SettingsForm({ settings }: Props) {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className={lbl}>Username</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-bookamatUsername`}>Username</label>
+                    <input id={`${uid}-bookamatUsername`}
                       type="text"
                       value={bookamatUsername}
                       onChange={e => setBookamatUsername(e.target.value)}
@@ -1579,8 +1602,8 @@ export default function SettingsForm({ settings }: Props) {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className={lbl}>API Key</label>
-                    <input
+                    <label className={lbl} htmlFor={`${uid}-bookamatApiKey`}>API Key</label>
+                    <input id={`${uid}-bookamatApiKey`}
                       type="password"
                       value={bookamatApiKey}
                       onChange={e => setBookamatApiKey(e.target.value)}
@@ -1590,9 +1613,9 @@ export default function SettingsForm({ settings }: Props) {
                     {bookamatKeySaved && (
                       <button
                         type="button"
-                        onClick={removeBookamatKey}
+                        onClick={() => setConfirmRemoveKey(true)}
                         disabled={savingBookamat}
-                        className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                        className="text-xs px-2 py-2 -my-2 -mr-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                       >
                         Remove saved key
                       </button>
@@ -1612,8 +1635,8 @@ export default function SettingsForm({ settings }: Props) {
                 ) : (
                   <div className="space-y-4 pt-1 border-t border-neutral-100 dark:border-neutral-800">
                     <div className="space-y-1.5 pt-1">
-                      <label className={lbl}>Bank account (receives payments)</label>
-                      <select
+                      <label className={lbl} htmlFor={`${uid}-bookamatBankId`}>Bank account (receives payments)</label>
+                      <select id={`${uid}-bookamatBankId`}
                         value={bookamatBankId}
                         onChange={e => setBookamatBankId(Number(e.target.value))}
                         className={inp}
@@ -1623,8 +1646,8 @@ export default function SettingsForm({ settings }: Props) {
                       </select>
                     </div>
                     <div className="space-y-1.5">
-                      <label className={lbl}>Income account (Erlöskonto)</label>
-                      <select
+                      <label className={lbl} htmlFor={`${uid}-bookamatCostId`}>Income account (Erlöskonto)</label>
+                      <select id={`${uid}-bookamatCostId`}
                         value={bookamatCostId}
                         onChange={e => setBookamatCostId(Number(e.target.value))}
                         className={inp}
@@ -1634,7 +1657,7 @@ export default function SettingsForm({ settings }: Props) {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className={lbl}>VAT accounts</label>
+                      <p className={lbl}>VAT accounts</p>
                       {([
                         [0,  bookamatVat0,  setBookamatVat0],
                         [10, bookamatVat10, setBookamatVat10],
@@ -1642,8 +1665,9 @@ export default function SettingsForm({ settings }: Props) {
                         [20, bookamatVat20, setBookamatVat20],
                       ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
                         <div key={rate} className="flex items-center gap-3">
-                          <span className="text-xs text-neutral-400 dark:text-neutral-500 w-7 shrink-0 text-right">{rate}%</span>
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-7 shrink-0 text-right">{rate}%</span>
                           <select
+                            aria-label={`VAT account for ${rate}%`}
                             value={val}
                             onChange={e => setter(Number(e.target.value))}
                             className={inp}
@@ -1670,6 +1694,27 @@ export default function SettingsForm({ settings }: Props) {
         </div>}
 
       </div>
+
+      <ConfirmDialog
+        open={confirmDisconnect}
+        title="Disconnect Google?"
+        description="Sending via Gmail and saving to Drive stop until you connect the account again."
+        confirmLabel={disconnecting ? 'Disconnecting…' : 'Disconnect'}
+        destructive
+        busy={disconnecting}
+        onConfirm={disconnectGoogle}
+        onCancel={() => setConfirmDisconnect(false)}
+      />
+      <ConfirmDialog
+        open={confirmRemoveKey}
+        title="Remove the stored Bookamat API key?"
+        description="Syncing stops until a new key is saved."
+        confirmLabel={savingBookamat ? 'Removing…' : 'Remove key'}
+        destructive
+        busy={savingBookamat}
+        onConfirm={removeBookamatKey}
+        onCancel={() => setConfirmRemoveKey(false)}
+      />
     </div>
   )
 }
