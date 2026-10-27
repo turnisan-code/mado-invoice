@@ -7,27 +7,32 @@ import InvoicePageClient from '@/components/layout/InvoicePageClient'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteButton'
-import { calcTotals, formatDate } from '@/lib/utils/document'
+import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
+import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
 import { toPublicSettings } from '@/lib/public-settings'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Repeat } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
+import type { DictKey } from '@/lib/i18n'
+import type { RecurringSchedule } from '@/types'
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
   const { t, lang } = await getT()
 
-  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { data: reminderLog }] = await Promise.all([
+  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { data: reminderLog }, { data: scheduleRow }] = await Promise.all([
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'invoice').single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
     supabase.from('reminder_log').select('*').eq('document_id', id).order('sent_at', { ascending: false }),
+    supabase.from('recurring_schedules').select('*').eq('source_document_id', id).maybeSingle(),
   ])
 
   if (!doc) notFound()
 
+  const schedule = (scheduleRow ?? null) as RecurringSchedule | null
   const publicSettings = toPublicSettings(settings)
   const payments = doc.payments ?? []
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments }
@@ -37,6 +42,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
     doc.tax_treatment,
   )
+
+  const client = (clients ?? []).find(c => c.id === doc.client_id)
+  const firstItem = orderItems<{ line_type?: string | null; description?: string | null }>(doc.document_items ?? []).find(i => (i.line_type ?? 'item') === 'item')
+  const recurringName = [client?.company || client?.name, firstItem?.description].filter(Boolean).join(' – ').slice(0, 60)
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
@@ -48,6 +57,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
             {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('documents.issued', { date: formatDate(doc.issued_at, lang) })}</p>}
+            {schedule && (
+              <Link href="/recurring" className="inline-flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+                <Repeat size={12} />
+                {schedule.active
+                  ? t('recurring.templateBanner', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), date: formatDate(schedule.next_date, lang) })
+                  : t('recurring.templateBannerInactive', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), status: t(schedule.end_date && schedule.next_date > schedule.end_date ? 'recurring.statuses.ended' : 'recurring.statuses.paused') })}
+              </Link>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
@@ -56,8 +73,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
           <ConvertToCreditNoteButton invoiceId={doc.id} />
+          {doc.status !== 'cancelled' && !schedule && <MakeRecurringDialog invoiceId={doc.id} defaultName={recurringName} />}
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
-          <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" />
+          <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" isTemplate={!!schedule} />
         </div>
       </div>
       <InvoicePageClient

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, MoreHorizontal, X,
+  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, MoreHorizontal, X, Repeat,
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import LanguageToggle from '@/components/layout/LanguageToggle'
@@ -29,6 +29,7 @@ const PRIMARY_NAV: NavItem[] = [
 // Overflow items in the "More" bottom sheet
 const MORE_NAV: NavItem[] = [
   { href: '/credit-notes', label: 'nav.creditNotes', icon: FileX },
+  { href: '/recurring',    label: 'nav.recurring',   icon: Repeat },
   { href: '/catalogue',    label: 'nav.catalogue',   icon: BookOpen },
   { href: '/reports',      label: 'nav.reports',     icon: BarChart3 },
   { href: '/settings',     label: 'nav.settings',    icon: Settings },
