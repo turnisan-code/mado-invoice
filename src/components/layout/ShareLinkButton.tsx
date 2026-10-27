@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Link2, Check, Loader2, X, HardDrive } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastApiError } from '@/lib/google/toast'
+import { Dialog } from '@/components/ui/ConfirmDialog'
 
 interface Props {
   documentId: string
@@ -15,6 +16,7 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
   const [token, setToken] = useState<string | null>(initialToken)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
+  const [confirmRevoke, setConfirmRevoke] = useState(false)
   const [copied, setCopied] = useState(false)
   const [saveToDrive, setSaveToDrive] = useState(driveConfigured)
   const [driveUploading, setDriveUploading] = useState(false)
@@ -22,6 +24,11 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
   const portalUrl = token
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/portal/${token}`
     : null
+
+  function close() {
+    setOpen(false)
+    setConfirmRevoke(false)
+  }
 
   async function generateLink() {
     setLoading(true)
@@ -44,7 +51,7 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
       const res = await fetch(`/api/documents/${documentId}/share`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to revoke')
       setToken(null)
-      setOpen(false)
+      close()
       toast.success('Share link revoked')
     } catch {
       toast.error('Failed to revoke link')
@@ -90,41 +97,51 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
     }
   }
 
-  if (!open && !token) {
-    return (
-      <button
-        onClick={generateLink}
-        disabled={loading}
-        title="Share"
-        className="p-1.5 rounded-md text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
-      >
-        {loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
-      </button>
-    )
-  }
-
-  if (token && !open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        title="Share link active"
-        className="p-1.5 rounded-md text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
-      >
-        <Link2 size={15} />
-      </button>
-    )
-  }
+  const busy = loading || driveUploading
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setOpen(false)}>
-      <div
-        className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-5 max-w-sm w-full mx-4 space-y-3"
-        onClick={e => e.stopPropagation()}
+    <>
+      {token ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title="Share link active"
+          aria-label="Share link active — open sharing options"
+          className="h-9 w-9 flex items-center justify-center rounded-md text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+        >
+          <Link2 size={15} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={generateLink}
+          disabled={loading}
+          title="Share"
+          aria-label="Share"
+          className="h-9 w-9 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
+        >
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
+        </button>
+      )}
+
+      <Dialog
+        open={open && !!token}
+        onClose={close}
+        title="Share link"
+        hideTitle
+        busy={busy}
+        panelClassName="p-5 space-y-3"
       >
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-neutral-900 dark:text-neutral-100 text-sm">Share link</h3>
-          <button onClick={() => setOpen(false)} className="p-1 rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
-            <X size={14} />
+          <span aria-hidden="true" className="font-semibold text-neutral-900 dark:text-neutral-100 text-sm">Share link</span>
+          <button
+            type="button"
+            onClick={close}
+            disabled={busy}
+            aria-label="Close"
+            className="h-11 w-11 -m-3 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors disabled:opacity-50"
+          >
+            <X size={16} />
           </button>
         </div>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -133,10 +150,12 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
         <div className="flex gap-2">
           <input
             readOnly
+            aria-label="Share link URL"
             value={portalUrl ?? ''}
-            className="flex-1 text-xs bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md px-2.5 py-1.5 text-neutral-700 dark:text-neutral-300 font-mono truncate"
+            className="flex-1 min-w-0 text-xs bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md px-2.5 py-1.5 text-neutral-700 dark:text-neutral-300 font-mono truncate"
           />
           <button
+            type="button"
             onClick={handleCopyWithDrive}
             disabled={driveUploading}
             className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-md hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
@@ -154,21 +173,46 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
               onChange={e => setSaveToDrive(e.target.checked)}
               className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
             />
-            <HardDrive size={13} className="text-neutral-400" />
+            <HardDrive size={13} className="text-neutral-500 dark:text-neutral-400" aria-hidden="true" />
             Also save to Google Drive
           </label>
         )}
 
-        <div className="flex justify-end pt-1">
-          <button
-            onClick={revokeLink}
-            disabled={loading || driveUploading}
-            className="text-xs text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Revoking…' : 'Revoke link'}
-          </button>
-        </div>
-      </div>
-    </div>
+        {confirmRevoke ? (
+          <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-3 space-y-2">
+            <p className="text-xs text-red-700 dark:text-red-300">Revoke this link? Anyone who has it loses access to the document.</p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmRevoke(false)}
+                disabled={busy}
+                className="text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-white dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
+              >
+                Keep link
+              </button>
+              <button
+                type="button"
+                onClick={revokeLink}
+                disabled={busy}
+                className="text-xs px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Revoking…' : 'Revoke link'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-end pt-1">
+            <button
+              type="button"
+              onClick={() => setConfirmRevoke(true)}
+              disabled={busy}
+              className="text-xs px-2 py-2 -my-2 rounded-md text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-50"
+            >
+              Revoke link
+            </button>
+          </div>
+        )}
+      </Dialog>
+    </>
   )
 }

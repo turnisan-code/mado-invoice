@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -19,7 +20,7 @@ const statusColor: Record<string, string> = {
   overdue:   'text-red-700 bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800 dark:text-red-300',
   accepted:  'text-green-700 bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800 dark:text-green-300',
   rejected:  'text-red-700 bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800 dark:text-red-300',
-  cancelled: 'text-neutral-400 bg-neutral-50 border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700',
+  cancelled: 'text-neutral-500 bg-neutral-50 border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-400',
 }
 
 const itemColor: Record<string, string> = {
@@ -27,7 +28,7 @@ const itemColor: Record<string, string> = {
   overdue:   'text-red-600 dark:text-red-400',
   accepted:  'text-green-700 dark:text-green-400',
   rejected:  'text-red-600 dark:text-red-400',
-  cancelled: 'text-neutral-400',
+  cancelled: 'text-neutral-500 dark:text-neutral-400',
 }
 
 interface Props {
@@ -135,9 +136,13 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   }
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false) } }}>
       <button
+        type="button"
         onClick={() => setOpen(o => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Status: ${status}. Change status`}
         className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${statusColor[status] ?? ''}`}
       >
         {status}
@@ -145,12 +150,15 @@ export default function DocumentStatusBar({ document: doc }: Props) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 mt-1.5 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 min-w-36 overflow-hidden">
+        <div role="menu" aria-label="Change status" className="absolute top-full left-0 mt-1.5 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 min-w-36 overflow-hidden">
           {statuses.map(s => (
             <button
               key={s}
+              type="button"
+              role="menuitem"
+              aria-current={s === status ? 'true' : undefined}
               onClick={() => changeStatus(s)}
-              className={`w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center justify-between gap-2
+              className={`w-full text-left px-3 py-2 sm:py-1.5 text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center justify-between gap-2
                 ${s === status ? 'font-medium' : ''}
                 ${itemColor[s] ?? 'text-neutral-700 dark:text-neutral-300'}`}
             >
@@ -161,24 +169,16 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         </div>
       )}
 
-      {confirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <div>
-              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as {confirm}?</h3>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{confirmText(confirm)}</p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirm(null)} disabled={busy} className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
-                Cancel
-              </button>
-              <button onClick={() => applyStatus(confirm)} disabled={busy} className="text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50">
-                {busy ? 'Working…' : 'Confirm'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!confirm}
+        title={`Mark as ${confirm}?`}
+        description={confirm ? confirmText(confirm) : undefined}
+        confirmLabel={busy ? 'Working…' : 'Confirm'}
+        destructive={!!confirm && DESTRUCTIVE.has(confirm)}
+        busy={busy}
+        onConfirm={() => { if (confirm) void applyStatus(confirm) }}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 interface Props {
   id: string
@@ -17,28 +18,41 @@ interface Props {
 // and their number must stay unique. They are cancelled instead; only drafts can go.
 export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
   const [loading, setLoading] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
   if (docNumber) return null
 
   async function handleDelete() {
-    if (!confirm('Delete this draft? This cannot be undone.')) return
     setLoading(true)
     const { error } = await supabase.from('documents').delete().eq('id', id)
-    if (error) { toast.error(error.message); setLoading(false); return }
+    if (error) { toast.error(error.message); setLoading(false); setConfirming(false); return }
     toast.success('Draft deleted.')
     router.push(backTo)
   }
 
   return (
-    <button
-      onClick={handleDelete}
-      disabled={loading}
-      className="flex items-center gap-1.5 text-sm px-2.5 py-1 rounded-md text-neutral-400 hover:text-red-600 hover:bg-red-50 transition-colors ml-auto"
-    >
-      <Trash2 size={14} />
-      <span className="hidden sm:inline">{loading ? 'Deleting…' : 'Delete'}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        disabled={loading}
+        className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors ml-auto disabled:opacity-50"
+      >
+        <Trash2 size={14} />
+        <span className="sr-only sm:not-sr-only">{loading ? 'Deleting…' : 'Delete'}</span>
+      </button>
+      <ConfirmDialog
+        open={confirming}
+        title="Delete this draft?"
+        description="This cannot be undone."
+        confirmLabel={loading ? 'Deleting…' : 'Delete'}
+        destructive
+        busy={loading}
+        onConfirm={handleDelete}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   )
 }

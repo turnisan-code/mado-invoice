@@ -92,7 +92,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
 
           {/* Header */}
-          <div className="flex items-start justify-between mb-8">
+          <div className="flex items-start justify-between gap-4 mb-8">
             <div>
               {settings.logo_url
                 ? <img src={settings.logo_url} alt={settings.company_name} className="h-12 object-contain object-left mb-3" />
@@ -118,9 +118,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </div>
 
           {/* Meta + Billed to */}
-          <div className="grid grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
             <div>
-              <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-2">{t('billed_to', lang)}</div>
+              <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">{t('billed_to', lang)}</div>
               <div className="text-sm text-neutral-700 space-y-0.5">
                 {client.company && <div className="font-medium">{client.company}</div>}
                 {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
@@ -161,10 +161,10 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 bg-neutral-50">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide">{t('description', lang)}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide w-16">{t('qty', lang)}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide w-28">{t('rate', lang)}</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide w-28">{t('amount', lang)}</th>
+                  <th scope="col" className="text-left px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide">{t('description', lang)}</th>
+                  <th scope="col" className="hidden sm:table-cell text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide sm:w-16">{t('qty', lang)}</th>
+                  <th scope="col" className="hidden sm:table-cell text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide sm:w-28">{t('rate', lang)}</th>
+                  <th scope="col" className="text-right px-4 py-3 text-xs font-semibold text-neutral-500 uppercase tracking-wide sm:w-28">{t('amount', lang)}</th>
                 </tr>
               </thead>
               <tbody>
@@ -200,13 +200,13 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
                     return (
                       <React.Fragment key={i}>
                         <tr className="border-b border-neutral-100 bg-neutral-50">
-                          <td colSpan={3} className="px-4 py-2 text-right text-xs text-neutral-400 uppercase tracking-wide font-medium">Subtotal</td>
-                          <td className={`px-4 py-2 text-right font-semibold ${disc > 0 ? 'line-through text-neutral-400' : 'text-neutral-900'}`}>{fmt(gross)}</td>
+                          <td colSpan={3} className="px-4 py-2 text-right text-xs text-neutral-500 uppercase tracking-wide font-medium">Subtotal</td>
+                          <td className={`px-4 py-2 text-right font-semibold ${disc > 0 ? 'line-through text-neutral-500' : 'text-neutral-900'}`}>{fmt(gross)}</td>
                         </tr>
                         {disc > 0 && (
                           <>
                             <tr className="border-b border-neutral-100 bg-neutral-50">
-                              <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-neutral-400">
+                              <td colSpan={3} className="px-4 py-1.5 text-right text-xs text-neutral-500">
                                 {item.discount_type === 'percent' ? `Discount (${item.discount_value}%)` : 'Discount'}
                               </td>
                               <td className="px-4 py-1.5 text-right text-xs text-neutral-500">−{fmt(disc)}</td>
@@ -227,12 +227,13 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
                       <td className="px-4 py-3">
                         <div className="text-neutral-900">{item.description}</div>
                         {item.service_date && (
-                          <div className="text-xs text-neutral-400 mt-0.5">{formatDate(item.service_date, lang)}</div>
+                          <div className="text-xs text-neutral-500 mt-0.5">{formatDate(item.service_date, lang)}</div>
                         )}
+                        <div className="sm:hidden text-xs text-neutral-500 mt-0.5">{item.quantity} × {fmt(item.unit_price)}</div>
                       </td>
-                      <td className="px-4 py-3 text-right text-neutral-600">{item.quantity}</td>
-                      <td className="px-4 py-3 text-right text-neutral-600">{fmt(item.unit_price)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-neutral-900">{fmt(item.quantity * item.unit_price)}</td>
+                      <td className="hidden sm:table-cell px-4 py-3 text-right text-neutral-600">{item.quantity}</td>
+                      <td className="hidden sm:table-cell px-4 py-3 text-right text-neutral-600">{fmt(item.unit_price)}</td>
+                      <td className="px-4 py-3 text-right font-medium text-neutral-900 whitespace-nowrap align-top">{fmt(item.quantity * item.unit_price)}</td>
                     </tr>
                   )
                 })}
@@ -282,7 +283,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           {/* Notes */}
           {doc.notes && (
             <div className="mb-6 rounded-xl border border-neutral-200 bg-white px-4 py-3">
-              <div className="text-xs font-semibold text-neutral-400 uppercase tracking-wide mb-1.5">{t('notes', lang)}</div>
+              <div className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-1.5">{t('notes', lang)}</div>
               <p className="text-sm text-neutral-600 whitespace-pre-line">{doc.notes}</p>
             </div>
           )}
@@ -302,7 +303,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           )}
 
           {/* Bottom action bar */}
-          <div className="flex items-center justify-between gap-4 pt-2">
+          <div className="flex items-center justify-between gap-4 flex-wrap pt-2">
             <a
               href={`/portal/${token}/pdf`}
               download
