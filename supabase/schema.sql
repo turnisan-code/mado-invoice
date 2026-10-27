@@ -181,6 +181,8 @@ create table documents (
   notes_internal      text,
   -- Generic provenance (quote → invoice, invoice → credit note).
   converted_from_id   uuid references documents(id),
+  -- Schedule that generated this invoice (FK added after recurring_schedules below).
+  recurring_schedule_id uuid,
   -- Set only on a Storno credit note, so a plain credit note is never labelled as one.
   cancels_document_id uuid references documents(id),
   bookamat_booking_id text,
@@ -247,6 +249,38 @@ create table reminder_log (
 );
 
 create index on reminder_log(document_id);
+
+-- ─── Recurring schedules ─────────────────────────────────────────────────────
+-- A schedule points at a template invoice; every run copies it into a new invoice for the
+-- next period. The template content is the invoice itself, the schedule only holds timing.
+create table recurring_schedules (
+  id                 uuid primary key default uuid_generate_v4(),
+  created_at         timestamptz not null default now(),
+  source_document_id uuid not null unique references documents(id) on delete cascade,
+  name               text not null,
+  interval           text not null check (interval in ('weekly','monthly','quarterly','half_yearly','yearly')),
+  -- Day-of-month the schedule was created with, so 31 Jan → 28 Feb → 31 Mar instead of
+  -- drifting to the 28th for good.
+  anchor_day         smallint not null,
+  next_date          date not null,
+  end_date           date,
+  active             boolean not null default true,
+  -- true: the service period is the interval STARTING on the invoice date; false: the interval
+  -- that ENDS the day before the invoice date (billing in arrears).
+  in_advance         boolean not null default false,
+  mode               text not null default 'draft' check (mode in ('draft','issue')),
+  last_generated_at  timestamptz,
+  last_document_id   uuid references documents(id) on delete set null
+);
+
+alter table documents
+  add constraint documents_recurring_schedule_id_fkey
+  foreign key (recurring_schedule_id) references recurring_schedules(id) on delete set null;
+
+-- A period can never be generated twice, even if two runs overlap.
+create unique index documents_recurring_period_key
+  on documents(recurring_schedule_id, date)
+  where recurring_schedule_id is not null;
 
 -- ─── Numbering ───────────────────────────────────────────────────────────────
 -- Longer counter tokens are replaced first so {N} cannot eat part of {NNN}.
@@ -396,6 +430,7 @@ alter table documents       enable row level security;
 alter table document_items  enable row level security;
 alter table payments        enable row level security;
 alter table reminder_log    enable row level security;
+alter table recurring_schedules enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on clients         for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -404,6 +439,7 @@ create policy "owner" on documents       for all to authenticated using (is_app_
 create policy "owner" on document_items  for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on payments        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on reminder_log    for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on recurring_schedules for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Storage: company logo ───────────────────────────────────────────────────
 -- SettingsForm uploads logo.<ext> to the public 'logos' bucket with upsert (insert + update)
