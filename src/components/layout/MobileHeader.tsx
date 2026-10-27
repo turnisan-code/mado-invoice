@@ -8,6 +8,7 @@ import {
   BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, MoreHorizontal, X,
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
+import LanguageToggle from '@/components/layout/LanguageToggle'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
@@ -161,6 +162,7 @@ export default function MobileHeader() {
               <span className="dark:hidden">Dark mode</span>
               <span className="hidden dark:inline">Light mode</span>
             </button>
+            <LanguageToggle iconSize={18} className="px-3 py-3 text-neutral-500 dark:text-neutral-400" />
             <button
               type="button"
               onClick={signOut}

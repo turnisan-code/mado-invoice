@@ -3,6 +3,8 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/ui/ThemeProvider";
+import { LanguageProvider } from "@/lib/i18n/client";
+import { getUiLang } from "@/lib/i18n/server";
 
 const geist = Geist({ subsets: ["latin"] });
 
@@ -24,12 +26,17 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// The UI language is read here (not only in the app layout) so <html lang> and the root
+// error/not-found pages follow it; the lookup is cached per request.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const lang = await getUiLang()
   return (
-    <html lang="de" className="h-full antialiased" suppressHydrationWarning>
+    <html lang={lang} className="h-full antialiased" suppressHydrationWarning>
       <body className={`${geist.className} min-h-full`}>
         <ThemeProvider>
-          {children}
+          <LanguageProvider lang={lang}>
+            {children}
+          </LanguageProvider>
           <Toaster
             richColors
             position="top-right"

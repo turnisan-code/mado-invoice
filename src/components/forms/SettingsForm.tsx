@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useRef, useEffect, useId } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { useT } from '@/lib/i18n/client'
+import type { UiLang } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
@@ -183,7 +185,9 @@ function VarChips({ vars, onInsert }: { vars: { token: string; label: string }[]
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function SettingsForm({ settings }: Props) {
   const supabase = createClient()
+  const router = useRouter()
   const searchParams = useSearchParams()
+  const { t } = useT()
   const uid = useId()
 
   // Per-section dirty tracking
@@ -254,6 +258,7 @@ export default function SettingsForm({ settings }: Props) {
     default_unit:                (settings?.default_unit ?? 'flat') as Unit,
     default_tax_treatment:       (settings?.default_tax_treatment ?? 'at_vat') as TaxTreatment,
     default_quote_validity_days: String(settings?.default_quote_validity_days ?? 14),
+    ui_language:                 (settings?.ui_language ?? 'en') as UiLang,
   })
   const [defaultsErrors, setDefaultsErrors] = useState<{ default_payment_days?: string; default_quote_validity_days?: string }>({})
 
@@ -478,11 +483,14 @@ export default function SettingsForm({ settings }: Props) {
       default_unit:                defaults.default_unit,
       default_tax_treatment:       defaults.default_tax_treatment,
       default_quote_validity_days: validityDays,
+      ui_language:                 defaults.ui_language,
     }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
     clearDirty('defaults')
     toast.success('Defaults saved.')
+    // The UI language is rendered server-side; refresh so the whole app switches.
+    router.refresh()
   }
 
   async function saveTerms() {
@@ -1063,6 +1071,20 @@ export default function SettingsForm({ settings }: Props) {
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">Language for new documents</p>
               </div>
               <div className="space-y-1.5">
+                <label className={lbl} htmlFor={`${uid}-defaults-ui_language`}>{t('settings.defaults.uiLanguage')}</label>
+                <select id={`${uid}-defaults-ui_language`}
+                  value={defaults.ui_language}
+                  onChange={e => { setDefaults(d => ({ ...d, ui_language: e.target.value as UiLang })); markDirty('defaults') }}
+                  className={inp}
+                >
+                  <option value="de">{t('common.german')}</option>
+                  <option value="en">{t('common.english')}</option>
+                </select>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.uiLanguageHint')}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_tax_treatment`}>Tax treatment</label>
                 <select id={`${uid}-defaults-default_tax_treatment`}
                   value={defaults.default_tax_treatment}
@@ -1073,8 +1095,6 @@ export default function SettingsForm({ settings }: Props) {
                 </select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">Pre-selected on a new document until a client is chosen</p>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_vat_rate`}>VAT rate</label>
                 <select id={`${uid}-defaults-default_vat_rate`}
@@ -1086,6 +1106,8 @@ export default function SettingsForm({ settings }: Props) {
                 </select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">VAT rate for new line items</p>
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_unit`}>Unit</label>
                 <select id={`${uid}-defaults-default_unit`}

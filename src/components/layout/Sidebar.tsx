@@ -7,6 +7,7 @@ import {
   BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
+import LanguageToggle from '@/components/layout/LanguageToggle'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -72,6 +73,7 @@ export default function Sidebar() {
           <span className="dark:hidden">Dark mode</span>
           <span className="hidden dark:inline">Light mode</span>
         </button>
+        <LanguageToggle className="px-3 py-2 text-neutral-500 dark:text-neutral-400" />
         <button
           type="button"
           onClick={signOut}

@@ -93,6 +93,7 @@ export interface Settings {
   reminder_interest_rate: number
   default_skonto_percent: number | null
   default_skonto_days: number | null
+  ui_language: Language
 }
 
 export interface Client {
