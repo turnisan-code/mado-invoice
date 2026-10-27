@@ -4,15 +4,12 @@ import { useState } from 'react'
 import { Pencil, Mail, Phone, MapPin, Building2 } from 'lucide-react'
 import ClientForm from '@/components/forms/ClientForm'
 import type { Client } from '@/types'
-
-const taxLabel: Record<string, string> = {
-  at_vat: 'AT VAT (20%)',
-  eu_reverse_charge: 'EU Reverse Charge',
-  non_eu: 'Non-EU',
-}
+import { useT } from '@/lib/i18n/client'
+import type { DictKey } from '@/lib/i18n'
 
 export default function ClientEditSection({ client }: { client: Client }) {
   const [editing, setEditing] = useState(false)
+  const { t } = useT()
 
   if (editing) {
     return <ClientForm client={client} onSaved={() => setEditing(false)} />
@@ -29,13 +26,13 @@ export default function ClientEditSection({ client }: { client: Client }) {
     <div className="space-y-0">
       {/* Card header */}
       <div className="flex items-center justify-between mb-5">
-        <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Details</p>
+        <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">{t('clients.details')}</p>
         <button
           type="button"
           onClick={() => setEditing(true)}
           className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors px-2 py-2 -my-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
-          <Pencil size={11} /> Edit
+          <Pencil size={11} /> {t('clients.edit')}
         </button>
       </div>
 
@@ -69,20 +66,20 @@ export default function ClientEditSection({ client }: { client: Client }) {
 
       {/* Billing settings */}
       <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800">
-        <Stat label="Tax" value={taxLabel[client.tax_treatment] ?? client.tax_treatment} />
-        <Stat label="Currency" value={client.currency ?? 'EUR'} />
-        <Stat label="Payment" value={`${client.payment_days ?? 14}d`} />
+        <Stat label={t('clients.tax')} value={t(`taxTreatments.${client.tax_treatment}` as DictKey)} />
+        <Stat label={t('clients.currency')} value={client.currency ?? 'EUR'} />
+        <Stat label={t('clients.payment')} value={t('clients.paymentDaysShort', { days: client.payment_days ?? 14 })} />
       </div>
 
       {/* Language */}
       <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">Language</span>
-        <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{client.language === 'en' ? 'English' : 'Deutsch'}</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('clients.language')}</span>
+        <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{client.language === 'en' ? t('common.english') : t('common.german')}</span>
       </div>
       {client.reminders_opt_out && (
         <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">Automatic reminders</span>
-          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Off</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('clients.automaticReminders')}</span>
+          <span className="text-xs font-medium text-amber-600 dark:text-amber-400">{t('clients.off')}</span>
         </div>
       )}
 
@@ -94,8 +91,8 @@ export default function ClientEditSection({ client }: { client: Client }) {
       {/* Tags */}
       {client.tags?.length > 0 && (
         <div className="flex gap-1.5 flex-wrap mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-800">
-          {client.tags.map((t: string) => (
-            <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{t}</span>
+          {client.tags.map((tag: string) => (
+            <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{tag}</span>
           ))}
         </div>
       )}
