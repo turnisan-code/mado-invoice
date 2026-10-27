@@ -283,7 +283,8 @@ export function applyMapping(rows: string[][], mapping: CsvMapping): { transacti
     } else {
       const c = parseAmount(cell(mapping.credit))
       const d = parseAmount(cell(mapping.debit))
-      amount = c === null && d === null ? null : Math.abs(c ?? 0) - Math.abs(d ?? 0)
+      // A credit printed negative ("12,00-" in Haben) is a reversed credit, i.e. money going out.
+      amount = c === null && d === null ? null : c !== null && c < 0 ? c : Math.abs(c ?? 0) - Math.abs(d ?? 0)
     }
     if (amount === null) { warnings.push(`noAmount:${n}`); return }
     const fields: TransactionFields = {
@@ -301,26 +302,43 @@ export function applyMapping(rows: string[][], mapping: CsvMapping): { transacti
 }
 
 const filled = (row: string[]) => row.filter(c => c !== '').length
+const SAMPLE_ROWS = 10
+
+// The rows after a header, cut or padded to its width.
+function tableRows(all: string[][], headerIdx: number, limit?: number): string[][] {
+  const width = all[headerIdx].length
+  return all.slice(headerIdx + 1, limit === undefined ? undefined : headerIdx + 1 + limit).map(r => {
+    const row = r.slice(0, width)
+    while (row.length < width) row.push('')
+    return row
+  })
+}
+
+// Bank exports open with account lines ("Konto;AT61…;EUR" / "Inhaber;Max;EUR") that look like a
+// narrow table of their own. Among the lines with at least three filled cells, the header is the
+// one whose following rows parse best as date + amount under the guessed mapping; ties go to the
+// candidate followed by the longest run of rows of its width, then to the earlier line.
+function findHeader(all: string[][]): number {
+  let best = { idx: -1, score: -1, run: -1 }
+  for (let i = 0; i < all.length; i++) {
+    if (filled(all[i]) < 3) continue
+    const score = applyMapping(tableRows(all, i, SAMPLE_ROWS), guessMapping(all[i])).transactions.length
+    let run = 0
+    while (i + 1 + run < all.length && all[i + 1 + run].length === all[i].length) run++
+    if (score > best.score || (score === best.score && run > best.run)) best = { idx: i, score, run }
+  }
+  return best.idx
+}
 
 export function parseCsv(text: string): ParsedStatement {
   const delimiter = detectDelimiter(text)
   const all = splitCsv(text, delimiter).map(r => r.map(c => c.trim())).filter(r => filled(r) > 0)
 
-  // Bank exports open with account info lines; the table starts at the first line with
-  // at least three filled cells that is followed by a row of the same width.
-  let headerIdx = -1
-  for (let i = 0; i < all.length - 1; i++) {
-    if (filled(all[i]) >= 3 && all[i + 1].length === all[i].length && filled(all[i + 1]) >= 2) { headerIdx = i; break }
-  }
-  if (headerIdx < 0) headerIdx = all.findIndex(r => filled(r) >= 3)
+  const headerIdx = findHeader(all)
   if (headerIdx < 0) return { format: 'csv', transactions: [], warnings: ['noHeader'], csv: { header: [], rows: [], mapping: emptyMapping() } }
 
   const header = all[headerIdx]
-  const rows = all.slice(headerIdx + 1).map(r => {
-    const row = r.slice(0, header.length)
-    while (row.length < header.length) row.push('')
-    return row
-  })
+  const rows = tableRows(all, headerIdx)
   const mapping = guessMapping(header)
   const { transactions, warnings } = applyMapping(rows, mapping)
   return { format: 'csv', transactions, warnings, csv: { header, rows, mapping } }

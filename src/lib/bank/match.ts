@@ -33,6 +33,9 @@ export interface MatchRow {
 
 const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
+// "2026-001" must not match "2026-0012": the normalised number may not touch another digit.
+const numberPattern = (number: string) => new RegExp(`(?<!\\d)${number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\d)`)
+
 // Legal forms and filler words carry no identity: "GmbH" or "und" would match every company.
 const NOISE = new Set(['gmbh', 'eu', 'kg', 'og', 'ag', 'ltd', 'inc', 'llc', 'mbh', 'und', 'and', 'the', 'der', 'die', 'das', 'von', 'van'])
 
@@ -55,6 +58,11 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
   // Running balance: an invoice can absorb several credits only while something is still open.
   const remaining = new Map(open.map(i => [i.id, i.balance]))
   const clientTokens = new Map(open.map(i => [i.id, nameTokens(`${i.clientName} ${i.clientCompany ?? ''}`)]))
+  // Numbers under three characters ("R1") would turn up everywhere; those count on amount and name only.
+  const numberPatterns = new Map(open.map(i => {
+    const number = alnum(i.number)
+    return [i.id, number.length >= 3 ? numberPattern(number) : null]
+  }))
   const rows: MatchRow[] = []
 
   for (const tx of transactions) {
@@ -75,8 +83,8 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       let skonto = 0
       const reasons: MatchReason[] = []
 
-      const number = alnum(inv.number)
-      if (number.length >= 3 && haystack.includes(number)) { score += 100; reasons.push('number') }
+      const pattern = numberPatterns.get(inv.id)
+      if (pattern && pattern.test(haystack)) { score += 100; reasons.push('number') }
 
       if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }

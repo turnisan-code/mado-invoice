@@ -84,14 +84,12 @@ export async function POST(req: Request) {
       kind: 'payment',
       import_ref: row.transaction_id,
     })
-    if (payErr) {
-      // 23505: the unique import_ref index already holds this statement transaction.
-      if (payErr.code === '23505') duplicates++
-      else errors.push({ transaction_id: row.transaction_id, message: payErr.message })
-      continue
-    }
-    doc.payments.push({ amount, kind: 'payment' })
-    imported++
+    if (payErr && payErr.code !== '23505') { errors.push({ transaction_id: row.transaction_id, message: payErr.message }); continue }
+    // 23505: the unique import_ref index already holds this statement transaction, and the lookup
+    // above already counted that row. A retry after a half-finished run still records the Skonto
+    // below and re-checks the status, so the invoice ends up paid.
+    if (payErr) duplicates++
+    else { doc.payments.push({ amount, kind: 'payment' }); imported++ }
     touched.add(doc.id)
 
     const skonto = roundCents(row.skonto_amount ?? 0)
