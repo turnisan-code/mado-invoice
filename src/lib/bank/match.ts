@@ -35,31 +35,69 @@ const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
 const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// The number's characters in order over the upper-cased text, any run of separators between them
-// (but no decimal or thousands separator between two digits), so "2026-001" is found in "RE2026-001",
+// Short words a payer puts before a bare invoice number ("Rechnung Nr. 2026-001", "Zahlung für
+// 2026-001"). Any other short letter run directly before the digits ("A-2026-003", "G-2026-001",
+// "KD2026001", "EUR 2026001") is another document's prefix or a unit, so the digits are not this invoice.
+const ALLOWED_WORDS = new Set([
+  'R', 'RE', 'RG', 'RN', 'NR', 'NO', 'INV', 'REF', 'RNR', 'BILL', 'FACT', 'FAKT',
+  'FÜR', 'FUR', 'VON', 'VOM', 'AUS', 'LT', 'ZU', 'ZUM', 'ZUR', 'PER', 'DER', 'DIE', 'DAS', 'DEN', 'DEM', 'UND', 'MIT',
+  'FOR', 'OF', 'TO', 'THE', 'AND', 'ID',
+])
+
+// The characters in order over the upper-cased text, any run of separators between them but no
+// decimal or thousands separator between two digits, so "2026-001" is found in "RE2026-001",
 // "2026/001", "2026 001" and "2026-001/2". A digit glued to either end continues the number instead
-// ("2026-0012", "12026-001", "02026-001"), so those do not match.
-const numberPattern = (number: string) => {
-  const chars = number.split('')
-  const body = chars.map((c, i) => {
-    const gap = i === 0 ? '' : /[0-9]/.test(chars[i - 1]) && /[0-9]/.test(c) ? '[^A-Z0-9.,]*' : '[^A-Z0-9]*'
-    return gap + escapeRe(c)
-  }).join('')
-  return new RegExp(`(?<![0-9])${body}(?![0-9])`, 'g')
+// ("2026-0012", "12026-001"), and a number that starts with its letter prefix must not continue a word
+// ("Honorar 12" is not R12).
+const gapPattern = (chars: string[]) => chars.map((c, i) => {
+  const gap = i === 0 ? '' : /[0-9]/.test(chars[i - 1]) && /[0-9]/.test(c) ? '[^\\p{L}\\p{N}.,]*' : '[^\\p{L}\\p{N}]*'
+  return gap + escapeRe(c)
+}).join('')
+
+interface NumberMatcher {
+  full: RegExp
+  /** The number without its letter prefix, when that is long enough to stand alone. */
+  digits: RegExp | null
+  prefix: string
+  /** Fewer than four digits: a hit is a coincidence often enough to stay medium confidence. */
+  short: boolean
 }
 
-// Finds the invoice number in a remittance text. A date right before the hit or a decimal part right
-// after it means the digits belong to a date and an amount ("12.03.2026 100,00" is not invoice
-// 2026-100). `split` reports a number whose digits were only found separated by spaces, which is
-// weaker evidence than "2026-001" or "2026001".
-function findNumber(text: string, pattern: RegExp): { split: boolean } | null {
+// Numbers under three characters ("R1") would turn up everywhere; those count on amount and name only.
+function numberMatcher(raw: string): NumberMatcher | null {
+  const number = alnum(raw)
+  if (number.length < 3) return null
+  const prefix = number.match(/^[A-Z]+/)?.[0] ?? ''
+  const digitPart = number.slice(prefix.length)
+  const full = new RegExp(`(?<![${prefix ? '\\p{L}\\p{N}' : '0-9'}])${gapPattern(number.split(''))}(?![0-9])`, 'gu')
+  // Payers usually leave the prefix out ("Rechnung 2026-001" for R-2026-001): the digit part alone
+  // counts too when it is long enough not to be a coincidence.
+  const digits = prefix && digitPart.length >= 5 ? new RegExp(`(?<![0-9])${gapPattern(digitPart.split(''))}(?![0-9])`, 'gu') : null
+  return { full, digits, prefix, short: digitPart.replace(/[^0-9]/g, '').length < 4 }
+}
+
+// Finds the invoice number in a remittance text and rules out digits that belong to something else:
+// a date ("12.03.2026 100,00" is not invoice 2026-100, "2026-03-12" is not 20260312), IBAN groups,
+// another document's prefix, or an amount's decimals. `split` reports a number whose digits were only
+// found separated by spaces, which is weaker evidence than "2026-001" or "2026001".
+function findNumber(text: string, re: RegExp, ownPrefix: string): { split: boolean } | null {
   const upper = text.toUpperCase()
-  pattern.lastIndex = 0
+  re.lastIndex = 0
   let m: RegExpExecArray | null
-  while ((m = pattern.exec(upper))) {
+  while ((m = re.exec(upper))) {
+    const hit = m[0]
     const before = upper.slice(0, m.index)
-    const after = upper.slice(m.index + m[0].length)
-    if (!/\d{1,2}[./]\s*$/.test(before) && !/^[,.]\d{2}(?!\d)/.test(after)) return { split: /\d\s+\d/.test(m[0]) }
+    const after = upper.slice(m.index + hit.length)
+    const split = /\d\s+\d/.test(hit)
+    if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(hit)) continue
+    if (/^[0-9]/.test(hit)) {
+      if (/(?<!\d)\d{1,2}[./]\s*$/.test(before)) continue
+      if (/IBAN[\s:]*[A-Z]{2}\d{2}\s*$/.test(before)) continue
+      const word = before.replace(/[^\p{L}\p{N}]+$/u, '').match(/\p{L}+$/u)?.[0]
+      if (word && word.length <= 3 && word !== ownPrefix && !ALLOWED_WORDS.has(word)) continue
+    }
+    if (split && /^[,.]\d{2}(?!\d)/.test(after)) continue
+    return { split }
   }
   return null
 }
@@ -86,11 +124,7 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
   // Running balance: an invoice can absorb several credits only while something is still open.
   const remaining = new Map(open.map(i => [i.id, i.balance]))
   const clientTokens = new Map(open.map(i => [i.id, nameTokens(`${i.clientName} ${i.clientCompany ?? ''}`)]))
-  // Numbers under three characters ("R1") would turn up everywhere; those count on amount and name only.
-  const numberPatterns = new Map(open.map(i => {
-    const number = alnum(i.number)
-    return [i.id, number.length >= 3 ? numberPattern(number) : null]
-  }))
+  const matchers = new Map(open.map(i => [i.id, numberMatcher(i.number)]))
   const rows: MatchRow[] = []
 
   for (const tx of transactions) {
@@ -112,9 +146,11 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       let skonto = 0
       const reasons: MatchReason[] = []
 
-      const pattern = numberPatterns.get(inv.id)
-      const hit = pattern ? haystacks.map(h => findNumber(h, pattern)).find(Boolean) : null
-      if (hit) { score += hit.split ? 70 : 100; reasons.push('number') }
+      const matcher = matchers.get(inv.id)
+      const hit = matcher
+        ? haystacks.map(h => findNumber(h, matcher.full, matcher.prefix) ?? (matcher.digits ? findNumber(h, matcher.digits, matcher.prefix) : null)).find(Boolean)
+        : null
+      if (hit) { score += hit.split || matcher!.short ? 70 : 100; reasons.push('number') }
 
       if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }
