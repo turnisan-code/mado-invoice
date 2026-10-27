@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2 } from 'lucide-react'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2, Landmark } from 'lucide-react'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { toast } from 'sonner'
@@ -319,6 +319,14 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('invoices.title')}</h1>
         <div className="flex items-center gap-2">
+          <Link
+            href="/invoices/import"
+            title={t('bankImport.button')}
+            className="flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
+          >
+            <Landmark size={14} />
+            <span className="sr-only sm:not-sr-only">{t('bankImport.button')}</span>
+          </Link>
           <button
             type="button"
             onClick={handleExport}
