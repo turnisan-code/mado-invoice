@@ -38,19 +38,21 @@ const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 // Short words a payer puts before a bare invoice number ("Rechnung Nr. 2026-001", "Zahlung für
 // 2026-001", "HN 2026-001"). Other one- or two-letter runs directly before the digits ("A-2026-003",
 // "G-2026-001", "KD2026001") are another document's prefix, so the digits are not this invoice.
-const ALLOWED_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'HN', 'NR', 'NO', 'ID', 'U', 'ZU', 'FA', 'VS', 'TZ', 'ER', 'AR', 'LT', 'OF', 'TO'])
+const ALLOWED_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'HN', 'FT', 'NR', 'NO', 'N', 'ID', 'U', 'ZU', 'FA', 'VS', 'TZ', 'ER', 'AR', 'LT', 'OF', 'TO'])
 
 // Labels of numbers that are never the invoice number: other document types, the payer's own
 // references, bank and tax identifiers, phone numbers, currencies. Short labels match as whole words
 // (so "Abrechnung" and "Pollak" are not AB or PO), long ones as word stems ("Bestellnummer").
 const DENIED_WORDS = new Set([
-  'KV', 'GS', 'PO', 'AB', 'LS', 'KD', 'KDNR', 'BIC', 'TEL', 'TAX', 'ACC', 'EUR', 'UID', 'ATU', 'BLZ', 'VAT', 'FAX',
-  'CHF', 'USD', 'GBP', 'MREF', 'STNR', 'SVNR', 'IBAN',
+  'KV', 'KVA', 'GS', 'PO', 'AB', 'LS', 'KD', 'KDNR', 'BIC', 'TEL', 'TAX', 'ACC', 'ACCT', 'EUR', 'EURO', 'UID', 'ATU', 'BLZ',
+  'VAT', 'FAX', 'CHF', 'USD', 'GBP', 'MREF', 'STNR', 'SVNR', 'IBAN', 'MOBIL', 'MOBILNR', 'CREDIT', 'CREDITNOTE',
+  // Abbreviated document and reference labels: "Ang. 2026-003", "Best.-Nr. 2026-001", "Auftr. 2026-001".
+  'ANG', 'ANGEB', 'GUTSCHR', 'BEST', 'BESTNR', 'AUFTR', 'AUFTRNR', 'PROJ', 'PROJNR', 'VERTR', 'MITGL', 'EST', 'CUST',
 ])
 const DENIED_STEMS = [
-  'ANGEBOT', 'OFFERT', 'KOSTENVORANSCHLAG', 'QUOTE', 'ESTIMATE', 'GUTSCHRIFT', 'CREDIT', 'STORNO', 'BESTELL', 'AUFTRAG',
+  'ANGEBOT', 'OFFERT', 'KOSTENVORANSCHLAG', 'QUOTE', 'ESTIMATE', 'GUTSCHRIFT', 'STORNO', 'BESTELL', 'AUFTRAG',
   'ORDER', 'LIEFERSCHEIN', 'PROJEKT', 'PROJECT', 'VERTRAG', 'CONTRACT', 'KUNDE', 'CUSTOMER', 'CLIENT', 'MITGLIED',
-  'MEMBER', 'MANDAT', 'KONTO', 'ACCOUNT', 'STEUERNR', 'TELEFON', 'MOBIL', 'HANDY', 'PHONE',
+  'MEMBER', 'MANDAT', 'KONTO', 'ACCOUNT', 'STEUERNR', 'TELEFON', 'MOBILTEL', 'HANDY', 'PHONE',
 ]
 // "Angebot Nr. 2026-003": the label sits one word further back.
 const NUMBER_WORDS = new Set(['NR', 'NO', 'NUMMER', 'NUM', 'NUMBER', 'NBR', 'N', 'ID'])
@@ -104,10 +106,12 @@ function trailingWord(text: string): { word: string; start: number } {
 
 interface FindOptions { ownPrefix: string; otherPrefixes: Set<string> }
 
-function isDeniedLabel(word: string, { ownPrefix, otherPrefixes }: FindOptions): boolean {
+// `unknownShort`: an unknown one- or two-letter word counts as a prefix directly before the digits
+// or before a number word ("A Nr. 2026-003"); before a separate number ("KW 09 2026-001") it is a word.
+function isDeniedLabel(word: string, { ownPrefix, otherPrefixes }: FindOptions, unknownShort = true): boolean {
   if (!word || word === ownPrefix) return false
   if (otherPrefixes.has(word) || DENIED_WORDS.has(word) || DENIED_STEMS.some(stem => word.startsWith(stem))) return true
-  return word.length <= 2 && !ALLOWED_WORDS.has(word)
+  return unknownShort && word.length <= 2 && !ALLOWED_WORDS.has(word)
 }
 
 // Finds the invoice number in a remittance text and rules out digits that belong to something else:
@@ -133,12 +137,15 @@ function findNumber(text: string, re: RegExp, options: FindOptions): { split: bo
       // Up to three groups after the check digits: the IBAN is not complete, the hit continues it.
       if (/IBAN[\s:]*[A-Z]{2}\s*\d{2}(?:\s*\d{4}){0,3}\s*$/.test(before)) continue
       if (/^\d{4}(?:\s\d{4})+$/.test(hit) && /(?<!\p{L})[A-Z]{2}\d{2}(?:\s+\d{4}){0,3}\s+$/u.test(before)) continue
-      // A phone prefix right before the digits: "0664/2026001", "+43 664 2026001", "0043 664 2026001".
-      if (/(?:^|[^\d\-/.])(?:(?:\+|00)\d{2,3}\s*(?:\(0\)\s*)?\d{2,4}|0\d{1,4})\s*[/ -]*$/.test(before)) continue
+      // A phone prefix right before the digits: "0664/2026001", "+43 664 2026001", "01/2026001".
+      if (/(?:^|[^\d\-/.])(?:(?:\+|00)\d{2,3}\s*(?:\(0\)\s*)?\d{2,4}\s*[/ -]*|06\d{2}\s*[/ -]*|0\d{1,4}\s*[/-]\s*)$/.test(before)) continue
       if (isDeniedLabel(word, options)) continue
       if (NUMBER_WORDS.has(word) && isDeniedLabel(trailingWord(before.slice(0, start)).word, options)) continue
+      // "Tel 01 2026001", "Kundennummer 12345 2026001": the label sits before a separate number.
+      const beforeNumber = word ? before : before.replace(/(?<!\p{L})\p{N}+[^\p{L}\p{N}]*$/u, '')
+      if (beforeNumber !== before && isDeniedLabel(trailingWord(beforeNumber).word, options, false)) continue
     }
-    if ((split || bare) && /^[,.]\d{2}(?!\d)/.test(after)) continue
+    if ((split || bare) && /^[,.](?:\d{2}(?!\d)|-)/.test(after)) continue
     // A plain digit run next to a currency is an amount ("Betrag 26001 EUR", "€ 26001"), unless the
     // currency introduces an amount of its own ("RE 20260001 EUR 100,00").
     if (bare && !isInvoiceWord(word) && (/^\s*(?:€|EURO?\b)(?!\s*\d)/.test(after) || /€\s*$/.test(before))) continue
