@@ -33,16 +33,36 @@ export interface MatchRow {
 
 const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
-// Remittance text with every run of separators collapsed to one space: "Nr.2026-001." → "NR 2026 001".
-const flatten = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()
-
 const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-// The number's characters in order, each pair optionally split by one separator, so "2026-001" is
-// found in "RE2026-001", "2026/001", "2026 001" and "2026-001/2". A digit glued to either end
-// continues the number instead ("2026-0012", "12026-001", "02026-001"), so those do not match.
-const numberPattern = (number: string) =>
-  new RegExp(`(?<![0-9])${number.split('').map(escapeRe).join(' ?')}(?![0-9])`)
+// The number's characters in order over the upper-cased text, any run of separators between them
+// (but no decimal or thousands separator between two digits), so "2026-001" is found in "RE2026-001",
+// "2026/001", "2026 001" and "2026-001/2". A digit glued to either end continues the number instead
+// ("2026-0012", "12026-001", "02026-001"), so those do not match.
+const numberPattern = (number: string) => {
+  const chars = number.split('')
+  const body = chars.map((c, i) => {
+    const gap = i === 0 ? '' : /[0-9]/.test(chars[i - 1]) && /[0-9]/.test(c) ? '[^A-Z0-9.,]*' : '[^A-Z0-9]*'
+    return gap + escapeRe(c)
+  }).join('')
+  return new RegExp(`(?<![0-9])${body}(?![0-9])`, 'g')
+}
+
+// Finds the invoice number in a remittance text. A date right before the hit or a decimal part right
+// after it means the digits belong to a date and an amount ("12.03.2026 100,00" is not invoice
+// 2026-100). `split` reports a number whose digits were only found separated by spaces, which is
+// weaker evidence than "2026-001" or "2026001".
+function findNumber(text: string, pattern: RegExp): { split: boolean } | null {
+  const upper = text.toUpperCase()
+  pattern.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = pattern.exec(upper))) {
+    const before = upper.slice(0, m.index)
+    const after = upper.slice(m.index + m[0].length)
+    if (!/\d{1,2}[./]\s*$/.test(before) && !/^[,.]\d{2}(?!\d)/.test(after)) return { split: /\d\s+\d/.test(m[0]) }
+  }
+  return null
+}
 
 // Legal forms and filler words carry no identity: "GmbH" or "und" would match every company.
 const NOISE = new Set(['gmbh', 'eu', 'kg', 'og', 'ag', 'ltd', 'inc', 'llc', 'mbh', 'und', 'and', 'the', 'der', 'die', 'das', 'von', 'van'])
@@ -80,7 +100,7 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
     if (!open.length) { rows.push({ ...base, status: 'nothing_open' }); continue }
 
     // Text and reference are searched separately so a number cannot span the two fields.
-    const haystacks = [flatten(tx.text), flatten(tx.reference ?? '')].filter(Boolean)
+    const haystacks = [tx.text, tx.reference ?? ''].filter(Boolean)
     const counterparty = nameTokens(tx.counterparty)
     let best: { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number } | null = null
 
@@ -93,7 +113,8 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       const reasons: MatchReason[] = []
 
       const pattern = numberPatterns.get(inv.id)
-      if (pattern && haystacks.some(h => pattern.test(h))) { score += 100; reasons.push('number') }
+      const hit = pattern ? haystacks.map(h => findNumber(h, pattern)).find(Boolean) : null
+      if (hit) { score += hit.split ? 70 : 100; reasons.push('number') }
 
       if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }
