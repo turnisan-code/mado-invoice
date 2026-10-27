@@ -36,19 +36,27 @@ const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 const escapeRe = (c: string) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Short words a payer puts before a bare invoice number ("Rechnung Nr. 2026-001", "Zahlung für
-// 2026-001"). Other one- or two-letter runs directly before the digits ("A-2026-003", "G-2026-001",
-// "KD2026001") are another document's prefix, so the digits are not this invoice.
-const ALLOWED_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'NR', 'NO', 'ID', 'U', 'ZU', 'FA', 'VS', 'TZ', 'ER', 'AR', 'LT', 'OF', 'TO'])
+// 2026-001", "HN 2026-001"). Other one- or two-letter runs directly before the digits ("A-2026-003",
+// "G-2026-001", "KD2026001") are another document's prefix, so the digits are not this invoice.
+const ALLOWED_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'HN', 'NR', 'NO', 'ID', 'U', 'ZU', 'FA', 'VS', 'TZ', 'ER', 'AR', 'LT', 'OF', 'TO'])
 
 // Labels of numbers that are never the invoice number: other document types, the payer's own
-// references, bank and tax identifiers, phone numbers, currencies. Matched as word stems.
+// references, bank and tax identifiers, phone numbers, currencies. Short labels match as whole words
+// (so "Abrechnung" and "Pollak" are not AB or PO), long ones as word stems ("Bestellnummer").
+const DENIED_WORDS = new Set([
+  'KV', 'GS', 'PO', 'AB', 'LS', 'KD', 'KDNR', 'BIC', 'TEL', 'TAX', 'ACC', 'EUR', 'UID', 'ATU', 'BLZ', 'VAT', 'FAX',
+  'CHF', 'USD', 'GBP', 'MREF', 'STNR', 'SVNR', 'IBAN',
+])
 const DENIED_STEMS = [
-  'ANGEBOT', 'OFFERT', 'KOSTENVORANSCHLAG', 'KV', 'QUOTE', 'ESTIMATE', 'GUTSCHRIFT', 'GS', 'CREDIT', 'STORNO',
-  'BESTELL', 'AUFTRAG', 'ORDER', 'PO', 'AB', 'LIEFERSCHEIN', 'LS', 'PROJEKT', 'PROJECT', 'VERTRAG', 'CONTRACT',
-  'KUNDE', 'KDNR', 'KD', 'CUSTOMER', 'CLIENT', 'MITGLIED', 'MEMBER', 'MREF', 'MANDAT', 'EREF', 'CREF',
-  'IBAN', 'BIC', 'KONTO', 'ACCOUNT', 'ACC', 'BLZ', 'UID', 'ATU', 'SVNR', 'STEUERNR', 'STNR', 'TAX', 'VAT',
-  'TEL', 'MOBIL', 'HANDY', 'PHONE', 'FAX', 'EUR', 'USD', 'CHF', 'GBP',
+  'ANGEBOT', 'OFFERT', 'KOSTENVORANSCHLAG', 'QUOTE', 'ESTIMATE', 'GUTSCHRIFT', 'CREDIT', 'STORNO', 'BESTELL', 'AUFTRAG',
+  'ORDER', 'LIEFERSCHEIN', 'PROJEKT', 'PROJECT', 'VERTRAG', 'CONTRACT', 'KUNDE', 'CUSTOMER', 'CLIENT', 'MITGLIED',
+  'MEMBER', 'MANDAT', 'KONTO', 'ACCOUNT', 'STEUERNR', 'TELEFON', 'MOBIL', 'HANDY', 'PHONE',
 ]
+// "Angebot Nr. 2026-003": the label sits one word further back.
+const NUMBER_WORDS = new Set(['NR', 'NO', 'NUMMER', 'NUM', 'NUMBER', 'NBR', 'N', 'ID'])
+// After one of these the digits are the invoice number even when a currency follows ("RE 20260001 EUR").
+const INVOICE_WORDS = new Set(['R', 'RE', 'RG', 'RN', 'HN', 'HNR', 'NR', 'NO', 'INV', 'REF', 'RNR', 'BILL', 'FACT', 'FAKT'])
+const isInvoiceWord = (word: string) => INVOICE_WORDS.has(word) || /^(?:RECHNUNG|RECH|INVOICE|HONORAR|FAKTUR)/.test(word)
 
 // The characters in order over the upper-cased text, any run of separators between them but no
 // decimal or thousands separator between two digits, so "2026-001" is found in "RE2026-001",
@@ -86,46 +94,54 @@ const isWordChar = (c: string) => /[\p{L}\p{N}]/u.test(c)
 
 // The letters directly before a position, skipping separators; a backwards scan so a long run of
 // separators costs nothing.
-function trailingWord(text: string): string {
+function trailingWord(text: string): { word: string; start: number } {
   let end = text.length
   while (end > 0 && !isWordChar(text[end - 1])) end--
   let start = end
   while (start > 0 && /\p{L}/u.test(text[start - 1])) start--
-  return text.slice(start, end)
+  return { word: text.slice(start, end), start }
 }
 
 interface FindOptions { ownPrefix: string; otherPrefixes: Set<string> }
 
+function isDeniedLabel(word: string, { ownPrefix, otherPrefixes }: FindOptions): boolean {
+  if (!word || word === ownPrefix) return false
+  if (otherPrefixes.has(word) || DENIED_WORDS.has(word) || DENIED_STEMS.some(stem => word.startsWith(stem))) return true
+  return word.length <= 2 && !ALLOWED_WORDS.has(word)
+}
+
 // Finds the invoice number in a remittance text and rules out digits that belong to something else:
-// a date ("12.03.2026 100,00" is not invoice 2026-100, "2026-03-12" is not 20260312), IBAN groups,
-// another document's number or the payer's own reference, or an amount's decimals. `split` reports
-// a number whose digits were only found with whitespace in between, which is weaker evidence than
-// "2026-001" or "2026001".
-function findNumber(text: string, re: RegExp, { ownPrefix, otherPrefixes }: FindOptions): { split: boolean } | null {
+// a date ("12.03.2026 100,00" is not invoice 2026-100, "2026-03-12" is not 20260312), an unfinished
+// IBAN, a phone number, another document's number or the payer's own reference, or an amount.
+// `split` reports a number whose digits were only found with whitespace in between, which is weaker
+// evidence than "2026-001" or "2026001".
+function findNumber(text: string, re: RegExp, options: FindOptions): { split: boolean } | null {
   const upper = text.toUpperCase()
   re.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = re.exec(upper))) {
     const hit = m[0]
-    const before = upper.slice(0, m.index)
-    const after = upper.slice(m.index + hit.length)
+    // Every rule below looks at the hit's immediate surroundings, so a long text costs nothing extra.
+    const before = upper.slice(Math.max(0, m.index - 64), m.index)
+    const after = upper.slice(m.index + hit.length, m.index + hit.length + 16)
     const split = /\d\D*\s\D*\d/.test(hit)
+    const bare = /^\d+$/.test(hit)
+    const { word, start } = trailingWord(before)
     if (/^\d{4}[-/. ]\d{1,2}[-/. ]\d{1,2}$/.test(hit)) continue
     if (/^[0-9]/.test(hit)) {
       if (/(?<!\d)\d{1,2}[./]\s*$/.test(before)) continue
-      if (/IBAN[\s:]*[A-Z]{2}\s*\d{2}[\d\s]*$/.test(before) || /(?<!\p{L})[A-Z]{2}\d{2}(\s+\d{4})*\s+$/u.test(before)) continue
-      // An Austrian mobile prefix right before the digits: "0664/2026001", "+43 664 2026001".
-      if (/(?:^|\D)(?:\+43\s*|0)6\d{2}\s*[/ -]*$/.test(before)) continue
-      const word = trailingWord(before)
-      if (word && word !== ownPrefix) {
-        if (otherPrefixes.has(word) || DENIED_STEMS.some(stem => word.startsWith(stem))) continue
-        if (word.length <= 2 && !ALLOWED_WORDS.has(word)) continue
-      }
+      // Up to three groups after the check digits: the IBAN is not complete, the hit continues it.
+      if (/IBAN[\s:]*[A-Z]{2}\s*\d{2}(?:\s*\d{4}){0,3}\s*$/.test(before)) continue
+      if (/^\d{4}(?:\s\d{4})+$/.test(hit) && /(?<!\p{L})[A-Z]{2}\d{2}(?:\s+\d{4}){0,3}\s+$/u.test(before)) continue
+      // A phone prefix right before the digits: "0664/2026001", "+43 664 2026001", "0043 664 2026001".
+      if (/(?:^|[^\d\-/.])(?:(?:\+|00)\d{2,3}\s*(?:\(0\)\s*)?\d{2,4}|0\d{1,4})\s*[/ -]*$/.test(before)) continue
+      if (isDeniedLabel(word, options)) continue
+      if (NUMBER_WORDS.has(word) && isDeniedLabel(trailingWord(before.slice(0, start)).word, options)) continue
     }
-    const bare = /^\d+$/.test(hit)
     if ((split || bare) && /^[,.]\d{2}(?!\d)/.test(after)) continue
-    // A plain digit run next to a currency is an amount ("Betrag 26001 EUR", "€ 26001").
-    if (bare && (/^\s*(?:€|EUR\b)/.test(after) || /€\s*$/.test(before))) continue
+    // A plain digit run next to a currency is an amount ("Betrag 26001 EUR", "€ 26001"), unless the
+    // currency introduces an amount of its own ("RE 20260001 EUR 100,00").
+    if (bare && !isInvoiceWord(word) && (/^\s*(?:€|EURO?\b)(?!\s*\d)/.test(after) || /€\s*$/.test(before))) continue
     return { split }
   }
   return null
