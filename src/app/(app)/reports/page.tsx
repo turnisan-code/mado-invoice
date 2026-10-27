@@ -3,6 +3,8 @@ import { calcTotals, formatMoney, formatDate, roundCents, today } from '@/lib/ut
 import ReportControls from '@/components/layout/ReportControls'
 import { Suspense } from 'react'
 import { Download } from 'lucide-react'
+import { getT } from '@/lib/i18n/server'
+import { n, type TFn } from '@/lib/i18n'
 
 const KZ: Record<number, { base: string; vat: string }> = {
   20: { base: 'KZ 022 — 20 % Normalsteuersatz, Bemessungsgrundlage', vat: 'USt 20 %' },
@@ -11,8 +13,8 @@ const KZ: Record<number, { base: string; vat: string }> = {
   0:  { base: 'Steuerfreie Umsätze 0 %, Bemessungsgrundlage', vat: 'USt 0 %' },
 }
 
-function periodFor(year: number, quarter: number) {
-  if (quarter === 0) return { start: `${year}-01-01`, end: `${year}-12-31`, label: `Jahr ${year}` }
+function periodFor(year: number, quarter: number, t: TFn) {
+  if (quarter === 0) return { start: `${year}-01-01`, end: `${year}-12-31`, label: t('reports.yearLabel', { year }) }
   const m1 = (quarter - 1) * 3 + 1
   const m3 = quarter * 3
   const lastDay = new Date(year, m3, 0).getDate()
@@ -41,11 +43,12 @@ function docTotals(d: DocRow) {
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ year?: string; quarter?: string }> }) {
   const { year: yearParam, quarter: quarterParam } = await searchParams
+  const { t, lang } = await getT()
   const now = today()
   const currentYear = Number(now.slice(0, 4))
   const year = parseInt(yearParam ?? '', 10) || currentYear
   const quarter = quarterParam === 'all' ? 0 : (parseInt(quarterParam ?? '', 10) || Math.ceil(Number(now.slice(5, 7)) / 3))
-  const period = periodFor(year, quarter)
+  const period = periodFor(year, quarter, t)
 
   const supabase = await createClient()
   const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
@@ -132,8 +135,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     <div className="p-4 sm:p-8 max-w-3xl mx-auto space-y-8">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold">UVA-Report</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Ist-Besteuerung — Beträge nach Zahlungseingang, zum Übertragen in FinanzOnline.</p>
+          <h1 className="text-2xl font-semibold">{t('reports.title')}</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{t('reports.subtitle')}</p>
         </div>
         <Suspense>
           <ReportControls year={year} quarter={quarter} years={years} />
@@ -141,8 +144,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-300">
-        Zeitraum <strong>{period.label}</strong> ({formatDate(period.start)} – {formatDate(period.end)}) · {paymentCount} Zahlungseingang{paymentCount !== 1 ? 'e' : ''} auf {invoiceIds.size} Rechnung{invoiceIds.size !== 1 ? 'en' : ''}
-        {creditNoteCount > 0 && <> · {creditNoteCount} Gutschrift{creditNoteCount !== 1 ? 'en' : ''} abgezogen</>}
+        {t('reports.period')} <strong>{period.label}</strong> ({formatDate(period.start, lang)} – {formatDate(period.end, lang)}) · {n(paymentCount, t('reports.paymentsOne', { count: paymentCount }), t('reports.paymentsOther', { count: paymentCount }))} {n(invoiceIds.size, t('reports.onInvoicesOne', { count: invoiceIds.size }), t('reports.onInvoicesOther', { count: invoiceIds.size }))}
+        {creditNoteCount > 0 && <> · {n(creditNoteCount, t('reports.creditNotesDeductedOne', { count: creditNoteCount }), t('reports.creditNotesDeductedOther', { count: creditNoteCount }))}</>}
       </div>
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
@@ -174,32 +177,32 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
         <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
-          <span className="font-medium text-sm">Zusammenfassung</span>
+          <span className="font-medium text-sm">{t('reports.summary')}</span>
         </div>
         <div className="divide-y divide-neutral-50 dark:divide-neutral-800 text-sm">
-          <Row label="Nettoumsatz gesamt (inkl. nicht steuerbar)" value={formatMoney(netTotal)} />
-          <Row label="Umsatzsteuer" value={formatMoney(totalVat)} />
-          <Row label="Bruttoeinnahmen" value={formatMoney(roundCents(netTotal + totalVat))} bold />
+          <Row label={t('reports.netTotal')} value={formatMoney(netTotal)} />
+          <Row label={t('reports.vat')} value={formatMoney(totalVat)} />
+          <Row label={t('reports.gross')} value={formatMoney(roundCents(netTotal + totalVat))} bold />
         </div>
       </div>
 
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
         <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
-          <span className="font-medium text-sm">Export für Steuerberater</span>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">CSV für Excel (de-AT): alle ausgestellten Rechnungen und Gutschriften bzw. alle Zahlungseingänge des Jahres {year}.</p>
+          <span className="font-medium text-sm">{t('reports.exportTitle')}</span>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">{t('reports.exportHint', { year })}</p>
         </div>
         <div className="px-5 py-4 flex gap-3 flex-wrap">
           <a href={`/api/export/accounting?year=${year}&kind=documents`} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
-            <Download size={14} /> Belege {year}
+            <Download size={14} /> {t('reports.exportDocuments', { year })}
           </a>
           <a href={`/api/export/accounting?year=${year}&kind=payments`} className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300">
-            <Download size={14} /> Zahlungen {year}
+            <Download size={14} /> {t('reports.exportPayments', { year })}
           </a>
         </div>
       </div>
 
       <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        Teilzahlungen werden anteilig berücksichtigt; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
+        {t('reports.footnote')}
       </p>
     </div>
   )

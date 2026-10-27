@@ -8,6 +8,8 @@ import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useT } from '@/lib/i18n/client'
+import { n, type DictKey, type TFn } from '@/lib/i18n'
 
 const statusColor: Record<string, string> = {
   draft: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
@@ -65,7 +67,7 @@ function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label:
 
 const PAGE_SIZE = 25
 
-function exportCSV(quotes: Quote[], todayStr: string) {
+function exportCSV(quotes: Quote[], todayStr: string, t: TFn) {
   const rows = quotes.map(d => [
     d.number ?? '',
     d.clients?.name ?? '',
@@ -76,11 +78,13 @@ function exportCSV(quotes: Quote[], todayStr: string) {
     d.currency ?? 'EUR',
     isExpired(d, todayStr) ? 'expired' : d.status,
   ])
-  downloadCsv(`quotes-${todayStr}.csv`, toCsv(['Number', 'Client', 'Company', 'Date', 'Valid until', 'Total', 'Currency', 'Status'], rows))
+  const header = [t('csv.number'), t('csv.client'), t('csv.company'), t('csv.date'), t('csv.validUntil'), t('csv.total'), t('csv.currency'), t('csv.status')]
+  downloadCsv(`quotes-${todayStr}.csv`, toCsv(header, rows))
 }
 
 export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   const router = useRouter()
+  const { t } = useT()
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'date', dir: 'desc' })
@@ -88,6 +92,9 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState(false)
+
+  const statusLabel = (s: string) => t(`status.${s}` as DictKey)
+  const quoteCount = (count: number) => n(count, t('quotes.countOne', { count }), t('quotes.countOther', { count }))
 
   const clearSelection = useCallback(() => setSelected(new Set()), [])
 
@@ -129,14 +136,14 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
 
   function toggleAll() {
     if (allPageSelected) {
-      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.delete(d.id)); return n })
+      setSelected(s => { const next = new Set(s); pageItems.forEach(d => next.delete(d.id)); return next })
     } else {
-      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.add(d.id)); return n })
+      setSelected(s => { const next = new Set(s); pageItems.forEach(d => next.add(d.id)); return next })
     }
   }
 
   function toggleOne(id: string) {
-    setSelected(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+    setSelected(s => { const next = new Set(s); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }
 
   async function bulkMarkSent() {
@@ -150,39 +157,40 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
     })
     setBulkLoading(false)
     if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
-      toast.error(`Bulk update failed: ${error}`)
+      const { error } = await res.json().catch(() => ({ error: t('common.failed') }))
+      toast.error(t('lists.bulkFailed', { error }))
       return
     }
     const { updated, skipped } = await res.json()
-    toast.success(`${updated} quote${updated !== 1 ? 's' : ''} marked as sent.`)
-    if (skipped) toast.info(`${skipped} quote${skipped !== 1 ? 's were' : ' was'} left alone (already issued).`)
+    toast.success(n(updated, t('quotes.markedSentOne', { count: updated }), t('quotes.markedSentOther', { count: updated })))
+    if (skipped) toast.info(n(skipped, t('quotes.skippedOne', { count: skipped }), t('quotes.skippedOther', { count: skipped })))
     clearSelection()
     router.refresh()
   }
 
   function handleExport() {
     const toExport = hasSelection ? selectedVisible : filtered
-    exportCSV(toExport, todayStr)
-    toast.success(`Exported ${toExport.length} quote${toExport.length !== 1 ? 's' : ''} to CSV.`)
+    exportCSV(toExport, todayStr, t)
+    const count = toExport.length
+    toast.success(n(count, t('quotes.exportedOne', { count }), t('quotes.exportedOther', { count })))
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Quotes</h1>
+        <h1 className="text-2xl font-semibold">{t('quotes.title')}</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleExport}
-            title="Export CSV"
+            title={t('lists.exportCsv')}
             className="flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
           >
             <Download size={14} />
-            <span className="sr-only sm:not-sr-only">Export CSV</span>
+            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
           </button>
           <Link href="/quotes/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-            <Plus size={14} /> New Quote
+            <Plus size={14} /> {t('quotes.new')}
           </Link>
         </div>
       </div>
@@ -190,20 +198,20 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       <div className="flex gap-3 flex-wrap">
         <input
           type="search"
-          aria-label="Search quotes"
+          aria-label={t('quotes.searchLabel')}
           value={q}
           onChange={e => { setQ(e.target.value); setPage(0); clearSelection() }}
-          placeholder="Search number or client…"
+          placeholder={t('lists.searchPlaceholder')}
           className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         />
         <select
-          aria-label="Status"
+          aria-label={t('common.status')}
           value={status}
           onChange={e => { setStatus(e.target.value); setPage(0); clearSelection() }}
           className="text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         >
-          <option value="">All statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          <option value="">{t('status.allStatuses')}</option>
+          {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
         </select>
       </div>
 
@@ -214,11 +222,11 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
             <div className="py-16 text-center">
               <MessageSquareQuote size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
               <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                {q || status ? 'No quotes match your filters.' : 'No quotes yet.'}
+                {q || status ? t('quotes.noMatch') : t('quotes.noneYet')}
               </p>
               {!q && !status && (
                 <Link href="/quotes/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                  Create your first quote
+                  {t('quotes.createFirst')}
                 </Link>
               )}
             </div>
@@ -232,7 +240,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 type="button"
                 onClick={() => toggleOne(doc.id)}
                 aria-pressed={selected.has(doc.id)}
-                aria-label={`Select ${doc.number ?? 'draft'}`}
+                aria-label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })}
                 className="shrink-0 h-11 w-11 -ml-3 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
               >
                 {selected.has(doc.id)
@@ -243,19 +251,19 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
               <Link href={`/quotes/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                 <div className="min-w-0">
                   <p className="font-medium text-sm">
-                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">Draft</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                   </p>
                   <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
                     {doc.clients?.company ?? doc.clients?.name ?? '—'}
                   </p>
                   <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
-                    {doc.date ?? '—'}{doc.due_date && <> · valid until {doc.due_date}</>}
+                    {doc.date ?? '—'}{doc.due_date && <> · {t('quotes.validUntilInline', { date: doc.due_date })}</>}
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                   <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isExpired(doc, todayStr) ? statusColor.rejected : statusColor[doc.status] ?? ''}`}>
-                    {isExpired(doc, todayStr) ? 'expired' : doc.status}
+                    {isExpired(doc, todayStr) ? t('status.expired') : statusLabel(doc.status)}
                   </span>
                 </div>
               </Link>
@@ -268,19 +276,19 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
               <th className="pl-4 py-3 w-8">
-                <button type="button" onClick={toggleAll} aria-pressed={allPageSelected} aria-label="Select all on this page" className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                <button type="button" onClick={toggleAll} aria-pressed={allPageSelected} aria-label={t('lists.selectAll')} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                   {allPageSelected
                     ? <CheckSquare size={14} className="text-blue-500" />
                     : <Square size={14} />
                   }
                 </button>
               </th>
-              <Th col="number" label="Number" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="client" label="Client" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="date" label="Date" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="due_date" label="Valid until" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="total" label="Total" sort={sort} onSort={toggleSort} className="text-right" />
-              <Th col="status" label="Status" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="number" label={t('common.number')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="client" label={t('common.client')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="date" label={t('common.date')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="due_date" label={t('quotes.validUntil')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="total" label={t('common.total')} sort={sort} onSort={toggleSort} className="text-right" />
+              <Th col="status" label={t('common.status')} sort={sort} onSort={toggleSort} className="text-left" />
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
@@ -289,11 +297,11 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 <td colSpan={7} className="px-4 py-16 text-center">
                   <MessageSquareQuote size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
                   <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    {q || status ? 'No quotes match your filters.' : 'No quotes yet.'}
+                    {q || status ? t('quotes.noMatch') : t('quotes.noneYet')}
                   </p>
                   {!q && !status && (
                     <Link href="/quotes/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                      Create your first quote
+                      {t('quotes.createFirst')}
                     </Link>
                   )}
                 </td>
@@ -302,7 +310,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
             {pageItems.map(doc => (
               <tr key={doc.id} className={`transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}>
                 <td className="pl-4 py-3 w-8">
-                  <button type="button" onClick={() => toggleOne(doc.id)} aria-pressed={selected.has(doc.id)} aria-label={`Select ${doc.number ?? 'draft'}`} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                  <button type="button" onClick={() => toggleOne(doc.id)} aria-pressed={selected.has(doc.id)} aria-label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                     {selected.has(doc.id)
                       ? <CheckSquare size={14} className="text-blue-500" />
                       : <Square size={14} />
@@ -311,7 +319,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/quotes/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}
+                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
@@ -320,13 +328,13 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                   <span className="flex items-center gap-2">
                     {doc.due_date ?? '—'}
                     {isExpired(doc, todayStr) && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor.rejected}`}>expired</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor.rejected}`}>{t('status.expired')}</span>
                     )}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{statusLabel(doc.status)}</span>
                 </td>
               </tr>
             ))}
@@ -334,12 +342,12 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
         </table>
       </div>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{filtered.length} quote{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{quoteCount(filtered.length)}</p>
         {filtered.length > PAGE_SIZE && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <button type="button" onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
-            <span>Page {page + 1} of {Math.ceil(filtered.length / PAGE_SIZE)}</span>
-            <button type="button" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
+            <button type="button" onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.prev')}</button>
+            <span>{t('common.pageOf', { page: page + 1, count: Math.ceil(filtered.length / PAGE_SIZE) })}</span>
+            <button type="button" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.next')}</button>
           </div>
         )}
       </div>
@@ -347,7 +355,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       {/* Bulk action bar */}
       <div
         role="region"
-        aria-label="Bulk actions"
+        aria-label={t('lists.bulkActions')}
         aria-hidden={!hasSelection}
         className={`fixed left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
         style={{ bottom: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}
@@ -355,7 +363,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
         <div className="max-w-5xl mx-auto px-4 pb-[4.5rem] md:pb-6">
           <div className="bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
             <span className="text-sm font-medium shrink-0">
-              {selectedCount} selected
+              {t('lists.selected', { count: selectedCount })}
             </span>
             <div className="flex items-center gap-2 flex-1 flex-wrap">
               <button
@@ -364,24 +372,24 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
               >
-                <Send size={12} /> Mark Sent
+                <Send size={12} /> {t('lists.markSent')}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  exportCSV(selectedVisible, todayStr)
-                  toast.success(`Exported ${selectedCount} quote${selectedCount !== 1 ? 's' : ''}.`)
+                  exportCSV(selectedVisible, todayStr, t)
+                  toast.success(n(selectedCount, t('quotes.bulkExportedOne', { count: selectedCount }), t('quotes.bulkExportedOther', { count: selectedCount })))
                 }}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-white/20 dark:bg-neutral-900/20 hover:bg-white/30 dark:hover:bg-neutral-900/30 transition-colors disabled:opacity-50"
               >
-                <Download size={12} /> Export CSV
+                <Download size={12} /> {t('lists.exportCsv')}
               </button>
             </div>
             <button
               type="button"
               onClick={clearSelection}
-              aria-label="Clear selection"
+              aria-label={t('lists.clearSelection')}
               className="shrink-0 h-11 w-11 -my-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-white/20 dark:hover:bg-neutral-900/20 transition-colors"
             >
               <X size={16} />
@@ -393,9 +401,9 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       {/* Bulk action confirmation */}
       <ConfirmDialog
         open={bulkConfirm}
-        title={`Mark as sent ${selectedCount} quote${selectedCount !== 1 ? 's' : ''}?`}
-        description="Drafts get the next quote number assigned; quotes that are already issued are left alone."
-        confirmLabel={bulkLoading ? 'Working…' : 'Confirm'}
+        title={n(selectedCount, t('quotes.confirmTitleOne', { count: selectedCount }), t('quotes.confirmTitleOther', { count: selectedCount }))}
+        description={t('quotes.confirmSentDesc')}
+        confirmLabel={bulkLoading ? t('common.working') : t('common.confirm')}
         busy={bulkLoading}
         onConfirm={() => void bulkMarkSent()}
         onCancel={() => setBulkConfirm(false)}
