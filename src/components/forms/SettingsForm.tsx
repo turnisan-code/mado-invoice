@@ -333,6 +333,7 @@ export default function SettingsForm({ settings }: Props) {
   const [bookamatKeySaved, setBookamatKeySaved] = useState(!!settings?.bookamat_configured)
   const [bookamatCountry, setBookamatCountry] = useState(settings?.bookamat_country ?? 'at')
   const [bookamatBankId, setBookamatBankId] = useState<number | ''>(settings?.bookamat_bank_account_id ?? '')
+  const [bookamatCashId, setBookamatCashId] = useState<number | ''>(settings?.bookamat_cash_account_id ?? '')
   const [bookamatCostId, setBookamatCostId] = useState<number | ''>(settings?.bookamat_cost_account_id ?? '')
   const [bookamatVat0, setBookamatVat0] = useState<number | ''>(settings?.bookamat_vat_account_0 ?? '')
   const [bookamatVat10, setBookamatVat10] = useState<number | ''>(settings?.bookamat_vat_account_10 ?? '')
@@ -653,6 +654,7 @@ export default function SettingsForm({ settings }: Props) {
       ...(bookamatApiKey ? { bookamat_api_key: bookamatApiKey } : {}),
       bookamat_country:         bookamatCountry,
       bookamat_bank_account_id: bookamatBankId   || null,
+      bookamat_cash_account_id: bookamatCashId   || null,
       bookamat_cost_account_id: bookamatCostId   || null,
       bookamat_vat_account_0:   bookamatVat0     || null,
       bookamat_vat_account_10:  bookamatVat10    || null,
@@ -1674,6 +1676,18 @@ export default function SettingsForm({ settings }: Props) {
                         <option value="">{t('common.selectPlaceholder')}</option>
                         {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
                       </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className={lbl} htmlFor={`${uid}-bookamatCashId`}>{t('settings.integrations.bookamat.cashAccount')}</label>
+                      <select id={`${uid}-bookamatCashId`}
+                        value={bookamatCashId}
+                        onChange={e => setBookamatCashId(e.target.value ? Number(e.target.value) : '')}
+                        className={inp}
+                      >
+                        <option value="">{t('common.notUsed')}</option>
+                        {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                      </select>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.integrations.bookamat.cashAccountHint')}</p>
                     </div>
                     <div className="space-y-1.5">
                       <label className={lbl} htmlFor={`${uid}-bookamatCostId`}>{t('settings.integrations.bookamat.incomeAccount')}</label>

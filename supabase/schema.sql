@@ -68,6 +68,8 @@ create table settings (
   bookamat_api_key            text,
   bookamat_country            text default 'at',
   bookamat_bank_account_id    integer,
+  -- Bookamat cash account (Kassa) for payments received in cash.
+  bookamat_cash_account_id    integer,
   bookamat_cost_account_id    integer,
   bookamat_vat_account_0      integer,
   bookamat_vat_account_10     integer,
@@ -234,6 +236,8 @@ create table payments (
   -- 'payment' is money that arrived (the only kind the UVA and revenue figures count);
   -- 'skonto' and 'writeoff' close the remaining balance without a bank transfer.
   kind        text not null default 'payment' check (kind in ('payment','skonto','writeoff')),
+  -- How the money arrived; cash payments book on the Bookamat cash account.
+  method      text not null default 'bank' check (method in ('bank','cash')),
   -- Statement transaction an imported payment came from; unique so a re-import skips it.
   import_ref  text
 );
