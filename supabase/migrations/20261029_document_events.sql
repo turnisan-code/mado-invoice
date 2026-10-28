@@ -23,7 +23,9 @@ create policy "owner" on document_events
   for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- Seed the history from what was recorded before the log existed. Each insert skips rows that
--- are already there, so a re-run adds nothing.
+-- are already there, so a re-run adds nothing. The app stamps sent_at with its own clock but the
+-- event with the database's now(), so an email or reminder it logged counts as the same one when
+-- it lies within five minutes.
 insert into document_events (document_id, created_at, type, detail)
 select d.id, d.issued_at, 'issued', jsonb_build_object('number', d.number)
 from documents d
@@ -36,7 +38,8 @@ from documents d
 where d.sent_at is not null
   and not exists (
     select 1 from document_events e
-    where e.document_id = d.id and e.type = 'emailed' and e.created_at = d.sent_at
+    where e.document_id = d.id and e.type = 'emailed'
+      and e.created_at between d.sent_at - interval '5 minutes' and d.sent_at + interval '5 minutes'
   );
 
 insert into document_events (document_id, created_at, type, detail)
@@ -45,5 +48,7 @@ select r.document_id, r.sent_at, 'reminder_sent',
 from reminder_log r
 where not exists (
   select 1 from document_events e
-  where e.document_id = r.document_id and e.type = 'reminder_sent' and e.created_at = r.sent_at
+  where e.document_id = r.document_id and e.type = 'reminder_sent'
+    and e.detail->>'level' = r.level::text
+    and e.created_at between r.sent_at - interval '5 minutes' and r.sent_at + interval '5 minutes'
 );

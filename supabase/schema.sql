@@ -364,7 +364,7 @@ $$;
 -- tokens come from the document date). A failure anywhere rolls the counter back, so no number
 -- is ever burned. Idempotent for already numbered documents. Issuing keeps an already reached
 -- status (e.g. a deposit recorded before issuing left the invoice 'paid'); only drafts move to
--- 'sent'. Cancelled documents cannot be issued. issued_at records when the number was assigned.
+-- 'sent'. Cancelled documents cannot be issued.
 create or replace function issue_document(p_document_id uuid)
 returns text language plpgsql as $$
 declare
