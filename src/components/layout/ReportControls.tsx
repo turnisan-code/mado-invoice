@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 
 interface Props {
   year: number
-  quarter: number
+  quarter: number // 0 = whole year
   years: number[]
 }
 
@@ -15,14 +15,14 @@ export default function ReportControls({ year, quarter, years }: Props) {
   function navigate(newYear: number, newQuarter: number) {
     const params = new URLSearchParams(searchParams.toString())
     params.set('year', String(newYear))
-    params.set('quarter', String(newQuarter))
+    params.set('quarter', newQuarter === 0 ? 'all' : String(newQuarter))
     router.push(`/reports?${params.toString()}`)
   }
 
   return (
     <div className="flex items-center gap-3 flex-wrap">
       <div className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
-        {[1, 2, 3, 4].map(q => (
+        {[1, 2, 3, 4, 0].map((q, i) => (
           <button
             key={q}
             onClick={() => navigate(year, q)}
@@ -30,9 +30,9 @@ export default function ReportControls({ year, quarter, years }: Props) {
               q === quarter
                 ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'
                 : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
-            } ${q > 1 ? 'border-l border-neutral-200 dark:border-neutral-700' : ''}`}
+            } ${i > 0 ? 'border-l border-neutral-200 dark:border-neutral-700' : ''}`}
           >
-            Q{q}
+            {q === 0 ? 'Jahr' : `Q${q}`}
           </button>
         ))}
       </div>

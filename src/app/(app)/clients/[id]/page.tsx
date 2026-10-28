@@ -55,7 +55,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     d.tax_treatment,
   )
   const totalRevenue = allDocs
-    .filter(d => d.type === 'invoice' && d.status === 'paid')
+    .filter(d => d.type === 'invoice')
     .reduce((s, d) => s + docTotals(d).total_paid, 0)
   const openBalance = allDocs
     .filter(d => d.type === 'invoice' && (d.status === 'sent' || d.status === 'overdue'))

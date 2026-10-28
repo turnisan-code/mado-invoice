@@ -1,5 +1,7 @@
 import { DocumentTotals, Settings, VatRate } from '@/types'
 
+export const roundCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+
 type CalcItem = {
   line_type?: string | null
   sort_order?: number | null
@@ -44,7 +46,7 @@ export function calcTotals(
     let scale = 1
     if (sectionDiscount && sectionDiscount.value > 0 && sectionSum > 0) {
       const discAmt = sectionDiscount.type === 'percent'
-        ? sectionSum * (sectionDiscount.value / 100)
+        ? sectionSum * (Math.min(sectionDiscount.value, 100) / 100)
         : Math.min(sectionDiscount.value, sectionSum)
       scale = (sectionSum - discAmt) / sectionSum
     }
@@ -76,18 +78,25 @@ export function calcTotals(
 
   let discount_amount = 0
   if (discount && discount.value > 0 && subtotal > 0) {
-    discount_amount = discount.type === 'percent'
-      ? subtotal * (discount.value / 100)
-      : Math.min(discount.value, subtotal)
+    discount_amount = roundCents(discount.type === 'percent'
+      ? subtotal * (Math.min(discount.value, 100) / 100)
+      : Math.min(discount.value, subtotal))
     const scale = (subtotal - discount_amount) / subtotal
     vat_groups = vat_groups.map(g => ({ rate: g.rate, base: g.base * scale, amount: g.amount * scale }))
   }
 
-  const total_vat = vat_groups.reduce((s, g) => s + g.amount, 0)
-  const total = subtotal - discount_amount + total_vat
-  const total_paid = payments.reduce((s, p) => s + p.amount, 0)
+  // Round once, at the end, with VAT per rate derived from the rounded base, so the
+  // printed rows always add up to the cent (Netto − Rabatt + Σ USt = Gesamt).
+  vat_groups = vat_groups.map(g => {
+    const base = roundCents(g.base)
+    return { rate: g.rate, base, amount: roundCents(base * (g.rate / 100)) }
+  })
+  const net = roundCents(subtotal)
+  const total_vat = roundCents(vat_groups.reduce((s, g) => s + g.amount, 0))
+  const total = roundCents(net - discount_amount + total_vat)
+  const total_paid = roundCents(payments.reduce((s, p) => s + p.amount, 0))
 
-  return { subtotal, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: total - total_paid }
+  return { subtotal: net, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: roundCents(total - total_paid) }
 }
 
 type TaxNoteSettings = Pick<Settings, 'tax_note_reverse_charge_de' | 'tax_note_reverse_charge_en' | 'tax_note_non_eu_de' | 'tax_note_non_eu_en'>
@@ -143,6 +152,7 @@ export function addDays(date: string, days: number): string {
   return toDateString(new Date(y, m - 1, d + days))
 }
 
+// The owner works in Vienna and the servers run in UTC, so "today" is always the Vienna date.
 export function today(): string {
-  return toDateString(new Date())
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
