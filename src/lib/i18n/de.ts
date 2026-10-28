@@ -1251,7 +1251,6 @@ export const de = {
     itemAdded: 'Leistung zum Katalog hinzugefügt.',
     itemsError: 'Positionen: {error}',
     selectClient: 'Kunde auswählen.',
-    addLineItem: 'Mindestens eine Position hinzufügen.',
     draftSaved: 'Entwurf gespeichert.',
     selectClientFirst: 'Zuerst einen Kunden auswählen.',
     pdfFailed: 'PDF-Erstellung fehlgeschlagen: {error}',
@@ -1264,7 +1263,6 @@ export const de = {
     emailFailed: 'E-Mail konnte nicht gesendet werden.',
     emailSent: 'E-Mail über Gmail gesendet.',
     issued: '{number} ausgestellt.',
-    dateRequired: 'Datum fehlt',
     notSavedToast: 'Nicht gespeichert: {error}',
     removeLine: 'Position entfernen',
     description: 'Beschreibung',
@@ -1410,6 +1408,9 @@ export const de = {
     serviceUntil: 'Bis (optional)',
     servicePeriodLabel: 'Leistungszeitraum {from} – {to}',
     currencyLegacy: 'Wie im ursprünglichen Beleg. Neue Rechnungen und Angebote nur in EUR.',
+  },
+  editor: {
+    settingsTaxNav: 'Steuer',
   },
   reports: {
     title: 'UVA-Report',

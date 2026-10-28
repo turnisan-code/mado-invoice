@@ -1249,7 +1249,6 @@ export const en = {
     itemAdded: 'Item added to catalogue.',
     itemsError: 'Items: {error}',
     selectClient: 'Select a client.',
-    addLineItem: 'Add at least one line item.',
     draftSaved: 'Draft saved.',
     selectClientFirst: 'Select a client first.',
     pdfFailed: 'PDF generation failed: {error}',
@@ -1262,7 +1261,6 @@ export const en = {
     emailFailed: 'Failed to send email.',
     emailSent: 'Email sent via Gmail.',
     issued: 'Issued {number}.',
-    dateRequired: 'Date is required',
     notSavedToast: 'Not saved: {error}',
     removeLine: 'Remove line',
     description: 'Description',
@@ -1408,6 +1406,9 @@ export const en = {
     serviceUntil: 'Until (optional)',
     servicePeriodLabel: 'Service period {from} – {to}',
     currencyLegacy: 'Kept from the original document. New invoices and quotes are in EUR only.',
+  },
+  editor: {
+    settingsTaxNav: 'Tax',
   },
   reports: {
     title: 'UVA Report',
