@@ -86,7 +86,7 @@ export default function MobileHeader() {
         align="bottom"
         title={t('nav.more')}
         hideTitle
-        panelClassName="md:hidden bg-white dark:bg-neutral-900"
+        panelClassName="md:hidden max-h-[90dvh] overflow-y-auto overscroll-contain bg-white dark:bg-neutral-900"
       >
         <div className="pb-[env(safe-area-inset-bottom)]">
           {/* Handle */}
