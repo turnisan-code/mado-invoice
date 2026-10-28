@@ -8,6 +8,8 @@ import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useT } from '@/lib/i18n/client'
+import { n, type DictKey, type TFn } from '@/lib/i18n'
 
 const statusColor: Record<string, string> = {
   draft: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
@@ -107,25 +109,26 @@ function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label:
 
 const PAGE_SIZE = 25
 
-function exportCSV(invoices: Invoice[]) {
+function exportCSV(invoices: Invoice[], t: TFn) {
   const rows = invoices.map(inv => {
-    const t = docTotals(inv)
+    const tot = docTotals(inv)
     return [
       inv.number ?? '',
       inv.clients?.name ?? '',
       inv.clients?.company ?? '',
       csvDate(inv.date),
       csvDate(inv.due_date),
-      t.subtotal - t.discount_amount,
-      t.total_vat,
-      t.total,
-      t.total_paid,
+      tot.subtotal - tot.discount_amount,
+      tot.total_vat,
+      tot.total,
+      tot.total_paid,
       docBalance(inv),
       inv.currency ?? 'EUR',
       inv.status,
     ]
   })
-  downloadCsv(`invoices-${today()}.csv`, toCsv(['Number', 'Client', 'Company', 'Date', 'Due date', 'Net', 'VAT', 'Total', 'Paid', 'Balance', 'Currency', 'Status'], rows))
+  const header = [t('csv.number'), t('csv.client'), t('csv.company'), t('csv.date'), t('csv.dueDate'), t('csv.net'), t('csv.vat'), t('csv.total'), t('csv.paid'), t('csv.balance'), t('csv.currency'), t('csv.status')]
+  downloadCsv(`invoices-${today()}.csv`, toCsv(header, rows))
 }
 
 const inputClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
@@ -134,6 +137,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
+  const { t } = useT()
   const urlQs = searchParams.toString()
   const [filters, setFilters] = useState<Filters>(() => parseFilters(searchParams))
   const pendingUrls = useRef(new Set<string>())
@@ -141,16 +145,19 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState<{ action: string; label: string } | null>(null)
 
+  const statusLabel = (s: string) => t(`status.${s}` as DictKey)
+  const invoiceCount = (count: number) => n(count, t('invoices.countOne', { count }), t('invoices.countOther', { count }))
+
   // Filter state lives in the component for instant feedback and is mirrored to the URL
   // (debounced, so typing does not navigate per keystroke) to survive reloads and back/forward.
   useEffect(() => {
     const next = serializeFilters(filters)
     if (next === urlQs) return
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       pendingUrls.current.add(next)
       router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false })
     }, 250)
-    return () => clearTimeout(t)
+    return () => clearTimeout(timer)
   }, [filters, urlQs, pathname, router])
 
   // URL changes we did not write (dashboard card, sidebar link, back button) replace the state.
@@ -241,14 +248,14 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
   function toggleAll() {
     if (allPageSelected) {
-      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.delete(d.id)); return n })
+      setSelected(s => { const next = new Set(s); pageItems.forEach(d => next.delete(d.id)); return next })
     } else {
-      setSelected(s => { const n = new Set(s); pageItems.forEach(d => n.add(d.id)); return n })
+      setSelected(s => { const next = new Set(s); pageItems.forEach(d => next.add(d.id)); return next })
     }
   }
 
   function toggleOne(id: string) {
-    setSelected(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+    setSelected(s => { const next = new Set(s); if (next.has(id)) next.delete(id); else next.add(id); return next })
   }
 
   async function bulkUpdateStatus(newStatus: string) {
@@ -262,13 +269,18 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
     })
     setBulkLoading(false)
     if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
-      toast.error(`Bulk update failed: ${error}`)
+      const { error } = await res.json().catch(() => ({ error: t('common.failed') }))
+      toast.error(t('lists.bulkFailed', { error }))
       return
     }
     const { updated, skipped } = await res.json()
-    toast.success(`${updated} invoice${updated !== 1 ? 's' : ''} marked as ${newStatus}.`)
-    if (skipped) toast.info(`${skipped} invoice${skipped !== 1 ? 's were' : ' was'} left alone (already ${newStatus === 'sent' ? 'issued' : 'paid or cancelled'}).`)
+    const vars = { count: updated, status: statusLabel(newStatus) }
+    toast.success(n(updated, t('invoices.markedOne', vars), t('invoices.markedOther', vars)))
+    if (skipped) {
+      toast.info(newStatus === 'sent'
+        ? n(skipped, t('invoices.skippedSentOne', { count: skipped }), t('invoices.skippedSentOther', { count: skipped }))
+        : n(skipped, t('invoices.skippedPaidOne', { count: skipped }), t('invoices.skippedPaidOther', { count: skipped })))
+    }
     clearSelection()
     router.refresh()
   }
@@ -284,39 +296,40 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
     })
     setBulkLoading(false)
     if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: 'Failed' }))
-      toast.error(`Delete failed: ${error}`)
+      const { error } = await res.json().catch(() => ({ error: t('common.failed') }))
+      toast.error(t('lists.deleteFailed', { error }))
       return
     }
     const { deleted, skipped } = await res.json()
-    toast.success(`${deleted} draft${deleted !== 1 ? 's' : ''} deleted.`)
-    if (skipped) toast.info(`${skipped} issued invoice${skipped !== 1 ? 's were' : ' was'} kept — issued documents cannot be deleted, cancel them instead.`)
+    toast.success(n(deleted, t('invoices.deletedOne', { count: deleted }), t('invoices.deletedOther', { count: deleted })))
+    if (skipped) toast.info(n(skipped, t('invoices.deleteSkippedOne', { count: skipped }), t('invoices.deleteSkippedOther', { count: skipped })))
     clearSelection()
     router.refresh()
   }
 
   function handleExport() {
     const toExport = hasSelection ? selectedVisible : filtered
-    exportCSV(toExport)
-    toast.success(`Exported ${toExport.length} invoice${toExport.length !== 1 ? 's' : ''} to CSV.`)
+    exportCSV(toExport, t)
+    const count = toExport.length
+    toast.success(n(count, t('invoices.exportedOne', { count }), t('invoices.exportedOther', { count })))
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Invoices</h1>
+        <h1 className="text-2xl font-semibold">{t('invoices.title')}</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleExport}
-            title="Export CSV"
+            title={t('lists.exportCsv')}
             className="flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
           >
             <Download size={14} />
-            <span className="sr-only sm:not-sr-only">Export CSV</span>
+            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
           </button>
           <Link href="/invoices/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-            <Plus size={14} /> New Invoice
+            <Plus size={14} /> {t('invoices.new')}
           </Link>
         </div>
       </div>
@@ -324,34 +337,34 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       <div className="flex gap-3 flex-wrap items-center">
         <input
           type="search"
-          aria-label="Search invoices"
+          aria-label={t('invoices.searchLabel')}
           value={q}
           onChange={e => updateFilter({ q: e.target.value })}
-          placeholder="Search number or client…"
+          placeholder={t('lists.searchPlaceholder')}
           className={`flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 ${inputClass}`}
         />
         <select
-          aria-label="Status"
+          aria-label={t('common.status')}
           value={status}
           onChange={e => updateFilter({ status: e.target.value })}
           className={inputClass}
         >
-          <option value="">All statuses</option>
-          {STATUSES.map(s => <option key={s} value={s}>{s === 'outstanding' ? 'Outstanding (sent + overdue)' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          <option value="">{t('status.allStatuses')}</option>
+          {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
         </select>
         <select
-          aria-label="Client"
+          aria-label={t('common.client')}
           value={client}
           onChange={e => updateFilter({ client: e.target.value })}
           className={`${inputClass} max-w-48`}
         >
-          <option value="">All clients</option>
+          <option value="">{t('lists.allClients')}</option>
           {clientOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
         <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-          <input type="date" value={from} max={to || undefined} onChange={e => updateFilter({ from: e.target.value })} aria-label="From date" className={inputClass} />
+          <input type="date" value={from} max={to || undefined} onChange={e => updateFilter({ from: e.target.value })} aria-label={t('lists.fromDate')} className={inputClass} />
           <span>–</span>
-          <input type="date" value={to} min={from || undefined} onChange={e => updateFilter({ to: e.target.value })} aria-label="To date" className={inputClass} />
+          <input type="date" value={to} min={from || undefined} onChange={e => updateFilter({ to: e.target.value })} aria-label={t('lists.toDate')} className={inputClass} />
         </div>
         {hasFilters && (
           <button
@@ -359,7 +372,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
             onClick={() => updateFilter({ status: '', q: '', from: '', to: '', client: '' })}
             className="flex items-center gap-1 text-xs px-2 py-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
           >
-            <X size={12} /> Clear filters
+            <X size={12} /> {t('lists.clearFilters')}
           </button>
         )}
       </div>
@@ -371,11 +384,11 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
             <div className="py-16 text-center">
               <FileText size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
               <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                {hasFilters ? 'No invoices match your filters.' : 'No invoices yet.'}
+                {hasFilters ? t('invoices.noMatch') : t('invoices.noneYet')}
               </p>
               {!hasFilters && (
                 <Link href="/invoices/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                  Create your first invoice
+                  {t('invoices.createFirst')}
                 </Link>
               )}
             </div>
@@ -391,7 +404,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                   type="button"
                   onClick={() => toggleOne(doc.id)}
                   aria-pressed={selected.has(doc.id)}
-                  aria-label={`Select ${doc.number ?? 'draft'}`}
+                  aria-label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })}
                   className="shrink-0 h-11 w-11 -ml-3 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
                 >
                   {selected.has(doc.id)
@@ -402,7 +415,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 <Link href={`/invoices/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-sm">
-                      {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">Draft</span>}
+                      {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
                       {doc.clients?.company ?? doc.clients?.name ?? '—'}
@@ -412,9 +425,9 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
                     {isOpen(doc) && balance !== docTotal(doc) && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400">Open {formatMoney(balance, doc.currency ?? undefined)}</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices.openAmount', { amount: formatMoney(balance, doc.currency ?? undefined) })}</p>
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{statusLabel(doc.status)}</span>
                   </div>
                 </Link>
               </div>
@@ -422,8 +435,8 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           })}
           {filtered.length > 0 && (
             <div className="flex items-center justify-between px-4 py-3 text-xs bg-neutral-50 dark:bg-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400">Total {formatMoney(totals.total, currency)}</span>
-              <span className="font-semibold">Open {formatMoney(totals.open, currency)}</span>
+              <span className="text-neutral-500 dark:text-neutral-400">{t('invoices.totalAmount', { amount: formatMoney(totals.total, currency) })}</span>
+              <span className="font-semibold">{t('invoices.openAmount', { amount: formatMoney(totals.open, currency) })}</span>
             </div>
           )}
         </div>
@@ -433,20 +446,20 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
               <th className="pl-4 py-3 w-8">
-                <button type="button" onClick={toggleAll} aria-pressed={allPageSelected} aria-label="Select all on this page" className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                <button type="button" onClick={toggleAll} aria-pressed={allPageSelected} aria-label={t('lists.selectAll')} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                   {allPageSelected
                     ? <CheckSquare size={14} className="text-blue-500" />
                     : <Square size={14} />
                   }
                 </button>
               </th>
-              <Th col="number" label="Number" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="client" label="Client" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="date" label="Date" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="due_date" label="Due" sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="total" label="Total" sort={sort} onSort={toggleSort} className="text-right" />
-              <Th col="balance" label="Balance" sort={sort} onSort={toggleSort} className="text-right" />
-              <Th col="status" label="Status" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="number" label={t('common.number')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="client" label={t('common.client')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="date" label={t('common.date')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="due_date" label={t('invoices.due')} sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="total" label={t('common.total')} sort={sort} onSort={toggleSort} className="text-right" />
+              <Th col="balance" label={t('invoices.balance')} sort={sort} onSort={toggleSort} className="text-right" />
+              <Th col="status" label={t('common.status')} sort={sort} onSort={toggleSort} className="text-left" />
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
@@ -455,11 +468,11 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 <td colSpan={8} className="px-4 py-16 text-center">
                   <FileText size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
                   <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    {hasFilters ? 'No invoices match your filters.' : 'No invoices yet.'}
+                    {hasFilters ? t('invoices.noMatch') : t('invoices.noneYet')}
                   </p>
                   {!hasFilters && (
                     <Link href="/invoices/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                      Create your first invoice
+                      {t('invoices.createFirst')}
                     </Link>
                   )}
                 </td>
@@ -471,7 +484,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 className={`transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}
               >
                 <td className="pl-4 py-3 w-8">
-                  <button type="button" onClick={() => toggleOne(doc.id)} aria-pressed={selected.has(doc.id)} aria-label={`Select ${doc.number ?? 'draft'}`} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                  <button type="button" onClick={() => toggleOne(doc.id)} aria-pressed={selected.has(doc.id)} aria-label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                     {selected.has(doc.id)
                       ? <CheckSquare size={14} className="text-blue-500" />
                       : <Square size={14} />
@@ -480,7 +493,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}
+                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
@@ -491,7 +504,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{doc.status}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[doc.status] ?? ''}`}>{statusLabel(doc.status)}</span>
                 </td>
               </tr>
             ))}
@@ -500,11 +513,11 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
             <tfoot className="border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-xs">
               <tr>
                 <td colSpan={5} className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400">
-                  {filtered.length} invoice{filtered.length !== 1 ? 's' : ''}{hasFilters ? ' (filtered)' : ''}
+                  {invoiceCount(filtered.length)}{hasFilters ? ` ${t('lists.filtered')}` : ''}
                 </td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.total, currency)}</td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.open, currency)}</td>
-                <td className="px-4 py-2.5 text-neutral-400 dark:text-neutral-500">open</td>
+                <td className="px-4 py-2.5 text-neutral-400 dark:text-neutral-500">{t('invoices.open')}</td>
               </tr>
             </tfoot>
           )}
@@ -512,12 +525,12 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       </div>
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{invoiceCount(filtered.length)}</p>
         {filtered.length > PAGE_SIZE && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <button type="button" onClick={() => setPage(page - 1)} disabled={page <= 1} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
-            <span>Page {page} of {pageCount}</span>
-            <button type="button" onClick={() => setPage(page + 1)} disabled={page >= pageCount} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
+            <button type="button" onClick={() => setPage(page - 1)} disabled={page <= 1} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.prev')}</button>
+            <span>{t('common.pageOf', { page, count: pageCount })}</span>
+            <button type="button" onClick={() => setPage(page + 1)} disabled={page >= pageCount} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.next')}</button>
           </div>
         )}
       </div>
@@ -525,7 +538,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       {/* Bulk action bar */}
       <div
         role="region"
-        aria-label="Bulk actions"
+        aria-label={t('lists.bulkActions')}
         aria-hidden={!hasSelection}
         className={`fixed left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
         style={{ bottom: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}
@@ -533,49 +546,49 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
         <div className="max-w-5xl mx-auto px-4 pb-[4.5rem] md:pb-6">
           <div className="bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 flex-wrap">
             <span className="text-sm font-medium shrink-0">
-              {selectedCount} selected
+              {t('lists.selected', { count: selectedCount })}
             </span>
             <div className="flex items-center gap-2 flex-1 flex-wrap">
               <button
                 type="button"
-                onClick={() => setBulkConfirm({ action: 'sent', label: 'Mark as sent' })}
+                onClick={() => setBulkConfirm({ action: 'sent', label: t('invoices.actionSent') })}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
               >
-                <Send size={12} /> Mark Sent
+                <Send size={12} /> {t('lists.markSent')}
               </button>
               <button
                 type="button"
-                onClick={() => setBulkConfirm({ action: 'paid', label: 'Mark as paid' })}
+                onClick={() => setBulkConfirm({ action: 'paid', label: t('invoices.actionPaid') })}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
               >
-                <CheckCircle size={12} /> Mark Paid
+                <CheckCircle size={12} /> {t('lists.markPaid')}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  exportCSV(selectedVisible)
-                  toast.success(`Exported ${selectedCount} invoice${selectedCount !== 1 ? 's' : ''}.`)
+                  exportCSV(selectedVisible, t)
+                  toast.success(n(selectedCount, t('invoices.bulkExportedOne', { count: selectedCount }), t('invoices.bulkExportedOther', { count: selectedCount })))
                 }}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-white/20 dark:bg-neutral-900/20 hover:bg-white/30 dark:hover:bg-neutral-900/30 transition-colors disabled:opacity-50"
               >
-                <Download size={12} /> Export CSV
+                <Download size={12} /> {t('lists.exportCsv')}
               </button>
               <button
                 type="button"
-                onClick={() => setBulkConfirm({ action: 'delete', label: 'Delete' })}
+                onClick={() => setBulkConfirm({ action: 'delete', label: t('invoices.actionDelete') })}
                 disabled={bulkLoading}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
               >
-                <Trash2 size={12} /> Delete
+                <Trash2 size={12} /> {t('common.delete')}
               </button>
             </div>
             <button
               type="button"
               onClick={clearSelection}
-              aria-label="Clear selection"
+              aria-label={t('lists.clearSelection')}
               className="shrink-0 h-11 w-11 -my-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-white/20 dark:hover:bg-neutral-900/20 transition-colors"
             >
               <X size={16} />
@@ -587,14 +600,14 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       {/* Bulk action confirmation */}
       <ConfirmDialog
         open={!!bulkConfirm}
-        title={bulkConfirm ? `${bulkConfirm.label} ${selectedCount} invoice${selectedCount !== 1 ? 's' : ''}?` : ''}
+        title={bulkConfirm ? n(selectedCount, t('invoices.confirmTitleOne', { action: bulkConfirm.label, count: selectedCount }), t('invoices.confirmTitleOther', { action: bulkConfirm.label, count: selectedCount })) : ''}
         description={
-          bulkConfirm?.action === 'delete' ? 'Only drafts are deleted — issued invoices are kept. This cannot be undone.'
-          : bulkConfirm?.action === 'paid' ? 'The open balance of each invoice is recorded as a payment dated today. Invoices that are already paid or cancelled are left alone; drafts are issued first.'
-          : bulkConfirm?.action === 'sent' ? 'Drafts get the next invoice number assigned; invoices that are already issued are left alone.'
+          bulkConfirm?.action === 'delete' ? t('invoices.confirmDeleteDesc')
+          : bulkConfirm?.action === 'paid' ? t('invoices.confirmPaidDesc')
+          : bulkConfirm?.action === 'sent' ? t('invoices.confirmSentDesc')
           : undefined
         }
-        confirmLabel={bulkLoading ? 'Working…' : 'Confirm'}
+        confirmLabel={bulkLoading ? t('common.working') : t('common.confirm')}
         destructive={bulkConfirm?.action === 'delete'}
         busy={bulkLoading}
         onConfirm={() => { if (!bulkConfirm) return; if (bulkConfirm.action === 'delete') void bulkDelete(); else void bulkUpdateStatus(bulkConfirm.action) }}

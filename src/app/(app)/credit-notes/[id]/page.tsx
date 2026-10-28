@@ -11,10 +11,12 @@ import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+import { getT } from '@/lib/i18n/server'
 
 export default async function CreditNoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
+  const { t, lang } = await getT()
 
   const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }] = await Promise.all([
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'credit_note').single(),
@@ -33,14 +35,14 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <Link href="/credit-notes" aria-label="Back to credit notes" className="h-11 w-11 -m-3.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
+          <Link href="/credit-notes" aria-label={t('documents.backToCreditNotes')} className="h-11 w-11 -m-3.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
-            {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">Issued {formatDate(doc.issued_at)}</p>}
+            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
+            {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('documents.issued', { date: formatDate(doc.issued_at, lang) })}</p>}
           </div>
-          {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">Storno zu {reference.number}</span>}
+          {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />

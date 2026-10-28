@@ -4,6 +4,8 @@ import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatMoney } from '@/lib/utils/document'
+import { getT } from '@/lib/i18n/server'
+import type { DictKey } from '@/lib/i18n'
 
 const statusColor: Record<string, string> = {
   active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
@@ -21,12 +23,6 @@ const docStatusColor: Record<string, string> = {
   cancelled: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
 }
 
-const typeLabel: Record<string, string> = {
-  invoice: 'Invoice',
-  quote: 'Quote',
-  credit_note: 'Credit Note',
-}
-
 const typeRoute: Record<string, string> = {
   invoice: 'invoices',
   quote: 'quotes',
@@ -36,6 +32,8 @@ const typeRoute: Record<string, string> = {
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
+  const { t } = await getT()
+  const statusLabel = (status: string) => t(`status.${status}` as DictKey)
 
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
   if (!client) notFound()
@@ -76,7 +74,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-start gap-4">
-        <Link href="/clients" aria-label="Back to clients" className="h-11 w-11 -mx-3.5 -mb-3.5 -mt-2.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
+        <Link href="/clients" aria-label={t('clients.backToClients')} className="h-11 w-11 -mx-3.5 -mb-3.5 -mt-2.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
           <ArrowLeft size={16} />
         </Link>
         <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -88,7 +86,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             {client.company && client.name && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{client.name}</p>}
           </div>
           <span className={`text-xs px-2.5 py-1 rounded-full font-medium ml-auto shrink-0 ${statusColor[client.status] ?? 'text-neutral-500 bg-neutral-100'}`}>
-            {client.status}
+            {statusLabel(client.status)}
           </span>
         </div>
       </div>
@@ -96,17 +94,17 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4">
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Total revenue</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">{t('clients.totalRevenue')}</p>
           <p className="text-lg font-semibold">{formatMoney(totalRevenue, client.currency)}</p>
         </div>
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4">
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Open balance</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">{t('clients.openBalance')}</p>
           <p className={`text-lg font-semibold ${openBalance > 0 ? 'text-amber-600' : ''}`}>
             {formatMoney(openBalance, client.currency)}
           </p>
         </div>
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4">
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">Invoices</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">{t('clients.invoices')}</p>
           <p className="text-lg font-semibold">{invoiceCount}</p>
         </div>
       </div>
@@ -121,22 +119,22 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         {/* Documents */}
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
-            <span className="text-sm font-medium">Documents</span>
+            <span className="text-sm font-medium">{t('clients.documents')}</span>
             <div className="flex gap-2">
               <Link href={`/quotes/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors dark:text-neutral-300">
-                <Plus size={11} /> Quote
+                <Plus size={11} /> {t('clients.quote')}
               </Link>
               <Link href={`/invoices/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-                <Plus size={11} /> Invoice
+                <Plus size={11} /> {t('clients.invoice')}
               </Link>
             </div>
           </div>
           <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {allDocs.length === 0 && (
               <div className="px-5 py-12 text-center">
-                <p className="text-sm text-neutral-400 dark:text-neutral-500">No documents yet.</p>
+                <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('clients.noDocuments')}</p>
                 <Link href={`/invoices/new?client=${id}`} className="mt-2 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                  Create first invoice
+                  {t('clients.createFirstInvoice')}
                 </Link>
               </div>
             )}
@@ -150,13 +148,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">
-                      {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500 font-normal">Draft</span>}
+                      {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
                     </div>
-                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{typeLabel[doc.type]} · {doc.date}</div>
+                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {doc.date}</div>
                   </div>
                   <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${docStatusColor[doc.status] ?? ''}`}>
-                    {doc.status}
+                    {statusLabel(doc.status)}
                   </span>
                 </Link>
               )

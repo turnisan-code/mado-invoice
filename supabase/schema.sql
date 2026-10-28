@@ -100,7 +100,9 @@ create table settings (
   reminder_interest_rate      numeric not null default 0,
   -- Skonto pre-filled on new invoices.
   default_skonto_percent      numeric,
-  default_skonto_days         integer
+  default_skonto_days         integer,
+  -- Language of the app interface; documents keep their own language.
+  ui_language                 text not null default 'en' check (ui_language in ('de','en'))
 );
 
 -- The app and next_document_number read "the" settings row; it must exist.

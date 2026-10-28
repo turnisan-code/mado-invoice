@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { Currency, PaymentKind } from '@/types'
+import { useT } from '@/lib/i18n/client'
 
 interface Payment {
   id: string
@@ -34,8 +35,6 @@ interface Props {
   bookamatBookingId?: string | null
   generatePdfForBookamat?: () => Promise<{ base64: string; filename: string } | null>
 }
-
-const KIND_LABEL: Record<PaymentKind, string | null> = { payment: null, skonto: 'Skonto', writeoff: 'Written off' }
 
 export default function PaymentPanel({
   documentId, number, status, date, total, payments: initial, currency, skontoPercent, skontoDays,
@@ -62,6 +61,9 @@ export default function PaymentPanel({
   const [bookamatId, setBookamatId] = useState(bookamatBookingId ?? null)
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
+
+  const kindLabel: Record<PaymentKind, string | null> = { payment: null, skonto: t('payments.skonto'), writeoff: t('payments.writtenOff') }
 
   // The balance counts every kind: a Skonto taken or a write-off closes the invoice like money would.
   const totalPaid = roundCents(payments.reduce((s, p) => s + p.amount, 0))
@@ -94,15 +96,15 @@ export default function PaymentPanel({
     setPayments(next)
 
     const newTotal = next.reduce((s, p) => s + p.amount, 0)
-    const label = row.kind === 'skonto' ? 'Skonto recorded' : row.kind === 'writeoff' ? 'Remaining balance written off' : 'Payment recorded'
+    const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
     if (newTotal >= total - 0.005) {
       await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId)
-      toast.success(`${label} — invoice marked as paid.`)
+      toast.success(t('payments.recordedAndPaid', { label }))
       if (!bookamatId && bookamatConfigured) {
         setShowBookamatPrompt(true)
       }
     } else {
-      toast.success(`${label}.`)
+      toast.success(t('payments.recorded', { label }))
     }
 
     setSaving(false)
@@ -110,10 +112,10 @@ export default function PaymentPanel({
   }
 
   async function addPayment(allowOverpayment = false) {
-    if (!number) { toast.error('Issue the invoice before recording a payment.'); return }
-    if (status === 'cancelled') { toast.error('This invoice is cancelled — record payments on the replacement invoice.'); return }
+    if (!number) { toast.error(t('payments.issueBeforePayment')); return }
+    if (status === 'cancelled') { toast.error(t('payments.cancelledInvoice')); return }
     const amt = amount ?? 0
-    if (!amt || amt <= 0) { toast.error('Enter a valid amount.'); return }
+    if (!amt || amt <= 0) { toast.error(t('payments.invalidAmount')); return }
     if (amt > balanceDue + 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
     setConfirmOverpay(false)
     await recordRow({ date: payDate, amount: amt, note: note || null, kind: 'payment' })
@@ -154,7 +156,7 @@ export default function PaymentPanel({
     if (error) { toast.error(error.message); return }
     setBookamatId(null)
     setConfirmReset(false)
-    toast.success('Sync reset — you can sync again after deleting the booking in Bookamat.')
+    toast.success(t('payments.syncReset'))
   }
 
   async function syncToBookamat() {
@@ -181,10 +183,10 @@ export default function PaymentPanel({
     if (!res.ok) {
       setSyncingBookamat(false)
       if (res.status === 409) {
-        toast.info('Already synced to Bookamat.')
+        toast.info(t('payments.alreadySynced'))
       } else {
-        const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
-        toast.error(`Bookamat sync failed: ${error}`)
+        const { error } = await res.json().catch(() => ({ error: t('common.unknownError') }))
+        toast.error(t('payments.syncFailed', { error }))
       }
       return
     }
@@ -194,7 +196,7 @@ export default function PaymentPanel({
 
     // Attach pre-generated PDF
     if (!pdfResult) {
-      toast.success('Synced to Bookamat.')
+      toast.success(t('payments.syncedPlain'))
     } else {
       try {
         const attachRes = await fetch('/api/bookamat/attach-pdf', {
@@ -204,14 +206,14 @@ export default function PaymentPanel({
         })
 
         if (attachRes.ok) {
-          toast.success('Synced to Bookamat — invoice PDF attached.')
+          toast.success(t('payments.syncedWithPdf'))
         } else {
-          const { error } = await attachRes.json().catch(() => ({ error: 'Unknown error' }))
-          toast.warning(`Synced, but PDF not attached: ${error}`)
+          const { error } = await attachRes.json().catch(() => ({ error: t('common.unknownError') }))
+          toast.warning(t('payments.pdfNotAttached', { error }))
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        toast.warning(`Synced, but PDF not attached: ${msg}`)
+        toast.warning(t('payments.pdfNotAttached', { error: msg }))
       }
     }
 
@@ -223,10 +225,10 @@ export default function PaymentPanel({
   return (
     <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Payments</h2>
+        <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{t('payments.title')}</h2>
         <div className="text-sm text-neutral-500 dark:text-neutral-400">
-          Balance: <span className={overpaid ? 'text-red-600 font-semibold' : fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
-            {overpaid ? `Overpaid by ${formatMoney(-balanceDue, currency)}` : fullyPaid ? 'Paid in full' : formatMoney(balanceDue, currency)}
+          {t('payments.balance')} <span className={overpaid ? 'text-red-600 font-semibold' : fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
+            {overpaid ? t('payments.overpaidBy', { amount: formatMoney(-balanceDue, currency) }) : fullyPaid ? t('payments.paidInFull') : formatMoney(balanceDue, currency)}
           </span>
         </div>
       </div>
@@ -237,14 +239,14 @@ export default function PaymentPanel({
             <div key={p.id} className="flex items-center py-1 sm:py-2 gap-3">
               <span className="text-neutral-500 dark:text-neutral-400 w-24 shrink-0">{p.date}</span>
               <span className="font-medium">{formatMoney(p.amount, currency)}</span>
-              {KIND_LABEL[p.kind] && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{KIND_LABEL[p.kind]}</span>
+              {kindLabel[p.kind] && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{kindLabel[p.kind]}</span>
               )}
               {p.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
               <button
                 type="button"
                 onClick={() => setPendingRemove(p)}
-                aria-label={`Remove payment of ${formatMoney(p.amount, currency)} from ${p.date}`}
+                aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: p.date })}
                 className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
@@ -258,33 +260,33 @@ export default function PaymentPanel({
         <div className="flex flex-wrap gap-2">
           {offerSkonto && (
             <button type="button" onClick={() => settleRemaining('skonto')} disabled={saving} className={settleBtn}>
-              Settle remaining {formatMoney(balanceDue, currency)} as Skonto
+              {t('payments.settleSkonto', { amount: formatMoney(balanceDue, currency) })}
             </button>
           )}
           {offerWriteoff && (
             <button type="button" onClick={() => settleRemaining('writeoff')} disabled={saving} className={settleBtn}>
-              Write off remaining {formatMoney(balanceDue, currency)}
+              {t('payments.writeOff', { amount: formatMoney(balanceDue, currency) })}
             </button>
           )}
         </div>
       )}
 
       {!fullyPaid && !number && (
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 pt-1">Issue the invoice before recording payments.</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 pt-1">{t('payments.issueFirst')}</p>
       )}
       {!fullyPaid && canRecord && (
         <div className="space-y-2 pt-1">
           <div className="flex gap-2">
             <Input
               type="date"
-              aria-label="Payment date"
+              aria-label={t('payments.paymentDate')}
               value={payDate}
               onChange={e => setPayDate(e.target.value)}
               className="flex-1 min-w-0"
             />
             <MoneyInput
-              aria-label={`Amount (${currency})`}
-              placeholder={`Amount (${currency})`}
+              aria-label={t('payments.amount', { currency })}
+              placeholder={t('payments.amount', { currency })}
               value={amount}
               onValueChange={setAmount}
               className="flex-1 min-w-0"
@@ -292,8 +294,8 @@ export default function PaymentPanel({
           </div>
           <div className="flex gap-2">
             <Input
-              aria-label="Note (optional)"
-              placeholder="Note (optional)"
+              aria-label={t('payments.note')}
+              placeholder={t('payments.note')}
               value={note}
               onChange={e => setNote(e.target.value)}
               className="flex-1 min-w-0"
@@ -306,7 +308,7 @@ export default function PaymentPanel({
               className="shrink-0 flex items-center gap-1.5 h-8"
             >
               <Plus size={13} />
-              {saving ? 'Saving…' : 'Add'}
+              {saving ? t('common.saving') : t('payments.add')}
             </Button>
           </div>
         </div>
@@ -318,14 +320,14 @@ export default function PaymentPanel({
           {bookamatId ? (
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                <CheckCircle2 size={13} /> Synced to Bookamat
+                <CheckCircle2 size={13} /> {t('payments.synced')}
               </span>
               <button
                 type="button"
                 onClick={() => setConfirmReset(true)}
                 className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
-                Reset sync
+                {t('payments.resetSync')}
               </button>
             </div>
           ) : fullyPaid ? (
@@ -334,19 +336,19 @@ export default function PaymentPanel({
               onClick={() => setShowBookamatPrompt(true)}
               className="text-xs font-medium px-2 py-2 -mx-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors flex items-center gap-1"
             >
-              Sync to Bookamat →
+              {t('payments.syncTo')}
             </button>
           ) : (
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">Sync to Bookamat becomes available once the invoice is fully paid</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('payments.syncAvailableWhenPaid')}</span>
           )}
         </div>
       )}
 
       <ConfirmDialog
         open={confirmOverpay}
-        title="Record an overpayment?"
-        description={`${formatMoney(amount ?? 0, currency)} is more than the open balance of ${formatMoney(Math.max(balanceDue, 0), currency)}.`}
-        confirmLabel="Record anyway"
+        title={t('payments.overpayTitle')}
+        description={t('payments.overpayDesc', { amount: formatMoney(amount ?? 0, currency), balance: formatMoney(Math.max(balanceDue, 0), currency) })}
+        confirmLabel={t('payments.recordAnyway')}
         busy={saving}
         onConfirm={() => void addPayment(true)}
         onCancel={() => setConfirmOverpay(false)}
@@ -354,9 +356,9 @@ export default function PaymentPanel({
 
       <ConfirmDialog
         open={!!pendingRemove}
-        title="Remove this payment?"
-        description={pendingRemove ? `${formatMoney(pendingRemove.amount, currency)} from ${pendingRemove.date} is removed and the open balance goes back up.` : undefined}
-        confirmLabel={removing ? 'Removing…' : 'Remove'}
+        title={t('payments.removeTitle')}
+        description={pendingRemove ? t('payments.removeDesc', { amount: formatMoney(pendingRemove.amount, currency), date: pendingRemove.date }) : undefined}
+        confirmLabel={removing ? t('common.removing') : t('common.remove')}
         destructive
         busy={removing}
         onConfirm={() => { if (pendingRemove) void removePayment(pendingRemove.id) }}
@@ -365,9 +367,9 @@ export default function PaymentPanel({
 
       <ConfirmDialog
         open={confirmReset}
-        title="Reset the Bookamat sync?"
-        description="Only do this after deleting the booking in Bookamat; the invoice can then be synced again."
-        confirmLabel={resetting ? 'Resetting…' : 'Reset sync'}
+        title={t('payments.resetTitle')}
+        description={t('payments.resetDesc')}
+        confirmLabel={resetting ? t('payments.resetting') : t('payments.resetSync')}
         busy={resetting}
         onConfirm={resetBookamatSync}
         onCancel={() => setConfirmReset(false)}
@@ -375,10 +377,10 @@ export default function PaymentPanel({
 
       <ConfirmDialog
         open={showBookamatPrompt}
-        title="Sync to Bookamat?"
-        description="This invoice is fully paid. Add it to your Bookamat bookkeeping?"
-        confirmLabel={syncingBookamat ? 'Syncing…' : 'Sync to Bookamat'}
-        cancelLabel="Skip"
+        title={t('payments.syncTitle')}
+        description={t('payments.syncDesc')}
+        confirmLabel={syncingBookamat ? t('payments.syncing') : t('payments.syncButton')}
+        cancelLabel={t('common.skip')}
         busy={syncingBookamat}
         onConfirm={syncToBookamat}
         onCancel={() => setShowBookamatPrompt(false)}

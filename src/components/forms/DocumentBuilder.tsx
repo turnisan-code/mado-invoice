@@ -20,6 +20,8 @@ import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { useT } from '@/lib/i18n/client'
+import type { DictKey, TFn } from '@/lib/i18n'
 
 interface LineItem {
   id: string
@@ -98,15 +100,15 @@ async function postJson<T = Record<string, unknown>>(url: string, body?: object)
   return data as T
 }
 
-function errorMessage(e: unknown) {
-  return e instanceof Error ? e.message : 'Unknown error'
+function errorMessage(e: unknown, fallback: string) {
+  return e instanceof Error ? e.message : fallback
 }
 
-function notifyDriveUpload(webViewLink?: string | null) {
+function notifyDriveUpload(t: TFn, webViewLink?: string | null) {
   toast.success(
     webViewLink
-      ? <span>Uploaded to Drive — <a href={webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>
-      : 'Uploaded to Drive.',
+      ? <span>{t('builder.driveUploaded')}<a href={webViewLink} target="_blank" rel="noopener" className="underline">{t('common.open')}</a></span>
+      : t('builder.driveUploadedPlain'),
     { duration: 5000 }
   )
 }
@@ -117,6 +119,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
 ) {
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
 
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
   const [date, setDate] = useState(doc?.date ?? today())
@@ -211,9 +214,9 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const client = clients.find(c => c.id === clientId)
   const discount = discountType && discountValue > 0 ? { type: discountType, value: discountValue } : null
   const saveStatus = saveError
-    ? { text: `Not saved — ${saveError}`, cls: 'text-red-500' }
-    : autoSaving ? { text: 'Saving…', cls: '' }
-    : lastSaved ? { text: `Saved ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, cls: '' }
+    ? { text: t('builder.notSaved', { error: saveError }), cls: 'text-red-500' }
+    : autoSaving ? { text: t('common.saving'), cls: '' }
+    : lastSaved ? { text: t('builder.saved', { time: lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }), cls: '' }
     : null
 
   function applyClientDefaults(c: Client) {
@@ -268,7 +271,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
     pickCatalogueItem(data, lineId)
     setAddingItem(false)
     setNewItemDraft({ name_de: '', name_en: '', default_price: 0, unit: 'flat', vat_rate: 20, category: '' })
-    toast.success('Item added to catalogue.')
+    toast.success(t('builder.itemAdded'))
   }
 
   function catalogueName(item: CatalogueItem): string {
@@ -359,7 +362,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       docId = newDoc.id
     }
     const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: docId, p_items: buildItemsPayload(docId) })
-    if (itemsErr) { toast.error(`Items: ${itemsErr.message}`); return null }
+    if (itemsErr) { toast.error(t('builder.itemsError', { error: itemsErr.message })); return null }
     if (!date) setDate(effectiveDate)
     if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
     return docId
@@ -367,8 +370,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   async function save(status: 'draft' | 'sent') {
     if (status === 'sent') { requestSent(); return }
-    if (!clientId) { toast.error('Select a client.'); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
+    if (!clientId) { toast.error(t('builder.selectClient')); return }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error(t('builder.addLineItem')); return }
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
     setSaving(true)
     const id = await serialized(() => persist(false))
@@ -376,13 +379,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!id) return
     setSaveError(null)
     setLastSaved(new Date())
-    toast.success('Draft saved.')
+    toast.success(t('builder.draftSaved'))
     if (!doc) router.push(`/${PATHS[type]}/${id}`)
     else router.refresh()
   }
 
   async function buildPdfBlob(numOverride?: string, includeQr = false) {
-    if (!client) { toast.error('Select a client first.'); return null }
+    if (!client) { toast.error(t('builder.selectClientFirst')); return null }
     const docData = {
       number: numOverride ?? doc?.number ?? 'DRAFT',
       date, service_date: serviceDate || null, service_date_end: serviceDateEnd || null, due_date: dueDate || null,
@@ -414,7 +417,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       return { blob, number: docData.number }
     } catch (err) {
       console.error('PDF generation failed:', err)
-      toast.error('PDF generation failed: ' + (err instanceof Error ? err.message : String(err)))
+      toast.error(t('builder.pdfFailed', { error: err instanceof Error ? err.message : String(err) }))
       return null
     }
   }
@@ -434,9 +437,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       ? postJson<{ webViewLink?: string | null }>(`/api/documents/${id}/drive-pdf`)
       : null
     const [snap, drv] = await Promise.allSettled([snapshot, drive])
-    if (snap.status === 'rejected') toast.error(`PDF snapshot failed: ${errorMessage(snap.reason)}`)
-    if (drv.status === 'rejected') toast.error(`Drive upload failed: ${errorMessage(drv.reason)}`)
-    else if (drv.value) notifyDriveUpload(drv.value.webViewLink)
+    if (snap.status === 'rejected') toast.error(t('builder.snapshotFailed', { error: errorMessage(snap.reason, t('common.unknownError')) }))
+    if (drv.status === 'rejected') toast.error(t('builder.driveFailed', { error: errorMessage(drv.reason, t('common.unknownError')) }))
+    else if (drv.value) notifyDriveUpload(t, drv.value.webViewLink)
     return { snapshot: snap.status === 'fulfilled' && !!snap.value, drive: drv.status === 'fulfilled' && !!drv.value }
   }
 
@@ -474,15 +477,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     const { id, number } = doc
     setSaving(true)
     void serialized(() => archiveIssued(id, number))
-      .then(archived => { if (archived.snapshot) { toast.success('Issued PDF archived.'); router.refresh() } })
+      .then(archived => { if (archived.snapshot) { toast.success(t('builder.issuedArchived')); router.refresh() } })
       .finally(() => setSaving(false))
   }
 
   // Issued documents run the action directly; drafts ask first, because issuing consumes
   // the next number and marks the document as sent.
   function withIssued(action: (issued: Issued) => Promise<void>) {
-    if (!clientId) { toast.error('Select a client.'); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error('Add at least one line item.'); return }
+    if (!clientId) { toast.error(t('builder.selectClient')); return }
+    if (!lines.some(l => l.line_type === 'item')) { toast.error(t('builder.addLineItem')); return }
     const run = async () => {
       const issued = await issueDocument()
       if (!issued) return
@@ -502,7 +505,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   async function uploadToDrive(pdfBase64: string, filename: string, documentId?: string) {
     if (!settings.drive_folder_id) {
-      toast.error('No Drive folder configured. Set one in Settings → Google Drive.')
+      toast.error(t('builder.noDriveFolder'))
       return
     }
     const res = await fetch('/api/drive/upload', {
@@ -512,14 +515,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     })
     if (res.ok) {
       const { webViewLink } = await res.json()
-      notifyDriveUpload(webViewLink)
+      notifyDriveUpload(t, webViewLink)
     } else {
-      toastApiError(await res.json().catch(() => ({})), 'Drive upload failed: ')
+      toastApiError(t, await res.json().catch(() => ({})), t('builder.driveFailedPrefix'))
     }
   }
 
   function saveToDrive() {
-    if (!settings.drive_folder_id) { toast.error('No Drive folder configured. Set one in Settings → Google Drive.'); return }
+    if (!settings.drive_folder_id) { toast.error(t('builder.noDriveFolder')); return }
     withIssued(async issued => {
       // Issuing just archived to Drive; a second upload would only overwrite the same file.
       if (issued.driveArchived) { afterIssue(issued); return }
@@ -626,8 +629,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   }
 
   function openInEmail() {
-    if (!client) { toast.error('Select a client first.'); return }
-    if (!client.email) { toast.error('Client has no email address.'); return }
+    if (!client) { toast.error(t('builder.selectClientFirst')); return }
+    if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
       const content = buildEmailContent(issued.number)
       const result = await buildPdfBlob(issued.number, true)
@@ -641,8 +644,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   }
 
   function sendViaGmail() {
-    if (!client) { toast.error('Select a client first.'); return }
-    if (!client.email) { toast.error('Client has no email address.'); return }
+    if (!client) { toast.error(t('builder.selectClientFirst')); return }
+    if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
       const content = buildEmailContent(issued.number)
       const pdfResult = await buildPdfBlob(issued.number, true)
@@ -667,11 +670,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     setGmailSending(false)
 
     if (!res.ok) {
-      toastApiError(await res.json().catch(() => ({})), '', 'Failed to send email.')
+      toastApiError(t, await res.json().catch(() => ({})), '', t('builder.emailFailed'))
       return
     }
 
-    toast.success('Email sent via Gmail.')
+    toast.success(t('builder.emailSent'))
     if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.documentId)
     closeGmailPreview()
   }
@@ -686,14 +689,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   function requestSent() {
     withIssued(async issued => {
-      toast.success(`Issued ${issued.number}.`)
+      toast.success(t('builder.issued', { number: issued.number }))
       afterIssue(issued)
     })
   }
 
   const autoSave = useCallback(async () => {
     if (!doc || !clientId || saving || issuingRef.current) return
-    if (!date) { setSaveError('Date is required'); return }
+    if (!date) { setSaveError(t('builder.dateRequired')); return }
     setAutoSaving(true)
     const failure = await serialized(async () => {
       const { error } = await supabase.from('documents').update(currentDocFields(date, dueDate || null)).eq('id', doc.id)
@@ -702,7 +705,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       return itemsErr ? itemsErr.message : null
     })
     if (failure) {
-      if (!saveError) toast.error(`Not saved: ${failure}`)
+      if (!saveError) toast.error(t('builder.notSavedToast', { error: failure }))
       setSaveError(failure)
     } else {
       setSaveError(null)
@@ -733,7 +736,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   }, [autoSave, doc, save])
 
   const deleteBtn = (id: string) => (
-    <button type="button" onClick={() => removeLine(id)} aria-label="Remove line"
+    <button type="button" onClick={() => removeLine(id)} aria-label={t('builder.removeLine')}
       className="h-11 w-11 sm:h-9 sm:w-8 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0">
       <Trash2 size={14} />
     </button>
@@ -796,8 +799,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     const lbId = catalogueListId(mobile)
     return {
       value: line.description,
-      placeholder: 'Description…',
-      'aria-label': 'Description',
+      placeholder: t('builder.descriptionPlaceholder'),
+      'aria-label': t('builder.description'),
       role: 'combobox' as const,
       'aria-expanded': open,
       'aria-controls': open ? lbId : undefined,
@@ -825,9 +828,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         className={`fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg max-h-72 overflow-auto ${mobile ? '' : 'w-96 max-w-[calc(100vw-2rem)]'}`}
         style={mobile ? { ...cataloguePos, width: 'calc(100vw - 2rem)' } : cataloguePos}
       >
-        <div role="listbox" id={lbId} aria-label="Catalogue items">
+        <div role="listbox" id={lbId} aria-label={t('builder.catalogueItems')}>
           {matches.length === 0 && (
-            <p className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400 text-center">No items found</p>
+            <p className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400 text-center">{t('builder.noItems')}</p>
           )}
           {matches.map((item, i) => (
             <button
@@ -843,7 +846,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               className={`w-full text-left px-3 ${mobile ? 'py-2.5' : 'py-2'} text-sm flex justify-between items-center gap-3 ${catalogueHighlight === i ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
             >
               <span className="min-w-0 truncate">{catalogueName(item)}</span>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{formatMoney(item.default_price)}/{item.unit}</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{formatMoney(item.default_price)}/{t(`units.${item.unit}` as DictKey)}</span>
             </button>
           ))}
         </div>
@@ -851,22 +854,22 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           {addingItem ? (
             <div className="p-3 space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder="Name DE" aria-label="Name (DE)" autoFocus className={popupFieldCls} />
-                <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder="Name EN" aria-label="Name (EN)" className={popupFieldCls} />
+                <input value={newItemDraft.name_de} onChange={e => setNewItemDraft(d => ({ ...d, name_de: e.target.value }))} placeholder={t('builder.nameDe')} aria-label={t('builder.nameDeLabel')} autoFocus className={popupFieldCls} />
+                <input value={newItemDraft.name_en} onChange={e => setNewItemDraft(d => ({ ...d, name_en: e.target.value }))} placeholder={t('builder.nameEn')} aria-label={t('builder.nameEnLabel')} className={popupFieldCls} />
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <MoneyInput value={newItemDraft.default_price} onValueChange={n => setNewItemDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder="Price" aria-label="Price" className="h-7 px-2 md:text-xs" />
-                <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label="Unit" className={`${popupFieldCls} px-1`}>
-                  {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                <MoneyInput value={newItemDraft.default_price} onValueChange={n => setNewItemDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder={t('builder.price')} aria-label={t('builder.price')} className="h-7 px-2 md:text-xs" />
+                <select value={newItemDraft.unit} onChange={e => setNewItemDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label={t('builder.unit')} className={`${popupFieldCls} px-1`}>
+                  {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
                 </select>
-                <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} aria-label="VAT rate" className={`${popupFieldCls} px-1`}>
+                <select value={newItemDraft.vat_rate} onChange={e => setNewItemDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} aria-label={t('builder.vatRate')} className={`${popupFieldCls} px-1`}>
                   {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                 </select>
               </div>
-              <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder="Category (optional)" aria-label="Category (optional)" className={popupFieldCls} />
+              <input value={newItemDraft.category} onChange={e => setNewItemDraft(d => ({ ...d, category: e.target.value }))} placeholder={t('builder.category')} aria-label={t('builder.category')} className={popupFieldCls} />
               <div className="flex gap-2">
-                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => saveNewCatalogueItem(line.id)} className="text-xs px-2.5 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-700 dark:hover:bg-neutral-200">Add &amp; use</button>
-                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => setAddingItem(false)} className="text-xs px-2.5 py-1.5 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">Cancel</button>
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => saveNewCatalogueItem(line.id)} className="text-xs px-2.5 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-700 dark:hover:bg-neutral-200">{t('builder.addAndUse')}</button>
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => setAddingItem(false)} className="text-xs px-2.5 py-1.5 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">{t('common.cancel')}</button>
               </div>
             </div>
           ) : (
@@ -878,7 +881,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               onClick={() => setAddingItem(true)}
               className={`w-full text-left px-3 py-2.5 text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5 ${newHighlighted ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
             >
-              <Plus size={12} /> New catalogue item…
+              <Plus size={12} /> {t('builder.newCatalogueItem')}
             </button>
           )}
         </div>
@@ -901,24 +904,24 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     return (
       <div className="flex-1 space-y-1.5 pr-1 min-w-0">
         <div className="flex justify-end items-center gap-3">
-          <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Subtotal</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{t('builder.subtotal')}</span>
           <span className={`text-sm font-medium ${discAmt > 0 ? 'line-through text-neutral-500 dark:text-neutral-400' : ''}`}>{formatMoney(gross, currency)}</span>
         </div>
         {line.discount_type ? (
           <div className="space-y-1.5">
             <div className="flex items-center justify-end gap-2 flex-wrap">
-              <div role="group" aria-label="Discount type" className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+              <div role="group" aria-label={t('builder.discountType')} className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
                 <button type="button" aria-pressed={line.discount_type === 'percent'} onClick={() => updateLine(line.id, { discount_type: 'percent' })} className={discountToggle(line.discount_type === 'percent')}>%</button>
                 <button type="button" aria-pressed={line.discount_type === 'fixed'} onClick={() => updateLine(line.id, { discount_type: 'fixed' })} className={discountToggle(line.discount_type === 'fixed')}>{currency}</button>
               </div>
               <MoneyInput
                 value={line.discount_value}
                 onValueChange={n => updateLine(line.id, { discount_value: n ?? 0 })}
-                aria-label="Section discount"
+                aria-label={t('builder.sectionDiscount')}
                 className="w-20 h-8 sm:h-7 md:text-xs text-right"
               />
               <span className="text-xs text-neutral-500 dark:text-neutral-400 w-20 sm:w-24 text-right">−{formatMoney(discAmt, currency)}</span>
-              <button type="button" aria-label="Remove discount" onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })} className={removeDiscountBtn}><X size={13} /></button>
+              <button type="button" aria-label={t('builder.removeDiscount')} onClick={() => updateLine(line.id, { discount_type: null, discount_value: 0 })} className={removeDiscountBtn}><X size={13} /></button>
             </div>
             {line.discount_type === 'percent' && (
               <div className="flex gap-1 justify-end flex-wrap">
@@ -928,7 +931,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               </div>
             )}
             <div className="flex justify-end gap-3">
-              <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">Net</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wide">{t('builder.net')}</span>
               <span className="text-sm font-semibold">{formatMoney(net, currency)}</span>
             </div>
           </div>
@@ -936,7 +939,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <div className="flex justify-end">
             <button type="button" onClick={() => updateLine(line.id, { discount_type: 'percent', discount_value: 0 })}
               className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded px-2 py-1 sm:py-0.5 transition-colors">
-              + {language === 'de' ? 'Rabatt' : 'Discount'}
+              + {t('builder.discount')}
             </button>
           </div>
         )}
@@ -952,7 +955,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       <Dialog
         open={!!gmailPreview}
         onClose={closeGmailPreview}
-        title="Review email"
+        title={t('builder.reviewEmail')}
         busy={gmailSending}
         panelClassName="max-w-lg"
       >
@@ -960,7 +963,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <>
             <div className="space-y-3">
               <div className="space-y-1">
-                <label htmlFor={`${uid}-gmail-to`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">To</label>
+                <label htmlFor={`${uid}-gmail-to`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.to')}</label>
                 <input
                   id={`${uid}-gmail-to`}
                   type="email"
@@ -970,7 +973,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 />
               </div>
               <div className="space-y-1">
-                <label htmlFor={`${uid}-gmail-subject`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Subject</label>
+                <label htmlFor={`${uid}-gmail-subject`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.subject')}</label>
                 <input
                   id={`${uid}-gmail-subject`}
                   value={gmailPreview.subject}
@@ -979,7 +982,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 />
               </div>
               <div className="space-y-1">
-                <label htmlFor={`${uid}-gmail-body`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Body</label>
+                <label htmlFor={`${uid}-gmail-body`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.body')}</label>
                 <textarea
                   id={`${uid}-gmail-body`}
                   value={gmailPreview.body}
@@ -988,10 +991,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   className="w-full text-base md:text-sm px-3 py-2 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 resize-none"
                 />
               </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">PDF attached: {gmailPreview.filename}</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('builder.pdfAttached', { filename: gmailPreview.filename })}</p>
             </div>
             {settings.drive_folder_id && (gmailPreview.driveArchived ? (
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">Archived to Google Drive when issued.</p>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('builder.archivedToDrive')}</p>
             ) : (
               <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
                 <input
@@ -1000,13 +1003,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   onChange={e => setGmailPreview(p => p ? { ...p, uploadToDrive: e.target.checked } : p)}
                   className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
                 />
-                Also save to Google Drive
+                {t('builder.alsoDrive')}
               </label>
             ))}
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={closeGmailPreview} disabled={gmailSending}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={closeGmailPreview} disabled={gmailSending}>{t('common.cancel')}</Button>
               <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>
-                {gmailSending ? 'Sending…' : 'Send'}
+                {gmailSending ? t('common.sending') : t('common.send')}
               </Button>
             </div>
           </>
@@ -1016,28 +1019,28 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       {/* Issue confirmation */}
       <ConfirmDialog
         open={!!pendingIssue}
-        title={`Issue this ${typeLabel[type].en.toLowerCase()}?`}
-        description={`The next ${typeLabel[type].en.toLowerCase()} number will be assigned, the document marked as sent and the final PDF stored as the issued copy. Numbers cannot be taken back.`}
-        confirmLabel="Issue & continue"
+        title={t(`builder.issueTitle.${type}`)}
+        description={t('builder.issueDesc', { number: t(`docTypeNumber.${type}`) })}
+        confirmLabel={t('builder.issueAndContinue')}
         onConfirm={() => { const run = pendingIssue; setPendingIssue(null); if (run) void run() }}
         onCancel={() => setPendingIssue(null)}
       />
 
       {doc?.number && doc.status !== 'draft' && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
-          <strong>{doc.number} is issued.</strong> Edits here change a document your client may already have — for corrections after sending, cancel it and issue a corrected one.
+          <strong>{t('builder.issuedWarning', { number: doc.number })}</strong> {t('builder.issuedWarningBody')}
         </div>
       )}
 
       {/* Client & dates */}
       <div className="space-y-4">
-        <p className={captionCls}>Client & Dates</p>
+        <p className={captionCls}>{t('builder.clientAndDates')}</p>
 
         {/* Client selector — full width always */}
         <div className="space-y-1.5">
-          <Label htmlFor={`${uid}-client`}>Client *</Label>
+          <Label htmlFor={`${uid}-client`}>{t('builder.client')}</Label>
           <select id={`${uid}-client`} value={clientId} onChange={e => handleClientChange(e.target.value)} className={SELECT_CLS}>
-            <option value="">Select client…</option>
+            <option value="">{t('builder.selectClientPlaceholder')}</option>
             {clients.sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)).map(c => (
               <option key={c.id} value={c.id}>{c.company && c.name ? `${c.company} (${c.name})` : c.company || c.name}</option>
             ))}
@@ -1047,11 +1050,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Date + Due date */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor={`${uid}-date`}>Date</Label>
+            <Label htmlFor={`${uid}-date`}>{t('builder.date')}</Label>
             <Input id={`${uid}-date`} type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 w-full" />
           </div>
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? 'Due date' : 'Valid until'}</Label>
+            <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? t('builder.dueDate') : t('builder.validUntil')}</Label>
             <Input id={`${uid}-due`} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="h-10 w-full" />
           </div>
         </div>
@@ -1065,19 +1068,19 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             className="sm:hidden flex items-center gap-1.5 text-xs py-2 -my-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors mb-3"
           >
             <ChevronRight size={13} className={`transition-transform ${showDetails ? 'rotate-90' : ''}`} />
-            {showDetails ? 'Hide details' : 'Language, currency & tax'}
+            {showDetails ? t('builder.hideDetails') : t('builder.showDetails')}
           </button>
 
           <div className={`grid grid-cols-2 sm:grid-cols-5 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
             <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-language`}>Language</Label>
+              <Label htmlFor={`${uid}-language`}>{t('builder.language')}</Label>
               <select id={`${uid}-language`} value={language} onChange={e => setLanguage(e.target.value as Language)} className={SELECT_CLS}>
-                <option value="de">Deutsch</option>
-                <option value="en">English</option>
+                <option value="de">{t('common.german')}</option>
+                <option value="en">{t('common.english')}</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-currency`}>Currency</Label>
+              <Label htmlFor={`${uid}-currency`}>{t('builder.currency')}</Label>
               <select id={`${uid}-currency`} value={currency} onChange={e => setCurrency(e.target.value as Currency)} className={SELECT_CLS}>
                 <option value="EUR">EUR</option>
                 <option value="USD">USD</option>
@@ -1085,31 +1088,31 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-tax`}>Tax treatment</Label>
+              <Label htmlFor={`${uid}-tax`}>{t('builder.taxTreatment')}</Label>
               <select id={`${uid}-tax`} value={taxTreatment} onChange={e => setTaxTreatment(e.target.value as TaxTreatment)} className={SELECT_CLS}>
-                <option value="at_vat">Austrian VAT</option>
-                <option value="eu_reverse_charge">Reverse Charge (EU)</option>
-                <option value="non_eu">Non-EU (no VAT)</option>
+                <option value="at_vat">{t('taxTreatments.at_vat')}</option>
+                <option value="eu_reverse_charge">{t('taxTreatments.eu_reverse_charge')}</option>
+                <option value="non_eu">{t('taxTreatments.non_eu')}</option>
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-service-from`}>Service from</Label>
+              <Label htmlFor={`${uid}-service-from`}>{t('builder.serviceFrom')}</Label>
               <Input id={`${uid}-service-from`} type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-service-to`}>Service to</Label>
+              <Label htmlFor={`${uid}-service-to`}>{t('builder.serviceTo')}</Label>
               <Input id={`${uid}-service-to`} type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} />
             </div>
             {type === 'invoice' && (
               <>
                 <div className="space-y-1.5">
-                  <Label htmlFor={`${uid}-skonto-percent`}>Skonto %</Label>
-                  <MoneyInput id={`${uid}-skonto-percent`} value={skontoPercent === '' ? null : skontoPercent} placeholder="none"
+                  <Label htmlFor={`${uid}-skonto-percent`}>{t('builder.skontoPercent')}</Label>
+                  <MoneyInput id={`${uid}-skonto-percent`} value={skontoPercent === '' ? null : skontoPercent} placeholder={t('builder.skontoNone')}
                     onValueChange={n => setSkontoPercent(n === null ? '' : n)} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor={`${uid}-skonto-days`}>Skonto days</Label>
-                  <MoneyInput id={`${uid}-skonto-days`} integer value={skontoDays === '' ? null : skontoDays} placeholder="from date"
+                  <Label htmlFor={`${uid}-skonto-days`}>{t('builder.skontoDays')}</Label>
+                  <MoneyInput id={`${uid}-skonto-days`} integer value={skontoDays === '' ? null : skontoDays} placeholder={t('builder.skontoFromDate')}
                     onValueChange={n => setSkontoDays(n === null ? '' : n)} />
                 </div>
               </>
@@ -1128,7 +1131,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
       {/* Line items */}
       <div className="space-y-1.5">
-        <p className={`${captionCls} mb-3`}>Line Items</p>
+        <p className={`${captionCls} mb-3`}>{t('builder.lineItems')}</p>
         {/* Mobile card layout */}
         <div className="sm:hidden space-y-0">
           {lines.map((line, idx) => {
@@ -1147,7 +1150,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <div key={line.id} className="flex items-center gap-2 py-1">
                   <GripVertical size={14} aria-hidden="true" className="text-neutral-300 dark:text-neutral-600 shrink-0" />
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">Page break</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">{t('builder.pageBreak')}</span>
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
                   {deleteBtn(line.id)}
                 </div>
@@ -1161,8 +1164,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
-                    placeholder="Section heading…"
-                    aria-label="Section heading"
+                    placeholder={t('builder.sectionHeadingPlaceholder')}
+                    aria-label={t('builder.sectionHeading')}
                     className="flex-1 min-w-0 text-base md:text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
@@ -1177,8 +1180,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
-                    placeholder="Note…"
-                    aria-label="Note"
+                    placeholder={t('builder.notePlaceholder')}
+                    aria-label={t('builder.note')}
                     className="flex-1 min-w-0 text-base md:text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
@@ -1210,19 +1213,19 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 {/* Qty × Unit | Price */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label htmlFor={`${uid}-qty-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">Qty × Unit</label>
+                    <label htmlFor={`${uid}-qty-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">{t('builder.qtyUnit')}</label>
                     <div className="flex gap-1.5">
                       <MoneyInput id={`${uid}-qty-${line.id}`} value={line.quantity} decimals={4}
                         onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })}
                         className="w-16 shrink-0" />
-                      <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label="Unit"
+                      <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label={t('builder.unit')}
                         className={`${LINE_SELECT_CLS} flex-1`}>
-                        {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                        {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
                       </select>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor={`${uid}-price-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">Price</label>
+                    <label htmlFor={`${uid}-price-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">{t('builder.price')}</label>
                     <MoneyInput id={`${uid}-price-${line.id}`} value={line.unit_price}
                       onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })}
                       className="w-full" />
@@ -1231,7 +1234,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 {/* VAT + service date */}
                 <div className="flex items-end gap-3">
                   <div className="space-y-1 flex-1">
-                    <label htmlFor={`${uid}-vat-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">VAT</label>
+                    <label htmlFor={`${uid}-vat-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">{t('builder.vat')}</label>
                     <select id={`${uid}-vat-${line.id}`} value={line.vat_rate}
                       onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
                       className={`${LINE_SELECT_CLS} w-full`}>
@@ -1241,8 +1244,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
-                    title={line.service_date ?? 'Set service date'}
-                    aria-label={line.service_date ? `Service date ${line.service_date}` : 'Set service date'}
+                    title={line.service_date ?? t('builder.setServiceDate')}
+                    aria-label={line.service_date ? t('builder.serviceDateLabel', { date: line.service_date }) : t('builder.setServiceDate')}
                     aria-expanded={activeDateLine === line.id}
                     className={`h-11 w-11 flex items-center justify-center rounded-md border transition-colors ${line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
@@ -1258,7 +1261,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         <div className="hidden sm:block overflow-x-auto -mx-1 px-1">
         <div className="min-w-[560px]">
         <div className="grid gap-2 text-xs font-medium text-neutral-500 dark:text-neutral-400 px-1" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
-          <span /><span>Description</span><span>Qty</span><span>Unit</span><span>Price</span><span>VAT</span><span /><span />
+          <span /><span>{t('builder.description')}</span><span>{t('builder.qty')}</span><span>{t('builder.unit')}</span><span>{t('builder.price')}</span><span>{t('builder.vat')}</span><span /><span />
         </div>
 
         <div className="space-y-1">
@@ -1290,7 +1293,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <div key={line.id} {...dragProps} className={`flex items-center gap-2 py-1 ${dragOverClass}`}>
                   {handle}
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">Page break</span>
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 px-1">{t('builder.pageBreak')}</span>
                   <div className="flex-1 border-t border-dashed border-neutral-300 dark:border-neutral-600" />
                   {deleteBtn(line.id)}
                 </div>
@@ -1304,8 +1307,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
-                    placeholder="Section heading…"
-                    aria-label="Section heading"
+                    placeholder={t('builder.sectionHeadingPlaceholder')}
+                    aria-label={t('builder.sectionHeading')}
                     className="flex-1 min-w-0 text-base md:text-sm font-semibold bg-transparent border-0 border-b border-neutral-200 dark:border-neutral-700 px-1 py-1.5 focus:outline-none focus:border-neutral-400 dark:text-neutral-100 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
@@ -1320,8 +1323,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <input
                     value={line.description}
                     onChange={e => updateLine(line.id, { description: e.target.value })}
-                    placeholder="Note…"
-                    aria-label="Note"
+                    placeholder={t('builder.notePlaceholder')}
+                    aria-label={t('builder.note')}
                     className="flex-1 min-w-0 text-base md:text-sm text-neutral-500 dark:text-neutral-400 bg-transparent border-0 border-b border-neutral-100 dark:border-neutral-800 px-1 py-1.5 focus:outline-none focus:border-neutral-300 dark:placeholder:text-neutral-600"
                   />
                   {deleteBtn(line.id)}
@@ -1348,14 +1351,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                     <Input {...descriptionProps(line, false)} />
                     {cataloguePopup(line, false)}
                   </div>
-                  <MoneyInput value={line.quantity} decimals={4} aria-label="Quantity"
+                  <MoneyInput value={line.quantity} decimals={4} aria-label={t('builder.quantity')}
                     onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })} />
-                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label="Unit" className={LINE_SELECT_CLS}>
-                    {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                  <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label={t('builder.unit')} className={LINE_SELECT_CLS}>
+                    {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
                   </select>
-                  <MoneyInput value={line.unit_price} aria-label="Unit price"
+                  <MoneyInput value={line.unit_price} aria-label={t('builder.unitPrice')}
                     onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })} />
-                  <select value={line.vat_rate} aria-label="VAT rate"
+                  <select value={line.vat_rate} aria-label={t('builder.vatRate')}
                     onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
                     className={LINE_SELECT_CLS}>
                     {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
@@ -1363,8 +1366,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
-                    title={line.service_date ?? 'Set service date'}
-                    aria-label={line.service_date ? `Service date ${line.service_date}` : 'Set service date'}
+                    title={line.service_date ?? t('builder.setServiceDate')}
+                    aria-label={line.service_date ? t('builder.serviceDateLabel', { date: line.service_date }) : t('builder.setServiceDate')}
                     aria-expanded={activeDateLine === line.id}
                     className={`h-9 w-6 flex items-center justify-center rounded-md transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
@@ -1383,15 +1386,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         <div className="flex items-center gap-1 pt-3 flex-wrap">
           <button type="button" onClick={() => addLine('item')}
             className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-            <Plus size={13} /> Add line
+            <Plus size={13} /> {t('builder.addLine')}
           </button>
           <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-700 mx-1.5" />
           {([
-            ['heading', 'Heading'],
-            ['text', 'Note'],
-            ['separator', 'Divider'],
-            ['subtotal', 'Subtotal'],
-            ['page_break', 'Page break'],
+            ['heading', t('builder.heading')],
+            ['text', t('builder.note')],
+            ['separator', t('builder.divider')],
+            ['subtotal', t('builder.subtotalLine')],
+            ['page_break', t('builder.pageBreak')],
           ] as [LineType, string][]).map(([lt, label]) => (
             <button key={lt} type="button" onClick={() => addLine(lt as LineType)}
               className="text-xs px-2 py-2 sm:py-1 rounded text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
@@ -1407,7 +1410,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       <div className="flex sm:justify-end">
         <div className="w-full sm:w-72 space-y-1.5 text-sm">
           <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
-            <span>{language === 'de' ? 'Netto' : 'Subtotal'}</span>
+            <span>{t('builder.net')}</span>
             <span>{formatMoney(totals.subtotal, currency)}</span>
           </div>
 
@@ -1415,9 +1418,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           {discountType ? (
             <div className="space-y-2 py-0.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-neutral-500 dark:text-neutral-400 text-xs shrink-0">{language === 'de' ? 'Rabatt' : 'Discount'}</span>
+                <span className="text-neutral-500 dark:text-neutral-400 text-xs shrink-0">{t('builder.discount')}</span>
                 {/* % / flat toggle */}
-                <div role="group" aria-label="Discount type" className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
+                <div role="group" aria-label={t('builder.discountType')} className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
                   <button type="button" aria-pressed={discountType === 'percent'} onClick={() => setDiscountType('percent')}
                     className={`px-2.5 py-1.5 sm:py-1 transition-colors ${discountType === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
                     %
@@ -1427,9 +1430,9 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                     {currency}
                   </button>
                 </div>
-                <MoneyInput value={discountValue} onValueChange={n => setDiscountValue(n ?? 0)} aria-label="Discount value" className="w-20 text-right" />
+                <MoneyInput value={discountValue} onValueChange={n => setDiscountValue(n ?? 0)} aria-label={t('builder.discountValue')} className="w-20 text-right" />
                 <span className="flex-1 text-right text-neutral-500 dark:text-neutral-400">−{formatMoney(totals.discount_amount, currency)}</span>
-                <button type="button" aria-label="Remove discount" onClick={() => { setDiscountType(null); setDiscountValue(0) }} className={removeDiscountBtn}>
+                <button type="button" aria-label={t('builder.removeDiscount')} onClick={() => { setDiscountType(null); setDiscountValue(0) }} className={removeDiscountBtn}>
                   <X size={13} />
                 </button>
               </div>
@@ -1447,29 +1450,29 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           ) : (
             <button type="button" onClick={() => { setDiscountType('percent'); setDiscountValue(0) }}
               className="w-full text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 border border-dashed border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600 rounded-md py-2 sm:py-1.5 transition-colors">
-              + {language === 'de' ? 'Rabatt hinzufügen' : 'Add discount'}
+              + {t('builder.addDiscount')}
             </button>
           )}
 
           {taxTreatment === 'at_vat' && totals.vat_groups.map(g => (
             <div key={g.rate} className="flex justify-between text-neutral-500 dark:text-neutral-400">
-              <span>USt. {g.rate}%</span>
+              <span>{t('builder.vatLine', { rate: g.rate })}</span>
               <span>{formatMoney(g.amount, currency)}</span>
             </div>
           ))}
           <Separator />
           <div className="flex justify-between font-semibold text-base">
-            <span>{language === 'de' ? 'Gesamt' : 'Total'}</span>
+            <span>{t('builder.total')}</span>
             <span>{formatMoney(totals.total, currency)}</span>
           </div>
           {totals.total_paid > 0 && (
             <>
               <div className="flex justify-between text-neutral-500 dark:text-neutral-400">
-                <span>{language === 'de' ? 'Bezahlt' : 'Paid'}</span>
+                <span>{t('builder.paid')}</span>
                 <span>−{formatMoney(totals.total_paid, currency)}</span>
               </div>
               <div className={`flex justify-between font-semibold ${totals.balance_due > 0.005 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400'}`}>
-                <span>{language === 'de' ? 'Offen' : 'Balance due'}</span>
+                <span>{t('builder.balanceDue')}</span>
                 <span>{formatMoney(totals.balance_due, currency)}</span>
               </div>
             </>
@@ -1479,15 +1482,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
       {/* Notes */}
       <div>
-        <p className={`${captionCls} mb-3`}>Notes</p>
+        <p className={`${captionCls} mb-3`}>{t('builder.notes')}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor={`${uid}-notes`}>{language === 'de' ? 'Anmerkungen (auf Dokument)' : 'Notes (on document)'}</Label>
+            <Label htmlFor={`${uid}-notes`}>{t('builder.notesOnDocument')}</Label>
             <Textarea id={`${uid}-notes`} value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="resize-none" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor={`${uid}-notes-internal`}>Internal notes</Label>
-            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none" placeholder="Not printed on PDF…" />
+            <Label htmlFor={`${uid}-notes-internal`}>{t('builder.internalNotes')}</Label>
+            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => setNotesInternal(e.target.value)} rows={3} className="resize-none" placeholder={t('builder.internalPlaceholder')} />
           </div>
         </div>
       </div>
@@ -1502,12 +1505,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             <div className="fixed inset-0 z-40" onClick={closeDatePop} />
             <div
               role="dialog"
-              aria-label="Service date"
+              aria-label={t('builder.serviceDate')}
               className="fixed z-50 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg p-3 space-y-2"
               style={datePop}
               onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closeDatePop() } }}
             >
-              <label htmlFor={`${uid}-service-date-${line.id}`} className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">Service date</label>
+              <label htmlFor={`${uid}-service-date-${line.id}`} className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.serviceDate')}</label>
               <Input id={`${uid}-service-date-${line.id}`} type="date" value={line.service_date ?? ''}
                 onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
                 className="w-44" autoFocus />
@@ -1515,7 +1518,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <button type="button"
                   onClick={() => { updateLine(line.id, { service_date: null }); closeDatePop() }}
                   className="text-xs py-2 -my-1 text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
-                  Clear date
+                  {t('builder.clearDate')}
                 </button>
               )}
             </div>
@@ -1532,30 +1535,30 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             <button type="button" onClick={downloadPdf}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors">
               <Eye size={16} />
-              <span className="text-[11px] font-medium">Preview</span>
+              <span className="text-[11px] font-medium">{t('builder.preview')}</span>
             </button>
             <button type="button" onClick={savePdf} disabled={saving}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Download size={16} />
-              <span className="text-[11px] font-medium">PDF</span>
+              <span className="text-[11px] font-medium">{t('builder.pdf')}</span>
             </button>
             {settings.gmail_connected && (
               <button type="button" onClick={saveToDrive} disabled={saving}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <HardDrive size={16} />
-                <span className="text-[11px] font-medium">Drive</span>
+                <span className="text-[11px] font-medium">{t('builder.drive')}</span>
               </button>
             )}
             <button type="button" onClick={settings.gmail_connected ? sendViaGmail : openInEmail} disabled={saving}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Mail size={16} />
-              <span className="text-[11px] font-medium">{settings.gmail_connected ? 'Gmail' : 'Email'}</span>
+              <span className="text-[11px] font-medium">{settings.gmail_connected ? t('builder.gmail') : t('builder.email')}</span>
             </button>
             {doc?.number && !doc.pdf_path && (
               <button type="button" onClick={archiveNow} disabled={saving}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <Archive size={16} />
-                <span className="text-[11px] font-medium">Archive</span>
+                <span className="text-[11px] font-medium">{t('builder.archive')}</span>
               </button>
             )}
           </div>
@@ -1563,12 +1566,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <div className="flex gap-2">
             {!doc && (
               <Button type="button" variant="outline" onClick={() => save('draft')} disabled={saving} className="flex-1 h-11 text-sm">
-                Save draft
+                {t('builder.saveDraft')}
               </Button>
             )}
             {(!doc || doc.status === 'draft') && (
               <Button type="button" onClick={requestSent} disabled={saving} className="flex-1 h-11 text-sm">
-                {saving ? 'Saving…' : 'Mark as sent'}
+                {saving ? t('common.saving') : t('builder.markAsSent')}
               </Button>
             )}
           </div>
@@ -1582,29 +1585,29 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Desktop layout */}
         <div className="hidden sm:flex items-center gap-3 px-6 py-4">
           <Button type="button" variant="ghost" size="sm" onClick={downloadPdf} className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
-            <Eye size={13} /> Preview
+            <Eye size={13} /> {t('builder.preview')}
           </Button>
           <div className="w-px h-5 bg-neutral-200 dark:bg-neutral-700" />
           <Button type="button" variant="outline" size="sm" onClick={savePdf} disabled={saving} className="flex items-center gap-1.5">
-            <Download size={13} /> Download PDF
+            <Download size={13} /> {t('builder.downloadPdf')}
           </Button>
           {settings.gmail_connected && (
             <Button type="button" variant="outline" size="sm" onClick={saveToDrive} disabled={saving} className="flex items-center gap-1.5">
-              <HardDrive size={13} /> Save to Drive
+              <HardDrive size={13} /> {t('builder.saveToDrive')}
             </Button>
           )}
           {settings.gmail_connected ? (
             <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} disabled={saving} className="flex items-center gap-1.5">
-              <Mail size={13} /> Send via Gmail
+              <Mail size={13} /> {t('builder.sendViaGmail')}
             </Button>
           ) : (
             <Button type="button" variant="outline" size="sm" onClick={openInEmail} disabled={saving} className="flex items-center gap-1.5">
-              <Mail size={13} /> Send via Superhuman
+              <Mail size={13} /> {t('builder.sendViaSuperhuman')}
             </Button>
           )}
           {doc?.number && !doc.pdf_path && (
             <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="flex items-center gap-1.5">
-              <Archive size={13} /> Archive PDF
+              <Archive size={13} /> {t('builder.archivePdf')}
             </Button>
           )}
           <div className="flex-1" />
@@ -1615,12 +1618,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           )}
           {!doc && (
             <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
-              Save draft
+              {t('builder.saveDraft')}
             </Button>
           )}
           {(!doc || doc.status === 'draft') && (
             <Button type="button" size="sm" onClick={requestSent} disabled={saving}>
-              {saving ? 'Saving…' : 'Mark as sent'}
+              {saving ? t('common.saving') : t('builder.markAsSent')}
             </Button>
           )}
         </div>

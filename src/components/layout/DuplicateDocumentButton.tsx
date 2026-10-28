@@ -6,6 +6,7 @@ import { Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { today } from '@/lib/utils/document'
+import { useT } from '@/lib/i18n/client'
 
 interface Props {
   docId: string
@@ -13,10 +14,11 @@ interface Props {
   backTo: string
 }
 
-export default function DuplicateDocumentButton({ docId, docType, backTo }: Props) {
+export default function DuplicateDocumentButton({ docId, backTo }: Props) {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+  const { t } = useT()
 
   async function duplicate() {
     setLoading(true)
@@ -26,7 +28,7 @@ export default function DuplicateDocumentButton({ docId, docType, backTo }: Prop
       .eq('id', docId)
       .single()
 
-    if (error || !doc) { toast.error('Could not load document.'); setLoading(false); return }
+    if (error || !doc) { toast.error(t('documents.couldNotLoad')); setLoading(false); return }
 
     const { data: newDoc, error: insertErr } = await supabase
       .from('documents')
@@ -49,18 +51,18 @@ export default function DuplicateDocumentButton({ docId, docType, backTo }: Prop
       .select()
       .single()
 
-    if (insertErr || !newDoc) { toast.error('Could not duplicate.'); setLoading(false); return }
+    if (insertErr || !newDoc) { toast.error(t('documents.couldNotDuplicate')); setLoading(false); return }
 
-    const items = (doc.document_items ?? []).map(({ id: _id, document_id: _did, created_at: _ca, ...rest }: Record<string, unknown>) => ({
-      ...rest,
-      document_id: newDoc.id,
-    }))
+    const items = (doc.document_items ?? []).map((item: Record<string, unknown>) => {
+      const { id: _id, document_id: _did, created_at: _ca, ...rest } = item
+      return { ...rest, document_id: newDoc.id }
+    })
 
     if (items.length > 0) {
       await supabase.from('document_items').insert(items)
     }
 
-    toast.success('Duplicated as draft.')
+    toast.success(t('documents.duplicated'))
     router.push(`${backTo}/${newDoc.id}`)
   }
 
@@ -69,10 +71,10 @@ export default function DuplicateDocumentButton({ docId, docType, backTo }: Prop
       type="button"
       onClick={duplicate}
       disabled={loading}
-      title="Duplicate as draft"
+      title={t('documents.duplicateTitle')}
       className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors disabled:opacity-50"
     >
-      <Copy size={14} /> <span className="sr-only sm:not-sr-only">{loading ? 'Duplicating…' : 'Duplicate'}</span>
+      <Copy size={14} /> <span className="sr-only sm:not-sr-only">{loading ? t('documents.duplicating') : t('documents.duplicate')}</span>
     </button>
   )
 }

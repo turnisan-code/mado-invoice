@@ -8,25 +8,30 @@ import {
   BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, MoreHorizontal, X,
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
+import LanguageToggle from '@/components/layout/LanguageToggle'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n/client'
+import type { DictKey } from '@/lib/i18n'
+
+type NavItem = { href: string; label: DictKey; icon: typeof LayoutDashboard }
 
 // Primary tabs shown in the bottom bar
-const PRIMARY_NAV = [
-  { href: '/dashboard',  label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/invoices',   label: 'Invoices',  icon: FileText },
-  { href: '/clients',    label: 'Clients',   icon: Users },
-  { href: '/quotes',     label: 'Quotes',    icon: MessageSquareQuote },
+const PRIMARY_NAV: NavItem[] = [
+  { href: '/dashboard',  label: 'nav.dashboard', icon: LayoutDashboard },
+  { href: '/invoices',   label: 'nav.invoices',  icon: FileText },
+  { href: '/clients',    label: 'nav.clients',   icon: Users },
+  { href: '/quotes',     label: 'nav.quotes',    icon: MessageSquareQuote },
 ]
 
 // Overflow items in the "More" bottom sheet
-const MORE_NAV = [
-  { href: '/credit-notes', label: 'Credit Notes', icon: FileX },
-  { href: '/catalogue',    label: 'Catalogue',     icon: BookOpen },
-  { href: '/reports',      label: 'VAT Report',    icon: BarChart3 },
-  { href: '/settings',     label: 'Settings',      icon: Settings },
+const MORE_NAV: NavItem[] = [
+  { href: '/credit-notes', label: 'nav.creditNotes', icon: FileX },
+  { href: '/catalogue',    label: 'nav.catalogue',   icon: BookOpen },
+  { href: '/reports',      label: 'nav.reports',     icon: BarChart3 },
+  { href: '/settings',     label: 'nav.settings',    icon: Settings },
 ]
 
 export default function MobileHeader() {
@@ -35,6 +40,7 @@ export default function MobileHeader() {
   const router = useRouter()
   const supabase = createClient()
   const { resolvedTheme, setTheme } = useTheme()
+  const { t } = useT()
 
   async function signOut() {
     setMoreOpen(false)
@@ -51,14 +57,14 @@ export default function MobileHeader() {
         className="md:hidden sticky top-0 z-30 flex items-center px-4 pb-3 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
         style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
       >
-        <Link href="/dashboard" aria-label="Mado Invoice — Dashboard" className="rounded-md">
+        <Link href="/dashboard" aria-label={t('nav.logoLabel')} className="rounded-md">
           <Logo />
         </Link>
       </div>
 
       {/* Bottom tab bar */}
       <nav
-        aria-label="Main"
+        aria-label={t('nav.main')}
         className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-stretch"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
@@ -77,7 +83,7 @@ export default function MobileHeader() {
               )}
             >
               <Icon size={22} strokeWidth={active ? 2.2 : 1.7} />
-              {label}
+              {t(label)}
             </Link>
           )
         })}
@@ -95,7 +101,7 @@ export default function MobileHeader() {
           )}
         >
           <MoreHorizontal size={22} strokeWidth={isMore ? 2.2 : 1.7} />
-          More
+          {t('nav.more')}
         </button>
       </nav>
 
@@ -104,7 +110,7 @@ export default function MobileHeader() {
         open={moreOpen}
         onClose={() => setMoreOpen(false)}
         align="bottom"
-        title="More"
+        title={t('nav.more')}
         hideTitle
         panelClassName="md:hidden bg-white dark:bg-neutral-900"
       >
@@ -115,18 +121,18 @@ export default function MobileHeader() {
           </div>
 
           <div className="px-4 pb-2 pt-1 flex items-center justify-between">
-            <span aria-hidden="true" className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">More</span>
+            <span aria-hidden="true" className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">{t('nav.more')}</span>
             <button
               type="button"
               onClick={() => setMoreOpen(false)}
-              aria-label="Close"
+              aria-label={t('common.close')}
               className="h-11 w-11 -mr-3 flex items-center justify-center rounded-full text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
             >
               <X size={18} />
             </button>
           </div>
 
-          <nav aria-label="More" className="px-2 pb-2 space-y-0.5">
+          <nav aria-label={t('nav.more')} className="px-2 pb-2 space-y-0.5">
             {MORE_NAV.map(({ href, label, icon: Icon }) => {
               const active = pathname.startsWith(href)
               return (
@@ -143,7 +149,7 @@ export default function MobileHeader() {
                   )}
                 >
                   <Icon size={18} />
-                  {label}
+                  {t(label)}
                 </Link>
               )
             })}
@@ -158,16 +164,17 @@ export default function MobileHeader() {
             >
               <Moon size={18} className="dark:hidden" />
               <Sun size={18} className="hidden dark:block" />
-              <span className="dark:hidden">Dark mode</span>
-              <span className="hidden dark:inline">Light mode</span>
+              <span className="dark:hidden">{t('nav.darkMode')}</span>
+              <span className="hidden dark:inline">{t('nav.lightMode')}</span>
             </button>
+            <LanguageToggle iconSize={18} className="px-3 py-3 text-neutral-500 dark:text-neutral-400" />
             <button
               type="button"
               onClick={signOut}
               className="flex w-full items-center gap-3 px-3 py-3 rounded-xl text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
             >
               <LogOut size={18} />
-              Sign out
+              {t('nav.signOut')}
             </button>
           </div>
         </div>

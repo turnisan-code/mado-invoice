@@ -4,6 +4,7 @@ import { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/i18n/client'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -117,20 +118,21 @@ export interface ConfirmDialogProps {
   children?: React.ReactNode
 }
 
-export function ConfirmDialog({ open, title, description, confirmLabel = 'Confirm', cancelLabel = 'Cancel', destructive = false, busy = false, portal, onConfirm, onCancel, children }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, title, description, confirmLabel, cancelLabel, destructive = false, busy = false, portal, onConfirm, onCancel, children }: ConfirmDialogProps) {
+  const { t } = useT()
   const cancelRef = useRef<HTMLButtonElement>(null)
   return (
     <Dialog open={open} onClose={onCancel} title={title} description={description} busy={busy} initialFocus={cancelRef} portal={portal}>
       {children}
       <div className="flex gap-2 justify-end">
-        <Button ref={cancelRef} type="button" variant="outline" onClick={onCancel} disabled={busy}>{cancelLabel}</Button>
+        <Button ref={cancelRef} type="button" variant="outline" onClick={onCancel} disabled={busy}>{cancelLabel ?? t('dialogs.cancel')}</Button>
         <Button
           type="button"
           onClick={onConfirm}
           disabled={busy}
           className={cn(destructive && 'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/40')}
         >
-          {confirmLabel}
+          {confirmLabel ?? t('dialogs.confirm')}
         </Button>
       </div>
     </Dialog>
