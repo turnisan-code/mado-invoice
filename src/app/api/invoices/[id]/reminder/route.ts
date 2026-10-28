@@ -5,7 +5,7 @@ import {
   DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
-import { formatMoney, calcTotals } from '@/lib/utils/document'
+import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -23,30 +23,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data: invoice } = await supabase
     .from('documents')
-    .select('*, document_items(*), clients(*)')
+    .select('*, document_items(*), payments(*), clients(*)')
     .eq('id', id)
+    .eq('type', 'invoice')
     .single()
 
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+  if (!invoice.number || !['sent', 'overdue'].includes(invoice.status)) {
+    return NextResponse.json({ error: 'Only issued, unpaid invoices can be reminded' }, { status: 400 })
+  }
   if (!invoice.clients?.email) return NextResponse.json({ error: 'Client has no email' }, { status: 400 })
 
   const client = invoice.clients
   const lang = client.language === 'en' ? 'en' : 'de'
   const dueDate = invoice.due_date ?? ''
-  const today = new Date()
   const daysOverdue = dueDate
-    ? Math.max(0, Math.floor((today.getTime() - new Date(dueDate).getTime()) / 86400000))
+    ? Math.max(0, Math.floor((new Date(today()).getTime() - new Date(dueDate).getTime()) / 86400000))
     : 0
 
   const docDiscount = invoice.discount_type && invoice.discount_value
     ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
     : null
-  const totals = calcTotals(invoice.document_items ?? [], [], docDiscount, invoice.tax_treatment)
+  const totals = calcTotals(invoice.document_items ?? [], invoice.payments ?? [], docDiscount, invoice.tax_treatment)
+  if (totals.balance_due <= 0.005) {
+    return NextResponse.json({ error: 'Nothing outstanding on this invoice' }, { status: 400 })
+  }
 
+  const currency = invoice.currency ?? 'EUR'
   const ctx = {
-    invoiceNumber: invoice.number ?? 'Draft',
+    invoiceNumber: invoice.number,
     clientName: client.company ?? client.name,
-    amount: formatMoney(totals.total, invoice.currency ?? 'EUR'),
+    amount: formatMoney(totals.balance_due, currency),
+    total: formatMoney(totals.total, currency),
     dueDate,
     date: invoice.date ?? '',
     daysOverdue,

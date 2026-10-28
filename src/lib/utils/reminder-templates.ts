@@ -1,7 +1,8 @@
 export interface ReminderContext {
   invoiceNumber: string
   clientName: string
-  amount: string
+  amount: string      // what is still owed (balance due)
+  total: string       // invoice total
   dueDate: string
   date: string
   daysOverdue: number
@@ -18,7 +19,7 @@ export function fillTemplate(template: string, ctx: ReminderContext): string {
     invoice_number: ctx.invoiceNumber,
     client:         ctx.clientName,
     amount:         ctx.amount,
-    total:          ctx.amount,
+    total:          ctx.total,
     balance_due:    ctx.amount,
     due_date:       ctx.dueDate,
     date:           ctx.date,

@@ -36,7 +36,7 @@ export default function InvoicePageClient({
 
   async function generatePdfBase64(): Promise<{ base64: string; filename: string } | null> {
     if (!builderRef.current) return null
-    const result = await builderRef.current.buildPdfBlob(document.number ?? undefined)
+    const result = await builderRef.current.buildPdfBlob(document.number ?? undefined, true)
     if (!result) return null
     const base64 = await new Promise<string>((resolve) => {
       const reader = new FileReader()
