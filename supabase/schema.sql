@@ -123,7 +123,10 @@ create table settings (
   default_skonto_percent      numeric,
   default_skonto_days         integer,
   -- Language of the app interface; documents keep their own language.
-  ui_language                 text not null default 'en' check (ui_language in ('de','en'))
+  ui_language                 text not null default 'en' check (ui_language in ('de','en')),
+  -- The studio's Peppol address for e-invoices; empty = 9914 (Austrian VAT number) with uid_number.
+  peppol_scheme               text constraint settings_peppol_scheme_check check (peppol_scheme is null or peppol_scheme ~ '^[0-9]{4}$'),
+  peppol_id                   text
 );
 
 -- The app and next_document_number read "the" settings row; it must exist, and only once.
@@ -158,7 +161,14 @@ create table clients (
   -- Excluded from the automatic reminder cron; manual reminders still work.
   reminders_opt_out boolean not null default false,
   -- Further recipients (e.g. an accounting mailbox), copied in CC on every email to the client.
-  cc_emails     text[] not null default '{}'
+  cc_emails     text[] not null default '{}',
+  -- E-invoicing: preferred format, the client's Peppol address (empty = derived from its UID),
+  -- the buyer reference prefilled on its e-invoices and the supplier number it assigned to the studio.
+  einvoice_format text constraint clients_einvoice_format_check check (einvoice_format is null or einvoice_format in ('ebinterface','ubl')),
+  peppol_scheme   text constraint clients_peppol_scheme_check check (peppol_scheme is null or peppol_scheme ~ '^[0-9]{4}$'),
+  peppol_id       text,
+  buyer_reference text,
+  supplier_number text
 );
 
 create or replace function format_client_number(n integer)
@@ -276,7 +286,9 @@ create table documents (
   -- First time the client opened the current share link (cleared on rotate/revoke; the owner's
   -- own visits are not counted).
   portal_viewed_at    timestamptz,
-  drive_file_id       text
+  drive_file_id       text,
+  -- The buyer's reference (Auftragsreferenz / order number) the document's e-invoices carry.
+  buyer_reference     text
 );
 
 create index on documents(client_id);
@@ -363,7 +375,7 @@ create table document_events (
   type        text not null check (type in (
                 'issued','emailed','mailto_opened','reminder_sent','status_changed',
                 'payment_added','payment_removed','storno_created','archived','drive_archived',
-                'portal_viewed','portal_responded','bookamat_synced','converted')),
+                'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported')),
   detail      jsonb not null default '{}',
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz
