@@ -216,7 +216,7 @@ export const de = {
     confirmTitleOne: '{action}: {count} Rechnung?',
     confirmTitleOther: '{action}: {count} Rechnungen?',
     confirmDeleteDesc: 'Nur Entwürfe werden gelöscht — ausgestellte Rechnungen bleiben erhalten. Das kann nicht rückgängig gemacht werden.',
-    confirmPaidDesc: 'Der offene Betrag jeder Rechnung wird als Zahlung mit heutigem Datum erfasst. Bereits bezahlte oder stornierte Rechnungen bleiben unverändert; Entwürfe werden zuerst ausgestellt.',
+    confirmPaidDesc: 'Der offene Betrag jeder Rechnung wird als Zahlung mit diesem Datum und dieser Zahlungsart erfasst. Bereits bezahlte oder stornierte Rechnungen bleiben unverändert; Entwürfe werden zuerst ausgestellt.',
     confirmSentDesc: 'Entwürfe erhalten die nächste Rechnungsnummer; bereits ausgestellte Rechnungen bleiben unverändert.',
   },
   quotes: {
@@ -905,6 +905,13 @@ export const de = {
       otherService: 'Sonstige Leistung',
       documents: 'Belege',
       yes: 'ja',
+    },
+    lists: {
+      noArchive: 'Ohne archiviertes PDF ausgestellt — Rechnung öffnen, um es zu archivieren',
+      paidDateInvalid: 'Ein Zahlungsdatum angeben, das nicht in der Zukunft liegt.',
+      tagFilter: 'Nach Tag filtern',
+      clientsExportedOne: '{count} Kunde als CSV exportiert.',
+      clientsExportedOther: '{count} Kunden als CSV exportiert.',
     },
   },
   settings: {

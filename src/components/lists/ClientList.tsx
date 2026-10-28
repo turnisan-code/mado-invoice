@@ -1,223 +1,276 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import Link from 'next/link'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, Users, ChevronRight } from 'lucide-react'
+import { Plus, Users, ChevronRight, Download, Tag } from 'lucide-react'
+import { toast } from 'sonner'
+import { formatMoney, roundCents, today } from '@/lib/utils/document'
+import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { useT } from '@/lib/i18n/client'
-import { n, type DictKey } from '@/lib/i18n'
+import { n, type DictKey, type TFn } from '@/lib/i18n'
+import { StatusBadge } from './StatusBadge'
+import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
+import {
+  SortableTh, PlainTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton,
+  inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+} from './ListParts'
 
-const statusColor: Record<string, string> = {
-  active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  inactive: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800',
-  lead: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
+const STATUSES = ['active', 'inactive', 'lead'] as const
+
+type SortKey = 'name' | 'company' | 'country' | 'status' | 'balance' | 'last_invoiced'
+const LIST: ListConfig<'status' | 'q' | 'tag', SortKey> = {
+  filters: { status: STATUSES, q: null, tag: null },
+  sortKeys: ['name', 'company', 'country', 'status', 'balance', 'last_invoiced'],
+  defaultSort: { key: 'name', dir: 'asc' },
+  firstDir: 'asc',
 }
 
-const STATUSES = ['active', 'inactive', 'lead']
-
-type SortKey = 'name' | 'company' | 'country' | 'status' | 'last_invoiced'
-type SortDir = 'asc' | 'desc'
-
-interface Client {
+export interface ClientRow {
   id: string
   name: string
   company: string | null
   email: string | null
+  phone: string | null
+  address_line1: string | null
+  address_line2: string | null
+  zip: string | null
+  city: string | null
   country: string | null
+  uid_number: string | null
   tax_treatment: string
+  language: string | null
+  payment_days: number | null
   status: string
-  tags: string[]
+  tags: string[] | null
 }
 
-function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: SortDir } }) {
-  if (sort.key !== col) return <ArrowUpDown size={12} className="opacity-30" />
-  return sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+const displayName = (c: ClientRow) => c.name || c.company || ''
+
+function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastInvoiced: Record<string, string>, t: TFn) {
+  const rows = clients.map(c => [
+    c.name,
+    c.company ?? '',
+    c.email ?? '',
+    c.phone ?? '',
+    c.address_line1 ?? '',
+    c.address_line2 ?? '',
+    c.zip ?? '',
+    c.city ?? '',
+    c.country ?? '',
+    c.uid_number ?? '',
+    t(`taxTreatments.${c.tax_treatment}` as DictKey),
+    c.language === 'en' ? t('common.english') : t('common.german'),
+    c.payment_days,
+    t(`status.${c.status}` as DictKey),
+    (c.tags ?? []).join(', '),
+    balances[c.id] ?? 0,
+    csvDate(lastInvoiced[c.id]),
+  ])
+  const header = [
+    t('clients.form.name'), t('clients.form.company'), t('clients.form.email'), t('clients.form.phone'), t('clients.form.address'),
+    t('clients.form.addressLine2'), t('clients.form.zip'), t('clients.form.city'), t('clients.form.country'), t('clients.form.uid'),
+    t('clients.form.taxTreatment'), t('clients.form.language'), t('clients.form.paymentDays'), t('clients.form.status'), t('clients.form.tags'),
+    t('clients.openBalance'), t('clients.lastInvoice'),
+  ]
+  downloadCsv(`clients-${today()}.csv`, toCsv(header, rows))
 }
 
-function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label: string; sort: { key: SortKey; dir: SortDir }; onSort: (key: SortKey) => void; className?: string }) {
-  return (
-    <th
-      aria-sort={sort.key === col ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 ${className}`}
-    >
-      <button type="button" onClick={() => onSort(col)} className="flex items-center gap-1 w-full rounded hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
-        {label}<SortIcon col={col} sort={sort} />
-      </button>
-    </th>
-  )
-}
-
-const PAGE_SIZE = 25
-
-export default function ClientList({ clients, lastInvoicedMap = {} }: { clients: Client[]; lastInvoicedMap?: Record<string, string> }) {
+export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap = {} }: {
+  clients: ClientRow[]
+  lastInvoicedMap?: Record<string, string>
+  balanceMap?: Record<string, number>
+}) {
   const { t } = useT()
-  const [q, setQ] = useState('')
-  const [status, setStatus] = useState('')
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'name', dir: 'asc' })
-  const [page, setPage] = useState(0)
+  const list = useListState(LIST)
+  const { status, q, tag } = list.filters
+  const { sort } = list
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const taxLabel = (s: string) => t(`taxTreatmentsShort.${s}` as DictKey)
+  const balance = (c: ClientRow) => balanceMap[c.id] ?? 0
 
-  function toggleSort(key: SortKey) {
-    setPage(0)
-    setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
-  }
+  const allTags = useMemo(() => [...new Set(clients.flatMap(c => c.tags ?? []))].sort((a, b) => a.localeCompare(b)), [clients])
 
   const filtered = useMemo(() => {
-    let list = clients
-    if (status) list = list.filter(c => c.status === status)
+    let rows = clients
+    if (status) rows = rows.filter(c => c.status === status)
+    if (tag) rows = rows.filter(c => (c.tags ?? []).includes(tag))
     if (q) {
       const lq = q.toLowerCase()
-      list = list.filter(c =>
-        `${c.name} ${c.company ?? ''} ${c.email ?? ''}`.toLowerCase().includes(lq)
+      rows = rows.filter(c =>
+        `${c.name} ${c.company ?? ''} ${c.email ?? ''} ${c.city ?? ''} ${c.uid_number ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(lq)
       )
     }
-    return [...list].sort((a, b) => {
-      let av = '', bv = ''
-      if (sort.key === 'name') { av = a.name || a.company || ''; bv = b.name || b.company || '' }
-      else if (sort.key === 'company') { av = a.company ?? ''; bv = b.company ?? '' }
-      else if (sort.key === 'country') { av = a.country ?? ''; bv = b.country ?? '' }
-      else if (sort.key === 'status') { av = a.status; bv = b.status }
-      else if (sort.key === 'last_invoiced') { av = lastInvoicedMap[a.id] ?? ''; bv = lastInvoicedMap[b.id] ?? '' }
-      if (av < bv) return sort.dir === 'asc' ? -1 : 1
-      if (av > bv) return sort.dir === 'asc' ? 1 : -1
-      return 0
-    })
-  }, [clients, q, status, sort])
+    const value = (c: ClientRow): string | number => {
+      switch (sort.key) {
+        case 'name': return displayName(c)
+        case 'company': return c.company ?? ''
+        case 'country': return c.country ?? ''
+        case 'status': return c.status
+        case 'balance': return balanceMap[c.id] ?? 0
+        case 'last_invoiced': return lastInvoicedMap[c.id] ?? ''
+      }
+    }
+    return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
+  }, [clients, q, status, tag, sort, balanceMap, lastInvoicedMap])
+
+  const { page, pageCount, pageItems } = paginate(filtered, list.page)
+  const selection = useSelection(filtered, pageItems)
+  const selectedCount = selection.count
+  const openTotal = roundCents(filtered.reduce((s, c) => s + balance(c), 0))
+
+  function setFilters(patch: Partial<Record<keyof typeof LIST.filters, string>>) {
+    selection.clear()
+    list.setFilters(patch)
+  }
+
+  function handleExport(rows: ClientRow[]) {
+    exportCSV(rows, balanceMap, lastInvoicedMap, t)
+    const count = rows.length
+    toast.success(n(count, t('exports.lists.clientsExportedOne', { count }), t('exports.lists.clientsExportedOther', { count })))
+  }
+
+  const tagChip = (value: string) => (
+    <span key={value} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{value}</span>
+  )
+  const empty = (
+    <EmptyState
+      icon={Users}
+      message={list.hasFilters ? t('clients.noMatch') : t('clients.noneYet')}
+      cta={list.hasFilters ? undefined : { href: '/clients/new', label: t('clients.addFirst') }}
+    />
+  )
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('clients.title')}</h1>
-        <Link href="/clients/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-          <Plus size={14} /> {t('clients.new')}
-        </Link>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered)} title={t('lists.exportCsv')} className={headerButtonClass}>
+            <Download size={14} />
+            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
+          </button>
+          <Link href="/clients/new" className={primaryLinkClass}>
+            <Plus size={14} /> {t('clients.new')}
+          </Link>
+        </div>
       </div>
 
-      <div className="flex gap-3 flex-wrap">
-        <input
-          type="search"
-          aria-label={t('clients.searchLabel')}
-          value={q}
-          onChange={e => { setQ(e.target.value); setPage(0) }}
-          placeholder={t('clients.searchPlaceholder')}
-          className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
-        />
-        <select
-          aria-label={t('common.status')}
-          value={status}
-          onChange={e => { setStatus(e.target.value); setPage(0) }}
-          className="text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100"
-        >
-          <option value="">{t('status.allStatuses')}</option>
-          {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-        </select>
+      <div className="space-y-3">
+        <div className="flex gap-3 flex-wrap">
+          <input type="search" aria-label={t('clients.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('clients.searchPlaceholder')} className={searchClass} />
+          <select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className={inputClass}>
+            <option value="">{t('status.allStatuses')}</option>
+            {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
+          </select>
+        </div>
+        {allTags.length > 0 && (
+          <div role="group" aria-label={t('exports.lists.tagFilter')} className="flex items-center gap-1.5 flex-wrap">
+            <Tag size={13} aria-hidden="true" className="text-neutral-400 dark:text-neutral-500" />
+            {allTags.map(value => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={tag === value}
+                onClick={() => setFilters({ tag: tag === value ? '' : value })}
+                className={`text-xs px-2.5 py-1.5 sm:py-1 rounded-full border transition-colors ${tag === value
+                  ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-white dark:text-neutral-900 dark:border-white'
+                  : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+      <div className={listCardClass}>
         {/* Mobile cards */}
         <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
-          {filtered.length === 0 && (
-            <div className="py-16 text-center">
-              <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                {q || status ? t('clients.noMatch') : t('clients.noneYet')}
-              </p>
-              {!q && !status && (
-                <Link href="/clients/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                  {t('clients.addFirst')}
+          {filtered.length === 0 && empty}
+          {pageItems.map(c => {
+            const selected = selection.isSelected(c.id)
+            return (
+              <div key={c.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)}`}>
+                <SelectToggle large checked={selected} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: displayName(c) })} />
+                <Link href={`/clients/${c.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{displayName(c)}</p>
+                    {c.name && c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
+                    {(c.tags ?? []).length > 0 && <div className="flex items-center gap-2 mt-1">{(c.tags ?? []).slice(0, 2).map(tagChip)}</div>}
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-col items-end gap-1.5">
+                      <StatusBadge status={c.status} label={statusLabel(c.status)} />
+                      {balance(c) > 0 && <span className="text-xs text-amber-600 dark:text-amber-400">{t('invoices.openAmount', { amount: formatMoney(balance(c)) })}</span>}
+                    </div>
+                    <ChevronRight size={14} aria-hidden="true" className="text-neutral-400 dark:text-neutral-600" />
+                  </div>
                 </Link>
-              )}
-            </div>
-          )}
-          {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(c => (
-            <Link
-              key={c.id}
-              href={`/clients/${c.id}`}
-              className="flex items-center justify-between px-4 py-3.5 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-            >
-              <div className="min-w-0">
-                <p className="font-medium text-sm">{c.name || c.company}</p>
-                {c.name && c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
-                <div className="flex items-center gap-2 mt-1">
-                  {c.tags.slice(0, 2).map(tag => (
-                    <span key={tag} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{tag}</span>
-                  ))}
-                </div>
               </div>
-              <div className="flex items-center gap-2 ml-3 shrink-0">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[c.status] ?? ''}`}>{statusLabel(c.status)}</span>
-                <ChevronRight size={14} aria-hidden="true" className="text-neutral-400 dark:text-neutral-600" />
-              </div>
-            </Link>
-          ))}
+            )
+          })}
         </div>
 
         {/* Desktop table */}
         <table className="hidden sm:table w-full text-sm">
-          <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
+          <thead className={theadClass}>
             <tr>
-              <Th col="name" label={t('clients.name')} sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="company" label={t('clients.company')} sort={sort} onSort={toggleSort} className="text-left" />
-              <Th col="country" label={t('clients.country')} sort={sort} onSort={toggleSort} className="text-left" />
-              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">{t('clients.tax')}</th>
-              <Th col="status" label={t('common.status')} sort={sort} onSort={toggleSort} className="text-left" />
-              <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">{t('clients.tags')}</th>
-              <Th col="last_invoiced" label={t('clients.lastInvoice')} sort={sort} onSort={toggleSort} className="text-left" />
+              <th className="pl-4 py-3 w-8">
+                <SelectToggle checked={selection.allPageSelected} onToggle={selection.toggleAll} label={t('lists.selectAll')} />
+              </th>
+              <SortableTh col="name" label={t('clients.name')} sort={sort} onSort={list.toggleSort} />
+              <SortableTh col="company" label={t('clients.company')} sort={sort} onSort={list.toggleSort} />
+              <SortableTh col="country" label={t('clients.country')} sort={sort} onSort={list.toggleSort} />
+              <PlainTh>{t('clients.tax')}</PlainTh>
+              <SortableTh col="status" label={t('common.status')} sort={sort} onSort={list.toggleSort} />
+              <PlainTh>{t('clients.tags')}</PlainTh>
+              <SortableTh col="balance" label={t('clients.openBalance')} sort={sort} onSort={list.toggleSort} align="right" />
+              <SortableTh col="last_invoiced" label={t('clients.lastInvoice')} sort={sort} onSort={list.toggleSort} />
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-16 text-center">
-                  <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    {q || status ? t('clients.noMatch') : t('clients.noneYet')}
-                  </p>
-                  {!q && !status && (
-                    <Link href="/clients/new" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
-                      {t('clients.addFirst')}
-                    </Link>
-                  )}
+            {filtered.length === 0 && <tr><td colSpan={9}>{empty}</td></tr>}
+            {pageItems.map(c => (
+              <ClickableRow key={c.id} href={`/clients/${c.id}`} className={rowStateClass(selection.isSelected(c.id))}>
+                <td className="pl-4 py-3 w-8">
+                  <SelectToggle checked={selection.isSelected(c.id)} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: displayName(c) })} />
                 </td>
-              </tr>
-            )}
-            {filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map(c => (
-              <tr key={c.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
                 <td className="px-4 py-3">
-                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{c.name || c.company}</Link>
+                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{displayName(c)}</Link>
                 </td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company ?? '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.country ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company || '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.country || '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{taxLabel(c.tax_treatment)}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[c.status] ?? ''}`}>{statusLabel(c.status)}</span>
+                  <StatusBadge status={c.status} label={statusLabel(c.status)} />
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1 flex-wrap">
-                    {c.tags.map((tag: string) => (
-                      <span key={tag} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">{tag}</span>
-                    ))}
-                  </div>
+                  <div className="flex gap-1 flex-wrap">{(c.tags ?? []).map(tagChip)}</div>
                 </td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
+                <td className={`px-4 py-3 text-right whitespace-nowrap ${balance(c) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                  {balance(c) > 0 ? formatMoney(balance(c)) : '—'}
+                </td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs whitespace-nowrap">
                   {lastInvoicedMap[c.id] ?? '—'}
                 </td>
-              </tr>
+              </ClickableRow>
             ))}
           </tbody>
         </table>
       </div>
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{n(filtered.length, t('clients.countOne', { count: filtered.length }), t('clients.countOther', { count: filtered.length }))}</p>
-        {filtered.length > PAGE_SIZE && (
-          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <button type="button" onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.prev')}</button>
-            <span>{t('common.pageOf', { page: page + 1, count: Math.ceil(filtered.length / PAGE_SIZE) })}</span>
-            <button type="button" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">{t('common.next')}</button>
-          </div>
-        )}
+
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {n(filtered.length, t('clients.countOne', { count: filtered.length }), t('clients.countOther', { count: filtered.length }))}
+          {openTotal > 0 && <> · {t('invoices.openAmount', { amount: formatMoney(openTotal) })}</>}
+        </p>
+        <Pagination page={page} pageCount={pageCount} onPage={list.setPage} />
       </div>
+
+      <BulkBar count={selectedCount} onClear={selection.clear}>
+        <BulkButton icon={Download} onClick={() => handleExport(selection.selectedVisible)}>{t('lists.exportCsv')}</BulkButton>
+      </BulkBar>
     </div>
   )
 }

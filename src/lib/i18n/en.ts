@@ -214,7 +214,7 @@ export const en = {
     confirmTitleOne: '{action} {count} invoice?',
     confirmTitleOther: '{action} {count} invoices?',
     confirmDeleteDesc: 'Only drafts are deleted — issued invoices are kept. This cannot be undone.',
-    confirmPaidDesc: 'The open balance of each invoice is recorded as a payment dated today. Invoices that are already paid or cancelled are left alone; drafts are issued first.',
+    confirmPaidDesc: 'The open balance of each invoice is recorded as a payment on this date and by this method. Invoices that are already paid or cancelled are left alone; drafts are issued first.',
     confirmSentDesc: 'Drafts get the next invoice number assigned; invoices that are already issued are left alone.',
   },
   quotes: {
@@ -903,6 +903,13 @@ export const en = {
       otherService: 'Other service',
       documents: 'Documents',
       yes: 'yes',
+    },
+    lists: {
+      noArchive: 'Issued without an archived PDF — open the invoice to archive it',
+      paidDateInvalid: 'Enter a payment date that is not in the future.',
+      tagFilter: 'Filter by tag',
+      clientsExportedOne: 'Exported {count} client to CSV.',
+      clientsExportedOther: 'Exported {count} clients to CSV.',
     },
   },
   settings: {
