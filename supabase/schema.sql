@@ -269,7 +269,8 @@ create table documents (
   share_token         uuid unique,
   -- The share link stops working after this (NULL = never); new links get 90 days.
   share_expires_at    timestamptz,
-  -- First time the client opened the document in the portal (the owner's own visits are not counted).
+  -- First time the client opened the current share link (cleared on rotate/revoke; the owner's
+  -- own visits are not counted).
   portal_viewed_at    timestamptz,
   drive_file_id       text
 );

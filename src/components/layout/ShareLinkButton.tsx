@@ -98,7 +98,7 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
     try {
       const res = await fetch(`/api/documents/${documentId}/share`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to revoke')
-      setShare({ token: null, expiresAt: null, viewedAt: share.viewedAt })
+      setShare({ token: null, expiresAt: null, viewedAt: null })
       setDetails(false)
       close()
       toast.success(t('share.revoked'))

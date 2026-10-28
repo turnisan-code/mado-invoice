@@ -808,7 +808,7 @@ export const de = {
       extended: 'Link gültig bis {date}.',
       extendFailed: 'Link konnte nicht verlängert werden',
       rotate: 'Neuer Link',
-      rotateQuestion: 'Neuen Link erstellen? Der bisherige Link funktioniert sofort nicht mehr; den neuen an den Kunden senden.',
+      rotateQuestion: 'Neuen Link erstellen? Der bisherige Link funktioniert sofort nicht mehr. Senden Sie dem Kunden anschließend den neuen Link.',
       rotateConfirm: 'Neuen Link erstellen',
       rotated: 'Neuer Link erstellt.',
       rotateFailed: 'Neuer Link konnte nicht erstellt werden',

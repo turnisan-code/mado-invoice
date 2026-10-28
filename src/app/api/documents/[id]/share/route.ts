@@ -61,7 +61,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 }
 
 // { action: 'extend' } keeps the link working SHARE_LINK_DAYS from now; { action: 'rotate' }
-// replaces it with a new one, so the old link stops working immediately.
+// replaces it with a new one, so the old link stops working immediately. portal_viewed_at tracks
+// the current link, so a new or revoked link starts unopened; document_events keeps every view.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const body = await req.json().catch(() => null) as { action?: unknown } | null
@@ -71,7 +72,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const auth = await authorize()
   if ('response' in auth) return auth.response
   const update = action === 'rotate'
-    ? { share_token: randomUUID(), share_expires_at: shareExpiry() }
+    ? { share_token: randomUUID(), share_expires_at: shareExpiry(), portal_viewed_at: null }
     : { share_expires_at: shareExpiry() }
   const { data, error } = await auth.supabase
     .from('documents')
@@ -92,7 +93,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
   const { data: updated, error } = await auth.supabase
     .from('documents')
-    .update({ share_token: null, share_expires_at: null })
+    .update({ share_token: null, share_expires_at: null, portal_viewed_at: null })
     .eq('id', id)
     .select('id')
 

@@ -1,7 +1,8 @@
 -- PDF and client portal:
 --   * settings.bank_account_holder: the name the account is held in, printed as the beneficiary
 --     of the payment QR code and in the PDF payment block (empty = company name)
---   * documents.portal_viewed_at: when the client first opened the document in the portal
+--   * documents.portal_viewed_at: when the client first opened the current share link (cleared
+--     when the link is rotated or revoked)
 --   * documents.share_expires_at: when the share link stops working (NULL = never); links that
 --     already exist get 90 days from now, the same as a newly created link
 --   * a saved copy of the wrong English non-EU tax note is cleared
