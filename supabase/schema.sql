@@ -343,7 +343,8 @@ create index on reminder_log(document_id);
 
 -- ─── Document events ─────────────────────────────────────────────────────────
 -- History per document: issuing, every email and reminder, status changes, payments, Storno,
--- archive copies and Drive uploads. Rows are only ever inserted by the app.
+-- archive copies and Drive uploads. Rows are only ever inserted by the app; read_at is the one
+-- column set later (a portal response the owner has seen).
 create table document_events (
   id          uuid primary key default uuid_generate_v4(),
   document_id uuid not null references documents(id) on delete cascade,

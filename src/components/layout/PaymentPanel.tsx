@@ -130,9 +130,9 @@ export default function PaymentPanel({
       const newTotal = next.reduce((s, p) => s + p.amount, 0)
       const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
       if (newTotal >= total - 0.005 && PAYABLE.includes(status)) {
-        const { error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE)
+        const { data: updated, error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE).select('id')
         if (statusErr) toast.error(lifecycleErrorMessage(statusErr, t))
-        else await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
+        else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
         toast.success(t('payments.recordedAndPaid', { label }))
         if (!bookamatId && bookamatConfigured) {
           setShowBookamatPrompt(true)
