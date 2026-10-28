@@ -824,7 +824,7 @@ export const en = {
       dayOne: '{days} day',
       dayOther: '{days} days',
       pay: 'Please transfer {amount} by {date} at the latest to the account below, quoting {reference}.',
-      scan: 'Scan with your banking app to pay.',
+      scan: 'Scan to pay',
       closing: 'If your payment has crossed with this letter, please disregard it.',
       closingFinal: 'If no payment is received by then, further steps to collect the debt will follow without further notice; the resulting costs are at your expense.',
       regards: 'Kind regards',

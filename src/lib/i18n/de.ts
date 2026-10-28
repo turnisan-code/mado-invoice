@@ -826,7 +826,7 @@ export const de = {
       dayOne: '{days} Tag',
       dayOther: '{days} Tage',
       pay: 'Bitte überweisen Sie {amount} bis spätestens {date} auf das unten angeführte Konto. Verwendungszweck: {reference}.',
-      scan: 'Zum Bezahlen mit der Banking-App scannen.',
+      scan: 'Zum Bezahlen scannen',
       closing: 'Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, betrachten Sie es bitte als gegenstandslos.',
       closingFinal: 'Geht bis dahin keine Zahlung ein, folgen ohne weitere Ankündigung weitere Schritte zur Einbringung der Forderung; die dadurch entstehenden Kosten gehen zu Ihren Lasten.',
       regards: 'Mit freundlichen Grüßen',

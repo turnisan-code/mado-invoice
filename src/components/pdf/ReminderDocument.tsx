@@ -8,23 +8,24 @@ import type { Client, Language, Settings } from '@/types'
 
 // Same page frame as InvoiceDocument, so a Mahnung reads as part of the same correspondence.
 const s = StyleSheet.create({
-  page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff' },
+  // The bottom padding keeps text clear of the fixed footer (up to five contact lines).
+  page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 44, paddingBottom: 150, backgroundColor: '#ffffff' },
 
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 40 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
   logo: { width: 130, height: 52, objectFit: 'contain', objectPositionX: 0 },
   logoFallback: { fontSize: 18, fontFamily: 'Helvetica-Bold', maxWidth: 160 },
   docTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
 
-  billedSection: { marginBottom: 28 },
+  billedSection: { marginBottom: 22 },
   billedLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
   billedText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.6 },
 
-  subject: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 14 },
-  paragraph: { fontSize: 9, lineHeight: 1.6, marginBottom: 10 },
+  subject: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 12 },
+  paragraph: { fontSize: 9, lineHeight: 1.5, marginBottom: 8 },
 
-  table: { marginTop: 6, marginBottom: 6, borderTopWidth: 1, borderTopColor: '#1a1a1a' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4' },
+  table: { marginTop: 4, marginBottom: 4, borderTopWidth: 1, borderTopColor: '#1a1a1a' },
+  row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4' },
   rowLabel: { flex: 1, paddingRight: 12 },
   rowSub: { fontSize: 7.5, color: '#9b9b9b', marginTop: 2 },
   rowValue: { width: 96, textAlign: 'right' },
@@ -32,13 +33,13 @@ const s = StyleSheet.create({
   totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
   totalValue: { width: 96, textAlign: 'right', fontFamily: 'Helvetica-Bold', fontSize: 10 },
 
-  payRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 14, marginBottom: 6 },
-  payText: { flex: 1, paddingRight: 16, fontSize: 9, lineHeight: 1.6 },
-  qrBox: { alignItems: 'center', width: 84 },
-  qr: { width: 72, height: 72 },
+  payRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 12, marginBottom: 4 },
+  payText: { flex: 1, paddingRight: 16, fontSize: 9, lineHeight: 1.5 },
+  qrBox: { alignItems: 'center', width: 96 },
+  qr: { width: 64, height: 64 },
   qrCaption: { fontSize: 6.5, color: '#9b9b9b', textAlign: 'center', marginTop: 3 },
 
-  regards: { marginTop: 18, fontSize: 9 },
+  regards: { marginTop: 12, fontSize: 9 },
   signature: { marginTop: 4, fontSize: 9, fontFamily: 'Helvetica-Bold' },
 
   footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },

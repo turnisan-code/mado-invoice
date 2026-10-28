@@ -1440,7 +1440,7 @@ export default function SettingsForm({ settings }: Props) {
             onSave={saveTemplates}
           >
             {/* Doc type tabs */}
-            <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
+            <div className="flex flex-wrap gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit max-w-full">
               {DOC_TABS.map(type => (
                 <button
                   key={type}
