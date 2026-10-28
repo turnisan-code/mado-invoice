@@ -9,6 +9,7 @@ export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
 export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
 // 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer.
 export type PaymentKind = 'payment' | 'skonto' | 'writeoff'
+export type PaymentMethod = 'bank' | 'cash'
 
 export interface Settings {
   id: string
@@ -64,6 +65,7 @@ export interface Settings {
   bookamat_api_key: string | null
   bookamat_country: string | null
   bookamat_bank_account_id: number | null
+  bookamat_cash_account_id: number | null
   bookamat_cost_account_id: number | null
   bookamat_vat_account_0: number | null
   bookamat_vat_account_10: number | null
@@ -191,6 +193,7 @@ export interface Payment {
   amount: number
   note: string | null
   kind: PaymentKind
+  method: PaymentMethod
   import_ref: string | null
 }
 

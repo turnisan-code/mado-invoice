@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import type { Currency, PaymentKind } from '@/types'
+import type { Currency, PaymentKind, PaymentMethod } from '@/types'
 import { useT } from '@/lib/i18n/client'
 
 interface Payment {
@@ -19,6 +19,7 @@ interface Payment {
   amount: number
   note: string | null
   kind: PaymentKind
+  method: PaymentMethod
 }
 
 interface Props {
@@ -50,6 +51,7 @@ export default function PaymentPanel({
   const [payDate, setPayDate] = useState(today())
   const [amount, setAmount] = useState<number | null>(null)
   const [note, setNote] = useState('')
+  const [method, setMethod] = useState<PaymentMethod>('bank')
   const [saving, setSaving] = useState(false)
   const [confirmOverpay, setConfirmOverpay] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<Payment | null>(null)
@@ -83,7 +85,7 @@ export default function PaymentPanel({
   const offerSkonto = canRecord && !fullyPaid && skonto > 0 && !!skontoDue && !!lastReceived && lastReceived <= skontoDue && balanceDue <= skonto + 0.01
   const offerWriteoff = canRecord && !fullyPaid && balanceDue < 1
 
-  async function recordRow(row: { date: string; amount: number; note: string | null; kind: PaymentKind }) {
+  async function recordRow(row: { date: string; amount: number; note: string | null; kind: PaymentKind; method: PaymentMethod }) {
     setSaving(true)
     const { data, error } = await supabase
       .from('payments')
@@ -118,7 +120,7 @@ export default function PaymentPanel({
     if (!amt || amt <= 0) { toast.error(t('payments.invalidAmount')); return }
     if (amt > balanceDue + 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
     setConfirmOverpay(false)
-    await recordRow({ date: payDate, amount: amt, note: note || null, kind: 'payment' })
+    await recordRow({ date: payDate, amount: amt, note: note || null, kind: 'payment', method })
     setAmount(null)
     setNote('')
   }
@@ -126,7 +128,7 @@ export default function PaymentPanel({
   async function settleRemaining(kind: 'skonto' | 'writeoff') {
     if (balanceDue <= 0.005) return
     const settleNote = kind === 'skonto' ? `Skonto ${skontoPercent} %` : null
-    await recordRow({ date: today(), amount: balanceDue, note: settleNote, kind })
+    await recordRow({ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' })
   }
 
   async function removePayment(id: string) {
@@ -242,6 +244,9 @@ export default function PaymentPanel({
               {kindLabel[p.kind] && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{kindLabel[p.kind]}</span>
               )}
+              {p.method === 'cash' && p.kind === 'payment' && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 shrink-0">{t('payments.cashBadge')}</span>
+              )}
               {p.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
               <button
                 type="button"
@@ -293,6 +298,15 @@ export default function PaymentPanel({
             />
           </div>
           <div className="flex gap-2">
+            <select
+              aria-label={t('payments.paymentMethod')}
+              value={method}
+              onChange={e => setMethod(e.target.value as PaymentMethod)}
+              className="shrink-0 h-8 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            >
+              <option value="bank">{t('payments.methodBank')}</option>
+              <option value="cash">{t('payments.methodCash')}</option>
+            </select>
             <Input
               aria-label={t('payments.note')}
               placeholder={t('payments.note')}

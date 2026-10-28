@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { calcTotals } from '@/lib/utils/document'
+import { calcTotals, roundCents } from '@/lib/utils/document'
+
+// Bookamat answers with DRF-style JSON ({"non_field_errors": ["…"]}); show the messages, not the JSON.
+function bookamatError(text: string): string {
+  const collect = (v: unknown): string[] =>
+    typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(collect) : v && typeof v === 'object' ? Object.values(v).flatMap(collect) : []
+  try {
+    const messages = collect(JSON.parse(text))
+    if (messages.length) return messages.join(' ')
+  } catch { /* not JSON */ }
+  return text
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -76,9 +87,27 @@ export async function POST(req: NextRequest) {
     20: settings.bookamat_vat_account_20,
   }
 
-  const lastPayment = ((doc.payments ?? []) as { date: string; amount: number }[])
-    .sort((a, b) => b.date.localeCompare(a.date))[0]
+  const paymentRows = (doc.payments ?? []) as { date: string; amount: number; kind?: string | null; method?: string | null }[]
+  const lastPayment = [...paymentRows].sort((a, b) => b.date.localeCompare(a.date))[0]
   const paymentDate = lastPayment?.date ?? doc.date
+
+  // Ist-Besteuerung: book what actually arrived. Skonto taken or a write-off reduces the income,
+  // and cash and bank receipts go to different Bookamat accounts, each VAT group split alike.
+  const received = paymentRows.filter(p => (p.kind ?? 'payment') === 'payment')
+  const receivedTotal = roundCents(received.reduce((s, p) => s + p.amount, 0))
+  const cashTotal = roundCents(received.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0))
+  if (receivedTotal <= 0) {
+    return NextResponse.json({ error: 'No money received on this invoice — nothing to book' }, { status: 400 })
+  }
+  if (cashTotal > 0 && !settings.bookamat_cash_account_id) {
+    return NextResponse.json({ error: 'This invoice was paid in cash, but no Bookamat cash account (Kassa) is configured — set it in Settings → Bookamat' }, { status: 400 })
+  }
+  const cashShare = cashTotal / receivedTotal
+  const accountShares = [
+    { account: settings.bookamat_bank_account_id as number, share: 1 - cashShare },
+    { account: settings.bookamat_cash_account_id as number, share: cashShare },
+  ].filter(a => a.share > 1e-9)
+  const receivedShare = totals.total > 0 ? Math.min(1, receivedTotal / totals.total) : 1
 
   // Use payment date year for the fiscal year URL (not invoice date)
   const year = new Date(paymentDate).getFullYear()
@@ -96,20 +125,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `No Bookamat VAT account configured for ${missing.rate} % — set it in Settings → Bookamat` }, { status: 400 })
   }
 
-  const amounts = totals.vat_groups.map(g => ({
-    bankaccount: settings.bookamat_bank_account_id,
-    costaccount: settings.bookamat_cost_account_id,
-    purchasetaxaccount: vatAccountMap[g.rate]!,
-    amount: (g.base + g.amount).toFixed(2),
-    tax_percent: g.rate.toFixed(2),
-    deductibility_tax_percent: '100.00',
-    deductibility_amount_percent: '100.00',
-  }))
+  // Gross per VAT group scaled to the received share; the cent drift lands in the largest group.
+  const booked = totals.vat_groups.map(g => ({ g, gross: roundCents((g.base + g.amount) * receivedShare) }))
+  const drift = roundCents(receivedTotal - booked.reduce((s, b) => s + b.gross, 0))
+  if (drift !== 0 && booked.length) {
+    const largest = booked.reduce((a, b) => (b.gross > a.gross ? b : a))
+    largest.gross = roundCents(largest.gross + drift)
+  }
+  const amounts = booked.flatMap(({ g, gross }) => {
+    let left = gross
+    return accountShares.map((a, i) => {
+      const part = i === accountShares.length - 1 ? left : roundCents(gross * a.share)
+      left = roundCents(left - part)
+      return {
+        bankaccount: a.account,
+        costaccount: settings.bookamat_cost_account_id,
+        purchasetaxaccount: vatAccountMap[g.rate]!,
+        amount: part.toFixed(2),
+        tax_percent: g.rate.toFixed(2),
+        deductibility_tax_percent: '100.00',
+        deductibility_amount_percent: '100.00',
+      }
+    }).filter(line => Number(line.amount) !== 0)
+  })
 
   const payload = {
     title,
     date: paymentDate,
     date_invoice: doc.date,
+    // Leistungsdatum: Bookamat requires it for the 0 % accounts (reverse charge, non-EU).
+    date_delivery: doc.service_date_end ?? doc.service_date ?? doc.date,
     vatin: client?.uid_number ?? undefined,
     description: `Invoice ${doc.number ?? ''} | ${client?.company ?? client?.name ?? ''}`,
     amounts,
@@ -126,7 +171,7 @@ export async function POST(req: NextRequest) {
 
   if (!bookingRes.ok) {
     const text = await bookingRes.text()
-    return NextResponse.json({ error: text }, { status: 500 })
+    return NextResponse.json({ error: bookamatError(text) }, { status: 500 })
   }
 
   const booking = await bookingRes.json()
