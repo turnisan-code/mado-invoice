@@ -14,8 +14,9 @@ const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, v
 const RATES = [20, 13, 10, 0] as const
 const KINDS = ['documents', 'payments', 'zm', 'pdfs', 'backup'] as const
 type Kind = typeof KINDS[number]
-// One ZIP holds at most this many PDFs; a year of a freelancer's documents fits comfortably.
-const MAX_PDFS = 1000
+// One ZIP holds at most this many PDFs (a year of a freelancer's documents fits comfortably);
+// kept below PostgREST's 1000-row page so an overflow is detected instead of truncated.
+const MAX_PDFS = 500
 const PAGE = 1000
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
@@ -43,7 +44,7 @@ function csvResponse(csv: string, filename: string) {
 // amounts, so the sums agree with the UVA, which ignores it. A cancelled invoice keeps its amounts:
 // its Storno offsets them. Paid/open only exist for invoices: the app records no refunds.
 async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
-  const { data, error } = await supabase
+  const result = await fetchPaged((from, to) => supabase
     .from('documents')
     .select(`type, number, date, service_date, service_date_end, status, tax_treatment, discount_type, discount_value, bookamat_booking_id, clients(name, company, uid_number), ${ITEM_COLS}, payments(amount)`)
     .in('type', ['invoice', 'credit_note'])
@@ -52,9 +53,10 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
     .lte('date', period.end)
     .order('date')
     .order('number')
-  if (error) return { error: error.message }
+    .range(from, to))
+  if ('error' in result) return result
 
-  const rows: CsvValue[][] = (data ?? []).map(d => {
+  const rows: CsvValue[][] = result.rows.map(d => {
     const totals = calcTotals(
       d.document_items ?? [],
       d.payments ?? [],
@@ -88,17 +90,19 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
 }
 
 async function paymentsCsv(supabase: Supabase, period: Period, t: TFn) {
-  const { data, error } = await supabase
+  const result = await fetchPaged((from, to) => supabase
     .from('payments')
     .select('date, amount, note, kind, method, import_ref, documents!inner(number, type, clients(name, company))')
     .eq('documents.type', 'invoice')
     .gte('date', period.start)
     .lte('date', period.end)
     .order('date')
-  if (error) return { error: error.message }
+    .order('id')
+    .range(from, to))
+  if ('error' in result) return result
 
   const kindLabel: Record<string, string> = { payment: t('exports.csv.kindPayment'), skonto: t('exports.csv.kindSkonto'), writeoff: t('exports.csv.kindWriteoff') }
-  const rows: CsvValue[][] = (data ?? []).map(p => {
+  const rows: CsvValue[][] = result.rows.map(p => {
     const doc = p.documents as unknown as { number: string | null; clients: ClientRef }
     return [
       csvDate(p.date),
@@ -124,17 +128,23 @@ async function zmCsv(supabase: Supabase, period: Period, t: TFn) {
   }
 }
 
-// Pages past PostgREST's row limit; stable order by primary key.
-async function fetchAll(supabase: Supabase, table: string, ordered = true): Promise<{ rows: Record<string, unknown>[] } | { error: string }> {
-  const rows: Record<string, unknown>[] = []
+// PostgREST returns at most 1000 rows per request; a year's export or a backup must not be cut
+// off silently. The query must have a stable order.
+async function fetchPaged<T>(query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<{ rows: T[] } | { error: string }> {
+  const rows: T[] = []
   for (let from = 0; ; from += PAGE) {
-    let query = supabase.from(table).select('*')
-    if (ordered) query = query.order('id')
-    const { data, error } = await query.range(from, from + PAGE - 1)
+    const { data, error } = await query(from, from + PAGE - 1)
     if (error) return { error: error.message }
     rows.push(...(data ?? []))
     if ((data?.length ?? 0) < PAGE) return { rows }
   }
+}
+
+function fetchAll(supabase: Supabase, table: string, ordered = true) {
+  return fetchPaged<Record<string, unknown>>((from, to) => {
+    const query = supabase.from(table).select('*')
+    return (ordered ? query.order('id') : query).range(from, to)
+  })
 }
 
 const BACKUP_TABLES = ['clients', 'catalogue_items', 'documents', 'document_items', 'payments', 'reminder_log', 'recurring_schedules'] as const
