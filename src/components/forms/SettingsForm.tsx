@@ -336,6 +336,8 @@ export default function SettingsForm({ settings }: Props) {
   const [bookamatCashId, setBookamatCashId] = useState<number | ''>(settings?.bookamat_cash_account_id ?? '')
   const [bookamatCostId, setBookamatCostId] = useState<number | ''>(settings?.bookamat_cost_account_id ?? '')
   const [bookamatVat0, setBookamatVat0] = useState<number | ''>(settings?.bookamat_vat_account_0 ?? '')
+  const [bookamatVatRc, setBookamatVatRc] = useState<number | ''>(settings?.bookamat_vat_account_rc ?? '')
+  const [bookamatVatNonEu, setBookamatVatNonEu] = useState<number | ''>(settings?.bookamat_vat_account_non_eu ?? '')
   const [bookamatVat10, setBookamatVat10] = useState<number | ''>(settings?.bookamat_vat_account_10 ?? '')
   const [bookamatVat13, setBookamatVat13] = useState<number | ''>(settings?.bookamat_vat_account_13 ?? '')
   const [bookamatVat20, setBookamatVat20] = useState<number | ''>(settings?.bookamat_vat_account_20 ?? '')
@@ -657,6 +659,8 @@ export default function SettingsForm({ settings }: Props) {
       bookamat_cash_account_id: bookamatCashId   || null,
       bookamat_cost_account_id: bookamatCostId   || null,
       bookamat_vat_account_0:   bookamatVat0     || null,
+      bookamat_vat_account_rc:  bookamatVatRc    || null,
+      bookamat_vat_account_non_eu: bookamatVatNonEu || null,
       bookamat_vat_account_10:  bookamatVat10    || null,
       bookamat_vat_account_13:  bookamatVat13    || null,
       bookamat_vat_account_20:  bookamatVat20    || null,
@@ -1702,23 +1706,29 @@ export default function SettingsForm({ settings }: Props) {
                     </div>
                     <div className="space-y-2">
                       <p className={lbl}>{t('settings.integrations.bookamat.vatAccounts')}</p>
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.integrations.bookamat.vatAccountsHint')}</p>
                       {([
-                        [0,  bookamatVat0,  setBookamatVat0],
-                        [10, bookamatVat10, setBookamatVat10],
-                        [13, bookamatVat13, setBookamatVat13],
-                        [20, bookamatVat20, setBookamatVat20],
-                      ] as [number, number | '', (v: number) => void][]).map(([rate, val, setter]) => (
-                        <div key={rate} className="flex items-center gap-3">
-                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-7 shrink-0 text-right">{rate}%</span>
-                          <select
-                            aria-label={t('settings.integrations.bookamat.vatAccountFor', { rate })}
-                            value={val}
-                            onChange={e => setter(Number(e.target.value))}
-                            className={inp}
-                          >
-                            <option value="">{t('common.notUsed')}</option>
-                            {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                          </select>
+                        ['rc',    0,  t('settings.integrations.bookamat.vatAccountRc'),    bookamatVatRc,    setBookamatVatRc],
+                        ['nonEu', 0,  t('settings.integrations.bookamat.vatAccountNonEu'), bookamatVatNonEu, setBookamatVatNonEu],
+                        ['0',     0,  t('settings.integrations.bookamat.vatAccount0'),     bookamatVat0,     setBookamatVat0],
+                        ['10',    10, null, bookamatVat10, setBookamatVat10],
+                        ['13',    13, null, bookamatVat13, setBookamatVat13],
+                        ['20',    20, null, bookamatVat20, setBookamatVat20],
+                      ] as [string, number, string | null, number | '', (v: number | '') => void][]).map(([key, rate, hint, val, setter]) => (
+                        <div key={key} className="flex items-start gap-3">
+                          <span className="text-xs text-neutral-500 dark:text-neutral-400 w-7 shrink-0 text-right pt-2">{rate}%</span>
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <select
+                              aria-label={hint ? `${t('settings.integrations.bookamat.vatAccountFor', { rate })} – ${hint}` : t('settings.integrations.bookamat.vatAccountFor', { rate })}
+                              value={val}
+                              onChange={e => setter(e.target.value ? Number(e.target.value) : '')}
+                              className={inp}
+                            >
+                              <option value="">{t('common.notUsed')}</option>
+                              {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                            </select>
+                            {hint && <p className="text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
+                          </div>
                         </div>
                       ))}
                     </div>

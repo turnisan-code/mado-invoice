@@ -80,8 +80,17 @@ export async function POST(req: NextRequest) {
   const clientName = (client?.company ?? client?.name ?? '').slice(0, 30)
   const title = `${doc.number ?? 'Draft'} – ${clientName}`.slice(0, 50)
 
+  // A 0 % invoice books on the account that matches its tax treatment, not on one generic 0 % account.
+  const zeroAccount: number | null =
+    doc.tax_treatment === 'eu_reverse_charge' ? settings.bookamat_vat_account_rc
+    : doc.tax_treatment === 'non_eu' ? settings.bookamat_vat_account_non_eu
+    : settings.bookamat_vat_account_0
+  const zeroLabel =
+    doc.tax_treatment === 'eu_reverse_charge' ? '0 % EU reverse charge (IG Leistungen)'
+    : doc.tax_treatment === 'non_eu' ? '0 % non-EU (Drittland)'
+    : '0 % domestic'
   const vatAccountMap: Record<number, number | null> = {
-    0: settings.bookamat_vat_account_0,
+    0: zeroAccount,
     10: settings.bookamat_vat_account_10,
     13: settings.bookamat_vat_account_13,
     20: settings.bookamat_vat_account_20,
@@ -122,7 +131,8 @@ export async function POST(req: NextRequest) {
   // Reverse-charge / non-EU invoices arrive as a single 0 % group and book on the 0 % account.
   const missing = totals.vat_groups.find(g => vatAccountMap[g.rate] == null)
   if (missing) {
-    return NextResponse.json({ error: `No Bookamat VAT account configured for ${missing.rate} % — set it in Settings → Bookamat` }, { status: 400 })
+    const which = missing.rate === 0 ? zeroLabel : `${missing.rate} %`
+    return NextResponse.json({ error: `No Bookamat VAT account configured for ${which} — set it in Settings → Integrations → Bookamat` }, { status: 400 })
   }
 
   // Gross per VAT group scaled to the received share; the cent drift lands in the largest group.

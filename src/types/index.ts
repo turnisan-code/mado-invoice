@@ -68,6 +68,8 @@ export interface Settings {
   bookamat_cash_account_id: number | null
   bookamat_cost_account_id: number | null
   bookamat_vat_account_0: number | null
+  bookamat_vat_account_rc: number | null
+  bookamat_vat_account_non_eu: number | null
   bookamat_vat_account_10: number | null
   bookamat_vat_account_13: number | null
   bookamat_vat_account_20: number | null

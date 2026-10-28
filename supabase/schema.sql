@@ -71,7 +71,10 @@ create table settings (
   -- Bookamat cash account (Kassa) for payments received in cash.
   bookamat_cash_account_id    integer,
   bookamat_cost_account_id    integer,
+  -- Purchase-tax accounts: domestic 0 % lines, EU reverse charge (IG Leistungen), non-EU (Drittland).
   bookamat_vat_account_0      integer,
+  bookamat_vat_account_rc     integer,
+  bookamat_vat_account_non_eu integer,
   bookamat_vat_account_10     integer,
   bookamat_vat_account_13     integer,
   bookamat_vat_account_20     integer,
