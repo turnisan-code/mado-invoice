@@ -6,6 +6,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import DocumentHistory from '@/components/layout/DocumentHistory'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
@@ -63,6 +64,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           reference={reference}
         />
       </div>
+      <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )
 }

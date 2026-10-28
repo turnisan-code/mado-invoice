@@ -5,6 +5,7 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import ConvertToInvoiceButton from '@/components/layout/ConvertToInvoiceButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import DocumentHistory from '@/components/layout/DocumentHistory'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import { toPublicSettings } from '@/lib/public-settings'
@@ -63,6 +64,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           document={docWithItems}
         />
       </div>
+      <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )
 }

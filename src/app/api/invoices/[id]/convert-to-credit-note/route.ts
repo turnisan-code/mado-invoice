@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { today } from '@/lib/utils/document'
+import { logEvent } from '@/lib/events'
 
 // Creates a credit note from an invoice. With { cancel: true } it is a Storno: the invoice
 // is marked cancelled and the credit note references it (number + date on the PDF).
@@ -78,7 +79,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       await supabase.from('documents').delete().eq('id', creditNote.id)
       return NextResponse.json({ error: 'Invoice is already cancelled' }, { status: 409 })
     }
+    await logEvent(supabase, invoice.id, 'storno_created', { credit_note_id: creditNote.id, from: invoice.status })
   }
+  await logEvent(supabase, creditNote.id, 'converted', { from_id: invoice.id, from_number: invoice.number, from_type: 'invoice', storno: cancel })
 
   return NextResponse.json({ creditNoteId: creditNote.id })
 }

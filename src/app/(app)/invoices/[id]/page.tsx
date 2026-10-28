@@ -6,6 +6,7 @@ import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton
 import InvoicePageClient from '@/components/layout/InvoicePageClient'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import DocumentHistory from '@/components/layout/DocumentHistory'
 import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteButton'
 import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
 import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
@@ -93,6 +94,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         reminderLevel={doc.reminder_level ?? 0}
         reminderLog={reminderLog ?? []}
       />
+      <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )
 }
