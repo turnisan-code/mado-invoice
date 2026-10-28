@@ -7,9 +7,10 @@ import { toast } from 'sonner'
 import { formatMoney, roundCents, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { useT } from '@/lib/i18n/client'
-import { n, type DictKey, type TFn } from '@/lib/i18n'
+import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
+import { countryName } from '@/lib/utils/country'
 import {
   SortableTh, PlainTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
   inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
@@ -46,7 +47,7 @@ export interface ClientRow {
 
 const displayName = (c: ClientRow) => c.name || c.company || ''
 
-function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastInvoiced: Record<string, string>, t: TFn) {
+function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastInvoiced: Record<string, string>, t: TFn, lang: UiLang) {
   const rows = clients.map(c => [
     c.name,
     c.company ?? '',
@@ -56,7 +57,7 @@ function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastI
     c.address_line2 ?? '',
     c.zip ?? '',
     c.city ?? '',
-    c.country ?? '',
+    countryName(c.country, lang),
     c.uid_number ?? '',
     t(`taxTreatments.${c.tax_treatment}` as DictKey),
     c.language === 'en' ? t('common.english') : t('common.german'),
@@ -80,7 +81,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
   lastInvoicedMap?: Record<string, string>
   balanceMap?: Record<string, number>
 }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   const list = useListState(LIST)
   const { status, q, tag } = list.filters
   const { sort } = list
@@ -105,14 +106,14 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
       switch (sort.key) {
         case 'name': return displayName(c)
         case 'company': return c.company ?? ''
-        case 'country': return c.country ?? ''
+        case 'country': return countryName(c.country, lang)
         case 'status': return c.status
         case 'balance': return balanceMap[c.id] ?? 0
         case 'last_invoiced': return lastInvoicedMap[c.id] ?? ''
       }
     }
     return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
-  }, [clients, q, status, tag, sort, balanceMap, lastInvoicedMap])
+  }, [clients, q, status, tag, sort, balanceMap, lastInvoicedMap, lang])
 
   const { page, pageCount, pageItems } = paginate(filtered, list.page)
   const selection = useSelection(filtered, pageItems)
@@ -125,7 +126,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
   }
 
   function handleExport(rows: ClientRow[]) {
-    exportCSV(rows, balanceMap, lastInvoicedMap, t)
+    exportCSV(rows, balanceMap, lastInvoicedMap, t, lang)
     const count = rows.length
     toast.success(n(count, t('exports.lists.clientsExportedOne', { count }), t('exports.lists.clientsExportedOther', { count })))
   }
@@ -237,7 +238,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
                   <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{displayName(c)}</Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company || '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.country || '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{countryName(c.country, lang) || '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{taxLabel(c.tax_treatment)}</td>
                 <td className="px-4 py-3">
                   <StatusBadge status={c.status} label={statusLabel(c.status)} />
