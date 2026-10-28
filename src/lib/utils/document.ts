@@ -1,4 +1,4 @@
-import { DocumentTotals, Settings, VatRate } from '@/types'
+import type { DocumentTotals, Settings, VatRate } from '@/types'
 import { roundCents } from './number'
 
 export { roundCents } from './number'
@@ -20,6 +20,28 @@ export function orderItems<T>(items: T[]): T[] {
   return [...items].sort((a, b) => pos(a) - pos(b))
 }
 
+type Amounts = { quantity: number | null; unit_price: number | null }
+type Discount = { type: string; value: number | null } | null | undefined
+
+// The amount a line prints and every view sums: quantity × unit price, rounded to the cent.
+export function lineAmount(item: Amounts): number {
+  return roundCents((item.quantity ?? 0) * (item.unit_price ?? 0))
+}
+
+// Percent is capped at 100 and a fixed amount at its base, so a typo can never make a section
+// or a document negative. Nothing is taken off a base that is zero or negative.
+export function discountAmount(base: number, discount: Discount): number {
+  if (!discount || !discount.value || discount.value <= 0 || base <= 0) return 0
+  return roundCents(discount.type === 'percent'
+    ? base * (Math.min(discount.value, 100) / 100)
+    : Math.min(discount.value, base))
+}
+
+// The percentage a discount label may show: the one calcTotals actually applied.
+export function clampPercent(value: number | null | undefined): number {
+  return Math.min(100, Math.max(0, value ?? 0))
+}
+
 export function calcTotals(
   rawItems: CalcItem[],
   payments: { amount: number }[] = [],
@@ -37,23 +59,20 @@ export function calcTotals(
   // being added to the global totals.
   let sectionStart = 0
 
-  function flushSection(end: number, sectionDiscount?: { type: string; value: number } | null) {
+  function flushSection(end: number, sectionDiscount: Discount) {
     const sectionItems = items.slice(sectionStart, end).filter(
       i => (i.line_type ?? 'item') === 'item' && i.quantity != null && i.unit_price != null && i.vat_rate != null
     )
     if (!sectionItems.length) return
 
-    const sectionSum = sectionItems.reduce((s, i) => s + i.quantity! * i.unit_price!, 0)
-    let scale = 1
-    if (sectionDiscount && sectionDiscount.value > 0 && sectionSum > 0) {
-      const discAmt = sectionDiscount.type === 'percent'
-        ? sectionSum * (Math.min(sectionDiscount.value, 100) / 100)
-        : Math.min(sectionDiscount.value, sectionSum)
-      scale = (sectionSum - discAmt) / sectionSum
-    }
+    // Lines are summed as printed (rounded to the cent), so a section's gross, discount and net
+    // on the PDF add up and Netto is the sum of the section nets.
+    const sectionSum = sectionItems.reduce((s, i) => s + lineAmount(i), 0)
+    const discAmt = discountAmount(sectionSum, sectionDiscount)
+    const scale = discAmt > 0 ? (sectionSum - discAmt) / sectionSum : 1
 
     for (const item of sectionItems) {
-      const base = item.quantity! * item.unit_price! * scale
+      const base = lineAmount(item) * scale
       const rate: VatRate = vatApplies ? (item.vat_rate as VatRate) : 0
       subtotal += base
       const vatAmt = base * (rate / 100)
@@ -64,10 +83,8 @@ export function calcTotals(
 
   for (let i = 0; i < items.length; i++) {
     if ((items[i].line_type ?? 'item') === 'subtotal') {
-      const sd = items[i].discount_type != null && items[i].discount_value != null
-        ? { type: items[i].discount_type!, value: items[i].discount_value! }
-        : null
-      flushSection(i, sd)
+      const { discount_type, discount_value } = items[i]
+      flushSection(i, discount_type != null ? { type: discount_type, value: discount_value ?? null } : null)
       sectionStart = i + 1
     }
   }
@@ -77,12 +94,10 @@ export function calcTotals(
     .map(([rate, v]) => ({ rate, ...v }))
     .sort((a, b) => b.rate - a.rate)
 
-  let discount_amount = 0
-  if (discount && discount.value > 0 && subtotal > 0) {
-    discount_amount = roundCents(discount.type === 'percent'
-      ? subtotal * (Math.min(discount.value, 100) / 100)
-      : Math.min(discount.value, subtotal))
-    const scale = (subtotal - discount_amount) / subtotal
+  const net = roundCents(subtotal)
+  const discount_amount = discountAmount(net, discount)
+  if (discount_amount > 0) {
+    const scale = (net - discount_amount) / net
     vat_groups = vat_groups.map(g => ({ rate: g.rate, base: g.base * scale, amount: g.amount * scale }))
   }
 
@@ -92,7 +107,6 @@ export function calcTotals(
     const base = roundCents(g.base)
     return { rate: g.rate, base, amount: roundCents(base * (g.rate / 100)) }
   })
-  const net = roundCents(subtotal)
   // Per-rate bases are rounded individually; push any cent of drift into the largest group so
   // the printed "davon Netto" rows sum exactly to Netto − Rabatt.
   const baseDrift = roundCents(net - discount_amount - vat_groups.reduce((s, g) => s + g.base, 0))
@@ -124,17 +138,31 @@ export function getTaxNote(taxTreatment: string, lang: 'de' | 'en', settings?: T
   return null
 }
 
-type SectionItem = { line_type?: string | null; quantity: number | null; unit_price: number | null }
+type SectionItem = Amounts & { line_type?: string | null; discount_type?: string | null; discount_value?: number | null }
 
+// Gross of the section closed by the subtotal line at `upToIdx`, lines rounded as printed.
 export function calcSectionSubtotal(items: SectionItem[], upToIdx: number): number {
   let sum = 0
   for (let i = upToIdx - 1; i >= 0; i--) {
     if ((items[i].line_type ?? 'item') === 'subtotal') break
     if ((items[i].line_type ?? 'item') === 'item' && items[i].quantity != null && items[i].unit_price != null) {
-      sum += items[i].quantity! * items[i].unit_price!
+      sum += lineAmount(items[i])
     }
   }
-  return sum
+  return roundCents(sum)
+}
+
+// The subtotal block of the subtotal line at `idx`, with the same clamped discount calcTotals applies.
+export function sectionSummary(items: SectionItem[], idx: number) {
+  const gross = calcSectionSubtotal(items, idx)
+  const { discount_type, discount_value } = items[idx] ?? {}
+  const discount = discountAmount(gross, discount_type != null ? { type: discount_type, value: discount_value ?? null } : null)
+  return {
+    gross,
+    discount,
+    net: roundCents(gross - discount),
+    percent: discount_type === 'percent' ? clampPercent(discount_value) : null,
+  }
 }
 
 // Skonto is taken off the gross total (Austrian practice); 0 when no Skonto is agreed.
