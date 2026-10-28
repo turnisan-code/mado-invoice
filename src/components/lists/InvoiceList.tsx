@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
+import { displayStatus, statusLabelKey } from '@/lib/status'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
@@ -44,7 +45,7 @@ export interface Invoice {
   discount_value?: number | null
   pdf_path?: string | null
   document_items: DocItem[]
-  payments?: { amount: number }[]
+  payments?: { amount: number; kind?: string }[]
 }
 
 function docTotals(d: Invoice) {
@@ -54,6 +55,8 @@ const docTotal = (d: Invoice) => docTotals(d).total
 // Nothing is owed on a draft (not issued yet) or a cancelled invoice (settled by its Storno).
 const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancelled' ? 0 : docTotals(d).balance_due
 const isOpen = (d: Invoice) => d.status === 'sent' || d.status === 'overdue'
+// Partly paid and written-off invoices show that instead of their stored status.
+const shownStatus = (d: Invoice, todayStr: string) => displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: d.payments ?? [] }, todayStr)
 const clientLabel = (d: Invoice) => d.clients?.company ?? d.clients?.name ?? ''
 
 function exportCSV(invoices: Invoice[], t: TFn) {
@@ -306,7 +309,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                     {isOpen(doc) && balance !== docTotal(doc) && (
                       <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices.openAmount', { amount: formatMoney(balance, doc.currency ?? undefined) })}</p>
                     )}
-                    <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                    <StatusBadge status={shownStatus(doc, todayStr)} label={t(statusLabelKey(shownStatus(doc, todayStr)))} />
                   </div>
                 </Link>
               </div>
@@ -357,7 +360,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                  <StatusBadge status={shownStatus(doc, todayStr)} label={t(statusLabelKey(shownStatus(doc, todayStr)))} />
                 </td>
               </ClickableRow>
             ))}

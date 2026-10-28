@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
 import { logEvent } from '@/lib/events'
+import { applyCreditNote } from '@/lib/credits'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 
@@ -18,7 +19,7 @@ export type IssueOutcome = {
 // failed number assignment throws; archive failures are returned so the caller can report them
 // while the document stays issued (a missing copy is flagged on its page and can be created later).
 export async function issueDocument(supabase: SupabaseClient, documentId: string): Promise<IssueOutcome> {
-  const { data: before, error: lookupErr } = await supabase.from('documents').select('number').eq('id', documentId).maybeSingle()
+  const { data: before, error: lookupErr } = await supabase.from('documents').select('number, type').eq('id', documentId).maybeSingle()
   if (lookupErr) throw new Error(lookupErr.message)
   if (!before) throw new Error('Document not found')
 
@@ -26,6 +27,11 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   // The code (MI001–MI003, MI010–MI018) lets callers word the failure in the UI language.
   if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
+  // An issued credit note takes its amount off the open balance of the invoice it corrects; a
+  // failure leaves it unapplied, and its page offers to apply it.
+  if (!before.number && before.type === 'credit_note') {
+    await applyCreditNote(supabase, documentId).catch(err => console.error(`[issue] credit note ${number} not applied:`, err))
+  }
 
   const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }
 

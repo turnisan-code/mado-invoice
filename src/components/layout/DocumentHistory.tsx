@@ -44,11 +44,15 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       return { text: t('archive.events.status_changed', { from: statusLabel(d.from), to: statusLabel(d.to) }) }
     case 'payment_added':
     case 'payment_removed': {
-      const kind = str(d.kind) === 'skonto' || str(d.kind) === 'writeoff' ? str(d.kind)! : 'payment'
+      const raw = str(d.kind)
+      const kind = raw === 'skonto' || raw === 'writeoff' ? raw : 'payment'
       const amount = typeof d.amount === 'number' ? formatMoney(d.amount, currency) : ''
+      const kindLabel = raw === 'credit' ? t('lifecycle.payments.creditNotePlain') : raw === 'refund' ? t('lifecycle.credit.refund') : t(`archive.paymentKinds.${kind}` as DictKey)
+      const creditNote = raw === 'credit' ? str(d.credit_note_id) : null
       return {
-        text: t(`archive.events.${event.type}`, { kind: t(`archive.paymentKinds.${kind}` as DictKey), amount }),
-        sub: d.method === 'cash' && kind === 'payment' ? t('payments.cashBadge') : null,
+        text: t(`archive.events.${event.type}`, { kind: kindLabel, amount }),
+        sub: d.method === 'cash' && (raw === 'payment' || raw === 'refund' || !raw) ? t('payments.cashBadge') : str(d.credit_note_number),
+        link: creditNote ? { href: `/credit-notes/${creditNote}`, label: t('archive.openSource') } : undefined,
       }
     }
     case 'storno_created': {
@@ -59,6 +63,9 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       }
     }
     case 'converted': {
+      const toId = str(d.to_id)
+      const toPath = DOC_PATHS[str(d.to_type) ?? '']
+      if (toId && toPath) return { text: t('lifecycle.history.convertedToInvoice'), link: { href: `/${toPath}/${toId}`, label: t('archive.openSource') } }
       const number = str(d.from_number)
       const path = DOC_PATHS[str(d.from_type) ?? '']
       const id = str(d.from_id)
@@ -77,6 +84,8 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
         link: href ? { href, label: t('archive.openInDrive'), external: true } : undefined,
       }
     }
+    case 'portal_responded':
+      return { text: d.action === 'accepted' ? t('lifecycle.history.portalAccepted') : d.action === 'rejected' ? t('lifecycle.history.portalRejected') : t('archive.events.portal_responded') }
     default:
       return { text: t(`archive.events.${event.type}`) }
   }

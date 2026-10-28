@@ -1,87 +1,58 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import { today } from '@/lib/utils/document'
 import { logEvent } from '@/lib/events'
+import { issueDocument } from '@/lib/pdf/issue'
+import { applyCreditNote } from '@/lib/credits'
+import { lifecycleErrorMessage } from '@/lib/status'
+import { getT } from '@/lib/i18n/server'
 
-// Creates a credit note from an invoice. With { cancel: true } it is a Storno: the invoice
-// is marked cancelled and the credit note references it (number + date on the PDF).
+// A Storno renders, stores and archives its PDF before answering.
+export const maxDuration = 60
+
+type Created = { credit_note_id: string; number: string | null; invoice_status: string }
+
+// Creates a draft credit note from an issued invoice; it takes its amount off the invoice's open
+// balance when it is issued. With { cancel: true } it is a Storno: create_credit_note numbers it
+// and cancels the invoice in one transaction, then it gets its frozen PDF and is applied here.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { t } = await getT()
 
   const body = await req.json().catch(() => ({}))
   const cancel = body?.cancel === true
 
-  const { data: invoice } = await supabase
-    .from('documents')
-    .select('*, document_items(*)')
-    .eq('id', id)
-    .eq('type', 'invoice')
-    .single()
+  const { data, error } = await supabase.rpc('create_credit_note', { p_invoice_id: id, p_cancel: cancel })
+  if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI017' || error.code === 'MI018' ? 409 : 500 })
+  const created = data as Created | null
+  if (!created) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  const creditNoteId = created.credit_note_id
 
-  if (!invoice) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (cancel) {
-    if (!invoice.number) return NextResponse.json({ error: 'A draft has no number to cancel — delete it instead' }, { status: 400 })
-    if (invoice.status === 'cancelled') return NextResponse.json({ error: 'Invoice is already cancelled' }, { status: 409 })
+  const { data: invoice } = await supabase.from('documents').select('number').eq('id', id).single()
+  await logEvent(supabase, creditNoteId, 'converted', { from_id: id, from_number: invoice?.number ?? null, from_type: 'invoice', storno: cancel })
+  if (!cancel) return NextResponse.json({ creditNoteId })
+
+  await logEvent(supabase, creditNoteId, 'issued', { number: created.number })
+  await logEvent(supabase, id, 'storno_created', { credit_note_id: creditNoteId, credit_note_number: created.number, from: created.invoice_status })
+
+  // The number is taken; the frozen PDF and the Drive copy follow (a failure is reported and the
+  // page offers to create the archive copy), then the credit settles the invoice's open balance.
+  let snapshotError: string | null = null
+  let driveError: { error: string; code?: string } | null = null
+  try {
+    const outcome = await issueDocument(supabase, creditNoteId)
+    snapshotError = outcome.snapshotError
+    driveError = outcome.driveError
+  } catch (err) {
+    snapshotError = err instanceof Error ? err.message : String(err)
+  }
+  try {
+    await applyCreditNote(supabase, creditNoteId)
+  } catch (err) {
+    console.error(`[convert-to-credit-note] Storno ${created.number} not applied:`, err)
   }
 
-  const { data: creditNote, error } = await supabase.from('documents').insert({
-    type: 'credit_note',
-    number: null,
-    client_id: invoice.client_id,
-    date: today(),
-    service_date: invoice.service_date,
-    service_date_end: invoice.service_date_end,
-    due_date: null,
-    status: 'draft',
-    language: invoice.language,
-    currency: invoice.currency,
-    tax_treatment: invoice.tax_treatment,
-    exchange_rate: invoice.exchange_rate,
-    notes: invoice.notes,
-    notes_internal: invoice.notes_internal,
-    discount_type: invoice.discount_type,
-    discount_value: invoice.discount_value,
-    converted_from_id: invoice.id,
-    cancels_document_id: cancel ? invoice.id : null,
-  }).select('id').single()
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  const items = (invoice.document_items ?? []).map((item: Record<string, unknown>) => ({
-    sort_order: item.sort_order,
-    line_type: item.line_type ?? 'item',
-    description: item.description,
-    service_date: item.service_date ?? null,
-    quantity: item.quantity,
-    unit: item.unit,
-    unit_price: item.unit_price,
-    vat_rate: item.vat_rate,
-    catalogue_item_id: item.catalogue_item_id ?? null,
-    discount_type: item.discount_type ?? null,
-    discount_value: item.discount_value ?? null,
-  }))
-  const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: creditNote.id, p_items: items })
-  if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 })
-
-  if (cancel) {
-    // Conditional update: if a concurrent request already cancelled the invoice, this Storno loses and is removed.
-    const { data: cancelled, error: cancelErr } = await supabase
-      .from('documents')
-      .update({ status: 'cancelled' })
-      .eq('id', invoice.id)
-      .neq('status', 'cancelled')
-      .select('id')
-    if (cancelErr) return NextResponse.json({ error: cancelErr.message }, { status: 500 })
-    if (!cancelled?.length) {
-      await supabase.from('documents').delete().eq('id', creditNote.id)
-      return NextResponse.json({ error: 'Invoice is already cancelled' }, { status: 409 })
-    }
-    await logEvent(supabase, invoice.id, 'storno_created', { credit_note_id: creditNote.id, from: invoice.status })
-  }
-  await logEvent(supabase, creditNote.id, 'converted', { from_id: invoice.id, from_number: invoice.number, from_type: 'invoice', storno: cancel })
-
-  return NextResponse.json({ creditNoteId: creditNote.id })
+  return NextResponse.json({ creditNoteId, number: created.number, snapshotError, driveError })
 }

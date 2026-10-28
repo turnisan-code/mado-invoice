@@ -7,6 +7,8 @@ import { getT } from '@/lib/i18n/server'
 import { n } from '@/lib/i18n'
 import { parsePeriod, periodLabel, periodParams, MAX_PDFS, MIN_YEAR, type PeriodParams } from './period'
 import { fetchZmRows } from './zm'
+import { istTurnover } from './ist'
+import { creditNoteOpen } from '@/lib/status'
 
 // FinanzOnline field names stay German in both UI languages.
 const KZ: Record<number, { base: string; vat: string }> = {
@@ -49,21 +51,41 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const supabase = await createClient()
   const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
-  const [{ data: payments }, { data: creditNotes }, zm, { count: issuedCount }] = await Promise.all([
+  const docCols = `id, number, date, type, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company)`
+  const [{ data: payments }, { data: credits }, { data: refunds }, { data: openCreditNotes }, zm, { count: issuedCount }] = await Promise.all([
     supabase
       .from('payments')
-      .select(`id, amount, date, method, document_id, documents!inner(id, number, type, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company))`)
+      .select(`id, amount, date, method, document_id, documents!inner(${docCols})`)
       .eq('documents.type', 'invoice')
       .eq('kind', 'payment')
       .gte('date', period.start)
       .lte('date', period.end)
       .order('date'),
+    // Credit notes applied to their invoice in the period (rows on the invoice).
+    supabase
+      .from('payments')
+      .select(`id, amount, date, credit_note_id, documents!inner(${docCols})`)
+      .eq('documents.type', 'invoice')
+      .eq('kind', 'credit')
+      .gte('date', period.start)
+      .lte('date', period.end)
+      .order('date'),
+    // Money paid back on credit notes in the period.
+    supabase
+      .from('payments')
+      .select(`id, amount, date, method, documents!inner(${docCols})`)
+      .eq('documents.type', 'credit_note')
+      .eq('kind', 'refund')
+      .gte('date', period.start)
+      .lte('date', period.end)
+      .order('date'),
+    // Issued credit notes up to the period end, to point out the ones not settled yet.
     supabase
       .from('documents')
-      .select(`id, number, date, converted_from_id, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company)`)
+      .select(`${docCols}, payments(amount, kind)`)
       .eq('type', 'credit_note')
       .eq('status', 'sent')
-      .gte('date', period.start)
+      .not('number', 'is', null)
       .lte('date', period.end)
       .order('date'),
     fetchZmRows(supabase, period.start, period.end),
@@ -75,68 +97,72 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .gte('date', period.start)
       .lte('date', period.end),
   ])
-  const cns = (creditNotes ?? []) as unknown as (DocRow & { date: string; converted_from_id: string | null })[]
-  const originalIds = cns.map(c => c.converted_from_id).filter((x): x is string => !!x)
-  const { data: originals } = originalIds.length
-    ? await supabase.from('documents').select(`id, tax_treatment, discount_type, discount_value, ${itemCols}, payments(amount, date, kind)`).in('id', originalIds)
-    : { data: [] as unknown[] }
-  const originalById = new Map((originals ?? []).map(o => [(o as DocRow).id, o as DocRow & { payments: { amount: number; date: string; kind: string }[] }]))
+  type Dated = DocRow & { date: string }
+  const creditRows = (credits ?? []) as unknown as { id: string; amount: number; date: string; credit_note_id: string; documents: Dated }[]
+  const refundRows = (refunds ?? []) as unknown as { id: string; amount: number; date: string; method: string; documents: Dated }[]
+  const unsettledCns = (openCreditNotes ?? []) as unknown as (Dated & { payments: { amount: number; kind: string }[] | null })[]
+  // Credit rows live on the invoice, so the credit notes (period credits and the open ones) are
+  // looked up by id; payments.credit_note_id has no embeddable foreign key.
+  const appliedCnIds = [...new Set(creditRows.map(r => r.credit_note_id))]
+  const unsettledIds = unsettledCns.map(c => c.id)
+  const [{ data: appliedCnDocs }, { data: appliedToOpen }] = await Promise.all([
+    appliedCnIds.length
+      ? supabase.from('documents').select(docCols).in('id', appliedCnIds)
+      : Promise.resolve({ data: [] as unknown[] }),
+    unsettledIds.length
+      ? supabase.from('payments').select('credit_note_id, amount').eq('kind', 'credit').in('credit_note_id', unsettledIds)
+      : Promise.resolve({ data: [] as unknown[] }),
+  ])
+  const cnById = new Map(((appliedCnDocs ?? []) as unknown as Dated[]).map(d => [d.id, d]))
 
-  const vat: Record<number, { base: number; vat: number }> = {}
-  let rcBase = 0
-  let nonEuBase = 0
+  // Ist-Besteuerung (see ist.ts): money received on invoices, credit notes applied to their
+  // invoice and refunds paid on credit notes, each in the period it happened. Skonto and
+  // write-offs close invoices without revenue and are not read at all.
   const invoiceIds = new Set<string>()
-
-  function add(d: DocRow, share: number) {
-    const t = docTotals(d)
-    const net = t.subtotal - t.discount_amount
-    if (d.tax_treatment === 'eu_reverse_charge') rcBase += net * share
-    else if (d.tax_treatment === 'non_eu') nonEuBase += net * share
-    else {
-      for (const g of t.vat_groups) {
-        vat[g.rate] = vat[g.rate] ?? { base: 0, vat: 0 }
-        vat[g.rate].base += g.base * share
-        vat[g.rate].vat += g.amount * share
-      }
-    }
-  }
-
-  // Ist-Besteuerung: a payment counts in the period it was received, partial payments
-  // proportionally. Only money that arrived (kind = payment) is turnover: a Skonto taken or a
-  // write-off closes the invoice without revenue.
   const countedPayments: { id: string; date: string; amount: number; method: string; doc: DocRow }[] = []
   for (const p of payments ?? []) {
     const d = p.documents as unknown as DocRow
-    const total = docTotals(d).total
-    if (!total) continue
+    if (!docTotals(d).total) continue
     invoiceIds.add(d.id)
-    add(d, p.amount / total)
     countedPayments.push({ id: p.id, date: p.date, amount: p.amount, method: p.method, doc: d })
   }
-  // Credit notes reverse turnover in the period of their document date — but a credit note
-  // on an invoice can only give back money that was actually received (a Storno of an unpaid
-  // invoice changes nothing). Standalone credit notes are deducted in full.
-  const countedCredits: { doc: DocRow & { date: string }; amount: number }[] = []
-  for (const cn of cns) {
-    const creditTotal = docTotals(cn).total
-    if (!creditTotal) continue
-    let refundable = creditTotal
-    const original = cn.converted_from_id ? originalById.get(cn.converted_from_id) : undefined
-    if (original) {
-      const paid = (original.payments ?? []).filter(p => p.kind === 'payment' && p.date && p.date <= period.end).reduce((s, p) => s + p.amount, 0)
-      refundable = Math.min(creditTotal, Math.max(0, paid + creditTotal - docTotals(original).total))
-    }
-    if (refundable <= 0) continue
-    countedCredits.push({ doc: cn, amount: roundCents(refundable) })
-    add(cn, -refundable / creditTotal)
+  const applied = creditRows.flatMap(r => {
+    const creditNote = cnById.get(r.credit_note_id)
+    return creditNote ? [{ id: r.id, date: r.date, amount: r.amount, invoice: r.documents, creditNote }] : []
+  })
+  const refunded = refundRows.map(r => ({ id: r.id, date: r.date, amount: r.amount, creditNote: r.documents }))
+  const { vat, rcBase: rcRaw, nonEuBase: nonEuRaw } = istTurnover({
+    received: countedPayments.map(p => ({ amount: p.amount, invoice: p.doc })),
+    applied,
+    refunded,
+  })
+  const rcBase = roundCents(rcRaw)
+  const nonEuBase = roundCents(nonEuRaw)
+
+  const countedCredits = [
+    ...applied.map(a => ({ key: `a-${a.id}`, doc: a.creditNote, date: a.date, amount: a.amount, appliedTo: a.invoice.number ?? '' })),
+    ...refunded.map(r => ({ key: `r-${r.id}`, doc: r.creditNote, date: r.date, amount: r.amount, appliedTo: null })),
+  ].sort((a, b) => a.date.localeCompare(b.date))
+  const creditNoteCount = new Set(countedCredits.map(c => c.doc.id)).size
+
+  const appliedByCn = new Map<string, number>()
+  for (const r of (appliedToOpen ?? []) as { credit_note_id: string; amount: number }[]) {
+    appliedByCn.set(r.credit_note_id, (appliedByCn.get(r.credit_note_id) ?? 0) + r.amount)
   }
-  const creditNoteCount = countedCredits.length
+  const unsettled = unsettledCns
+    .map(cn => ({
+      doc: cn,
+      open: creditNoteOpen(
+        docTotals(cn).total,
+        appliedByCn.get(cn.id) ?? 0,
+        (cn.payments ?? []).filter(p => p.kind === 'refund').reduce((s, p) => s + p.amount, 0),
+      ),
+    }))
+    .filter(c => c.open > 0.005)
 
   const rates = Object.keys(vat).map(Number).sort((a, b) => b - a)
   const taxableBase = roundCents(rates.reduce((s, r) => s + vat[r].base, 0))
   const totalVat = roundCents(rates.reduce((s, r) => s + vat[r].vat, 0))
-  rcBase = roundCents(rcBase)
-  nonEuBase = roundCents(nonEuBase)
   const netTotal = roundCents(taxableBase + rcBase + nonEuBase)
   const currentYear = Number(now.slice(0, 4))
   const years = Array.from(new Set([...Array.from({ length: 6 }, (_, i) => currentYear - i), period.year]))
@@ -161,6 +187,23 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         {t('reports.period')} <strong>{label}</strong> ({formatDate(period.start, lang)} – {formatDate(period.end, lang)}) · {n(paymentCount, t('reports.paymentsOne', { count: paymentCount }), t('reports.paymentsOther', { count: paymentCount }))} {n(invoiceIds.size, t('reports.onInvoicesOne', { count: invoiceIds.size }), t('reports.onInvoicesOther', { count: invoiceIds.size }))}
         {creditNoteCount > 0 && <> · {n(creditNoteCount, t('reports.creditNotesDeductedOne', { count: creditNoteCount }), t('reports.creditNotesDeductedOther', { count: creditNoteCount }))}</>}
       </div>
+
+      {unsettled.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-300 space-y-2">
+          <p className="flex items-start gap-2">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+            <span><strong>{t('lifecycle.reports.unsettledTitle')}</strong> — {t('lifecycle.reports.unsettledHint')}</span>
+          </p>
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+            {unsettled.map(c => (
+              <li key={c.doc.id}>
+                <Link href={`/credit-notes/${c.doc.id}`} className="underline underline-offset-2 font-medium">{c.doc.number}</Link>
+                {' '}{t('lifecycle.reports.unsettledRow', { amount: formatMoney(c.open) })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className={card}>
         <div className={cardHead}>
@@ -277,13 +320,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           ) : (
             <ul className="divide-y divide-neutral-50 dark:divide-neutral-800">
               {countedCredits.map(c => (
-                <li key={c.doc.id} className="px-5 py-2.5 flex items-start justify-between gap-4">
+                <li key={c.key} className="px-5 py-2.5 flex items-start justify-between gap-4">
                   <div className="min-w-0">
                     <Link href={`/credit-notes/${c.doc.id}`} className="font-medium hover:underline">{c.doc.number ?? t('common.draft')}</Link>
                     <span className="text-neutral-500 dark:text-neutral-400"> · {clientName(c.doc.clients) || '—'}</span>
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{formatDate(c.doc.date, lang)}</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                      {formatDate(c.date, lang)} · {c.appliedTo !== null ? t('lifecycle.reports.applied', { number: c.appliedTo }) : t('lifecycle.reports.refunded')}
+                    </div>
                   </div>
-                  <span className="shrink-0 tabular-nums">−{formatMoney(c.amount)}</span>
+                  {/* An applied credit settles the invoice without money: it only moves turnover between rates. */}
+                  <span className={`shrink-0 tabular-nums ${c.appliedTo !== null ? 'text-neutral-500 dark:text-neutral-400' : ''}`}>{c.appliedTo !== null ? '±' : '−'}{formatMoney(c.amount)}</span>
                 </li>
               ))}
             </ul>
@@ -332,7 +378,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        {t('reports.footnote')}
+        {t('lifecycle.reports.footnote')}
       </p>
     </div>
   )
