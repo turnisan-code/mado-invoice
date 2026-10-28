@@ -4,23 +4,26 @@ import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, 
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import { countryName } from '@/lib/utils/country'
 import type { DocReference } from '@/lib/utils/document-reference'
+import { PDF_FONT_FAMILY, registerPdfFonts } from './fonts'
+
+if (typeof window !== 'undefined') registerPdfFonts('/fonts')
 
 const s = StyleSheet.create({
-  page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
+  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
 
   topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 40 },
   logo: { width: 130, height: 52, objectFit: 'contain', objectPositionX: 0 },
-  logoFallback: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', maxWidth: 160 },
-  docTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
+  logoFallback: { fontSize: 18, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', color: '#1a1a1a', maxWidth: 160 },
+  docTitle: { fontSize: 22, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', marginBottom: 5 },
   metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
   qrBelowTotals: { width: 72, height: 72, marginTop: 14, alignSelf: 'flex-end' },
 
   billedSection: { marginBottom: 32 },
-  billedLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
+  billedLabel: { fontSize: 8, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', marginBottom: 5 },
   billedText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.6 },
 
   tableHeader: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a1a1a', borderBottomWidth: 1, borderBottomColor: '#1a1a1a', paddingVertical: 6, marginBottom: 0 },
-  tableHeaderText: { fontSize: 8, fontFamily: 'Helvetica-Bold' },
+  tableHeaderText: { fontSize: 8, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' },
   tableRow: { flexDirection: 'row', paddingVertical: 7, borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4' },
   colDesc: { flex: 1 },
   colDescDate: { fontSize: 7.5, color: '#9b9b9b', marginTop: 2 },
@@ -29,26 +32,26 @@ const s = StyleSheet.create({
   colAmount: { width: 72, textAlign: 'right' },
 
   headingRow: { paddingVertical: 8, paddingTop: 12 },
-  headingText: { fontFamily: 'Helvetica-Bold', fontSize: 9.5 },
+  headingText: { fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', fontSize: 9.5 },
   textRow: { paddingVertical: 4 },
   textRowText: { fontSize: 8.5, color: '#4b4b4b' },
   separatorRow: { borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginVertical: 6 },
   subtotalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 5, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginTop: 2 },
   subtotalLabel: { fontSize: 7.5, color: '#9b9b9b', marginRight: 8, textTransform: 'uppercase' },
-  subtotalValue: { width: 72, textAlign: 'right', fontFamily: 'Helvetica-Bold', fontSize: 8.5 },
+  subtotalValue: { width: 72, textAlign: 'right', fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', fontSize: 8.5 },
 
   bottomDivider: { borderTopWidth: 1, borderTopColor: '#1a1a1a', marginTop: 28, marginBottom: 18 },
   bottomRow: { flexDirection: 'row', justifyContent: 'space-between' },
   dueDateLabel: { fontSize: 8, color: '#6b6b6b', marginBottom: 3 },
-  dueDateValue: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
+  dueDateValue: { fontSize: 9, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' },
 
   totalsBlock: { width: 210 },
   totalsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
   totalsLabel: { color: '#6b6b6b' },
   totalsDivider: { borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginVertical: 4 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  totalValue: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
+  totalLabel: { fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', fontSize: 10 },
+  totalValue: { fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', fontSize: 10 },
 
   paymentTerms: { marginTop: 14, fontSize: 8.5, color: '#4b4b4b' },
   taxNote: { marginTop: 16, fontSize: 8, color: '#6b6b6b', fontStyle: 'italic' },
@@ -56,7 +59,7 @@ const s = StyleSheet.create({
   footerNote: { marginTop: 16, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
 
   footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
+  footerTitle: { fontSize: 10, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', marginBottom: 5 },
   footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
   footerPage: { fontSize: 8, color: '#9b9b9b' },
 })
@@ -286,8 +289,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                       <Text style={s.subtotalValue}>-{fmt(discAmt)}</Text>
                     </View>
                     <View style={s.subtotalRow}>
-                      <Text style={[s.subtotalLabel, { fontFamily: 'Helvetica-Bold' }]}>{L('net', lang)}</Text>
-                      <Text style={[s.subtotalValue, { fontFamily: 'Helvetica-Bold' }]}>{fmt(net)}</Text>
+                      <Text style={[s.subtotalLabel, { fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' }]}>{L('net', lang)}</Text>
+                      <Text style={[s.subtotalValue, { fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' }]}>{fmt(net)}</Text>
                     </View>
                   </>
                 )}
@@ -359,7 +362,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             {doc.totals.total_paid > 0 && (
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{lang === 'de' ? 'Offen' : 'Balance due'}</Text>
-                <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(doc.totals.balance_due)}</Text>
+                <Text style={{ fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' }}>{fmt(doc.totals.balance_due)}</Text>
               </View>
             )}
             {!!qrCodeDataUri && (

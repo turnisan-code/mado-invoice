@@ -1,7 +1,9 @@
+import path from 'path'
 import { createElement, type ComponentProps } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
+import { registerPdfFonts } from '@/components/pdf/fonts'
 import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
@@ -9,6 +11,9 @@ import type { Client, Document, DocumentItem, Language, Payment, Settings } from
 
 // Server-only (renderToBuffer needs node): import from route handlers and server utilities,
 // never from a client component.
+
+// next.config.ts traces public/fonts into every function that renders.
+registerPdfFonts(path.join(process.cwd(), 'public', 'fonts'))
 
 export type PdfDocument = Document & {
   document_items: DocumentItem[] | null
