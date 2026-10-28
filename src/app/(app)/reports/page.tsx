@@ -54,6 +54,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .from('payments')
       .select(`amount, date, document_id, documents!inner(id, type, tax_treatment, discount_type, discount_value, ${itemCols})`)
       .eq('documents.type', 'invoice')
+      .eq('kind', 'payment')
       .gte('date', period.start)
       .lte('date', period.end),
     supabase
@@ -67,9 +68,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const cns = (creditNotes ?? []) as (DocRow & { converted_from_id: string | null })[]
   const originalIds = cns.map(c => c.converted_from_id).filter((x): x is string => !!x)
   const { data: originals } = originalIds.length
-    ? await supabase.from('documents').select(`id, tax_treatment, discount_type, discount_value, ${itemCols}, payments(amount, date)`).in('id', originalIds)
+    ? await supabase.from('documents').select(`id, tax_treatment, discount_type, discount_value, ${itemCols}, payments(amount, date, kind)`).in('id', originalIds)
     : { data: [] as unknown[] }
-  const originalById = new Map((originals ?? []).map(o => [(o as DocRow).id, o as DocRow & { payments: { amount: number; date: string }[] }]))
+  const originalById = new Map((originals ?? []).map(o => [(o as DocRow).id, o as DocRow & { payments: { amount: number; date: string; kind: string }[] }]))
 
   const vat: Record<number, { base: number; vat: number }> = {}
   let rcBase = 0
@@ -91,7 +92,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   }
 
   // Ist-Besteuerung: a payment counts in the period it was received, partial payments
-  // proportionally.
+  // proportionally. Only money that arrived (kind = payment) is turnover: a Skonto taken or a
+  // write-off closes the invoice without revenue.
   for (const p of payments ?? []) {
     const d = p.documents as unknown as DocRow
     const total = docTotals(d).total
@@ -109,7 +111,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     let refundable = creditTotal
     const original = cn.converted_from_id ? originalById.get(cn.converted_from_id) : undefined
     if (original) {
-      const paid = (original.payments ?? []).filter(p => p.date && p.date <= period.end).reduce((s, p) => s + p.amount, 0)
+      const paid = (original.payments ?? []).filter(p => p.kind === 'payment' && p.date && p.date <= period.end).reduce((s, p) => s + p.amount, 0)
       refundable = Math.min(creditTotal, Math.max(0, paid + creditTotal - docTotals(original).total))
     }
     if (refundable <= 0) continue
@@ -197,7 +199,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <p className="text-xs text-neutral-400 dark:text-neutral-500">
-        Teilzahlungen werden anteilig berücksichtigt. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
+        Teilzahlungen werden anteilig berücksichtigt; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
       </p>
     </div>
   )

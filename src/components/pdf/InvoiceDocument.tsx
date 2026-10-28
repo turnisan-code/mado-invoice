@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import { formatMoney, formatDate, orderItems } from '@/lib/utils/document'
+import { formatMoney, formatDate, orderItems, paymentTermsSentence } from '@/lib/utils/document'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import type { DocReference } from '@/lib/utils/document-reference'
@@ -49,6 +49,7 @@ const s = StyleSheet.create({
   totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
   totalValue: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
 
+  paymentTerms: { marginTop: 14, fontSize: 8.5, color: '#4b4b4b' },
   taxNote: { marginTop: 16, fontSize: 8, color: '#6b6b6b', fontStyle: 'italic' },
   notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
   footerNote: { marginTop: 16, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
@@ -135,6 +136,8 @@ interface DocData {
   tax_note: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
+  skonto_percent?: number | null
+  skonto_days?: number | null
   items: DocItem[]
   totals: DocumentTotals
   reference?: DocReference | null
@@ -186,6 +189,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
     ? (lang === 'de' ? settings.credit_note_footer_de : settings.credit_note_footer_en)
     : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
   const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
+  const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
 
   return (
     <Document>
@@ -362,6 +366,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             )}
           </View>
         </View>
+        {!!paymentTerms && <Text style={s.paymentTerms}>{paymentTerms}</Text>}
 
         </View>{/* end wrap={false} bottom block */}
 

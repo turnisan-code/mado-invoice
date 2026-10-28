@@ -64,13 +64,19 @@ const EMAIL_VARS = [
   { token: '{{owner}}',          label: 'Your name' },
 ]
 
+// Must match fillTemplate in src/lib/utils/reminder-templates.ts
 const REMINDER_VARS = [
+  { token: '{{reminder_title}}', label: 'Zahlungserinnerung / 1. Mahnung / 2. Mahnung' },
+  { token: '{{level}}',          label: 'Reminder level' },
   { token: '{{invoice_number}}', label: 'Invoice #' },
   { token: '{{client}}',         label: 'Client' },
   { token: '{{date}}',           label: 'Invoice date' },
   { token: '{{due_date}}',       label: 'Due date' },
   { token: '{{balance_due}}',    label: 'Balance due' },
   { token: '{{days_overdue}}',   label: 'Days overdue' },
+  { token: '{{new_deadline}}',   label: 'New deadline' },
+  { token: '{{fee}}',            label: 'Mahnspesen (from level 2)' },
+  { token: '{{interest}}',       label: 'Verzugszinsen' },
   { token: '{{iban}}',           label: 'IBAN' },
   { token: '{{company}}',        label: 'Your company' },
   { token: '{{owner}}',          label: 'Your name' },
@@ -247,6 +253,22 @@ export default function SettingsForm({ settings }: Props) {
     default_quote_validity_days: String(settings?.default_quote_validity_days ?? 14),
   })
   const [defaultsErrors, setDefaultsErrors] = useState<{ default_payment_days?: string; default_quote_validity_days?: string }>({})
+
+  // ── Payment terms state ──────────────────────────────────────────────────────
+  const [terms, setTerms] = useState({
+    default_skonto_percent: settings?.default_skonto_percent != null ? String(settings.default_skonto_percent) : '',
+    default_skonto_days:    settings?.default_skonto_days != null ? String(settings.default_skonto_days) : '',
+  })
+
+  // ── Reminders state ──────────────────────────────────────────────────────────
+  const [reminders, setReminders] = useState({
+    reminders_enabled:      settings?.reminders_enabled ?? true,
+    reminder_grace_days:    String(settings?.reminder_grace_days ?? 7),
+    reminder_interval_days: String(settings?.reminder_interval_days ?? 14),
+    reminder_max_level:     String(settings?.reminder_max_level ?? 3),
+    reminder_fee:           String(settings?.reminder_fee ?? 0),
+    reminder_interest_rate: String(settings?.reminder_interest_rate ?? 0),
+  })
 
   // ── Footer state ─────────────────────────────────────────────────────────────
   const [footerDocTab, setFooterDocTab] = useState<'invoice' | 'quote' | 'credit_note'>('invoice')
@@ -458,6 +480,38 @@ export default function SettingsForm({ settings }: Props) {
     if (error) { toast.error(error.message); return }
     clearDirty('defaults')
     toast.success('Defaults saved.')
+  }
+
+  async function saveTerms() {
+    if (!settings) return
+    setSaving('terms')
+    const percent = parseFloat(terms.default_skonto_percent)
+    const days = parseInt(terms.default_skonto_days, 10)
+    const { error } = await supabase.from('settings').update({
+      default_skonto_percent: percent > 0 ? Math.min(percent, 100) : null,
+      default_skonto_days:    days >= 0 ? days : null,
+    }).eq('id', settings.id)
+    setSaving(null)
+    if (error) { toast.error(error.message); return }
+    clearDirty('terms')
+    toast.success('Payment terms saved.')
+  }
+
+  async function saveReminders() {
+    if (!settings) return
+    setSaving('reminders')
+    const { error } = await supabase.from('settings').update({
+      reminders_enabled:      reminders.reminders_enabled,
+      reminder_grace_days:    Math.max(0, parseInt(reminders.reminder_grace_days, 10) || 0),
+      reminder_interval_days: Math.max(1, parseInt(reminders.reminder_interval_days, 10) || 14),
+      reminder_max_level:     Math.max(1, parseInt(reminders.reminder_max_level, 10) || 3),
+      reminder_fee:           Math.max(0, parseFloat(reminders.reminder_fee) || 0),
+      reminder_interest_rate: Math.max(0, parseFloat(reminders.reminder_interest_rate) || 0),
+    }).eq('id', settings.id)
+    setSaving(null)
+    if (error) { toast.error(error.message); return }
+    clearDirty('reminders')
+    toast.success('Reminder settings saved.')
   }
 
   async function saveFooter() {
@@ -1025,6 +1079,80 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             </div>
           </SectionCard>
+
+          <div className="h-5" />
+
+          <SectionCard
+            title="Payment terms"
+            description="Skonto pre-filled on new invoices and printed under the totals: “Bei Zahlung bis … x % Skonto”."
+            dirty={!!dirty.terms}
+            saving={saving === 'terms'}
+            onSave={saveTerms}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Skonto (%)</label>
+                <input type="number" min={0} max={100} step="0.5" className={inp} value={terms.default_skonto_percent} placeholder="none"
+                  onChange={e => { setTerms(t => ({ ...t, default_skonto_percent: e.target.value })); markDirty('terms') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Off the gross total; leave empty for no Skonto</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Skonto period (days)</label>
+                <input type="number" min={0} className={inp} value={terms.default_skonto_days}
+                  onChange={e => { setTerms(t => ({ ...t, default_skonto_days: e.target.value })); markDirty('terms') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Counted from the invoice date</p>
+              </div>
+            </div>
+          </SectionCard>
+
+          <div className="h-5" />
+
+          <SectionCard
+            title="Reminders"
+            description="The daily run escalates overdue invoices: Zahlungserinnerung, then 1. Mahnung, then 2. Mahnung. Clients can be excluded on their page."
+            dirty={!!dirty.reminders}
+            saving={saving === 'reminders'}
+            onSave={saveReminders}
+          >
+            <label className="flex items-center gap-2.5 text-sm cursor-pointer">
+              <input type="checkbox" checked={reminders.reminders_enabled}
+                onChange={e => { setReminders(r => ({ ...r, reminders_enabled: e.target.checked })); markDirty('reminders') }}
+                className="accent-neutral-900 dark:accent-white" />
+              <span className="text-neutral-800 dark:text-neutral-200">Send reminders automatically</span>
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className={lbl}>Grace period (days)</label>
+                <input type="number" min={0} className={inp} value={reminders.reminder_grace_days}
+                  onChange={e => { setReminders(r => ({ ...r, reminder_grace_days: e.target.value })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">After the due date before the first reminder; also the new deadline in each email</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Interval (days)</label>
+                <input type="number" min={1} className={inp} value={reminders.reminder_interval_days}
+                  onChange={e => { setReminders(r => ({ ...r, reminder_interval_days: e.target.value })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Between one level and the next</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Highest level</label>
+                <input type="number" min={1} max={9} className={inp} value={reminders.reminder_max_level}
+                  onChange={e => { setReminders(r => ({ ...r, reminder_max_level: e.target.value })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Mahnspesen (EUR)</label>
+                <input type="number" min={0} step="0.01" className={inp} value={reminders.reminder_fee}
+                  onChange={e => { setReminders(r => ({ ...r, reminder_fee: e.target.value })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">Charged from the 1. Mahnung on as {'{{fee}}'}</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={lbl}>Verzugszinsen (% p.a.)</label>
+                <input type="number" min={0} step="0.1" className={inp} value={reminders.reminder_interest_rate}
+                  onChange={e => { setReminders(r => ({ ...r, reminder_interest_rate: e.target.value })); markDirty('reminders') }} />
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">On the open balance for the days overdue, as {'{{interest}}'}</p>
+              </div>
+            </div>
+          </SectionCard>
         </div>}
 
         {/* ── 6. PDF Footer ── */}
@@ -1235,6 +1363,11 @@ export default function SettingsForm({ settings }: Props) {
               vars={activeDocTab === 'reminder' ? REMINDER_VARS : EMAIL_VARS}
               onInsert={insertTplVar}
             />
+            {activeDocTab === 'reminder' && (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                One template serves every level. A line whose variables are all empty (e.g. &quot;Mahnspesen: {'{{fee}}'}&quot; on a Zahlungserinnerung) is left out of the email.
+              </p>
+            )}
 
             {/* Context label */}
             <div className="flex items-center gap-2 py-2 border-t border-neutral-100 dark:border-neutral-800">

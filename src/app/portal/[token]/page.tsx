@@ -2,7 +2,7 @@ import React from 'react'
 import { notFound } from 'next/navigation'
 import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
-import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems } from '@/lib/utils/document'
+import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems, paymentTermsSentence } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import { Download } from 'lucide-react'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language } from '@/types'
@@ -86,6 +86,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const docType = doc.type as DocumentType
 
   const showPaymentInfo = (doc.status === 'sent' || doc.status === 'overdue') && docType === 'invoice'
+  const paymentTerms = paymentTermsSentence(doc, totals.total, lang)
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12">
@@ -276,6 +277,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               )}
             </div>
           </div>
+          {paymentTerms && <p className="-mt-4 mb-8 text-sm text-neutral-600 text-right">{paymentTerms}</p>}
 
           {/* Notes */}
           {doc.notes && (

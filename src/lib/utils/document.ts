@@ -136,6 +136,46 @@ export function calcSectionSubtotal(items: SectionItem[], upToIdx: number): numb
   return sum
 }
 
+// Skonto is taken off the gross total (Austrian practice); 0 when no Skonto is agreed.
+export function skontoAmount(total: number, percent: number | null | undefined): number {
+  if (!percent || percent <= 0) return 0
+  return roundCents(total * (Math.min(percent, 100) / 100))
+}
+
+export function skontoDeadline(date: string, days: number | null | undefined): string {
+  return addDays(date, Math.max(0, days ?? 0))
+}
+
+type PaymentTermsDoc = {
+  type: string
+  date: string
+  due_date: string | null
+  skonto_percent?: number | null
+  skonto_days?: number | null
+  currency?: string | null
+}
+
+// Printed under the totals of an invoice:
+// "Zahlbar bis <due>. Bei Zahlung bis <date> <x> % Skonto (<amount>)."
+export function paymentTermsSentence(doc: PaymentTermsDoc, total: number, lang: 'de' | 'en'): string | null {
+  if (doc.type !== 'invoice') return null
+  const parts: string[] = []
+  if (doc.due_date) {
+    const due = formatDate(doc.due_date, lang)
+    parts.push(lang === 'de' ? `Zahlbar bis ${due}.` : `Payable by ${due}.`)
+  }
+  const amount = skontoAmount(total, doc.skonto_percent)
+  if (amount > 0 && doc.skonto_days != null) {
+    const deadline = formatDate(skontoDeadline(doc.date, doc.skonto_days), lang)
+    const pct = new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { maximumFractionDigits: 2 }).format(doc.skonto_percent!)
+    const money = formatMoney(amount, doc.currency ?? 'EUR')
+    parts.push(lang === 'de'
+      ? `Bei Zahlung bis ${deadline} ${pct} % Skonto (${money}).`
+      : `${pct} % early payment discount (${money}) if paid by ${deadline}.`)
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
 export function formatMoney(amount: number, currency = 'EUR'): string {
   return new Intl.NumberFormat('de-AT', { style: 'currency', currency }).format(amount)
 }
@@ -160,7 +200,11 @@ export function addDays(date: string, days: number): string {
   return toDateString(new Date(y, m - 1, d + days))
 }
 
-// The owner works in Vienna and the servers run in UTC, so "today" is always the Vienna date.
+// The owner works in Vienna and the servers run in UTC, so calendar dates are always Vienna dates.
+export function viennaDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+}
+
 export function today(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  return viennaDate(new Date())
 }

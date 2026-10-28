@@ -7,6 +7,7 @@ const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, v
 const RATES = [20, 13, 10, 0]
 const TYPE_LABEL: Record<string, string> = { invoice: 'Rechnung', credit_note: 'Gutschrift' }
 const TAX_LABEL: Record<string, string> = { at_vat: 'USt', eu_reverse_charge: 'Reverse Charge', non_eu: 'Drittland' }
+const KIND_LABEL: Record<string, string> = { payment: 'Zahlung', skonto: 'Skonto', writeoff: 'Abschreibung' }
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 type ClientRef = { name: string; company: string | null } | null
@@ -71,7 +72,7 @@ async function documentsCsv(supabase: Supabase, start: string, end: string) {
 async function paymentsCsv(supabase: Supabase, start: string, end: string) {
   const { data, error } = await supabase
     .from('payments')
-    .select('date, amount, note, documents!inner(number, type, clients(name, company))')
+    .select('date, amount, note, kind, documents!inner(number, type, clients(name, company))')
     .eq('documents.type', 'invoice')
     .gte('date', start)
     .lte('date', end)
@@ -80,9 +81,9 @@ async function paymentsCsv(supabase: Supabase, start: string, end: string) {
 
   const rows: CsvValue[][] = (data ?? []).map(p => {
     const doc = p.documents as unknown as { number: string | null; clients: ClientRef }
-    return [csvDate(p.date), doc.number ?? '', clientLabel(doc.clients), p.amount, p.note ?? '']
+    return [csvDate(p.date), doc.number ?? '', clientLabel(doc.clients), KIND_LABEL[p.kind] ?? p.kind, p.amount, p.note ?? '']
   })
-  return { csv: toCsv(['Datum', 'Rechnung', 'Kunde', 'Betrag', 'Notiz'], rows) }
+  return { csv: toCsv(['Datum', 'Rechnung', 'Kunde', 'Art', 'Betrag', 'Notiz'], rows) }
 }
 
 export async function GET(req: NextRequest) {

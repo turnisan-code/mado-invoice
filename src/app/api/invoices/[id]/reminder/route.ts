@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import {
-  fillTemplate, sendReminderEmail,
-  DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE,
-  DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
-} from '@/lib/utils/reminder'
-import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, nextReminderLevel } from '@/lib/utils/reminder'
+import { calcTotals } from '@/lib/utils/document'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,10 +31,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const client = invoice.clients
   const lang = client.language === 'en' ? 'en' : 'de'
-  const dueDate = invoice.due_date ?? ''
-  const daysOverdue = dueDate
-    ? Math.max(0, Math.floor((new Date(today()).getTime() - new Date(dueDate).getTime()) / 86400000))
-    : 0
 
   const docDiscount = invoice.discount_type && invoice.discount_value
     ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
@@ -48,35 +40,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Nothing outstanding on this invoice' }, { status: 400 })
   }
 
-  const currency = invoice.currency ?? 'EUR'
-  const ctx = {
-    invoiceNumber: invoice.number,
-    clientName: client.company ?? client.name,
-    amount: formatMoney(totals.balance_due, currency),
-    total: formatMoney(totals.total, currency),
-    dueDate,
-    date: invoice.date ?? '',
-    daysOverdue,
-    iban: settings.iban ?? '',
-    sender: settings.company_name ?? settings.owner_name ?? '',
-    company: settings.company_name ?? '',
-    owner: settings.owner_name ?? '',
-  }
-
-  const subjectTpl = lang === 'en'
-    ? (settings.email_subject_reminder_en || DEFAULT_SUBJECT_EN)
-    : (settings.email_subject_reminder_de || DEFAULT_SUBJECT_DE)
-  const bodyTpl = lang === 'en'
-    ? (settings.email_body_reminder_en || DEFAULT_BODY_EN)
-    : (settings.email_body_reminder_de || DEFAULT_BODY_DE)
+  const level = nextReminderLevel(invoice.reminder_level, settings.reminder_max_level)
+  const ctx = buildReminderContext({ invoice, client, settings, totals, level, lang })
+  const tpl = reminderTemplates(settings, lang)
+  const subject = fillTemplate(tpl.subject, ctx)
 
   try {
     await sendReminderEmail({
       auth: getAuthorizedGoogle(settings, supabase),
       from: settings.gmail_email,
       to: client.email,
-      subject: fillTemplate(subjectTpl, ctx),
-      body: fillTemplate(bodyTpl, ctx),
+      subject,
+      body: fillTemplate(tpl.body, ctx),
       pdfBase64,
       filename,
     })
@@ -85,8 +60,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const now = new Date().toISOString()
-  const { error } = await supabase.from('documents').update({ reminder_sent_at: now }).eq('id', id)
-  if (error) console.error('[invoices/reminder] reminder_sent_at not recorded:', error.message)
+  const [{ error: docErr }, { error: logErr }] = await Promise.all([
+    supabase.from('documents').update({ reminder_sent_at: now, reminder_level: level }).eq('id', id),
+    supabase.from('reminder_log').insert({ document_id: id, level, sent_at: now, to_email: client.email, subject }),
+  ])
+  if (docErr) console.error('[invoices/reminder] reminder level not recorded:', docErr.message)
+  if (logErr) console.error('[invoices/reminder] reminder_log not written:', logErr.message)
 
-  return NextResponse.json({ ok: true, sentAt: now })
+  return NextResponse.json({ ok: true, sentAt: now, level })
 }

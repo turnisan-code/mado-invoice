@@ -75,6 +75,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     tax_note: taxNote,
     discount_type: doc.discount_type as 'percent' | 'fixed' | null,
     discount_value: doc.discount_value,
+    skonto_percent: doc.skonto_percent ?? null,
+    skonto_days: doc.skonto_days ?? null,
     items,
     totals,
     reference,

@@ -7,7 +7,8 @@
 -- The files under supabase/migrations/ (plus supabase/add_reminders.sql and
 -- BOOKAMAT_MIGRATION.sql) are HISTORY: they record how an existing database reached this
 -- state and are never edited. Do not run this file against a database that already has
--- tables; run supabase/migrations/20261020_schema_alignment.sql there instead.
+-- tables; run supabase/migrations/20261020_schema_alignment.sql and the later migrations
+-- there instead.
 --
 -- Run in the Supabase SQL editor (the storage policies need the postgres role).
 
@@ -87,7 +88,19 @@ create table settings (
   email_subject_reminder_de   text,
   email_body_reminder_de      text,
   email_subject_reminder_en   text,
-  email_body_reminder_en      text
+  email_body_reminder_en      text,
+  -- Dunning: automatic reminders start reminder_grace_days after the due date and escalate
+  -- every reminder_interval_days up to reminder_max_level. Mahnspesen apply from level 2,
+  -- Verzugszinsen are % p.a. on the open balance.
+  reminders_enabled           boolean not null default true,
+  reminder_grace_days         integer not null default 7,
+  reminder_interval_days      integer not null default 14,
+  reminder_max_level          integer not null default 3,
+  reminder_fee                numeric not null default 0,
+  reminder_interest_rate      numeric not null default 0,
+  -- Skonto pre-filled on new invoices.
+  default_skonto_percent      numeric,
+  default_skonto_days         integer
 );
 
 -- The app and next_document_number read "the" settings row; it must exist.
@@ -113,7 +126,9 @@ create table clients (
   payment_days  integer not null default 14,
   status        text not null default 'active' check (status in ('active','inactive','lead')),
   tags          text[] not null default '{}',
-  notes         text
+  notes         text,
+  -- Excluded from the automatic reminder cron; manual reminders still work.
+  reminders_opt_out boolean not null default false
 );
 
 -- ─── Service catalogue ───────────────────────────────────────────────────────
@@ -168,6 +183,11 @@ create table documents (
   cancels_document_id uuid references documents(id),
   bookamat_booking_id text,
   reminder_sent_at    timestamptz,
+  -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung).
+  reminder_level      integer not null default 0,
+  -- Early-payment discount: skonto_percent off the gross total if paid within skonto_days of the date.
+  skonto_percent      numeric,
+  skonto_days         integer,
   share_token         uuid unique,
   drive_file_id       text
 );
@@ -205,10 +225,26 @@ create table payments (
   document_id uuid not null references documents(id) on delete cascade,
   date        date not null default current_date,
   amount      numeric(10,2) not null,
-  note        text
+  note        text,
+  -- 'payment' is money that arrived (the only kind the UVA and revenue figures count);
+  -- 'skonto' and 'writeoff' close the remaining balance without a bank transfer.
+  kind        text not null default 'payment' check (kind in ('payment','skonto','writeoff'))
 );
 
 create index on payments(document_id);
+
+-- ─── Reminder log ────────────────────────────────────────────────────────────
+-- One row per reminder email that went out: the invoice page shows this history.
+create table reminder_log (
+  id          uuid primary key default uuid_generate_v4(),
+  document_id uuid not null references documents(id) on delete cascade,
+  level       integer not null,
+  sent_at     timestamptz not null default now(),
+  to_email    text,
+  subject     text
+);
+
+create index on reminder_log(document_id);
 
 -- ─── Numbering ───────────────────────────────────────────────────────────────
 -- Longer counter tokens are replaced first so {N} cannot eat part of {NNN}.
@@ -357,6 +393,7 @@ alter table catalogue_items enable row level security;
 alter table documents       enable row level security;
 alter table document_items  enable row level security;
 alter table payments        enable row level security;
+alter table reminder_log    enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on clients         for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -364,6 +401,7 @@ create policy "owner" on catalogue_items for all to authenticated using (is_app_
 create policy "owner" on documents       for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on document_items  for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on payments        for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on reminder_log    for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Storage: company logo ───────────────────────────────────────────────────
 -- SettingsForm uploads logo.<ext> to the public 'logos' bucket with upsert (insert + update)
