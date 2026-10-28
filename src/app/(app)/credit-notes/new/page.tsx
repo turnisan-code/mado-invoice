@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import { toPublicSettings } from '@/lib/public-settings'
+import SettingsMissing from '@/components/layout/SettingsMissing'
 import { getT } from '@/lib/i18n/server'
 
 export default async function NewCreditNotePage({ searchParams }: { searchParams: Promise<{ client?: string }> }) {
@@ -13,6 +14,8 @@ export default async function NewCreditNotePage({ searchParams }: { searchParams
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
   ])
+
+  if (!settings) return <SettingsMissing />
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
