@@ -7,8 +7,9 @@ export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' 
 export type VatRate = 0 | 10 | 13 | 20
 export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
 export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
-// 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer.
-export type PaymentKind = 'payment' | 'skonto' | 'writeoff'
+// 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer;
+// 'credit' is an issued credit note applied to its invoice; 'refund' is money paid back on a credit note.
+export type PaymentKind = 'payment' | 'skonto' | 'writeoff' | 'credit' | 'refund'
 export type PaymentMethod = 'bank' | 'cash'
 // Issuer details every issued document needs; one entry per Settings field group.
 export type IssuerField = 'companyName' | 'address' | 'uid' | 'iban'
@@ -198,6 +199,7 @@ export interface Document {
   skonto_percent?: number | null
   skonto_days?: number | null
   sent_at?: string | null
+  responded_at?: string | null
   share_token?: string | null
   drive_file_id?: string | null
   issued_at?: string | null
@@ -233,7 +235,15 @@ export interface Payment {
   kind: PaymentKind
   method: PaymentMethod
   import_ref: string | null
+  reference: string | null
+  credit_note_id: string | null
 }
+
+// What the money side of a document looks like, derived from its payments (never stored).
+export type PaymentState = 'nothing_due' | 'unpaid' | 'partially_paid' | 'paid' | 'written_off' | 'overpaid'
+
+// A status as shown: the stored status, or a state derived from payments or dates.
+export type DisplayStatus = DocumentStatus | 'partially_paid' | 'written_off' | 'settled' | 'expired'
 
 export interface ReminderLogEntry {
   id: string

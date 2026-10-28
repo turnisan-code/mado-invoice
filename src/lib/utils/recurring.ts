@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RecurringInterval, RecurringSchedule } from '@/types'
+import type { TFn } from '@/lib/i18n'
 
 // Date math is self-contained (type-only imports) so plain node can run this module for checks.
 const MONTHS_PER_INTERVAL: Record<Exclude<RecurringInterval, 'weekly'>, number> = {
@@ -134,7 +135,21 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   return doc.id as string
 }
 
-async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult) {
+// Issue failures as the manual button shows them: in the UI language when the route passes t
+// (and describeError to word database errors), in English for the cron log.
+function issueMessages(t: TFn | undefined, describeError: ((err: unknown) => string) | undefined) {
+  const reason = (err: unknown) => describeError ? describeError(err) : err instanceof Error ? err.message : String(err)
+  return {
+    snapshot: (date: string, error: string) => t ? t('lifecycle.recurring.snapshotFailed', { date, error }) : `${date}: issued, but the archive copy failed (${error})`,
+    drive: (date: string, error: string) => t ? t('lifecycle.recurring.driveFailed', { date, error }) : `${date}: issued, but the Drive archive failed (${error})`,
+    issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date, error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
+  }
+}
+
+type Wording = { t?: TFn; describeError?: (err: unknown) => string }
+
+async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult, wording: Wording) {
+  const messages = issueMessages(wording.t, wording.describeError)
   const { data: source, error } = await supabase
     .from('documents')
     .select('*, document_items(*), clients(payment_days)')
@@ -167,10 +182,10 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       if (schedule.mode === 'issue') {
         try {
           const { snapshotError, driveError } = await issue(supabase, documentId)
-          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the archive copy failed (${snapshotError})` })
-          if (driveError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the Drive archive failed (${driveError.error})` })
+          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next, snapshotError) })
+          if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError.error) })
         } catch (err) {
-          result.errors.push({ scheduleId: schedule.id, message: `${next}: created as draft, issuing failed (${err instanceof Error ? err.message : String(err)})` })
+          result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
         }
       }
     } else {
@@ -202,7 +217,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
 export async function generateDueSchedules(
   supabase: SupabaseClient,
   asOf: string,
-  opts: { scheduleId?: string; force?: boolean; issue: IssueDocumentFn },
+  opts: { scheduleId?: string; force?: boolean; issue: IssueDocumentFn } & Wording,
 ): Promise<GenerateResult> {
   const result: GenerateResult = { generated: [], skipped: [], errors: [] }
 
@@ -221,7 +236,7 @@ export async function generateDueSchedules(
 
   for (const schedule of (schedules ?? []) as RecurringSchedule[]) {
     try {
-      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result)
+      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result, opts)
     } catch (err) {
       result.errors.push({ scheduleId: schedule.id, message: err instanceof Error ? err.message : String(err) })
     }
