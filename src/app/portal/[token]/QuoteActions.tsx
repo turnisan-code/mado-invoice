@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { makeT } from '@/lib/i18n'
 
 const L: Record<string, { de: string; en: string }> = {
   accept:          { de: 'Angebot annehmen',                          en: 'Accept quote' },
@@ -21,16 +22,29 @@ function t(key: string, lang: 'de' | 'en') { return L[key]?.[lang] ?? key }
 export default function QuoteActions({ token, lang }: { token: string; lang: 'de' | 'en' }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'accepted' | 'rejected'>('idle')
   const [pending, setPending] = useState<'accepted' | 'rejected' | null>(null)
+  const [error, setError] = useState<{ message: string; final: boolean } | null>(null)
 
   async function respond(action: 'accepted' | 'rejected') {
     setStatus('loading')
-    const res = await fetch(`/api/portal/${token}/respond`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    })
-    setPending(null)
-    setStatus(res.ok ? (action === 'accepted' ? 'accepted' : 'rejected') : 'idle')
+    setError(null)
+    try {
+      const res = await fetch(`/api/portal/${token}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (res.ok) { setStatus(action); return }
+      // The quote expired while the page was open: the server's message names the date.
+      const data = await res.json().catch(() => ({}))
+      const expired = data.code === 'expired' && typeof data.error === 'string'
+      setError({ message: expired ? data.error : makeT(lang)('lifecycle.portal.respondFailed'), final: expired })
+      setStatus('idle')
+    } catch {
+      setError({ message: makeT(lang)('lifecycle.portal.respondFailed'), final: false })
+      setStatus('idle')
+    } finally {
+      setPending(null)
+    }
   }
 
   if (status === 'accepted') {
@@ -53,8 +67,11 @@ export default function QuoteActions({ token, lang }: { token: string; lang: 'de
 
   const busy = status === 'loading'
 
+  if (error?.final) return <p role="alert" className="text-sm text-neutral-600">{error.message}</p>
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
+      {error && <p role="alert" className="w-full text-sm text-red-600">{error.message}</p>}
       <button
         type="button"
         onClick={() => setPending('rejected')}
