@@ -7,6 +7,7 @@ import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from 
 import { logEvent } from '@/lib/events'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
+import { applyCreditNote } from '@/lib/credits'
 
 export type IssueOutcome = {
   number: string
@@ -49,7 +50,7 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
 // failed number assignment throws; archive failures are returned so the caller can report them
 // while the document stays issued (a missing copy is flagged on its page and can be created later).
 export async function issueDocument(supabase: SupabaseClient, documentId: string): Promise<IssueOutcome> {
-  const { data: before, error: lookupErr } = await supabase.from('documents').select('number').eq('id', documentId).maybeSingle()
+  const { data: before, error: lookupErr } = await supabase.from('documents').select('number, type').eq('id', documentId).maybeSingle()
   if (lookupErr) throw new Error(lookupErr.message)
   if (!before) throw new Error('Document not found')
   if (!before.number) await assertIssuable(supabase, documentId)
@@ -57,6 +58,11 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
   if (error) throw new Error(error.message)
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
+  // An issued credit note takes its amount off the open balance of the invoice it corrects; a
+  // failure leaves it unapplied, and its page offers to apply it.
+  if (!before.number && before.type === 'credit_note') {
+    await applyCreditNote(supabase, documentId).catch(err => console.error(`[issue] credit note ${number} not applied:`, err))
+  }
 
   const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }
 
