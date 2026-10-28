@@ -21,7 +21,7 @@ export function invoiceTotals(doc: PdfDocument): DocumentTotals {
 
 // "Zahlungserinnerung_RE-2026-0042.pdf", "1-Mahnung_RE-2026-0042.pdf"
 export function reminderFilename(title: string, number: string): string {
-  const slug = title.normalize('NFKD').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '')
+  const slug = title.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '-').replace(/^-+|-+$/g, '')
   return `${slug}_${number.replace(/["\\/\r\n]+/g, '_')}.pdf`
 }
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { DocumentNotFoundError, loadPdfDocument, loadSettings } from '@/lib/pdf/render'
 import { renderReminderPdf } from '@/lib/pdf/reminder'
-import { nextReminderLevel } from '@/lib/utils/reminder-templates'
+import { dispositionFilename, nextReminderLevel } from '@/lib/utils/reminder'
 
 export const maxDuration = 60
 
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${filename.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': `inline; ${dispositionFilename(filename)}`,
         'Cache-Control': 'private, no-store',
       },
     })

@@ -39,10 +39,11 @@ function base64Lines(content: Buffer): string {
 }
 
 // RFC 2231 filename with an ASCII fallback for clients that ignore filename*.
-function dispositionFilename(filename: string): string {
+export function dispositionFilename(filename: string): string {
   const clean = headerValue(filename).replace(/["\\]/g, '_')
-  const ascii = clean.normalize('NFKD').replace(/[^\x20-\x7e]/g, '_')
-  return `filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(clean)}`
+  const ascii = clean.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '_')
+  const encoded = encodeURIComponent(clean).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+  return `filename="${ascii}"; filename*=UTF-8''${encoded}`
 }
 
 // Gmail removes the Bcc header from the copies it delivers.
