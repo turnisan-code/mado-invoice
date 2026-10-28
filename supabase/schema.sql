@@ -154,7 +154,9 @@ create table clients (
   tags          text[] not null default '{}',
   notes         text,
   -- Excluded from the automatic reminder cron; manual reminders still work.
-  reminders_opt_out boolean not null default false
+  reminders_opt_out boolean not null default false,
+  -- Further recipients (e.g. an accounting mailbox), copied in CC on every email to the client.
+  cc_emails     text[] not null default '{}'
 );
 
 create or replace function format_client_number(n integer)
