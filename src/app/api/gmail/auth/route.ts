@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
-import { getOAuthClient } from '@/lib/google/client'
+import { randomUUID } from 'crypto'
+import { createClient } from '@/lib/supabase/server'
+import { getOAuthClient, OAUTH_STATE_COOKIE } from '@/lib/google/client'
 
 export async function GET() {
-  const oauth2 = getOAuthClient()
-  const url = oauth2.generateAuthUrl({
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const state = randomUUID()
+  const url = getOAuthClient().generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     scope: [
@@ -11,6 +17,16 @@ export async function GET() {
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/drive',
     ],
+    state,
   })
-  return NextResponse.redirect(url)
+
+  const res = NextResponse.redirect(url)
+  res.cookies.set(OAUTH_STATE_COOKIE.name, state, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 600,
+    path: OAUTH_STATE_COOKIE.path,
+  })
+  return res
 }

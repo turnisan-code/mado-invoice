@@ -4,7 +4,8 @@ import { useRef } from 'react'
 import DocumentBuilder, { type DocumentBuilderHandle } from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import ReminderButton from '@/components/layout/ReminderButton'
-import type { Settings, Client, CatalogueItem, Document, Currency } from '@/types'
+import type { Client, CatalogueItem, Document, Currency } from '@/types'
+import type { PublicSettings } from '@/lib/public-settings'
 
 interface Payment {
   id: string
@@ -15,7 +16,7 @@ interface Payment {
 
 interface Props {
   type: 'invoice'
-  settings: Settings
+  settings: PublicSettings
   clients: Client[]
   catalogue: CatalogueItem[]
   document: Document & { items: Document['items']; payments: Payment[] }
@@ -45,7 +46,7 @@ export default function InvoicePageClient({
     return { base64, filename: `${result.number}.pdf` }
   }
 
-  const gmailConfigured = !!(settings.gmail_refresh_token)
+  const gmailConfigured = settings.gmail_connected
   const showReminder = (document.status === 'overdue' || document.status === 'sent') && gmailConfigured
 
   return (

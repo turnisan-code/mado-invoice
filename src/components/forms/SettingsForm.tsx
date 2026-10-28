@@ -6,9 +6,9 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
-import type { Settings } from '@/types'
+import type { PublicSettings } from '@/lib/public-settings'
 
-interface Props { settings: Settings | null }
+interface Props { settings: PublicSettings | null }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
 const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
@@ -249,7 +249,8 @@ export default function SettingsForm({ settings }: Props) {
   const [savingDrive, setSavingDrive] = useState(false)
   const [driveDirty, setDriveDirty] = useState(false)
   const [bookamatUsername, setBookamatUsername] = useState(settings?.bookamat_username ?? '')
-  const [bookamatApiKey, setBookamatApiKey] = useState(settings?.bookamat_api_key ?? '')
+  const [bookamatApiKey, setBookamatApiKey] = useState('')
+  const [bookamatKeySaved, setBookamatKeySaved] = useState(!!settings?.bookamat_configured)
   const [bookamatCountry, setBookamatCountry] = useState(settings?.bookamat_country ?? 'at')
   const [bookamatBankId, setBookamatBankId] = useState<number | ''>(settings?.bookamat_bank_account_id ?? '')
   const [bookamatCostId, setBookamatCostId] = useState<number | ''>(settings?.bookamat_cost_account_id ?? '')
@@ -461,7 +462,7 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   async function loadBookamatAccounts() {
-    if (!bookamatUsername || !bookamatApiKey) { toast.error('Enter username and API key first.'); return }
+    if (!bookamatUsername || (!bookamatApiKey && !bookamatKeySaved)) { toast.error('Enter username and API key first.'); return }
     setLoadingAccounts(true)
     const res = await fetch('/api/bookamat/accounts', {
       method: 'POST',
@@ -479,7 +480,7 @@ export default function SettingsForm({ settings }: Props) {
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({
       bookamat_username:        bookamatUsername || null,
-      bookamat_api_key:         bookamatApiKey   || null,
+      ...(bookamatApiKey ? { bookamat_api_key: bookamatApiKey } : {}),
       bookamat_country:         bookamatCountry,
       bookamat_bank_account_id: bookamatBankId   || null,
       bookamat_cost_account_id: bookamatCostId   || null,
@@ -490,6 +491,8 @@ export default function SettingsForm({ settings }: Props) {
     }).eq('id', settings.id)
     setSavingBookamat(false)
     if (error) { toast.error(error.message); return }
+    if (bookamatApiKey) setBookamatKeySaved(true)
+    setBookamatApiKey('')
     setBookamatAccounts(null)
     setEditingBookamat(false)
     toast.success('Bookamat connected.')
@@ -1201,7 +1204,7 @@ export default function SettingsForm({ settings }: Props) {
                     </button>
                   )}
                 </div>
-                {!settings?.gmail_access_token?.includes('drive') && settings?.gmail_refresh_token && (
+                {settings?.gmail_connected && (
                   <p className="text-xs text-amber-600 dark:text-amber-500">
                     Re-connect your Google account to grant Drive access.{' '}
                     <a href="/api/gmail/auth" className="underline">Re-connect →</a>
@@ -1250,7 +1253,7 @@ export default function SettingsForm({ settings }: Props) {
                       type="password"
                       value={bookamatApiKey}
                       onChange={e => setBookamatApiKey(e.target.value)}
-                      placeholder="From Mein Account → API"
+                      placeholder={bookamatKeySaved ? '•••••••• (saved)' : 'From Mein Account → API'}
                       className={inp}
                     />
                   </div>

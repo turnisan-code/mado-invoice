@@ -16,7 +16,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
   }
 
-  const { pdfBase64, filename, documentId } = await req.json()
+  let payload: { pdfBase64?: unknown; filename?: unknown; documentId?: unknown } | null
+  try {
+    payload = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const { pdfBase64, filename, documentId } = payload ?? {}
+  if (typeof pdfBase64 !== 'string' || !pdfBase64 || typeof filename !== 'string' || !filename) {
+    return NextResponse.json({ error: 'pdfBase64 and filename are required' }, { status: 400 })
+  }
+  if (documentId !== undefined && typeof documentId !== 'string') {
+    return NextResponse.json({ error: 'Invalid documentId' }, { status: 400 })
+  }
 
   // Look up existing Drive file ID for this document (if any)
   let existingFileId: string | null = null

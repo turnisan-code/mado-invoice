@@ -6,16 +6,28 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { username: string; apiKey: string; country: string }
+  let body: { username?: unknown; apiKey?: unknown; country?: unknown } | null
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { username, apiKey, country } = body
-  if (!username || !apiKey || !country) {
-    return NextResponse.json({ error: 'username, apiKey and country are required' }, { status: 400 })
+  const { username, country } = body ?? {}
+  if (typeof username !== 'string' || !username || typeof country !== 'string' || !country) {
+    return NextResponse.json({ error: 'username and country are required' }, { status: 400 })
+  }
+  if (!/^[a-z]{2}$/.test(country)) {
+    return NextResponse.json({ error: 'Invalid country' }, { status: 400 })
+  }
+
+  let apiKey = typeof body?.apiKey === 'string' ? body.apiKey : ''
+  if (!apiKey) {
+    const { data: settings } = await supabase.from('settings').select('bookamat_api_key').single()
+    apiKey = settings?.bookamat_api_key ?? ''
+  }
+  if (!apiKey) {
+    return NextResponse.json({ error: 'apiKey is required' }, { status: 400 })
   }
 
   const year = new Date().getFullYear()
