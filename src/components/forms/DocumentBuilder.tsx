@@ -148,7 +148,8 @@ function contentKeyOf(f: FormState): string {
 }
 
 // Unsaved edits kept on this device per document ('new' until the draft exists). `base` is the
-// saved key the edits started from: a server copy that moved on since then is newer.
+// saved key the edits started from: a server copy that moved on since then is newer. It is null
+// until the draft and its items were first saved.
 interface Backup { savedAt: number; base: string | null; form: FormState }
 
 function readBackup(key: string): Backup | null {
@@ -372,7 +373,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [useToday, setUseToday] = useState(true)
   const [latestIssued, setLatestIssued] = useState<{ number: string; date: string } | null>(null)
   const [checking, setChecking] = useState(false)
-  const [serverProblems, setServerProblems] = useState<IssueProblem[]>([])
+  // What the server refused, for the form state it checked.
+  const [serverProblems, setServerProblems] = useState<{ key: string; problems: IssueProblem[] } | null>(null)
   const [revealTick, setRevealTick] = useState(0)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
@@ -393,6 +395,10 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const formRef = useRef(form)
   const docIdRef = useRef<string | null>(doc?.id ?? null)
   const savedKeyRef = useRef(initialKeys.saved)
+  // False from inserting a new draft until its items are written too.
+  const savedOnceRef = useRef(!!doc)
+  // Mounted without a document at a document's URL (see the restore effect): never insert one.
+  const misplacedRef = useRef(false)
   const saveErrorRef = useRef<string | null>(null)
   const pendingWritesRef = useRef(0)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -515,13 +521,16 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   }
 
   function canPersist(f: FormState) {
-    return !!f.clientId && (!!docIdRef.current || contentKeyOf(f) !== initialKeys.content)
+    return !misplacedRef.current && !!f.clientId && (!!docIdRef.current || contentKeyOf(f) !== initialKeys.content)
   }
 
+  // A backup taken before the draft's first complete save has no base: the server copy may lack
+  // the items, so it is offered whenever it differs.
   function backupNow() {
     const f = formRef.current
     if (!isDirty(f)) return
-    writeBackup(backupKey(docIdRef.current), { savedAt: Date.now(), base: docIdRef.current ? savedKeyRef.current : null, form: f })
+    const base = docIdRef.current && savedOnceRef.current ? savedKeyRef.current : null
+    writeBackup(backupKey(docIdRef.current), { savedAt: Date.now(), base, form: f })
   }
 
   function cancelAutoSave() {
@@ -551,13 +560,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   // The one write path: header + items of `f`, inserting the draft once for a new document.
   // Throws on failure; returns the document id.
-  async function persist(f: FormState, forIssue = false): Promise<string> {
+  async function persist(f: FormState, mode: 'auto' | 'save' | 'issue' = 'auto'): Promise<string> {
     const effectiveDate = f.date || today()
     const c = clients.find(x => x.id === f.clientId)
     const effective: FormState = {
       ...f,
       date: effectiveDate,
-      dueDate: f.dueDate || (forIssue && c ? addDays(effectiveDate, termDays(type, settings, c)) : ''),
+      dueDate: f.dueDate || (mode === 'issue' && c ? addDays(effectiveDate, termDays(type, settings, c)) : ''),
     }
     const fields = docFields(type, effective)
     const items = itemsPayload(effective.lines)
@@ -568,6 +577,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         const { error } = await supabase.from('documents').update(fields).eq('id', id)
         if (error) throw new Error(error.message)
       } else {
+        if (misplacedRef.current) throw new Error(t('common.unknownError'))
         if (!fields.client_id) throw new Error(t('builder.selectClient'))
         const { data, error } = await supabase.from('documents')
           .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
@@ -580,9 +590,11 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       if (itemsErr) throw new Error(t('builder.itemsError', { error: itemsErr.message }))
 
       savedKeyRef.current = JSON.stringify([fields, items])
-      // Show the date and due date that were filled in, and keep the snapshot in step so the next
-      // flush does not write the empty values back.
-      if (effective.date !== f.date || effective.dueDate !== f.dueDate) {
+      savedOnceRef.current = true
+      // Saving or issuing shows the date and due date that were filled in, and keeps the snapshot
+      // in step so the next flush does not write the empty values back. An autosave leaves the
+      // fields alone: a date input is empty while it is being typed in.
+      if (mode !== 'auto' && (effective.date !== f.date || effective.dueDate !== f.dueDate)) {
         const cur = formRef.current
         formRef.current = { ...cur, date: cur.date || effective.date, dueDate: cur.dueDate || effective.dueDate }
         setDate(d => d || effective.date)
@@ -591,7 +603,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       saveErrorRef.current = null
       setSaveError(null)
       setLastSaved(new Date())
-      if (!isDirty(formRef.current)) removeBackup(backupKey(id))
+      // Edits made while this was being written stay backed up, now against what was saved.
+      if (isDirty(formRef.current)) backupNow()
+      else removeBackup(backupKey(id))
       return id
     } finally {
       pendingWritesRef.current--
@@ -623,7 +637,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     cancelAutoSave()
     setSaving(true)
     try {
-      const id = await serialized(() => persist(formRef.current))
+      const id = await serialized(() => persist(formRef.current, 'save'))
       toast.success(t('builder.draftSaved'))
       if (!doc) router.replace(`/${PATHS[type]}/${id}`)
       else router.refresh()
@@ -663,21 +677,30 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!isDirty(formRef.current)) removeBackup(backupKey(docIdRef.current))
   }
 
-  // Listeners and timers call the latest render's functions and read the latest form.
-  const latest = useRef({ flush, saveDraft, isDirty })
+  // Listeners, timers and the actions that run after issuing call the latest render's functions
+  // and read the latest form (the issue dialog may have changed the date since the click).
+  const latest = useRef({ flush, saveDraft, isDirty, buildEmailContent })
   useEffect(() => {
     formRef.current = form
-    latest.current = { flush, saveDraft, isDirty }
+    latest.current = { flush, saveDraft, isDirty, buildEmailContent }
   })
 
   // An earlier visit left edits on this device that the server copy does not have.
   useEffect(() => {
+    // Back to a draft that was created here can restore the empty editor it was started in (the
+    // address bar switched to the draft without a navigation); load the draft itself instead.
+    if (!doc && window.location.pathname !== `/${PATHS[type]}/new`) {
+      misplacedRef.current = true
+      router.replace(window.location.pathname + window.location.search)
+      return
+    }
     const key = backupKey(docIdRef.current)
     const b = readBackup(key)
     if (!b) return
+    const merged = { ...formRef.current, ...b.form, currency }
     const newer = docIdRef.current
-      ? b.base === initialKeys.saved && savedKeyOf(type, { ...formRef.current, ...b.form }) !== initialKeys.saved
-      : contentKeyOf({ ...formRef.current, ...b.form }) !== initialKeys.content
+      ? (b.base === null || b.base === initialKeys.saved) && savedKeyOf(type, merged) !== initialKeys.saved
+      : contentKeyOf(merged) !== initialKeys.content
     if (!newer) { removeBackup(key); return }
     offerPendingRef.current = true
     setRestoreOffer(b)
@@ -687,6 +710,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   // Every edit is backed up on the device at once and written to the server 2 s later.
   useEffect(() => {
     const f = formRef.current
+    if (misplacedRef.current) return
     if (!latest.current.isDirty(f)) {
       if (!offerPendingRef.current) removeBackup(backupKey(docIdRef.current))
       return
@@ -768,7 +792,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   }
 
   const liveProblems = checking && !doc?.number ? issueProblems(checkInput(form)) : []
-  const shownProblems = liveProblems.length ? liveProblems : checking ? serverProblems : []
+  const shownProblems = liveProblems.length ? liveProblems
+    : checking && serverProblems?.key === formKey ? serverProblems.problems : []
   const missingIssuer = missingIssuerFields(settings)
   const issuerFieldList = (fields: string[]) => fields.map(f => t(`issueChecks.issuerFields.${f}` as DictKey)).join(', ')
 
@@ -862,7 +887,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       return await serialized(async () => {
         let id: string
         try {
-          id = await persist(f, true)
+          id = await persist(f, 'issue')
         } catch (e) {
           toast.error(errorMessage(e, t('common.unknownError')))
           return null
@@ -870,7 +895,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         const res = await fetch(`/api/documents/${id}/issue`, { method: 'POST' })
         const data = await res.json().catch(() => ({}))
         if (res.status === 422 && Array.isArray(data.problems)) {
-          setServerProblems(data.problems as IssueProblem[])
+          setServerProblems({ key: savedKeyRef.current, problems: data.problems as IssueProblem[] })
           setChecking(true)
           setRevealTick(n => n + 1)
           return null
@@ -935,7 +960,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (doc?.number) { void run(null); return }
     const f = formRef.current
     const problems = issueProblems(checkInput(f))
-    setServerProblems([])
+    setServerProblems(null)
     setChecking(problems.length > 0)
     if (problems.length) {
       // On phones the document's service date sits in the collapsed details.
@@ -1076,7 +1101,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = buildEmailContent(issued.number)
+      const content = latest.current.buildEmailContent(issued.number)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       triggerDownload(blob, `${issued.number}.pdf`)
@@ -1092,7 +1117,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = buildEmailContent(issued.number)
+      const content = latest.current.buildEmailContent(issued.number)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
