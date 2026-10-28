@@ -133,7 +133,7 @@ export function getTaxNote(taxTreatment: string, lang: 'de' | 'en', settings?: T
   if (taxTreatment === 'non_eu') {
     return lang === 'de'
       ? (settings?.tax_note_non_eu_de || 'Nicht steuerbar (Leistungsort außerhalb der EU)')
-      : (settings?.tax_note_non_eu_en || 'Tax liability shifts to the recipient of the services.')
+      : (settings?.tax_note_non_eu_en || 'Not subject to Austrian VAT (place of supply outside the EU)')
   }
   return null
 }
