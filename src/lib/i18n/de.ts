@@ -939,6 +939,19 @@ export const de = {
       accountHolderHint: 'Name, auf den das Konto lautet, wie ihn die Bank führt. Wird als Empfänger im Zahlungs-QR-Code und auf Rechnungen gedruckt; leer = Firmenname.',
     },
   },
+  docs: {
+    history: {
+      reminderManual: '{title} manuell erfasst',
+      reminderManualTo: '{title} an {to} manuell erfasst',
+      reminderMailto: '{title} im E-Mail-Programm für {to} geöffnet',
+      reminderMailtoPlain: '{title} im E-Mail-Programm geöffnet',
+      mailtoPlain: 'Im E-Mail-Programm geöffnet',
+      cc: 'CC: {list}',
+      bcc: 'BCC: {list}',
+      booking: 'Buchung {id}',
+      bookingYear: 'Buchungsjahr {year}',
+    },
+  },
   reminders: {
     title: 'Mahnungen',
     sentShort: 'Gesendet {date}',

@@ -10,7 +10,7 @@ const DOC_PATHS: Record<string, string> = { invoice: 'invoices', quote: 'quotes'
 
 type Row = {
   text: string
-  sub?: string | null
+  subs?: (string | null)[]
   link?: { href: string; label: string; external?: boolean }
 }
 
@@ -18,11 +18,30 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null
 }
 
+// Detail fields written by older code or other writers may be strings or numbers.
+function num(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN
+  return Number.isFinite(n) ? n : null
+}
+
+function id(value: unknown): string | null {
+  return str(value) ?? (num(value) != null ? String(value) : null)
+}
+
+function addresses(value: unknown): string | null {
+  const list = (Array.isArray(value) ? value : [value]).filter((v): v is string => typeof v === 'string' && !!v.trim())
+  return list.length ? list.join(', ') : null
+}
+
 function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string): Row {
   const d = event.detail ?? {}
   const statusLabel = (value: unknown) => (str(value) ? t(`status.${str(value)}` as DictKey) : '')
   const subject = str(d.subject) ? t('archive.subject', { subject: str(d.subject)! }) : null
   const reason = str(d.reason) ? t('lifecycle.storno.reasonShort', { reason: str(d.reason)! }) : null
+  const cc = addresses(d.cc)
+  const bcc = addresses(d.bcc)
+  const copies = [cc && t('docs.history.cc', { list: cc }), bcc && t('docs.history.bcc', { list: bcc })].filter(Boolean).join(' · ') || null
+  const level = typeof d.level === 'number' ? d.level : null
 
   switch (event.type) {
     case 'issued': {
@@ -31,15 +50,24 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
     }
     case 'emailed': {
       const to = str(d.to)
-      return { text: to ? t('archive.events.emailed', { to }) : t('archive.events.emailedPlain'), sub: subject }
+      return { text: to ? t('archive.events.emailed', { to }) : t('archive.events.emailedPlain'), subs: [copies, subject] }
     }
-    case 'mailto_opened':
-      return { text: t('archive.events.mailto_opened', { to: str(d.to) ?? '' }), sub: subject }
-    case 'reminder_sent': {
-      const title = reminderTitle(typeof d.level === 'number' ? d.level : 1, lang)
+    case 'mailto_opened': {
       const to = str(d.to)
-      const text = to ? t('archive.events.reminder_sent', { title, to }) : t('archive.events.reminder_sentPlain', { title })
-      return { text: d.automatic ? `${text} · ${t('archive.automatic')}` : text, sub: subject }
+      // Opened from the reminder dialog: the level says which reminder the email carries.
+      if (level != null) {
+        const title = reminderTitle(level, lang)
+        return { text: to ? t('docs.history.reminderMailto', { title, to }) : t('docs.history.reminderMailtoPlain', { title }), subs: [subject] }
+      }
+      return { text: to ? t('archive.events.mailto_opened', { to }) : t('docs.history.mailtoPlain'), subs: [subject] }
+    }
+    case 'reminder_sent': {
+      const title = reminderTitle(level ?? 1, lang)
+      const to = str(d.to)
+      const text = d.manual
+        ? to ? t('docs.history.reminderManualTo', { title, to }) : t('docs.history.reminderManual', { title })
+        : to ? t('archive.events.reminder_sent', { title, to }) : t('archive.events.reminder_sentPlain', { title })
+      return { text: d.automatic ? `${text} · ${t('archive.automatic')}` : text, subs: [copies, subject] }
     }
     case 'status_changed':
       return { text: t('archive.events.status_changed', { from: statusLabel(d.from), to: statusLabel(d.to) }) }
@@ -52,7 +80,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const creditNote = raw === 'credit' ? str(d.credit_note_id) : null
       return {
         text: t(`archive.events.${event.type}`, { kind: kindLabel, amount }),
-        sub: d.method === 'cash' && (raw === 'payment' || raw === 'refund' || !raw) ? t('payments.cashBadge') : str(d.credit_note_number),
+        subs: [d.method === 'cash' && (raw === 'payment' || raw === 'refund' || !raw) ? t('payments.cashBadge') : str(d.credit_note_number)],
         link: creditNote ? { href: `/credit-notes/${creditNote}`, label: t('archive.openSource') } : undefined,
       }
     }
@@ -60,7 +88,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const id = str(d.credit_note_id)
       return {
         text: t('archive.events.storno_created'),
-        sub: reason,
+        subs: [reason],
         link: id ? { href: `/credit-notes/${id}`, label: t('archive.openStorno') } : undefined,
       }
     }
@@ -73,7 +101,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const id = str(d.from_id)
       return {
         text: number ? t('archive.events.converted', { number }) : t('archive.events.convertedPlain'),
-        sub: reason,
+        subs: [reason],
         link: path && id ? { href: `/${path}/${id}`, label: t('archive.openSource') } : undefined,
       }
     }
@@ -83,9 +111,20 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const href = str(d.link)
       return {
         text: t('archive.events.drive_archived'),
-        sub: str(d.name),
+        subs: [str(d.name)],
         link: href ? { href, label: t('archive.openInDrive'), external: true } : undefined,
       }
+    }
+    case 'bookamat_synced': {
+      const booking = id(d.booking_id)
+      const year = num(d.year)
+      const amount = num(d.amount)
+      const parts = [
+        booking && t('docs.history.booking', { id: booking }),
+        year != null && t('docs.history.bookingYear', { year }),
+        amount != null && formatMoney(amount, currency),
+      ].filter(Boolean)
+      return { text: t('archive.events.bookamat_synced'), subs: [parts.join(' · ') || null] }
     }
     case 'portal_responded':
       return { text: d.action === 'accepted' ? t('lifecycle.history.portalAccepted') : d.action === 'rejected' ? t('lifecycle.history.portalRejected') : t('archive.events.portal_responded') }
@@ -138,7 +177,9 @@ export default async function DocumentHistory({ documentId, currency }: { docume
                     </>
                   )}
                 </p>
-                {row.sub && <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{row.sub}</p>}
+                {row.subs?.filter(Boolean).map((sub, i) => (
+                  <p key={i} className="text-xs text-neutral-500 dark:text-neutral-400 break-words">{sub}</p>
+                ))}
               </div>
             </li>
           )

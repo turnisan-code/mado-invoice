@@ -937,6 +937,19 @@ export const en = {
       accountHolderHint: 'The name the account is held in, as your bank shows it. Printed as the beneficiary of the payment QR code and on invoices; empty = company name.',
     },
   },
+  docs: {
+    history: {
+      reminderManual: '{title} recorded manually',
+      reminderManualTo: '{title} to {to} recorded manually',
+      reminderMailto: '{title} opened in the email app for {to}',
+      reminderMailtoPlain: '{title} opened in the email app',
+      mailtoPlain: 'Opened in the email app',
+      cc: 'CC: {list}',
+      bcc: 'BCC: {list}',
+      booking: 'Booking {id}',
+      bookingYear: 'Booking year {year}',
+    },
+  },
   reminders: {
     title: 'Reminders',
     sentShort: 'Sent {date}',
