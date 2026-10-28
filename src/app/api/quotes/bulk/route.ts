@@ -1,5 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
+import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
+
+// Issuing renders, stores and archives each draft's PDF in turn.
+export const maxDuration = 60
 
 // Only drafts can be issued in bulk; accepted/rejected/cancelled quotes are per-document decisions.
 export async function PATCH(req: Request) {
@@ -21,10 +25,11 @@ export async function PATCH(req: Request) {
   if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
   const quotes = docs ?? []
 
-  // issue_document assigns the next quote number and sets 'sent' in one transaction per quote.
+  // Each quote gets the next number and 'sent' in one transaction, then its archive copy.
   for (const d of quotes) {
-    const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: d.id })
-    if (issueErr) return NextResponse.json({ error: issueErr.message }, { status: 500 })
+    try { await issueDocument(supabase, d.id) } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    }
   }
 
   return NextResponse.json({ updated: quotes.length, skipped: body.ids.length - quotes.length })

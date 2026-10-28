@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, nextReminderLevel } from '@/lib/utils/reminder'
 import { calcTotals } from '@/lib/utils/document'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
+import { logEvent } from '@/lib/events'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   ])
   if (docErr) console.error('[invoices/reminder] reminder level not recorded:', docErr.message)
   if (logErr) console.error('[invoices/reminder] reminder_log not written:', logErr.message)
+  await logEvent(supabase, id, 'reminder_sent', { level, to: client.email, subject })
 
   return NextResponse.json({ ok: true, sentAt: now, level })
 }

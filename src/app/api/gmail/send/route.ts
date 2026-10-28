@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import { buildMime } from '@/lib/utils/reminder'
+import { logEvent } from '@/lib/events'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
       .eq('id', documentId)
       .is('sent_at', null)
     if (error) console.error('[gmail/send] sent_at not recorded:', error.message)
+    await logEvent(supabase, documentId, 'emailed', { to, subject, attachment: pdfBase64 ? filename ?? null : null })
   }
 
   return NextResponse.json({ ok: true })

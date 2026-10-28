@@ -2,7 +2,8 @@
 --
 -- This file is a SNAPSHOT: applied to an EMPTY Supabase project it yields the schema the
 -- application expects today — every column in src/types/index.ts, every RPC the app calls,
--- RLS pinned to app_users, and the 'logos' storage bucket the settings page uploads to.
+-- RLS pinned to app_users, the 'logos' storage bucket the settings page uploads to and the
+-- private 'documents' bucket that holds the PDF stored for every issued document.
 --
 -- The files under supabase/migrations/ (plus supabase/add_reminders.sql and
 -- BOOKAMAT_MIGRATION.sql) are HISTORY: they record how an existing database reached this
@@ -62,6 +63,9 @@ create table settings (
   gmail_access_token          text,
   gmail_refresh_token         text,
   gmail_token_expiry          bigint,
+  -- When Google was connected and which scopes the grant includes (Drive is optional).
+  gmail_connected_at          timestamptz,
+  gmail_scopes                text,
   drive_folder_id             text,
   drive_folder_name           text,
   bookamat_username           text,
@@ -184,6 +188,12 @@ create table documents (
   discount_value      numeric,
   notes               text,
   notes_internal      text,
+  -- Set once by issue_document when the number is assigned.
+  issued_at           timestamptz,
+  -- Key of the frozen PDF in the private 'documents' bucket, stored at issuance and never replaced.
+  pdf_path            text,
+  -- First successful Gmail send (never overwritten by later re-sends); document_events has every send.
+  sent_at             timestamptz,
   -- Generic provenance (quote → invoice, invoice → credit note, template → recurring invoice).
   -- SET NULL so a deleted draft template keeps the invoices generated from it.
   converted_from_id   uuid references documents(id) on delete set null,
@@ -260,6 +270,22 @@ create table reminder_log (
 );
 
 create index on reminder_log(document_id);
+
+-- ─── Document events ─────────────────────────────────────────────────────────
+-- History per document: issuing, every email and reminder, status changes, payments, Storno,
+-- archive copies and Drive uploads. Rows are only ever inserted by the app.
+create table document_events (
+  id          uuid primary key default uuid_generate_v4(),
+  document_id uuid not null references documents(id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  type        text not null check (type in (
+                'issued','emailed','mailto_opened','reminder_sent','status_changed',
+                'payment_added','payment_removed','storno_created','archived','drive_archived',
+                'portal_viewed','portal_responded','bookamat_synced','converted')),
+  detail      jsonb not null default '{}'
+);
+
+create index document_events_document_id_created_at_idx on document_events(document_id, created_at);
 
 -- ─── Recurring schedules ─────────────────────────────────────────────────────
 -- A schedule points at a template invoice; every run copies it into a new invoice for the
@@ -374,7 +400,8 @@ begin
 
   update documents
   set number = result,
-      status = case when status = 'draft' then 'sent' else status end
+      status = case when status = 'draft' then 'sent' else status end,
+      issued_at = coalesce(issued_at, now())
   where id = d.id;
   return result;
 end;
@@ -441,6 +468,7 @@ alter table documents       enable row level security;
 alter table document_items  enable row level security;
 alter table payments        enable row level security;
 alter table reminder_log    enable row level security;
+alter table document_events enable row level security;
 alter table recurring_schedules enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -450,7 +478,37 @@ create policy "owner" on documents       for all to authenticated using (is_app_
 create policy "owner" on document_items  for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on payments        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on reminder_log    for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on document_events for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on recurring_schedules for all to authenticated using (is_app_user()) with check (is_app_user());
+
+-- ─── Storage: issued documents ───────────────────────────────────────────────
+-- The PDF of every issued document is stored once in this private bucket (documents.pdf_path)
+-- and served from there, so later edits to the client, settings or lines cannot change it.
+insert into storage.buckets (id, name, public)
+values ('documents', 'documents', false)
+on conflict (id) do nothing;
+
+drop policy if exists "documents owner select" on storage.objects;
+drop policy if exists "documents owner insert" on storage.objects;
+drop policy if exists "documents owner update" on storage.objects;
+drop policy if exists "documents owner delete" on storage.objects;
+
+create policy "documents owner select" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'documents' and is_app_user());
+
+create policy "documents owner insert" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'documents' and is_app_user());
+
+create policy "documents owner update" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'documents' and is_app_user())
+  with check (bucket_id = 'documents' and is_app_user());
+
+create policy "documents owner delete" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'documents' and is_app_user());
 
 -- ─── Storage: company logo ───────────────────────────────────────────────────
 -- SettingsForm uploads logo.<ext> to the public 'logos' bucket with upsert (insert + update)

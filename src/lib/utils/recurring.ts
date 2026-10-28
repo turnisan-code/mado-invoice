@@ -72,6 +72,13 @@ export interface GenerateResult {
   errors: { scheduleId: string; message: string; code?: 'template_cancelled' }[]
 }
 
+// Issuing (number, archive copy, Drive) lives in the server-only src/lib/pdf/issue.ts. This module
+// is also imported by client components for its date math, so the route handlers pass it in.
+export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
+  snapshotError: string | null
+  driveError: { error: string } | null
+}>
+
 type SourceDocument = Record<string, unknown> & {
   id: string
   client_id: string
@@ -127,7 +134,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   return doc.id as string
 }
 
-async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, result: GenerateResult) {
+async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult) {
   const { data: source, error } = await supabase
     .from('documents')
     .select('*, document_items(*), clients(payment_days)')
@@ -158,8 +165,13 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
     if (documentId) {
       result.generated.push({ scheduleId: schedule.id, documentId, date: next })
       if (schedule.mode === 'issue') {
-        const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: documentId })
-        if (issueErr) result.errors.push({ scheduleId: schedule.id, message: `${next}: created as draft, issuing failed (${issueErr.message})` })
+        try {
+          const { snapshotError, driveError } = await issue(supabase, documentId)
+          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the archive copy failed (${snapshotError})` })
+          if (driveError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the Drive archive failed (${driveError.error})` })
+        } catch (err) {
+          result.errors.push({ scheduleId: schedule.id, message: `${next}: created as draft, issuing failed (${err instanceof Error ? err.message : String(err)})` })
+        }
       }
     } else {
       result.skipped.push({ scheduleId: schedule.id, date: next, skipped: 'already_generated' })
@@ -190,7 +202,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
 export async function generateDueSchedules(
   supabase: SupabaseClient,
   asOf: string,
-  opts: { scheduleId?: string; force?: boolean } = {},
+  opts: { scheduleId?: string; force?: boolean; issue: IssueDocumentFn },
 ): Promise<GenerateResult> {
   const result: GenerateResult = { generated: [], skipped: [], errors: [] }
 
@@ -209,7 +221,7 @@ export async function generateDueSchedules(
 
   for (const schedule of (schedules ?? []) as RecurringSchedule[]) {
     try {
-      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, result)
+      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result)
     } catch (err) {
       result.errors.push({ scheduleId: schedule.id, message: err instanceof Error ? err.message : String(err) })
     }
