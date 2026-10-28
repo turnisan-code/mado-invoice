@@ -6,7 +6,7 @@ import {
 } from '@/lib/utils/reminder'
 import { calcTotals, today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
-import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { readStoredPdf } from '@/lib/pdf/snapshot'
 import { pdfFilename, renderLoadedPdf, type PdfDocument } from '@/lib/pdf/render'
 import { logEvent } from '@/lib/events'
 import type { Settings } from '@/types'
@@ -75,24 +75,20 @@ export async function GET(req: NextRequest) {
     const tpl = reminderTemplates(settings, lang)
     const subject = fillTemplate(tpl.subject, ctx)
 
-    // Attach the issued copy the client received; rendering from the stored data (with payments,
-    // section discounts and the QR) is only the fallback when the archive is unreachable.
-    let pdfBase64: string | undefined
-    let filename: string | undefined
-    try {
-      const issued = await getIssuedPdf(supabase, invoice.id, 'on_demand')
-      pdfBase64 = issued.buffer.toString('base64')
-      filename = issued.filename
-    } catch (archiveErr) {
-      console.warn(`[cron/reminders] archive copy unavailable for ${invoice.number}:`, archiveErr)
+    // Attach the stored issued copy the client received; without one, render it from the stored
+    // data with payments, section discounts and the QR (not archived: an archive copy made today
+    // would carry today's payments).
+    const filename = pdfFilename(invoice.number)
+    let pdf = invoice.pdf_path ? await readStoredPdf(supabase, invoice.pdf_path) : null
+    if (!pdf) {
       try {
-        pdfBase64 = (await renderLoadedPdf(supabase, invoice as PdfDocument, settings as Settings)).toString('base64')
-        filename = pdfFilename(invoice.number)
+        pdf = await renderLoadedPdf(supabase, invoice as PdfDocument, settings as Settings)
       } catch (pdfErr) {
         // Send without attachment rather than skipping entirely
         console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
       }
     }
+    const pdfBase64 = pdf?.toString('base64')
 
     try {
       await sendReminderEmail({

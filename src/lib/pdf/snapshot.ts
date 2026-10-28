@@ -12,9 +12,14 @@ export function storageKey(date: string, number: string) {
   return `${date.slice(0, 4)}/${number.replace(/[^\w!.*'() &$@=;:+,?-]/g, '_')}.pdf`
 }
 
-async function download(supabase: SupabaseClient, path: string): Promise<Buffer | null> {
-  const { data } = await supabase.storage.from(BUCKET).download(path)
-  return data ? Buffer.from(await data.arrayBuffer()) : null
+export async function readStoredPdf(supabase: SupabaseClient, path: string): Promise<Buffer | null> {
+  try {
+    const { data } = await supabase.storage.from(BUCKET).download(path)
+    return data ? Buffer.from(await data.arrayBuffer()) : null
+  } catch (err) {
+    console.error(`[snapshot] could not read ${path}:`, err)
+    return null
+  }
 }
 
 export type IssuedPdf = {
@@ -39,7 +44,7 @@ export async function getIssuedPdf(
   const filename = pdfFilename(doc.number)
 
   if (doc.pdf_path) {
-    const stored = await download(supabase, doc.pdf_path)
+    const stored = await readStoredPdf(supabase, doc.pdf_path)
     if (!stored) throw new Error('The stored PDF could not be read')
     return { buffer: stored, filename, path: doc.pdf_path, created: false, doc, settings }
   }
@@ -50,7 +55,7 @@ export async function getIssuedPdf(
     .from(BUCKET)
     .upload(path, buffer, { upsert: false, contentType: 'application/pdf' })
   if (uploadErr) {
-    const existing = await download(supabase, path)
+    const existing = await readStoredPdf(supabase, path)
     if (!existing) throw new Error(uploadErr.message)
     buffer = existing
   }
