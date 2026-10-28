@@ -47,7 +47,7 @@ export default function InvoicePageClient({
 
   const gmailConfigured = settings.gmail_connected
   const balance = roundCents(total - payments.reduce((s, p) => s + p.amount, 0))
-  const showReminder = canRemind(document, balance, today()) && gmailConfigured
+  const showReminder = canRemind(document, balance, today())
 
   return (
     <>
@@ -85,7 +85,6 @@ export default function InvoicePageClient({
                 reminderLevel={reminderLevel}
                 maxLevel={settings.reminder_max_level}
                 gmailConfigured={gmailConfigured}
-                generatePdf={() => issuedPdfBase64('reminder')}
               />
             )}
           </div>

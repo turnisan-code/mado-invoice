@@ -7,7 +7,8 @@ import { useT } from '@/lib/i18n/client'
 import type { DictKey, UiLang } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
-import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
+import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/reminder-templates'
+import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -15,7 +16,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import { formatDate, viennaDate } from '@/lib/utils/document'
 import { NUMBER_TOKENS, formatDocumentNumber, hasYearToken, nextCounter, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
-import type { TaxTreatment, Unit, VatRate } from '@/types'
+import type { EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 
 interface Props { settings: PublicSettings | null }
 
@@ -59,39 +60,12 @@ const FOOTER_VARS = [
   { token: '{{balance_due}}',    label: 'Balance due' },
 ]
 
-// Used in email template sections (must match buildEmailContent vars exactly)
-const EMAIL_VARS = [
-  { token: '{{invoice_number}}', label: 'Invoice #' },
-  { token: '{{client}}',         label: 'Client' },
-  { token: '{{date}}',           label: 'Date' },
-  { token: '{{due_date}}',       label: 'Due date' },
-  { token: '{{total}}',          label: 'Total' },
-  { token: '{{balance_due}}',    label: 'Balance due' },
-  { token: '{{subtotal}}',       label: 'Subtotal' },
-  { token: '{{company}}',        label: 'Your company' },
-  { token: '{{owner}}',          label: 'Your name' },
-]
-
-// Must match fillTemplate in src/lib/utils/reminder-templates.ts
-const REMINDER_VARS = [
-  { token: '{{reminder_title}}', label: 'Zahlungserinnerung / 1. Mahnung / 2. Mahnung' },
-  { token: '{{level}}',          label: 'Reminder level' },
-  { token: '{{invoice_number}}', label: 'Invoice #' },
-  { token: '{{client}}',         label: 'Client' },
-  { token: '{{date}}',           label: 'Invoice date' },
-  { token: '{{due_date}}',       label: 'Due date' },
-  { token: '{{balance_due}}',    label: 'Balance due' },
-  { token: '{{days_overdue}}',   label: 'Days overdue' },
-  { token: '{{new_deadline}}',   label: 'New deadline' },
-  { token: '{{fee}}',            label: 'Mahnspesen (from level 2)' },
-  { token: '{{interest}}',       label: 'Verzugszinsen' },
-  { token: '{{iban}}',           label: 'IBAN' },
-  { token: '{{company}}',        label: 'Your company' },
-  { token: '{{owner}}',          label: 'Your name' },
-]
+// The preview's portal link; a real one is created per document when an email uses it.
+const SAMPLE_PORTAL_TOKEN = '3f0c9a2e-5b1d-4c7a-9e60-2d8f4b1a7c55'
+const PREVIEW_LEVELS = [1, 2, 3] as const
 
 // ── Doc type config ────────────────────────────────────────────────────────────
-type DocType = 'invoice' | 'quote' | 'credit_note' | 'reminder'
+type DocType = EmailTemplateKind
 
 const DOC_TABS: DocType[] = ['invoice', 'quote', 'credit_note', 'reminder']
 const DOC_TAB_LABEL: Record<DocType, DictKey> = {
@@ -337,6 +311,7 @@ export default function SettingsForm({ settings }: Props) {
   })
   const [activeDocTab, setActiveDocTab] = useState<DocType>('invoice')
   const [activeLang, setActiveLang] = useState<'de' | 'en'>('de')
+  const [previewLevel, setPreviewLevel] = useState<number>(1)
 
   // ── Integration state ────────────────────────────────────────────────────────
   const [google, setGoogle] = useState({
@@ -785,6 +760,40 @@ export default function SettingsForm({ settings }: Props) {
   const tpl = emailTpl[activeDocTab]
   const subjectKey = `subject_${activeLang}` as 'subject_de' | 'subject_en'
   const bodyKey    = `body_${activeLang}`    as 'body_de'    | 'body_en'
+  const builtIn = defaultTemplate(activeDocTab, activeLang, previewLevel)
+
+  // Live preview from the unsaved values of every card, so a changed fee or IBAN shows at once.
+  function emailPreview() {
+    const issuer = {
+      company_name: biz.company_name,
+      owner_name: biz.owner_name,
+      iban: banking.iban,
+      reminder_fee: Number(reminders.reminder_fee) || 0,
+      reminder_interest_rate: Number(reminders.reminder_interest_rate) || 0,
+      reminder_grace_days: Number(reminders.reminder_grace_days) || 0,
+    }
+    const skonto = { percent: terms.default_skonto_percent ? Number(terms.default_skonto_percent) : null, days: terms.default_skonto_days ? Number(terms.default_skonto_days) : null }
+    const { doc, client, totals } = sampleDocument(activeDocTab, activeLang, todayIso, skonto)
+    const portalLink = portalUrl(process.env.NEXT_PUBLIC_APP_URL || (typeof window === 'undefined' ? '' : window.location.origin), SAMPLE_PORTAL_TOKEN)
+    const vars = activeDocTab === 'reminder'
+      ? reminderVariables({
+          doc, client, issuer, totals, portalLink,
+          figures: reminderFigures({ dueDate: doc.due_date, balance: totals.balance_due, issuer, level: previewLevel, lang: activeLang, issuedOn: todayIso }),
+        })
+      : documentVariables({ doc, client, issuer, totals, portalLink })
+    return {
+      subject: fillSubject(tpl[subjectKey] || builtIn.subject, vars),
+      body: fillTemplate(tpl[bodyKey] || builtIn.body, vars),
+    }
+  }
+
+  function prefillBuiltIn() {
+    const starter = starterTemplate(activeDocTab, activeLang)
+    if (!tpl[subjectKey]) setTplField(activeDocTab, subjectKey, starter.subject)
+    setTplField(activeDocTab, bodyKey, starter.body)
+  }
+
+  const preview = activeSection === 'templates' ? emailPreview() : null
 
   // ── Number format live preview ───────────────────────────────────────────────
   function previewNumber(row: (typeof NUMBER_ROWS)[number]): string {
@@ -1235,6 +1244,9 @@ export default function SettingsForm({ settings }: Props) {
                 className="accent-neutral-900 dark:accent-white" />
               <span className="text-neutral-800 dark:text-neutral-200">{t('settings.reminders.enabled')}</span>
             </label>
+            {reminders.reminders_enabled && !google.connected && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">{t('dunning.settings.noGmail')}</p>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-reminders-reminder_grace_days`}>{t('settings.reminders.grace')}</label>
@@ -1439,7 +1451,7 @@ export default function SettingsForm({ settings }: Props) {
             onSave={saveTemplates}
           >
             {/* Doc type tabs */}
-            <div className="flex gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit">
+            <div className="flex flex-wrap gap-1 p-1 bg-neutral-100 dark:bg-neutral-800 rounded-lg w-fit max-w-full">
               {DOC_TABS.map(type => (
                 <button
                   key={type}
@@ -1478,21 +1490,59 @@ export default function SettingsForm({ settings }: Props) {
 
             {/* Variable chips */}
             <VarChips
-              vars={activeDocTab === 'reminder' ? REMINDER_VARS : EMAIL_VARS}
+              vars={variablesFor(activeDocTab).map(name => ({ token: `{{${name}}}`, label: t(`dunning.vars.${name}`) }))}
               onInsert={insertVar}
             />
-            {activeDocTab === 'reminder' && (
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {t('settings.templates.reminderHint', { token: '{{fee}}' })}
-              </p>
-            )}
+            <details className="text-xs text-neutral-500 dark:text-neutral-400">
+              <summary className="cursor-pointer py-1 w-fit hover:text-neutral-700 dark:hover:text-neutral-200">{t('dunning.settings.variables')}</summary>
+              <dl className="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                {variablesFor(activeDocTab).map(name => (
+                  <div key={name} className="contents">
+                    <dt className="font-mono break-all">{`{{${name}}}`}</dt>
+                    <dd className="mb-1 sm:mb-0">{t(`dunning.vars.${name}`)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              {activeDocTab === 'reminder' ? `${t('dunning.settings.reminderHint', { fee: '{{fee}}', interest: '{{interest}}', total: '{{total_due}}' })} ` : ''}
+              {t('settings.templates.reminderHint', { token: '{{fee}}' })}
+            </p>
 
             {/* Context label */}
-            <div className="flex items-center gap-2 py-2 border-t border-neutral-100 dark:border-neutral-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-2 border-t border-neutral-100 dark:border-neutral-800">
               <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
                 {t(DOC_TAB_LABEL[activeDocTab])} · {activeLang === 'de' ? t('common.german') : t('common.english')}
               </span>
+              {!tpl[bodyKey] && (
+                <button type="button" onClick={prefillBuiltIn}
+                  className="text-xs py-1 underline underline-offset-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
+                  {activeDocTab === 'reminder' ? t('dunning.settings.useDefaultReminder') : t('dunning.settings.useDefault')}
+                </button>
+              )}
             </div>
+            {activeDocTab === 'reminder' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('dunning.settings.level')}</span>
+                <div className="flex flex-wrap gap-1 p-0.5 bg-neutral-100 dark:bg-neutral-800 rounded-lg">
+                  {PREVIEW_LEVELS.map(level => (
+                    <button
+                      key={level}
+                      type="button"
+                      aria-pressed={previewLevel === level}
+                      onClick={() => setPreviewLevel(level)}
+                      className={`px-3 h-6 text-xs font-medium rounded-md transition-colors ${
+                        previewLevel === level
+                          ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-sm'
+                          : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+                      }`}
+                    >
+                      {reminderTitle(level, activeLang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Subject */}
             <div className="space-y-1.5">
@@ -1503,11 +1553,7 @@ export default function SettingsForm({ settings }: Props) {
                 value={tpl[subjectKey]}
                 onChange={e => setTplField(activeDocTab, subjectKey, e.target.value)}
                 onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, subjectKey, v))}
-                placeholder={
-                  activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_SUBJECT_DE :
-                  activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_SUBJECT_EN :
-                  undefined
-                }
+                placeholder={builtIn.subject}
               />
             </div>
 
@@ -1519,15 +1565,24 @@ export default function SettingsForm({ settings }: Props) {
                 value={tpl[bodyKey]}
                 onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
                 onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
-                rows={8}
-                placeholder={
-                  activeDocTab === 'reminder' && activeLang === 'de' ? DEFAULT_BODY_DE :
-                  activeDocTab === 'reminder' && activeLang === 'en' ? DEFAULT_BODY_EN :
-                  undefined
-                }
-                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                rows={activeDocTab === 'reminder' ? 14 : 10}
+                placeholder={builtIn.body}
+                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-y"
               />
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('dunning.settings.defaultHint')}</p>
             </div>
+
+            {/* Live preview */}
+            {preview && (
+              <section aria-label={t('dunning.settings.preview')} className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/40 p-3 sm:p-4 space-y-2 min-w-0">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <p className="text-xs font-semibold text-neutral-700 dark:text-neutral-300">{t('dunning.settings.preview')}</p>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('dunning.settings.previewNote')}</p>
+                </div>
+                <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 break-words">{preview.subject}</p>
+                <p className="text-sm text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap break-words">{preview.body}</p>
+              </section>
+            )}
           </SectionCard>
         </div>}
 
