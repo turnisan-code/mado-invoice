@@ -45,7 +45,7 @@ export default function InvoicePageClient({
   }
 
   const gmailConfigured = settings.gmail_connected
-  const showReminder = (document.status === 'overdue' || document.status === 'sent') && gmailConfigured
+  const showReminder = document.status === 'overdue' || document.status === 'sent'
 
   return (
     <>
@@ -83,7 +83,6 @@ export default function InvoicePageClient({
                 reminderLevel={reminderLevel}
                 maxLevel={settings.reminder_max_level}
                 gmailConfigured={gmailConfigured}
-                generatePdf={() => issuedPdfBase64('reminder')}
               />
             )}
           </div>
