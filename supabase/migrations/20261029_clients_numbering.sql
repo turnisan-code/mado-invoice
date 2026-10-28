@@ -198,6 +198,14 @@ returns void language sql as $$
   where c.id = x.id
 $$;
 
+-- How many document lines use each catalogue item, for the counts on the catalogue page.
+create or replace function catalogue_usage()
+returns table (catalogue_item_id uuid, uses bigint) language sql stable as $$
+  select catalogue_item_id, count(*) from document_items
+  where catalogue_item_id is not null
+  group by catalogue_item_id
+$$;
+
 -- ─── numbering ───────────────────────────────────────────────────────────────
 -- Longer counter tokens are replaced first so {N} cannot eat part of {NNN}; a counter longer
 -- than its token is printed in full instead of being cut (lpad truncates).
@@ -219,8 +227,8 @@ $$;
 -- Locks the settings row, so concurrent calls never hand out the same number. With the yearly
 -- restart on and a {YYYY}/{YY} format, the first document of a new year starts again at 1.
 -- A number that already exists (e.g. after the counter was lowered by hand) is skipped.
--- Error codes: MI002 = the date lies in a numbering year that has already been closed,
--- MI003 = the format has no counter token.
+-- Error codes: MI002 = the date lies in a numbering year that has already been closed (detail:
+-- the open year), MI003 = the format has no counter token. The app maps them to its dictionaries.
 drop function if exists next_document_number(text);
 
 create or replace function next_document_number(doc_type text, doc_date date default null)
@@ -263,7 +271,8 @@ begin
       num := 1;
     elsif y < cy then
       raise exception using errcode = 'MI002',
-        message = format('Numbering for %s has already started, so a document dated %s can no longer be numbered. Date it in %s or later and put the earlier period in the service date.', cy, d, cy);
+        message = format('Numbering for %s has already started, so a document dated %s can no longer be numbered. Date it in %s or later and put the earlier period in the service date.', cy, d, cy),
+        detail = cy::text;
     end if;
   end if;
 

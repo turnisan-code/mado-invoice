@@ -15,7 +15,8 @@ const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 const CAT_DATALIST_ID = 'cat-options'
 
-interface Props { initialItems: CatalogueItem[] }
+// usage: document lines per catalogue item id, counted when the page loaded.
+interface Props { initialItems: CatalogueItem[]; usage: Record<string, number> }
 interface AddingState { category: string | null }
 type Draft = Partial<CatalogueItem>
 type PendingDelete = { kind: 'item'; id: string } | { kind: 'category'; cat: string; count: number }
@@ -115,7 +116,7 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
   )
 }
 
-export default function CatalogueManager({ initialItems }: Props) {
+export default function CatalogueManager({ initialItems, usage }: Props) {
   const [items, setItems] = useState<CatalogueItem[]>(initialItems)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>({})
@@ -398,6 +399,11 @@ export default function CatalogueManager({ initialItems }: Props) {
                       )}
                       {(item.description_de || item.description_en) && (
                         <p className="text-xs text-neutral-400 dark:text-neutral-500 line-clamp-1 mt-0.5 leading-snug">{item.description_de || item.description_en}</p>
+                      )}
+                      {(usage[item.id] ?? 0) > 0 && (
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 leading-snug">
+                          {n(usage[item.id], t('clientData.catalogue.usedOne'), t('clientData.catalogue.usedOther', { count: usage[item.id] }))}
+                        </p>
                       )}
                     </div>
 

@@ -1,5 +1,6 @@
 // Client-side mirror of format_document_number / next_document_number in
 // supabase/migrations/20261029_clients_numbering.sql, for the Settings preview and checks.
+import type { TFn } from '@/lib/i18n'
 
 export const NUMBER_TOKENS = ['{prefix}', '{YYYY}', '{YY}', '{MM}', '{NNNN}', '{NNN}', '{NN}', '{N}'] as const
 const KNOWN_TOKENS = new Set<string>(NUMBER_TOKENS)
@@ -50,4 +51,14 @@ export function numberPrefixIssue(prefix: string, fmt: string): NumberPrefixIssu
   if (!PREFIX.test(prefix)) return 'invalid'
   if (!prefix && fmt.includes('{prefix}')) return 'required'
   return null
+}
+
+// The SQL raises English messages; MI001–MI003 are shown from the dictionaries instead.
+export function numberingErrorMessage(error: { code?: string | null; message: string; details?: string | null }, t: TFn): string {
+  switch (error.code) {
+    case 'MI001': return t('clientData.numbering.errorFuture')
+    case 'MI002': return error.details ? t('clientData.numbering.errorClosedYear', { year: error.details }) : error.message
+    case 'MI003': return t('clientData.numbering.errorNoCounter')
+    default: return error.message
+  }
 }

@@ -254,12 +254,26 @@ export default function SettingsForm({ settings }: Props) {
     invoice_number_reset_yearly:     settings?.invoice_number_reset_yearly ?? false,
     quote_number_reset_yearly:       settings?.quote_number_reset_yearly ?? false,
     credit_note_number_reset_yearly: settings?.credit_note_number_reset_yearly ?? false,
+    invoice_counter_year:            settings?.invoice_counter_year ?? null,
+    quote_counter_year:              settings?.quote_counter_year ?? null,
+    credit_note_counter_year:        settings?.credit_note_counter_year ?? null,
   })
   // Only counters the user edited are written back, so a save never rolls back a number issued since page load.
-  const editedCounters = useRef(new Set<CounterKey>())
+  const [editedCounters, setEditedCounters] = useState<ReadonlySet<CounterKey>>(() => new Set())
   const [docsErrors, setDocsErrors] = useState<Partial<Record<string, string>>>({})
   // Numbers are previewed with today's date in Vienna, the date the next document most likely carries.
   const [todayIso] = useState(() => viennaDate(new Date()))
+  const thisYear = Number(todayIso.slice(0, 4))
+
+  // A counter typed in while the yearly restart is on and the series is still last year's starts
+  // this year's series; otherwise the restart would set it straight back to 1.
+  function startsThisYearsSeries(row: (typeof NUMBER_ROWS)[number], resetYearly: boolean): boolean {
+    const cy = docs[row.yearKey]
+    return editedCounters.has(row.numKey) && resetYearly && cy !== null && cy < thisYear
+  }
+  function counterYear(row: (typeof NUMBER_ROWS)[number]): number | null {
+    return startsThisYearsSeries(row, docs[row.resetKey] && hasYearToken(docs[row.fmtKey])) ? thisYear : docs[row.yearKey]
+  }
 
   // ── Defaults state ───────────────────────────────────────────────────────────
   const [defaults, setDefaults] = useState({
@@ -478,7 +492,7 @@ export default function SettingsForm({ settings }: Props) {
           ? t('clientData.numbering.formatUnknownToken', { token: fmtIssue.token })
           : t(fmtIssue.kind === 'tooLong' ? 'clientData.numbering.formatTooLong' : 'clientData.numbering.formatNoCounter')
       }
-      if (editedCounters.current.has(row.numKey)) {
+      if (editedCounters.has(row.numKey)) {
         const n = docs[row.numKey]
         if (n !== null && Number.isInteger(n) && n >= 1) counters[row.numKey] = n
         else errors[row.numKey] = t('settings.numbering.nextError')
@@ -509,12 +523,14 @@ export default function SettingsForm({ settings }: Props) {
       quote_number_reset_yearly:       docs.quote_number_reset_yearly && hasYearToken(quote.fmt),
       credit_note_number_reset_yearly: docs.credit_note_number_reset_yearly && hasYearToken(credit.fmt),
     }
+    const years: Partial<Record<(typeof NUMBER_ROWS)[number]['yearKey'], number>> = {}
+    for (const row of rows) if (startsThisYearsSeries(row, config[row.resetKey])) years[row.yearKey] = thisYear
     setSaving('docs')
-    const { error } = await supabase.from('settings').update({ ...config, ...counters }).eq('id', settings.id)
+    const { error } = await supabase.from('settings').update({ ...config, ...counters, ...years }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
-    setDocs(d => ({ ...d, ...config }))
-    editedCounters.current.clear()
+    setDocs(d => ({ ...d, ...config, ...years }))
+    setEditedCounters(new Set())
     clearDirty('docs')
     toast.success(t('settings.numbering.saved'))
   }
@@ -786,9 +802,8 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   // ── Number format live preview ───────────────────────────────────────────────
-  const thisYear = Number(todayIso.slice(0, 4))
   function previewNumber(row: (typeof NUMBER_ROWS)[number]): string {
-    const counter = nextCounter(docs[row.numKey] ?? 1, settings?.[row.yearKey] ?? null, docs[row.resetKey], docs[row.fmtKey], thisYear)
+    const counter = nextCounter(docs[row.numKey] ?? 1, counterYear(row), docs[row.resetKey], docs[row.fmtKey], thisYear)
     return formatDocumentNumber(docs[row.fmtKey], docs[row.prefixKey] || '?', counter, todayIso)
   }
 
@@ -1040,6 +1055,7 @@ export default function SettingsForm({ settings }: Props) {
             {/* One row per doc type */}
             {NUMBER_ROWS.map(row => {
               const yearInFormat = hasYearToken(docs[row.fmtKey])
+              const cy = counterYear(row)
               const rowErrors = [docsErrors[row.prefixKey], docsErrors[row.fmtKey], docsErrors[row.numKey]].filter(Boolean)
               return (
                 <div key={row.prefixKey} className="space-y-1.5">
@@ -1060,7 +1076,7 @@ export default function SettingsForm({ settings }: Props) {
                     <div className="space-y-1 min-w-0 col-span-2 sm:col-span-1">
                       <label htmlFor={`${uid}-${row.numKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.next')}</label>
                       <MoneyInput id={`${uid}-${row.numKey}`} integer className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
-                        onValueChange={n => { editedCounters.current.add(row.numKey); setDocs(d => ({ ...d, [row.numKey]: n })); markDirty('docs') }} />
+                        onValueChange={n => { setEditedCounters(s => new Set(s).add(row.numKey)); setDocs(d => ({ ...d, [row.numKey]: n })); markDirty('docs') }} />
                     </div>
                   </div>
                   <div className="sm:pl-[112px] space-y-1">
@@ -1078,9 +1094,11 @@ export default function SettingsForm({ settings }: Props) {
                         <span className="block text-neutral-500 dark:text-neutral-400">
                           {!yearInFormat
                             ? t('clientData.numbering.resetYearlyNeedsYear')
-                            : docs[row.resetKey]
-                              ? t('clientData.numbering.restartsAt', { year: Math.max(settings?.[row.yearKey] ?? thisYear, thisYear) + 1 })
-                              : null}
+                            : !docs[row.resetKey]
+                              ? null
+                              : cy !== null && cy < thisYear
+                                ? t('clientData.numbering.restartsNext')
+                                : t('clientData.numbering.restartsAt', { year: Math.max(cy ?? thisYear, thisYear) + 1 })}
                         </span>
                       </span>
                     </label>

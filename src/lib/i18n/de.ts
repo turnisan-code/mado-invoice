@@ -427,7 +427,9 @@ export const de = {
     catalogue: {
       descriptionDe: 'Beschreibung (DE)',
       descriptionEn: 'Beschreibung (EN)',
-      descriptionPlaceholder: 'Optional, auch mehrzeilig. Wird beim Auswählen unter dem Namen eingefügt.',
+      descriptionPlaceholder: 'Optional, auch mehrzeilig. Wird beim Auswählen nach dem Namen eingefügt.',
+      usedOne: 'Einmal verwendet',
+      usedOther: '{count}-mal verwendet',
     },
     numbering: {
       prefixInvalid: 'Bis zu 10 Buchstaben, Ziffern oder . _ / -',
@@ -437,8 +439,12 @@ export const de = {
       formatTooLong: 'Das Format darf höchstens 40 Zeichen lang sein.',
       resetYearly: 'Jedes Jahr wieder bei 1 beginnen',
       resetYearlyNeedsYear: 'Dafür muss {YYYY} oder {YY} im Format stehen.',
-      restartsAt: 'Beginnt mit dem ersten Beleg mit Datum {year} wieder bei 1.',
+      restartsAt: 'Beginnt mit dem ersten Beleg im Jahr {year} wieder bei 1.',
+      restartsNext: 'Beginnt mit dem nächsten Beleg wieder bei 1.',
       numberTaken: '{number} wurde bereits vergeben. Eine höhere Nummer eingeben.',
+      errorFuture: 'Das Belegdatum liegt mehr als einen Tag in der Zukunft. Zum Ausstellen das Datum ändern.',
+      errorClosedYear: 'Die Nummerierung für {year} hat bereits begonnen, daher bekommt dieses Datum keine Nummer mehr. Den Beleg auf {year} oder später datieren und den früheren Zeitraum als Leistungsdatum angeben.',
+      errorNoCounter: 'Das Nummernformat enthält keinen Zähler ({N}, {NN}, {NNN} oder {NNNN}). In Einstellungen → Nummerierung korrigieren.',
     },
     address: {
       emailInvalid: 'Gültige E-Mail-Adresse eingeben.',
