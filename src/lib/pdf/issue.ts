@@ -1,10 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
-import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
-import { logEvent } from '@/lib/events'
 import { isUiLang, makeT } from '@/lib/i18n'
 import { orderItems } from '@/lib/utils/document'
 import { ISSUER_SETTINGS_COLUMNS, IssueCheckError, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
+import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
+import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
+import { logEvent } from '@/lib/events'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 
@@ -54,7 +54,7 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   if (!before.number) await assertIssuable(supabase, documentId)
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
-  if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
+  if (error) throw new Error(error.message)
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
 
   const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }
