@@ -9,9 +9,12 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { X } from 'lucide-react'
+import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import type { Client } from '@/types'
 
 interface Props { client?: Client; onSaved?: () => void }
+
+type FieldErrors = Partial<Record<'country' | 'email' | 'uid_number' | 'payment_days', string>>
 
 const TAX_OPTIONS = [
   { value: 'at_vat', label: 'Austrian VAT (20%)' },
@@ -20,6 +23,9 @@ const TAX_OPTIONS = [
 ]
 
 const SELECT_CLS = 'w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1.5 text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
+
+// Postgres foreign_key_violation: documents.client_id is "on delete restrict".
+const FK_VIOLATION = '23503'
 
 function TagInput({ initialTags }: { initialTags: string[] }) {
   const [tags, setTags] = useState<string[]>(initialTags)
@@ -71,6 +77,7 @@ export default function ClientForm({ client, onSaved }: Props) {
   const supabase = createClient()
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [errors, setErrors] = useState<FieldErrors>({})
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -81,6 +88,20 @@ export default function ClientForm({ client, onSaved }: Props) {
       toast.error('Enter a name or company name.')
       return
     }
+    const country = (fd.get('country') as string).trim()
+    const email = (fd.get('email') as string).trim()
+    const uid = normalizeVatId(fd.get('uid_number') as string)
+    const paymentDaysRaw = (fd.get('payment_days') as string).trim()
+    const paymentDays = paymentDaysRaw === '' || Number.isNaN(Number(paymentDaysRaw)) ? 14 : Number(paymentDaysRaw)
+
+    const nextErrors: FieldErrors = {}
+    if (!country) nextErrors.country = 'Enter a country.'
+    if (email && !isValidEmail(email)) nextErrors.email = 'Enter a valid email address.'
+    if (uid && !isValidVatId(uid)) nextErrors.uid_number = 'Enter a valid VAT ID, e.g. ATU12345678 or DE123456789.'
+    if (!Number.isInteger(paymentDays) || paymentDays < 0 || paymentDays > 365) nextErrors.payment_days = 'Payment days must be a whole number between 0 and 365.'
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length) return
+
     setSaving(true)
     const tagsRaw = (fd.get('tags') as string).trim()
     const payload = {
@@ -90,14 +111,14 @@ export default function ClientForm({ client, onSaved }: Props) {
       address_line2: (fd.get('address_line2') as string) || null,
       zip: fd.get('zip') as string,
       city: fd.get('city') as string,
-      country: fd.get('country') as string,
-      email: fd.get('email') as string,
+      country,
+      email,
       phone: (fd.get('phone') as string) || null,
-      uid_number: (fd.get('uid_number') as string) || null,
+      uid_number: uid || null,
       tax_treatment: fd.get('tax_treatment') as string,
       language: fd.get('language') as string,
       currency: fd.get('currency') as string,
-      payment_days: parseInt(fd.get('payment_days') as string, 10),
+      payment_days: paymentDays,
       status: fd.get('status') as string,
       tags: tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
       notes: (fd.get('notes') as string) || null,
@@ -109,7 +130,7 @@ export default function ClientForm({ client, onSaved }: Props) {
       toast.success('Client updated.')
       onSaved?.()
     } else {
-      const { data, error } = await supabase.from('clients').insert(payload).select().single()
+      const { error } = await supabase.from('clients').insert(payload)
       if (error) { toast.error(error.message); setSaving(false); return }
       toast.success('Client created.')
       router.push('/clients')
@@ -123,13 +144,19 @@ export default function ClientForm({ client, onSaved }: Props) {
     if (!confirm(`Delete ${client.company ?? client.name}? This cannot be undone.`)) return
     setDeleting(true)
     const { error } = await supabase.from('clients').delete().eq('id', client.id)
-    if (error) { toast.error(error.message); setDeleting(false); return }
+    if (error) {
+      toast.error(error.code === FK_VIOLATION
+        ? 'This client has documents — set the client to inactive instead.'
+        : error.message)
+      setDeleting(false)
+      return
+    }
     toast.success('Client deleted.')
     router.push('/clients')
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <Field label="Name" name="name" defaultValue={client?.name} placeholder="Contact name" />
         <Field label="Company" name="company" defaultValue={client?.company ?? ''} placeholder="Company name" />
@@ -141,12 +168,12 @@ export default function ClientForm({ client, onSaved }: Props) {
         <Field label="ZIP" name="zip" defaultValue={client?.zip} />
         <Field label="City" name="city" defaultValue={client?.city} className="col-span-2" />
       </div>
-      <Field label="Country" name="country" defaultValue={client?.country ?? ''} />
+      <Field label="Country" name="country" defaultValue={client?.country ?? ''} placeholder="Austria" error={errors.country} />
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Email" name="email" type="email" defaultValue={client?.email} />
+        <Field label="Email" name="email" type="email" defaultValue={client?.email} error={errors.email} />
         <Field label="Phone" name="phone" defaultValue={client?.phone ?? ''} />
       </div>
-      <Field label="UID-Nummer" name="uid_number" defaultValue={client?.uid_number ?? ''} placeholder="ATU..." />
+      <Field label="UID-Nummer" name="uid_number" defaultValue={client?.uid_number ?? ''} placeholder="ATU..." error={errors.uid_number} />
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
@@ -173,7 +200,7 @@ export default function ClientForm({ client, onSaved }: Props) {
             <option value="GBP">GBP</option>
           </select>
         </div>
-        <Field label="Payment days" name="payment_days" type="number" defaultValue={String(client?.payment_days ?? 14)} />
+        <Field label="Payment days" name="payment_days" type="number" defaultValue={String(client?.payment_days ?? 14)} error={errors.payment_days} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -207,13 +234,14 @@ export default function ClientForm({ client, onSaved }: Props) {
   )
 }
 
-function Field({ label, name, defaultValue, type = 'text', required = false, placeholder = '', className = '' }: {
-  label: string; name: string; defaultValue?: string; type?: string; required?: boolean; placeholder?: string; className?: string
+function Field({ label, name, defaultValue, type = 'text', placeholder = '', className = '', error }: {
+  label: string; name: string; defaultValue?: string; type?: string; placeholder?: string; className?: string; error?: string
 }) {
   return (
     <div className={`space-y-1.5 ${className}`}>
       <Label htmlFor={name}>{label}</Label>
-      <Input id={name} name={name} type={type} defaultValue={defaultValue ?? ''} required={required} placeholder={placeholder} className="text-sm" />
+      <Input id={name} name={name} type={type} defaultValue={defaultValue ?? ''} placeholder={placeholder} className="text-sm" aria-invalid={!!error || undefined} />
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }

@@ -3,63 +3,143 @@
 import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, Search } from 'lucide-react'
 import { formatMoney } from '@/lib/utils/document'
 import type { CatalogueItem, Unit, VatRate } from '@/types'
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
+const CAT_DATALIST_ID = 'cat-options'
 
 interface Props { initialItems: CatalogueItem[] }
 interface AddingState { category: string | null }
+type Draft = Partial<CatalogueItem>
 
 const fieldCls = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
+
+// Trimmed names, or null when both are empty; a missing translation falls back to the other.
+function draftNames(d: Draft): { name_de: string; name_en: string } | null {
+  const de = (d.name_de ?? '').trim()
+  const en = (d.name_en ?? '').trim()
+  if (!de && !en) return null
+  return { name_de: de || en, name_en: en || de }
+}
+
+// Module level on purpose: a component declared inside CatalogueManager would be a new type on
+// every render, remounting the form and dropping focus after each keystroke.
+function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName = true }: {
+  d: Draft
+  setD: (fn: (prev: Draft) => Draft) => void
+  onSave: () => void
+  onCancel: () => void
+  categories: string[]
+  error: string | null
+  autoFocusName?: boolean
+}) {
+  return (
+    <div className="px-4 py-4 bg-neutral-50 dark:bg-neutral-800/60 border-t border-neutral-100 dark:border-neutral-800">
+      <datalist id={CAT_DATALIST_ID}>{categories.map(c => <option key={c} value={c} />)}</datalist>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Name (DE)</label>
+          <input autoFocus={autoFocusName} value={d.name_de ?? ''} onChange={e => setD(p => ({ ...p, name_de: e.target.value }))} placeholder="Servicename…" className={fieldCls} aria-invalid={!!error || undefined} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Name (EN)</label>
+          <input value={d.name_en ?? ''} onChange={e => setD(p => ({ ...p, name_en: e.target.value }))} placeholder="Service name…" className={fieldCls} aria-invalid={!!error || undefined} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Default price</label>
+          <input type="number" value={isNaN(d.default_price as number) ? 0 : (d.default_price ?? 0)} onChange={e => setD(p => ({ ...p, default_price: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Unit</label>
+          <select value={d.unit ?? 'flat'} onChange={e => setD(p => ({ ...p, unit: e.target.value as Unit }))} className={fieldCls}>{UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">VAT rate</label>
+          <select value={d.vat_rate ?? 20} onChange={e => setD(p => ({ ...p, vat_rate: parseInt(e.target.value) as VatRate }))} className={fieldCls}>{VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}</select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Section</label>
+          <input value={(d.category as string) ?? ''} onChange={e => setD(p => ({ ...p, category: e.target.value || null }))} list={CAT_DATALIST_ID} placeholder="e.g. Studio" className={fieldCls} />
+        </div>
+      </div>
+      {error && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>}
+      <div className="flex items-center gap-2">
+        <button onClick={onSave} className="h-8 px-4 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
+          Save
+        </button>
+        <button onClick={onCancel} className="h-8 px-3 rounded-lg text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function CatalogueManager({ initialItems }: Props) {
   const [items, setItems] = useState<CatalogueItem[]>(initialItems)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Partial<CatalogueItem>>({})
+  const [draft, setDraft] = useState<Draft>({})
   const [adding, setAdding] = useState<AddingState | null>(null)
-  const [addDraft, setAddDraft] = useState<Partial<CatalogueItem>>({})
+  const [addDraft, setAddDraft] = useState<Draft>({})
+  const [formError, setFormError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<string | null>(null)
   const [renamingCat, setRenamingCat] = useState<string | null>(null)
   const [catRenameVal, setCatRenameVal] = useState('')
   const [pendingCats, setPendingCats] = useState<string[]>([])
   const [newCatInput, setNewCatInput] = useState(false)
   const [newCatName, setNewCatName] = useState('')
+  const [search, setSearch] = useState('')
+  const [showHidden, setShowHidden] = useState(false)
   const dragId = useRef<string | null>(null)
+  const renameInFlight = useRef(false)
   const supabase = createClient()
 
   const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))) as string[]
   const allCatNames = Array.from(new Set([...categories, ...pendingCats]))
   const groupKeys: (string | null)[] = [...allCatNames, null]
-  const catDatalistId = 'cat-options'
+
+  const query = search.trim().toLowerCase()
+  const hiddenCount = items.filter(i => !i.active).length
+  const isVisible = (i: CatalogueItem) =>
+    (showHidden || i.active) &&
+    (!query || [i.name_de, i.name_en, i.category ?? ''].some(s => s.toLowerCase().includes(query)))
+  const anyVisible = items.some(isVisible)
 
   function startEdit(item: CatalogueItem) {
     setAdding(null)
+    setFormError(null)
     setEditingId(item.id)
     setDraft({ ...item })
   }
-  function cancelEdit() { setEditingId(null); setDraft({}) }
+  function cancelEdit() { setEditingId(null); setDraft({}); setFormError(null) }
 
   function startAdd(category: string | null) {
     setEditingId(null)
+    setFormError(null)
     setAdding({ category })
     setAddDraft({ name_de: '', name_en: '', default_price: 0, unit: 'flat', vat_rate: 20, category: category ?? undefined })
   }
+  function cancelAdd() { setAdding(null); setAddDraft({}); setFormError(null) }
 
   async function saveEdit() {
     if (!editingId) return
-    const { error } = await supabase.from('catalogue_items').update(draft).eq('id', editingId)
+    const names = draftNames(draft)
+    if (!names) { setFormError('Enter a name in at least one language.'); return }
+    const payload = { ...draft, ...names, default_price: Number(draft.default_price) || 0 }
+    const { error } = await supabase.from('catalogue_items').update(payload).eq('id', editingId)
     if (error) { toast.error(error.message); return }
-    setItems(items.map(i => i.id === editingId ? { ...i, ...draft } as CatalogueItem : i))
+    setItems(items.map(i => i.id === editingId ? { ...i, ...payload } as CatalogueItem : i))
     setEditingId(null)
+    setFormError(null)
   }
 
   async function deleteItem(id: string) {
     if (!confirm('Delete this item?')) return
-    await supabase.from('document_items').update({ catalogue_item_id: null }).eq('catalogue_item_id', id)
+    const { error: unlinkError } = await supabase.from('document_items').update({ catalogue_item_id: null }).eq('catalogue_item_id', id)
+    if (unlinkError) { toast.error(unlinkError.message); return }
     const { error } = await supabase.from('catalogue_items').delete().eq('id', id)
     if (error) { toast.error(error.message); return }
     setItems(items.filter(i => i.id !== id))
@@ -75,12 +155,13 @@ export default function CatalogueManager({ initialItems }: Props) {
   }
 
   async function addItem() {
-    const payload = { name_de: addDraft.name_de || 'Neuer Eintrag', name_en: addDraft.name_en || 'New Item', default_price: addDraft.default_price ?? 0, unit: addDraft.unit ?? 'flat', vat_rate: addDraft.vat_rate ?? 20, category: (addDraft.category as string) || null, sort_order: items.length * 10, active: true }
+    const names = draftNames(addDraft)
+    if (!names) { setFormError('Enter a name in at least one language.'); return }
+    const payload = { ...names, default_price: Number(addDraft.default_price) || 0, unit: addDraft.unit ?? 'flat', vat_rate: addDraft.vat_rate ?? 20, category: addDraft.category || null, sort_order: items.length * 10, active: true }
     const { data, error } = await supabase.from('catalogue_items').insert(payload).select().single()
     if (error) { toast.error(error.message); return }
     setItems([...items, data])
-    setAdding(null)
-    setAddDraft({})
+    cancelAdd()
     toast.success('Item added.')
   }
 
@@ -91,29 +172,39 @@ export default function CatalogueManager({ initialItems }: Props) {
   }
 
   async function handleDrop(targetId: string) {
-    if (!dragId.current || dragId.current === targetId) { setDragOver(null); return }
-    const from = items.findIndex(i => i.id === dragId.current)
+    const sourceId = dragId.current
+    dragId.current = null
+    setDragOver(null)
+    if (!sourceId || sourceId === targetId) return
+    const from = items.findIndex(i => i.id === sourceId)
     const to = items.findIndex(i => i.id === targetId)
+    if (from < 0 || to < 0) return
     const next = [...items]
     const [moved] = next.splice(from, 1)
     next.splice(to, 0, moved)
     const withOrder = next.map((item, idx) => ({ ...item, sort_order: idx * 10 }))
+    const previous = items
     setItems(withOrder)
-    dragId.current = null
-    setDragOver(null)
-    await Promise.all(withOrder.map(item => supabase.from('catalogue_items').update({ sort_order: item.sort_order }).eq('id', item.id)))
+    // One statement for the whole order, so a failure leaves the database as it was.
+    const { error } = await supabase.from('catalogue_items').upsert(withOrder)
+    if (error) { setItems(previous); toast.error(`Could not save the new order: ${error.message}`) }
   }
 
   function startRenameCat(cat: string) { setRenamingCat(cat); setCatRenameVal(cat) }
+  function cancelRenameCat() { setRenamingCat(null) }
 
   async function saveCatRename() {
-    if (!renamingCat) return
-    const newName = catRenameVal.trim() || null
+    if (!renamingCat || renameInFlight.current) return
+    const newName = catRenameVal.trim()
+    if (!newName) { toast.error('Section name cannot be empty.'); return }
     if (newName === renamingCat) { setRenamingCat(null); return }
-    const toUpdate = items.filter(i => i.category === renamingCat)
-    const { error } = await Promise.all(toUpdate.map(i => supabase.from('catalogue_items').update({ category: newName }).eq('id', i.id))).then(rs => rs.find(r => r.error) ?? { error: null })
+    if (allCatNames.includes(newName)) { toast.error('That section already exists.'); return }
+    renameInFlight.current = true
+    const { error } = await supabase.from('catalogue_items').update({ category: newName }).eq('category', renamingCat)
+    renameInFlight.current = false
     if (error) { toast.error(error.message); return }
     setItems(items.map(i => i.category === renamingCat ? { ...i, category: newName } : i))
+    setPendingCats(p => p.map(c => c === renamingCat ? newName : c))
     setRenamingCat(null)
     toast.success('Section renamed.')
   }
@@ -123,7 +214,7 @@ export default function CatalogueManager({ initialItems }: Props) {
     const msg = count > 0 ? `Move ${count} item${count === 1 ? '' : 's'} to Uncategorised and remove "${cat}"?` : `Delete empty section "${cat}"?`
     if (!confirm(msg)) return
     if (count > 0) {
-      const { error } = await Promise.all(items.filter(i => i.category === cat).map(i => supabase.from('catalogue_items').update({ category: null }).eq('id', i.id))).then(rs => rs.find(r => r.error) ?? { error: null })
+      const { error } = await supabase.from('catalogue_items').update({ category: null }).eq('category', cat)
       if (error) { toast.error(error.message); return }
       setItems(items.map(i => i.category === cat ? { ...i, category: null } : i))
     }
@@ -134,67 +225,42 @@ export default function CatalogueManager({ initialItems }: Props) {
   function confirmNewCat() {
     const name = newCatName.trim()
     if (!name) return
-    if (categories.includes(name) || pendingCats.includes(name)) { toast.error('That section already exists.'); return }
+    if (allCatNames.includes(name)) { toast.error('That section already exists.'); return }
     setPendingCats(p => [...p, name])
     setNewCatInput(false)
     setNewCatName('')
     startAdd(name)
   }
 
-  // Shared edit/add form
-  function EditForm({ d, setD, onSave, onCancel, autoFocusName = true }: {
-    d: Partial<CatalogueItem>
-    setD: (fn: (prev: Partial<CatalogueItem>) => Partial<CatalogueItem>) => void
-    onSave: () => void
-    onCancel: () => void
-    autoFocusName?: boolean
-  }) {
-    return (
-      <div className="px-4 py-4 bg-neutral-50 dark:bg-neutral-800/60 border-t border-neutral-100 dark:border-neutral-800">
-        <datalist id={catDatalistId}>{categories.map(c => <option key={c} value={c} />)}</datalist>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Name (DE)</label>
-            <input autoFocus={autoFocusName} value={d.name_de ?? ''} onChange={e => setD(p => ({ ...p, name_de: e.target.value }))} placeholder="Servicename…" className={fieldCls} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Name (EN)</label>
-            <input value={d.name_en ?? ''} onChange={e => setD(p => ({ ...p, name_en: e.target.value }))} placeholder="Service name…" className={fieldCls} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Default price</label>
-            <input type="number" value={isNaN(d.default_price as number) ? 0 : (d.default_price ?? 0)} onChange={e => setD(p => ({ ...p, default_price: parseFloat(e.target.value) || 0 }))} className={fieldCls} />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Unit</label>
-            <select value={d.unit ?? 'flat'} onChange={e => setD(p => ({ ...p, unit: e.target.value as Unit }))} className={fieldCls}>{UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">VAT rate</label>
-            <select value={d.vat_rate ?? 20} onChange={e => setD(p => ({ ...p, vat_rate: parseInt(e.target.value) as VatRate }))} className={fieldCls}>{VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}</select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-neutral-500 dark:text-neutral-400">Section</label>
-            <input value={(d.category as string) ?? ''} onChange={e => setD(p => ({ ...p, category: e.target.value || null }))} list={catDatalistId} placeholder="e.g. Studio" className={fieldCls} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={onSave} className="h-8 px-4 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
-            Save
-          </button>
-          <button onClick={onCancel} className="h-8 px-3 rounded-lg text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
-            Cancel
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-3">
 
+      {/* Search + hidden toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" />
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search items…"
+            className={`${fieldCls} pl-9`}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400 cursor-pointer select-none">
+          <input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} className="h-4 w-4 rounded border-neutral-300 dark:border-neutral-600" />
+          Show hidden{hiddenCount ? ` (${hiddenCount})` : ''}
+        </label>
+      </div>
+
+      {!anyVisible && items.length > 0 && !adding && (
+        <p className="text-sm text-neutral-400 dark:text-neutral-500 px-1">
+          {query ? 'No items match your search.' : 'All items are hidden.'}
+        </p>
+      )}
+
       {groupKeys.map(cat => {
-        const group = items.filter(i => (i.category ?? null) === cat)
+        const group = items.filter(i => (i.category ?? null) === cat && isVisible(i))
         const isPending = cat !== null && pendingCats.includes(cat)
         const isAddingHere = adding?.category === cat
         if (!group.length && !isPending && !isAddingHere) return null
@@ -211,11 +277,11 @@ export default function CatalogueManager({ initialItems }: Props) {
                       autoFocus
                       value={catRenameVal}
                       onChange={e => setCatRenameVal(e.target.value)}
-                      onBlur={saveCatRename}
+                      onKeyDown={e => { if (e.key === 'Escape') cancelRenameCat() }}
                       className="text-xs font-semibold uppercase tracking-widest bg-transparent border-b border-neutral-400 dark:border-neutral-500 outline-none text-neutral-700 dark:text-neutral-200 w-40 pb-0.5"
                     />
-                    <button type="submit" className="text-green-500 hover:text-green-600"><Check size={13} /></button>
-                    <button type="button" onClick={() => setRenamingCat(null)} className="text-neutral-400 hover:text-neutral-600"><X size={13} /></button>
+                    <button type="submit" title="Save" className="text-green-500 hover:text-green-600"><Check size={13} /></button>
+                    <button type="button" title="Cancel" onClick={cancelRenameCat} className="text-neutral-400 hover:text-neutral-600"><X size={13} /></button>
                   </form>
                 ) : (
                   <>
@@ -304,7 +370,7 @@ export default function CatalogueManager({ initialItems }: Props) {
 
                   {/* Inline edit form */}
                   {editingId === item.id && (
-                    <EditForm d={draft} setD={setDraft} onSave={saveEdit} onCancel={cancelEdit} />
+                    <EditForm d={draft} setD={setDraft} onSave={saveEdit} onCancel={cancelEdit} categories={categories} error={formError} />
                   )}
                 </div>
               ))}
@@ -312,7 +378,7 @@ export default function CatalogueManager({ initialItems }: Props) {
 
             {/* Add item row / form */}
             {isAddingHere ? (
-              <EditForm d={addDraft} setD={setAddDraft} onSave={addItem} onCancel={() => { setAdding(null); setAddDraft({}) }} />
+              <EditForm d={addDraft} setD={setAddDraft} onSave={addItem} onCancel={cancelAdd} categories={categories} error={formError} />
             ) : (
               <button
                 onClick={() => startAdd(cat)}
