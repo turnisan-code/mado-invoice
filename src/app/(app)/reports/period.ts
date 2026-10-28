@@ -16,6 +16,9 @@ export type PeriodParams = { period?: string | null; year?: string | null; quart
 
 export const MIN_YEAR = 2000
 export const MAX_YEAR = 2100
+// One PDF ZIP holds at most this many documents (a freelancer's year fits comfortably); kept
+// below PostgREST's 1000-row page so an overflow is detected instead of truncated.
+export const MAX_PDFS = 500
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const lastDay = (year: number, month: number) => new Date(Date.UTC(year, month, 0)).getUTCDate()

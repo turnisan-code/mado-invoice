@@ -7,17 +7,19 @@ import { toPublicSettings } from '@/lib/public-settings'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey, TFn } from '@/lib/i18n'
 import type { Settings } from '@/types'
-import { parsePeriod, periodSlug, MAX_YEAR, MIN_YEAR, type Period } from '@/app/(app)/reports/period'
+import { parsePeriod, periodLabel, periodSlug, MAX_PDFS, MAX_YEAR, MIN_YEAR, type Period } from '@/app/(app)/reports/period'
 import { fetchZmRows } from '@/app/(app)/reports/zm'
+
+// A year's PDF ZIP downloads hundreds of files from storage while it streams.
+export const maxDuration = 300
 
 const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
 const RATES = [20, 13, 10, 0] as const
 const KINDS = ['documents', 'payments', 'zm', 'pdfs', 'backup'] as const
 type Kind = typeof KINDS[number]
-// One ZIP holds at most this many PDFs (a year of a freelancer's documents fits comfortably);
-// kept below PostgREST's 1000-row page so an overflow is detected instead of truncated.
-const MAX_PDFS = 500
 const PAGE = 1000
+// PostgREST's "table not in the schema cache" and Postgres' "relation does not exist".
+const MISSING_TABLE = new Set(['PGRST205', '42P01'])
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 type ClientRef = { name: string; company: string | null; uid_number?: string | null } | null
@@ -130,21 +132,18 @@ async function zmCsv(supabase: Supabase, period: Period, t: TFn) {
 
 // PostgREST returns at most 1000 rows per request; a year's export or a backup must not be cut
 // off silently. The query must have a stable order.
-async function fetchPaged<T>(query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<{ rows: T[] } | { error: string }> {
+async function fetchPaged<T>(query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>): Promise<{ rows: T[] } | { error: string; code?: string }> {
   const rows: T[] = []
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await query(from, from + PAGE - 1)
-    if (error) return { error: error.message }
+    if (error) return { error: error.message, code: error.code }
     rows.push(...(data ?? []))
     if ((data?.length ?? 0) < PAGE) return { rows }
   }
 }
 
-function fetchAll(supabase: Supabase, table: string, ordered = true) {
-  return fetchPaged<Record<string, unknown>>((from, to) => {
-    const query = supabase.from(table).select('*')
-    return (ordered ? query.order('id') : query).range(from, to)
-  })
+function fetchAll(supabase: Supabase, table: string) {
+  return fetchPaged<Record<string, unknown>>((from, to) => supabase.from(table).select('*').order('id').range(from, to))
 }
 
 const BACKUP_TABLES = ['clients', 'catalogue_items', 'documents', 'document_items', 'payments', 'reminder_log', 'recurring_schedules'] as const
@@ -161,8 +160,9 @@ async function backupResponse(supabase: Supabase) {
     tables[table] = result.rows
   }
   // The audit log only exists once its migration has run; a backup without it is still complete.
-  const events = await fetchAll(supabase, 'document_events', false)
+  const events = await fetchAll(supabase, 'document_events')
   if ('rows' in events) tables.document_events = events.rows
+  else if (!MISSING_TABLE.has(events.code ?? '')) return NextResponse.json({ error: `document_events: ${events.error}` }, { status: 500 })
 
   const body = JSON.stringify({ format: 'mado-invoice-backup', version: 1, exported_at: new Date().toISOString(), tables }, null, 2)
   return new NextResponse(body, {
@@ -174,7 +174,8 @@ async function backupResponse(supabase: Supabase) {
   })
 }
 
-// The frozen PDFs exactly as issued, one storage download at a time while the ZIP streams out.
+// The frozen PDFs exactly as issued; the next file downloads from storage while the current one
+// streams out, so at most two PDFs are held in memory.
 async function pdfZipResponse(supabase: Supabase, period: Period, t: TFn, lang: 'de' | 'en') {
   const { data, error } = await supabase
     .from('documents')
@@ -191,15 +192,32 @@ async function pdfZipResponse(supabase: Supabase, period: Period, t: TFn, lang: 
   if (docs.length > MAX_PDFS) {
     return NextResponse.json({ error: t('exports.files.tooMany', { count: `${MAX_PDFS}+` }) }, { status: 413 })
   }
+  if (!docs.length) {
+    const label = periodLabel(period, lang, t('reports.yearLabel', { year: period.year }))
+    return NextResponse.json({ error: t('exports.files.pdfsNone', { period: label }) }, { status: 404 })
+  }
+
+  async function load(path: string | null): Promise<Uint8Array | null> {
+    if (!path) return null
+    try {
+      const { data: file, error: downloadErr } = await supabase.storage.from('documents').download(path)
+      return downloadErr || !file ? null : new Uint8Array(await file.arrayBuffer())
+    } catch {
+      return null
+    }
+  }
 
   async function* entries(): AsyncGenerator<ZipEntry> {
     const missing: string[] = []
-    for (const doc of docs) {
+    let next = load(docs[0].pdf_path)
+    for (let i = 0; i < docs.length; i++) {
+      const doc = docs[i]
+      const bytes = await next
+      if (i + 1 < docs.length) next = load(docs[i + 1].pdf_path)
       const label = `${doc.number} (${formatDate(doc.date, lang)})`
       if (!doc.pdf_path) { missing.push(label); continue }
-      const { data: file, error: downloadErr } = await supabase.storage.from('documents').download(doc.pdf_path)
-      if (downloadErr || !file) { missing.push(`${label} — ${t('exports.files.missingFile')}`); continue }
-      yield { name: doc.pdf_path, data: new Uint8Array(await file.arrayBuffer()) }
+      if (!bytes) { missing.push(`${label} — ${t('exports.files.missingFile')}`); continue }
+      yield { name: doc.pdf_path, data: bytes }
     }
     if (missing.length) {
       yield { name: 'missing.txt', data: new TextEncoder().encode(`${t('exports.files.missingTitle')}\r\n\r\n${missing.join('\r\n')}\r\n`) }

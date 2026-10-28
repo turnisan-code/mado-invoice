@@ -5,7 +5,7 @@ import { calcTotals, formatMoney, formatDate, roundCents, today } from '@/lib/ut
 import ReportControls from '@/components/layout/ReportControls'
 import { getT } from '@/lib/i18n/server'
 import { n } from '@/lib/i18n'
-import { parsePeriod, periodLabel, periodParams, MIN_YEAR, type PeriodParams } from './period'
+import { parsePeriod, periodLabel, periodParams, MAX_PDFS, MIN_YEAR, type PeriodParams } from './period'
 import { fetchZmRows } from './zm'
 
 // FinanzOnline field names stay German in both UI languages.
@@ -49,7 +49,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const supabase = await createClient()
   const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
-  const [{ data: payments }, { data: creditNotes }, zm] = await Promise.all([
+  const [{ data: payments }, { data: creditNotes }, zm, { count: issuedCount }] = await Promise.all([
     supabase
       .from('payments')
       .select(`id, amount, date, method, document_id, documents!inner(id, number, type, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company))`)
@@ -67,6 +67,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .lte('date', period.end)
       .order('date'),
     fetchZmRows(supabase, period.start, period.end),
+    supabase
+      .from('documents')
+      .select('id', { count: 'exact', head: true })
+      .in('type', ['invoice', 'credit_note'])
+      .not('number', 'is', null)
+      .gte('date', period.start)
+      .lte('date', period.end),
   ])
   const cns = (creditNotes ?? []) as unknown as (DocRow & { date: string; converted_from_id: string | null })[]
   const originalIds = cns.map(c => c.converted_from_id).filter((x): x is string => !!x)
@@ -299,10 +306,21 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             </a>
           </div>
           <div className="space-y-1.5">
-            <a href={exportHref('pdfs')} className={`${fileLink} w-fit`}>
-              <FileArchive size={14} /> {t('exports.files.pdfs', { period: label })}
-            </a>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('exports.files.pdfsHint', { period: label })}</p>
+            {issuedCount === 0 ? (
+              <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('exports.files.pdfsNone', { period: label })}</p>
+            ) : issuedCount != null && issuedCount > MAX_PDFS ? (
+              <p className="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
+                {t('exports.files.tooMany', { count: issuedCount })}
+              </p>
+            ) : (
+              <>
+                <a href={exportHref('pdfs')} className={`${fileLink} w-fit`}>
+                  <FileArchive size={14} /> {t('exports.files.pdfs', { period: label })}
+                </a>
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('exports.files.pdfsHint', { period: label })}</p>
+              </>
+            )}
           </div>
           <div className="space-y-1.5">
             <a href="/api/export/accounting?kind=backup" className={`${fileLink} w-fit`}>
