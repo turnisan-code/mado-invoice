@@ -233,10 +233,13 @@ create table payments (
   note        text,
   -- 'payment' is money that arrived (the only kind the UVA and revenue figures count);
   -- 'skonto' and 'writeoff' close the remaining balance without a bank transfer.
-  kind        text not null default 'payment' check (kind in ('payment','skonto','writeoff'))
+  kind        text not null default 'payment' check (kind in ('payment','skonto','writeoff')),
+  -- Statement transaction an imported payment came from; unique so a re-import skips it.
+  import_ref  text
 );
 
 create index on payments(document_id);
+create unique index payments_import_ref_key on payments(import_ref) where import_ref is not null;
 
 -- ─── Reminder log ────────────────────────────────────────────────────────────
 -- One row per reminder email that went out: the invoice page shows this history.

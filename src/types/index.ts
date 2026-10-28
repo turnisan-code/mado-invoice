@@ -191,6 +191,7 @@ export interface Payment {
   amount: number
   note: string | null
   kind: PaymentKind
+  import_ref: string | null
 }
 
 export interface ReminderLogEntry {

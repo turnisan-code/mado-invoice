@@ -1,6 +1,7 @@
 import { DocumentTotals, Settings, VatRate } from '@/types'
+import { roundCents } from './number'
 
-export const roundCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+export { roundCents } from './number'
 
 type CalcItem = {
   line_type?: string | null
