@@ -48,16 +48,16 @@ function parseDays(value: string): number | null {
 }
 
 // ── Variable chip sets ─────────────────────────────────────────────────────────
-// Used in the PDF footer section (server-side substitution supports these)
-const FOOTER_VARS = [
-  { token: '{{invoice_number}}', label: 'Number' },
-  { token: '{{date}}',           label: 'Date' },
-  { token: '{{due_date}}',       label: 'Due date' },
-  { token: '{{client}}',         label: 'Client' },
-  { token: '{{subtotal}}',       label: 'Subtotal' },
-  { token: '{{vat}}',            label: 'VAT' },
-  { token: '{{total}}',          label: 'Total' },
-  { token: '{{balance_due}}',    label: 'Balance due' },
+// The PDF footer is filled like a document email (fillTemplate), plus {{vat}}.
+const FOOTER_VARS: { name: string; labelKey: DictKey }[] = [
+  { name: 'invoice_number', labelKey: 'dunning.vars.invoice_number' },
+  { name: 'date',           labelKey: 'dunning.vars.date' },
+  { name: 'due_date',       labelKey: 'dunning.vars.due_date' },
+  { name: 'client',         labelKey: 'dunning.vars.client' },
+  { name: 'subtotal',       labelKey: 'dunning.vars.subtotal' },
+  { name: 'vat',            labelKey: 'docs.footer.vat' },
+  { name: 'total',          labelKey: 'dunning.vars.total' },
+  { name: 'balance_due',    labelKey: 'dunning.vars.balance_due' },
 ]
 
 // The preview's portal link; a real one is created per document when an email uses it.
@@ -1303,12 +1303,23 @@ export default function SettingsForm({ settings }: Props) {
                 </button>
               ))}
             </div>
-            <VarChips vars={FOOTER_VARS} onInsert={insertVar} />
+            <VarChips vars={FOOTER_VARS.map(v => ({ token: `{{${v.name}}}`, label: t(v.labelKey) }))} onInsert={insertVar} />
             <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1">
-              {t('settings.footer.insertHint')}
+              {t('settings.footer.insertHint')} {t('docs.footer.emptyLines')}
             </p>
+            <details className="text-xs text-neutral-500 dark:text-neutral-400">
+              <summary className="cursor-pointer py-1 w-fit hover:text-neutral-700 dark:hover:text-neutral-200">{t('dunning.settings.variables')}</summary>
+              <dl className="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                {FOOTER_VARS.map(v => (
+                  <div key={v.name} className="contents">
+                    <dt className="font-mono break-all">{`{{${v.name}}}`}</dt>
+                    <dd className="mb-1 sm:mb-0">{t(v.labelKey)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
             {footerDocTab === 'invoice' ? (
-              <div key="invoice" className="grid grid-cols-2 gap-4">
+              <div key="invoice" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl} htmlFor={`${uid}-footerDe`}>{t('common.german')}</label>
                   <textarea id={`${uid}-footerDe`}
@@ -1331,7 +1342,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             ) : footerDocTab === 'quote' ? (
-              <div key="quote" className="grid grid-cols-2 gap-4">
+              <div key="quote" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl} htmlFor={`${uid}-quoteFooterDe`}>{t('common.german')}</label>
                   <textarea id={`${uid}-quoteFooterDe`}
@@ -1354,7 +1365,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               </div>
             ) : (
-              <div key="credit_note" className="grid grid-cols-2 gap-4">
+              <div key="credit_note" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className={lbl} htmlFor={`${uid}-creditNoteFooterDe`}>{t('common.german')}</label>
                   <textarea id={`${uid}-creditNoteFooterDe`}

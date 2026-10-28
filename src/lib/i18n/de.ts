@@ -951,6 +951,17 @@ export const de = {
       booking: 'Buchung {id}',
       bookingYear: 'Buchungsjahr {year}',
     },
+    // Gedruckt (PDF, Portal, Mahnung): in der Sprache des Belegs.
+    payments: {
+      creditNote: 'Gutschrift {number}',
+      creditNotePlain: 'Gutschrift',
+      skonto: 'Skonto',
+      writeoff: 'Abgeschrieben',
+    },
+    footer: {
+      vat: 'USt.-Betrag',
+      emptyLines: 'Eine Zeile, deren Variablen alle leer sind (z. B. das Fälligkeitsdatum auf einer Gutschrift), entfällt.',
+    },
   },
   reminders: {
     title: 'Mahnungen',

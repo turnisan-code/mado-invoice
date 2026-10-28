@@ -949,6 +949,17 @@ export const en = {
       booking: 'Booking {id}',
       bookingYear: 'Booking year {year}',
     },
+    // Printed (PDF, portal, Mahnung): in the document's language.
+    payments: {
+      creditNote: 'Credit note {number}',
+      creditNotePlain: 'Credit note',
+      skonto: 'Early payment discount',
+      writeoff: 'Written off',
+    },
+    footer: {
+      vat: 'VAT amount',
+      emptyLines: 'A line whose variables are all empty (e.g. the due date on a credit note) is left out.',
+    },
   },
   reminders: {
     title: 'Reminders',

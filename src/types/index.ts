@@ -289,6 +289,14 @@ export interface ReminderDraft {
   gmail: boolean
 }
 
+// One printed row between an invoice's total and its balance due: money received, an applied
+// credit note, Skonto or a write-off (src/lib/payment-summary.ts).
+export interface PaymentSummaryLine {
+  kind: 'paid' | 'credit' | 'skonto' | 'writeoff'
+  amount: number
+  creditNoteNumber: string | null
+}
+
 export interface DocumentTotals {
   subtotal: number
   discount_amount: number
