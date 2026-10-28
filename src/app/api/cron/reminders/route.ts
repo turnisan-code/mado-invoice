@@ -6,6 +6,7 @@ import {
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
 import { formatMoney, calcTotals, getTaxNote } from '@/lib/utils/document'
+import { markOverdueInvoices } from '@/lib/utils/overdue'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import React from 'react'
@@ -22,9 +23,12 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServiceClient()
 
+  // Flip past-due invoices to 'overdue' first; reminders below only see that status.
+  await markOverdueInvoices(supabase)
+
   const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings?.gmail_refresh_token || !settings?.gmail_email) {
-    return NextResponse.json({ skipped: 'Gmail not configured' })
+    return NextResponse.json({ skipped: 'Gmail not configured', overdueMarked: true })
   }
 
   // Find overdue invoices that haven't had a reminder sent, with client email
@@ -110,12 +114,12 @@ export async function GET(req: NextRequest) {
         })),
         totals,
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const stream = await pdf(React.createElement(InvoiceDocument, {
         settings: settings as unknown as Settings,
         client: client as unknown as Client,
         document: docData,
         qrCodeDataUri: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       }) as any).toBuffer()
       const chunks: Buffer[] = []
       await new Promise<void>((resolve, reject) => {

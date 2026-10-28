@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
+import { today } from '@/lib/utils/document'
 
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -32,9 +33,10 @@ const itemColor: Record<string, string> = {
 
 interface Props {
   document: { id: string; status: string; type: string; number: string | null }
+  balanceDue?: number
 }
 
-export default function DocumentStatusBar({ document: doc }: Props) {
+export default function DocumentStatusBar({ document: doc, balanceDue }: Props) {
   const [status, setStatus] = useState(doc.status)
   const [seenStatus, setSeenStatus] = useState(doc.status)
   const [open, setOpen] = useState(false)
@@ -42,7 +44,9 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
-  const statuses = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
+  const allStatuses: readonly string[] = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
+  // An issued document keeps its number: it can be cancelled, never un-issued.
+  const statuses = allStatuses.filter(s => !(doc.number && s === 'draft'))
 
   if (doc.status !== seenStatus) {
     setSeenStatus(doc.status)
@@ -60,10 +64,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
 
   // Every status beyond draft/cancelled means the document has been issued, which requires a number.
   const needsNumber = (s: string) => !doc.number && s !== 'draft' && s !== 'cancelled'
+  const recordsPayment = (s: string) => s === 'paid' && doc.type === 'invoice' && !!balanceDue && balanceDue > 0
 
   async function changeStatus(newStatus: string) {
     if (newStatus === status) { setOpen(false); return }
-    if (DESTRUCTIVE.has(newStatus) || needsNumber(newStatus)) {
+    if (DESTRUCTIVE.has(newStatus) || needsNumber(newStatus) || recordsPayment(newStatus)) {
       setConfirm(newStatus)
       setOpen(false)
       return
@@ -76,13 +81,25 @@ export default function DocumentStatusBar({ document: doc }: Props) {
       const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
       if (issueErr) { toast.error(issueErr.message); return }
     }
+    if (recordsPayment(newStatus)) {
+      const { error: payErr } = await supabase.from('payments').insert({ document_id: doc.id, date: today(), amount: balanceDue, note: null })
+      if (payErr) { toast.error(payErr.message); return }
+    }
     const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
     if (error) { toast.error(error.message); return }
     setStatus(newStatus)
     setOpen(false)
     setConfirm(null)
     router.refresh()
-    toast.success(`Status updated to ${newStatus}.`)
+    toast.success(recordsPayment(newStatus) ? 'Marked as paid — payment recorded.' : `Status updated to ${newStatus}.`)
+  }
+
+  const confirmText = (s: string) => {
+    const parts: string[] = []
+    if (needsNumber(s)) parts.push(`This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${s}. Numbers cannot be taken back.`)
+    if (recordsPayment(s)) parts.push('The open balance is recorded as a payment dated today.')
+    if (DESTRUCTIVE.has(s)) parts.push('This action is hard to reverse.')
+    return parts.join(' ')
   }
 
   return (
@@ -117,11 +134,7 @@ export default function DocumentStatusBar({ document: doc }: Props) {
           <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
             <div>
               <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Mark as {confirm}?</h3>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                {needsNumber(confirm)
-                  ? `This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${confirm}. Numbers cannot be taken back.`
-                  : 'This action is hard to reverse.'}
-              </p>
+              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{confirmText(confirm)}</p>
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirm(null)} className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
