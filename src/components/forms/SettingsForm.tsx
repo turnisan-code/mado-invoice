@@ -784,23 +784,6 @@ export default function SettingsForm({ settings }: Props) {
   const subjectKey = `subject_${activeLang}` as 'subject_de' | 'subject_en'
   const bodyKey    = `body_${activeLang}`    as 'body_de'    | 'body_en'
 
-  const subjectRef = useRef<HTMLInputElement>(null)
-  const bodyRef    = useRef<HTMLTextAreaElement>(null)
-
-  function insertTplVar(token: string) {
-    const target = lastFocused.current
-    if (!target) return
-    const { el, setter } = target
-    const start = el.selectionStart ?? el.value.length
-    const end   = el.selectionEnd ?? start
-    setter(el.value.slice(0, start) + token + el.value.slice(end))
-    markDirty('templates')
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(start + token.length, start + token.length)
-    })
-  }
-
   // ── Number format live preview ───────────────────────────────────────────────
   function previewNumber(row: (typeof NUMBER_ROWS)[number]): string {
     const counter = nextCounter(docs[row.numKey] ?? 1, counterYear(row), docs[row.resetKey], docs[row.fmtKey], thisYear)
@@ -1486,7 +1469,7 @@ export default function SettingsForm({ settings }: Props) {
             {/* Variable chips */}
             <VarChips
               vars={activeDocTab === 'reminder' ? REMINDER_VARS : EMAIL_VARS}
-              onInsert={insertTplVar}
+              onInsert={insertVar}
             />
             {activeDocTab === 'reminder' && (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -1506,7 +1489,6 @@ export default function SettingsForm({ settings }: Props) {
               <label className={lbl} htmlFor={`${uid}-tpl-subjectKey`}>{t('settings.templates.subject')}</label>
               <input id={`${uid}-tpl-subjectKey`}
                 key={`${activeDocTab}-${activeLang}`}
-                ref={subjectRef}
                 className={inp}
                 value={tpl[subjectKey]}
                 onChange={e => setTplField(activeDocTab, subjectKey, e.target.value)}
@@ -1524,7 +1506,6 @@ export default function SettingsForm({ settings }: Props) {
               <label className={lbl} htmlFor={`${uid}-tpl-bodyKey`}>{t('settings.templates.body')}</label>
               <textarea id={`${uid}-tpl-bodyKey`}
                 key={`${activeDocTab}-${activeLang}`}
-                ref={bodyRef}
                 value={tpl[bodyKey]}
                 onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
                 onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
