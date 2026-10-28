@@ -1411,6 +1411,10 @@ export const de = {
   },
   editor: {
     settingsTaxNav: 'Steuer',
+    doc: {
+      lineDiscountPercent: 'Rabatt {percent}: {amount}',
+      lineDiscount: 'Rabatt: {amount}',
+    },
     problems: {
       badDiscount: 'Position {position}: Der Rabatt muss zwischen 0 und 100 % liegen bzw. darf den Positionsbetrag nicht übersteigen.',
       negativeTotal: 'Der Gesamtbetrag ist negativ. Für eine Rückzahlung eine Gutschrift ausstellen.',

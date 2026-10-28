@@ -1409,6 +1409,10 @@ export const en = {
   },
   editor: {
     settingsTaxNav: 'Tax',
+    doc: {
+      lineDiscountPercent: 'Discount {percent}: {amount}',
+      lineDiscount: 'Discount: {amount}',
+    },
     problems: {
       badDiscount: 'Position {position}: a discount must be between 0 and 100 % or at most the line amount.',
       negativeTotal: 'The total is negative. To give money back, issue a credit note instead.',

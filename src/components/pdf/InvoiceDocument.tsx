@@ -331,11 +331,20 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
 
             if (item.quantity == null || item.unit_price == null) return null
             const period = servicePeriod(item.service_date, item.service_date_end, lang)
+            // The line's own discount, already taken off its amount.
+            const lineOff = lineAmount({ quantity: item.quantity, unit_price: item.unit_price }) - lineAmount(item)
             return (
               <View key={i} style={s.tableRow} wrap={!keepRowTogether(item.description)}>
                 <View style={s.colDesc}>
                   <Text>{item.description}</Text>
                   {period && <Text style={s.colDescSub}>{period.text}</Text>}
+                  {lineOff > 0 && (
+                    <Text style={s.colDescSub}>
+                      {item.discount_type === 'percent'
+                        ? t('editor.doc.lineDiscountPercent', { percent: pct(clampPercent(item.discount_value)), amount: money(-lineOff) })
+                        : t('editor.doc.lineDiscount', { amount: money(-lineOff) })}
+                    </Text>
+                  )}
                 </View>
                 <Text style={s.colQty}>
                   {formatQuantity(item.quantity, lang)}{item.unit ? ` ${unitLabel(t, item.unit, item.quantity)}` : ''}
