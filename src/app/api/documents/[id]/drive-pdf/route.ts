@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { googleErrorResponse, googleNotConnected } from '@/lib/google/client'
-import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { archiveToDrive } from '@/lib/pdf/drive'
 
 export const maxDuration = 60
@@ -19,7 +19,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     supabase.from('settings').select('drive_folder_id, gmail_refresh_token').single(),
   ])
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (!doc.number) return NextResponse.json({ error: 'Issue the document before saving it to Drive' }, { status: 400 })
+  if (!doc.number) return NextResponse.json({ error: 'Issue the document before saving it to Drive', code: 'not_issued' }, { status: 400 })
   if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
   if (!settings.drive_folder_id) return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
   if (!settings.gmail_refresh_token) return googleNotConnected()
@@ -29,7 +29,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     issued = await getIssuedPdf(supabase, id, 'on_demand')
   } catch (err) {
     console.error('[drive-pdf] archive copy unavailable:', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'PDF unavailable' }, { status: 500 })
+    const code = err instanceof ArchiveError ? err.code : undefined
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'PDF unavailable', code }, { status: 500 })
   }
 
   try {

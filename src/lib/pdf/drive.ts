@@ -17,8 +17,8 @@ function rethrowGoogleAccess(err: unknown) {
 
 // Archives the issued PDF to the configured Drive folder as a new file named after the number.
 // An archived file is never overwritten or renamed: the document's own file (by stored id or
-// by the documentId tag set on upload) is returned as it is, and when a different file with the
-// same name already sits in the folder nothing is uploaded at all.
+// by the documentId tag set on upload) is returned as it is, and when a file with the same name
+// already sits in the folder nothing is uploaded: that file is linked as the document's copy.
 export async function archiveToDrive(
   supabase: SupabaseClient,
   settings: Settings,
@@ -59,7 +59,10 @@ export async function archiveToDrive(
     includeItemsFromAllDrives: true,
   })
   const sameName = named.files?.[0]
-  if (sameName?.id) return { fileId: sameName.id, webViewLink: sameName.webViewLink ?? null, existing: true }
+  if (sameName?.id) {
+    if (sameName.id !== doc.drive_file_id) await supabase.from('documents').update({ drive_file_id: sameName.id }).eq('id', doc.id)
+    return { fileId: sameName.id, webViewLink: sameName.webViewLink ?? null, existing: true }
+  }
 
   const body = new PassThrough()
   body.end(pdf.buffer)

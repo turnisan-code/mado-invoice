@@ -32,11 +32,12 @@ export default function InvoicePageClient({
 }: Props) {
   const { t, lang } = useT()
 
-  // Reminders and Bookamat attach the stored issued copy, not the editor's current state.
-  async function issuedPdfBase64(): Promise<{ base64: string; filename: string } | null> {
+  // Bookamat attaches the stored issued copy; a reminder attaches it only while nothing is paid,
+  // otherwise a render that shows the payments and asks for the open balance.
+  async function issuedPdfBase64(purpose: 'archive' | 'reminder'): Promise<{ base64: string; filename: string } | null> {
     if (!document.number) return null
     try {
-      return { base64: await blobToBase64(await fetchIssuedPdf(document.id)), filename: `${document.number}.pdf` }
+      return { base64: await blobToBase64(await fetchIssuedPdf(document.id, t, purpose)), filename: `${document.number}.pdf` }
     } catch (err) {
       console.warn('Issued PDF unavailable:', err)
       return null
@@ -69,7 +70,7 @@ export default function InvoicePageClient({
         skontoDays={document.skonto_days ?? null}
         bookamatConfigured={bookamatConfigured}
         bookamatBookingId={bookamatBookingId}
-        generatePdfForBookamat={issuedPdfBase64}
+        generatePdfForBookamat={() => issuedPdfBase64('archive')}
       />
       {(showReminder || reminderLog.length > 0) && (
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-3">
@@ -82,7 +83,7 @@ export default function InvoicePageClient({
                 reminderLevel={reminderLevel}
                 maxLevel={settings.reminder_max_level}
                 gmailConfigured={gmailConfigured}
-                generatePdf={issuedPdfBase64}
+                generatePdf={() => issuedPdfBase64('reminder')}
               />
             )}
           </div>

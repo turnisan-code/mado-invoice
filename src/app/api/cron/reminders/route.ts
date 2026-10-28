@@ -6,8 +6,8 @@ import {
 } from '@/lib/utils/reminder'
 import { calcTotals, today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
-import { readStoredPdf } from '@/lib/pdf/snapshot'
-import { pdfFilename, renderLoadedPdf, type PdfDocument } from '@/lib/pdf/render'
+import { getReminderPdf } from '@/lib/pdf/snapshot'
+import { pdfFilename, type PdfDocument } from '@/lib/pdf/render'
 import { logEvent } from '@/lib/events'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
@@ -75,20 +75,16 @@ export async function GET(req: NextRequest) {
     const tpl = reminderTemplates(settings, lang)
     const subject = fillTemplate(tpl.subject, ctx)
 
-    // Attach the stored issued copy the client received; without one, render it from the stored
-    // data with payments, section discounts and the QR (not archived: an archive copy made today
-    // would carry today's payments).
+    // The issued copy while nothing is paid; after a part payment a render showing the open
+    // balance (and a QR for it), so the attachment asks for the amount the email names.
     const filename = pdfFilename(invoice.number)
-    let pdf = invoice.pdf_path ? await readStoredPdf(supabase, invoice.pdf_path) : null
-    if (!pdf) {
-      try {
-        pdf = await renderLoadedPdf(supabase, invoice as PdfDocument, settings as Settings)
-      } catch (pdfErr) {
-        // Send without attachment rather than skipping entirely
-        console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
-      }
+    let pdfBase64: string | undefined
+    try {
+      pdfBase64 = (await getReminderPdf(supabase, invoice as PdfDocument, settings as Settings)).toString('base64')
+    } catch (pdfErr) {
+      // Send without attachment rather than skipping entirely
+      console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
     }
-    const pdfBase64 = pdf?.toString('base64')
 
     try {
       await sendReminderEmail({

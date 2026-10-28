@@ -67,6 +67,8 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
         link: path && id ? { href: `/${path}/${id}`, label: t('archive.openSource') } : undefined,
       }
     }
+    case 'archived':
+      return { text: t(d.restored ? 'archive.events.archivedRestored' : 'archive.events.archived') }
     case 'drive_archived': {
       const href = str(d.link)
       return {

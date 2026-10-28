@@ -81,8 +81,8 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
       }
       toast.success(
         data.webViewLink
-          ? <span>{t('share.savedToDrive')}<a href={data.webViewLink} target="_blank" rel="noopener" className="underline">{t('common.open')}</a></span>
-          : t('share.savedToDrivePlain'),
+          ? <span>{t(data.existing ? 'archive.driveExisting' : 'share.savedToDrive')}<a href={data.webViewLink} target="_blank" rel="noopener" className="underline">{t('common.open')}</a></span>
+          : t(data.existing ? 'archive.driveExistingPlain' : 'share.savedToDrivePlain'),
         { duration: 5000 }
       )
     } catch (e) {

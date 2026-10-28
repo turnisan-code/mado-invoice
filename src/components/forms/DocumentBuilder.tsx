@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useId, forwardRef, useImperativeHandle } from 'react'
+import { useState, useRef, useEffect, useCallback, useId } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -20,7 +20,7 @@ import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
-import { fetchIssuedPdf, blobToBase64 } from '@/lib/issued-pdf'
+import { fetchIssuedPdf, blobToBase64, archiveErrorMessage, FLUSH_EDITS_EVENT, type FlushEditsDetail } from '@/lib/issued-pdf'
 import { logEvent } from '@/lib/events'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey, TFn } from '@/lib/i18n'
@@ -88,10 +88,6 @@ const typeLabel: Record<DocumentType, { de: string; en: string }> = {
 
 const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
 
-export interface DocumentBuilderHandle {
-  buildPdfBlob: (numOverride?: string, includeQr?: boolean) => Promise<{ blob: Blob; number: string } | null>
-}
-
 async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -115,10 +111,7 @@ function notifyDriveUpload(t: TFn, webViewLink?: string | null, existing = false
   )
 }
 
-const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function DocumentBuilder(
-  { type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props,
-  ref,
-) {
+export default function DocumentBuilder({ type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props) {
   const router = useRouter()
   const supabase = createClient()
   const { t } = useT()
@@ -232,6 +225,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   useEffect(() => {
     if (defaultClientId && !doc) {
       const c = clients.find(cl => cl.id === defaultClientId)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (c) applyClientDefaults(c)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -424,8 +418,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
   }
 
-  useImperativeHandle(ref, () => ({ buildPdfBlob }))
-
   // driveFailed: issuing tried Drive and already reported the error.
   type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean; driveFailed: boolean }
   type IssueResponse = {
@@ -479,7 +471,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!doc?.number) return
     const { id } = doc
     setSaving(true)
-    void serialized(() => postJson(`/api/documents/${id}/snapshot`))
+    void serialized(async () => {
+      const res = await fetch(`/api/documents/${id}/snapshot`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(archiveErrorMessage(t, data, res.statusText))
+    })
       .then(() => { toast.success(t('builder.issuedArchived')); router.refresh() })
       .catch(e => toast.error(t('builder.snapshotFailed', { error: errorMessage(e, t('common.unknownError')) })))
       .finally(() => setSaving(false))
@@ -488,7 +484,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   // The stored issued copy; outgoing PDFs of a numbered document never come from the editor.
   async function issuedPdf(issued: Issued): Promise<Blob | null> {
     try {
-      return await fetchIssuedPdf(issued.id)
+      return await fetchIssuedPdf(issued.id, t)
     } catch (e) {
       toast.error(t('archive.pdfFailed', { error: errorMessage(e, t('common.unknownError')) }))
       return null
@@ -522,7 +518,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' })
     const data = await res.json().catch(() => ({}))
     if (res.ok) notifyDriveUpload(t, data.webViewLink, data.existing)
-    else toastApiError(t, data, t('builder.driveFailedPrefix'))
+    else toastApiError(t, { ...data, error: archiveErrorMessage(t, data, t('common.unknownError')) }, t('builder.driveFailedPrefix'))
   }
 
   function saveToDrive() {
@@ -714,8 +710,27 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!doc) return
     if (isFirstRender.current) { isFirstRender.current = false; return }
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(autoSave, 2000)
+    autoSaveTimer.current = setTimeout(() => { autoSaveTimer.current = null; void autoSave() }, 2000)
     return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
+  }, [autoSave, doc])
+
+  // The status menu issues this document from outside the builder; edits still waiting for the
+  // autosave are written first, so the frozen PDF the server renders includes them.
+  useEffect(() => {
+    if (!doc) return
+    const docId = doc.id
+    function onFlush(e: Event) {
+      const { documentId, waitUntil } = (e as CustomEvent<FlushEditsDetail>).detail
+      if (documentId !== docId) return
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current)
+        autoSaveTimer.current = null
+        waitUntil(autoSave())
+      }
+      waitUntil(writeChain.current)
+    }
+    window.addEventListener(FLUSH_EDITS_EVENT, onFlush)
+    return () => window.removeEventListener(FLUSH_EDITS_EVENT, onFlush)
   }, [autoSave, doc])
 
   useEffect(() => {
@@ -1032,6 +1047,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <p className="flex-1"><strong>{t('archive.missingTitle')}</strong> {t('archive.missingBody')}</p>
           <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="shrink-0 self-start sm:self-auto flex items-center gap-1.5 h-9 sm:h-8 bg-white dark:bg-neutral-900">
             <Archive size={13} /> {t('archive.create')}
+          </Button>
+        </div>
+      )}
+
+      {doc?.number && doc.pdf_path && !doc.drive_file_id && settings.drive_folder_id && settings.gmail_connected && (
+        <div role="status" className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3 text-sm text-neutral-600 dark:text-neutral-300 flex flex-col sm:flex-row sm:items-center gap-3">
+          <p className="flex-1"><strong>{t('archive.driveMissingTitle')}</strong> {t('archive.driveMissingBody')}</p>
+          <Button type="button" variant="outline" size="sm" onClick={saveToDrive} disabled={saving} className="shrink-0 self-start sm:self-auto flex items-center gap-1.5 h-9 sm:h-8 bg-white dark:bg-neutral-900">
+            <HardDrive size={13} /> {t('builder.saveToDrive')}
           </Button>
         </div>
       )}
@@ -1622,6 +1646,4 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       </div>
     </div>
   )
-})
-
-export default DocumentBuilder
+}

@@ -8,6 +8,7 @@ import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toastApiError } from '@/lib/google/toast'
 import { logEvent } from '@/lib/events'
+import { flushPendingEdits } from '@/lib/issued-pdf'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 
@@ -91,6 +92,8 @@ export default function DocumentStatusBar({ document: doc }: Props) {
     busyRef.current = true
     setBusy(true)
     try {
+      // Issuing renders the frozen PDF from the database, so the builder's pending edits go first.
+      if (needsNumber(newStatus) || (recordsPayment(newStatus) && !doc.number)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',

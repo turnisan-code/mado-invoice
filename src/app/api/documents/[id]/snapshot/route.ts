@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { getIssuedPdf, NotIssuedError } from '@/lib/pdf/snapshot'
+import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { DocumentNotFoundError } from '@/lib/pdf/render'
 
 export const maxDuration = 60
@@ -18,7 +18,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ path, created })
   } catch (err) {
     if (err instanceof DocumentNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 })
-    if (err instanceof NotIssuedError) return NextResponse.json({ error: err.message }, { status: 400 })
+    if (err instanceof ArchiveError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.code === 'not_issued' ? 400 : 500 })
+    }
     console.error('[documents/snapshot]', err)
     return NextResponse.json({ error: err instanceof Error ? err.message : 'Archive copy failed' }, { status: 500 })
   }
