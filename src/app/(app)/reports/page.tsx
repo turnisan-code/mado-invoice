@@ -7,7 +7,7 @@ import { getT } from '@/lib/i18n/server'
 import { n } from '@/lib/i18n'
 import { parsePeriod, periodLabel, periodParams, MAX_PDFS, MIN_YEAR, type PeriodParams } from './period'
 import { fetchZmRows } from './zm'
-import { istTurnover } from './ist'
+import { istTurnover, type InvoiceHistory } from './ist'
 import { creditNoteOpen } from '@/lib/status'
 import { unappliedCreditNotes } from '@/lib/credits'
 import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
@@ -63,14 +63,13 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .gte('date', period.start)
       .lte('date', period.end)
       .order('date'),
-    // Credit notes applied to their invoice in the period (rows on the invoice).
+    // Every credit note applied to its invoice (rows on the invoice): a credit before the period
+    // changes how the period's payments split, and the open ones below need all of them.
     supabase
       .from('payments')
       .select(`id, amount, date, credit_note_id, documents!inner(${docCols})`)
       .eq('documents.type', 'invoice')
       .eq('kind', 'credit')
-      .gte('date', period.start)
-      .lte('date', period.end)
       .order('date'),
     // Money paid back on credit notes in the period.
     supabase
@@ -107,23 +106,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const creditRows = (credits ?? []) as unknown as { id: string; amount: number; date: string; credit_note_id: string; documents: Dated }[]
   const refundRows = (refunds ?? []) as unknown as { id: string; amount: number; date: string; method: string; documents: Dated }[]
   const unsettledCns = (openCreditNotes ?? []) as unknown as (Dated & { payments: { amount: number; kind: string }[] | null })[]
-  // Credit rows live on the invoice, so the credit notes (period credits and the open ones) are
-  // looked up by id; payments.credit_note_id has no embeddable foreign key.
-  const appliedCnIds = [...new Set(creditRows.map(r => r.credit_note_id))]
-  const unsettledIds = unsettledCns.map(c => c.id)
-  const [{ data: appliedCnDocs }, { data: appliedToOpen }] = await Promise.all([
-    appliedCnIds.length
-      ? supabase.from('documents').select(docCols).in('id', appliedCnIds)
-      : Promise.resolve({ data: [] as unknown[] }),
-    unsettledIds.length
-      ? supabase.from('payments').select('credit_note_id, amount').eq('kind', 'credit').in('credit_note_id', unsettledIds)
-      : Promise.resolve({ data: [] as unknown[] }),
-  ])
-  const cnById = new Map(((appliedCnDocs ?? []) as unknown as Dated[]).map(d => [d.id, d]))
-
-  // Ist-Besteuerung (see ist.ts): money received on invoices, credit notes applied to their
-  // invoice and refunds paid on credit notes, each in the period it happened. Skonto and
-  // write-offs close invoices without revenue and are not read at all.
+  // Ist-Besteuerung (see ist.ts): money received on invoices, split at the rates left after the
+  // credit notes applied to them, and refunds paid on credit notes, each in the period it
+  // happened. Skonto and write-offs close invoices without revenue and are not read at all.
   const invoiceIds = new Set<string>()
   const countedPayments: { id: string; date: string; amount: number; method: string; doc: DocRow }[] = []
   for (const p of payments ?? []) {
@@ -132,14 +117,47 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     invoiceIds.add(d.id)
     countedPayments.push({ id: p.id, date: p.date, amount: p.amount, method: p.method, doc: d })
   }
-  const applied = creditRows.flatMap(r => {
+  const inPeriod = (date: string) => date >= period.start && date <= period.end
+  const periodCredits = creditRows.filter(r => inPeriod(r.date))
+  // Invoices the period touches (a payment or a credit in it) that have credits up to its end
+  // need their whole history; the others split every payment at the invoice's own rates.
+  const touched = new Set([...invoiceIds, ...periodCredits.map(r => r.documents.id)])
+  const historyCredits = creditRows.filter(r => r.date <= period.end && touched.has(r.documents.id))
+  const historyIds = [...new Set(historyCredits.map(r => r.documents.id))]
+  // payments.credit_note_id has no embeddable foreign key, so the credit notes are looked up by id.
+  const cnIds = [...new Set(historyCredits.map(r => r.credit_note_id))]
+  const [{ data: cnDocs }, { data: earlierPayments }] = await Promise.all([
+    cnIds.length
+      ? supabase.from('documents').select(docCols).in('id', cnIds)
+      : Promise.resolve({ data: [] as unknown[] }),
+    historyIds.length
+      ? supabase.from('payments').select('document_id, date, amount').eq('kind', 'payment').in('document_id', historyIds).lt('date', period.start)
+      : Promise.resolve({ data: [] as unknown[] }),
+  ])
+  const cnById = new Map(((cnDocs ?? []) as unknown as Dated[]).map(d => [d.id, d]))
+
+  const histories = new Map<string, InvoiceHistory>()
+  const historyOf = (doc: DocRow) => {
+    let h = histories.get(doc.id)
+    if (!h) histories.set(doc.id, h = { invoice: doc, payments: [], credits: [] })
+    return h
+  }
+  for (const p of countedPayments) historyOf(p.doc).payments.push({ date: p.date, amount: p.amount })
+  const applied: { id: string; date: string; amount: number; invoice: Dated; creditNote: Dated }[] = []
+  for (const r of historyCredits) {
     const creditNote = cnById.get(r.credit_note_id)
-    return creditNote ? [{ id: r.id, date: r.date, amount: r.amount, invoice: r.documents, creditNote }] : []
-  })
+    if (!creditNote) continue
+    historyOf(r.documents).credits.push({ date: r.date, amount: r.amount, creditNote })
+    if (inPeriod(r.date)) applied.push({ id: r.id, date: r.date, amount: r.amount, invoice: r.documents, creditNote })
+  }
+  for (const p of (earlierPayments ?? []) as { document_id: string; date: string; amount: number }[]) {
+    histories.get(p.document_id)?.payments.push({ date: p.date, amount: p.amount })
+  }
   const refunded = refundRows.map(r => ({ id: r.id, date: r.date, amount: r.amount, creditNote: r.documents }))
   const { vat, rcBase: rcRaw, nonEuBase: nonEuRaw } = istTurnover({
-    received: countedPayments.map(p => ({ amount: p.amount, invoice: p.doc })),
-    applied,
+    start: period.start,
+    end: period.end,
+    invoices: [...histories.values()],
     refunded,
   })
   const rcBase = roundCents(rcRaw)
@@ -154,7 +172,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const deductedCount = new Set(refunded.map(r => r.creditNote.id)).size
 
   const appliedByCn = new Map<string, number>()
-  for (const r of (appliedToOpen ?? []) as { credit_note_id: string; amount: number }[]) {
+  for (const r of creditRows) {
     appliedByCn.set(r.credit_note_id, (appliedByCn.get(r.credit_note_id) ?? 0) + r.amount)
   }
   const unsettled = unsettledCns
@@ -168,7 +186,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     }))
     .filter(c => c.open > 0.005)
 
-  const rates = Object.keys(vat).map(Number).sort((a, b) => b - a)
+  // A credit can leave a rate at zero (its line credited in full): no row for it.
+  const rates = Object.keys(vat).map(Number)
+    .filter(r => roundCents(vat[r].base) !== 0 || roundCents(vat[r].vat) !== 0)
+    .sort((a, b) => b - a)
   const taxableBase = roundCents(rates.reduce((s, r) => s + vat[r].base, 0))
   const totalVat = roundCents(rates.reduce((s, r) => s + vat[r].vat, 0))
   const netTotal = roundCents(taxableBase + rcBase + nonEuBase)

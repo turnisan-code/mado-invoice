@@ -734,9 +734,9 @@ export const en = {
       applied: 'applied to {number}',
       refunded: 'refunded',
       unsettledTitle: 'Credit notes not settled yet',
-      unsettledHint: 'They reduce the turnover once their refund is recorded or they are applied to an invoice.',
+      unsettledHint: 'A refund reduces the turnover in the period it is paid; applying one to its invoice settles that invoice without money.',
       unsettledRow: '{amount} open',
-      footnote: 'Partial payments count proportionally; Skonto and write-offs are not income and do not count. A credit note counts when it is applied to its invoice (at the invoice’s and the credit note’s rates, which cancel out in total) and when money is paid back on it — in the period that happened. Input VAT from purchase invoices is not included — the amount payable is calculated in Bookamat.',
+      footnote: 'Partial payments count proportionally; Skonto and write-offs are not income and do not count. A credit note applied to its invoice moves no money: later payments on that invoice count at the rates left after the credit, and money received before it is re-split at those rates in the period of the credit. Money paid back on a credit note is deducted in the period it was paid. Input VAT from purchase invoices is not included — the amount payable is calculated in Bookamat.',
     },
   },
   share: {

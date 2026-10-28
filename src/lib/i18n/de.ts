@@ -736,9 +736,9 @@ export const de = {
       applied: 'verrechnet mit {number}',
       refunded: 'zurückgezahlt',
       unsettledTitle: 'Noch nicht ausgeglichene Gutschriften',
-      unsettledHint: 'Sie mindern den Umsatz, sobald die Rückzahlung erfasst oder sie mit einer Rechnung verrechnet sind.',
+      unsettledHint: 'Eine Rückzahlung mindert den Umsatz im Zeitraum, in dem sie bezahlt wird; die Verrechnung mit ihrer Rechnung gleicht diese ohne Geld aus.',
       unsettledRow: '{amount} offen',
-      footnote: 'Teilzahlungen zählen anteilig; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Eine Gutschrift zählt, wenn sie mit ihrer Rechnung verrechnet wird (zu den Steuersätzen der Rechnung und der Gutschrift, die sich in Summe aufheben) und wenn Geld darauf zurückgezahlt wird — jeweils im Zeitraum, in dem das geschah. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast wird in Bookamat berechnet.',
+      footnote: 'Teilzahlungen zählen anteilig; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Eine mit ihrer Rechnung verrechnete Gutschrift bewegt kein Geld: Spätere Zahlungen auf diese Rechnung zählen zu den Steuersätzen, die nach der Gutschrift übrig bleiben, und vorher erhaltenes Geld wird im Zeitraum der Gutschrift zu diesen Sätzen neu aufgeteilt. Auf eine Gutschrift zurückgezahltes Geld wird im Zeitraum der Rückzahlung abgezogen. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast wird in Bookamat berechnet.',
     },
   },
   share: {

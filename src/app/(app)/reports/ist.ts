@@ -13,6 +13,15 @@ export type VatBuckets = {
   nonEuBase: number
 }
 
+// Everything that settled an invoice up to the period end: money received (kind 'payment') and
+// credit notes applied to it (kind 'credit'). Payments before the period are only needed when the
+// invoice has credits, because a credit re-splits the money received before it.
+export type InvoiceHistory = {
+  invoice: TotalsDoc
+  payments: { date: string; amount: number }[]
+  credits: { date: string; amount: number; creditNote: TotalsDoc }[]
+}
+
 function docTotals(d: TotalsDoc) {
   return calcTotals(
     d.document_items ?? [],
@@ -22,42 +31,82 @@ function docTotals(d: TotalsDoc) {
   )
 }
 
-// Ist-Besteuerung: turnover counts when money moves, split like the document it belongs to.
-//  - received: money paid on an invoice (kind 'payment'), in the period it arrived;
-//  - refunded: money paid back on a credit note (kind 'refund'), deducted when it was paid;
-//  - applied: a credit note applied to its invoice (kind 'credit'). It settles part of the invoice
-//    without money: counted at the invoice's rates and taken off at the credit note's rates in its
-//    period. It adds nothing in total, but once the invoice is settled the turnover per rate is
-//    what was really paid for (a credited 10 % line no longer shows up as 10 % turnover through
-//    the payments for the 20 % lines).
-// Skonto and write-offs never reach this function: they close a balance without turnover.
+const empty = (): VatBuckets => ({ vat: {}, rcBase: 0, nonEuBase: 0 })
+
+function addTo(out: VatBuckets, v: VatBuckets, factor: number) {
+  out.rcBase += v.rcBase * factor
+  out.nonEuBase += v.nonEuBase * factor
+  for (const [key, g] of Object.entries(v.vat)) {
+    const rate = Number(key)
+    out.vat[rate] = out.vat[rate] ?? { base: 0, vat: 0 }
+    out.vat[rate].base += g.base * factor
+    out.vat[rate].vat += g.vat * factor
+  }
+}
+
+// How `gross` of a document splits into its tax buckets (proportionally to its total).
+function split(d: TotalsDoc, gross: number): VatBuckets {
+  const out = empty()
+  const t = docTotals(d)
+  if (!t.total) return out
+  const share = gross / t.total
+  if (d.tax_treatment === 'eu_reverse_charge') out.rcBase = (t.subtotal - t.discount_amount) * share
+  else if (d.tax_treatment === 'non_eu') out.nonEuBase = (t.subtotal - t.discount_amount) * share
+  else addTo(out, { vat: Object.fromEntries(t.vat_groups.map(g => [g.rate, { base: g.base, vat: g.amount }])), rcBase: 0, nonEuBase: 0 }, share)
+  return out
+}
+
+// Ist-Besteuerung: turnover counts when money moves.
+//  - Money received on an invoice counts in the period it arrived, split at the rates of what was
+//    still to be paid for: the invoice minus the credit notes applied to it so far.
+//  - A credit note applied to its invoice moves no money. Money received before it was split at
+//    the old rates, so it is re-split at the corrected ones in the period the credit was applied
+//    (a credited 10 % line stops counting as 10 % turnover; nothing moves when nothing was paid).
+//  - Money paid back on a credit note (kind 'refund') is deducted at its rates when it was paid.
+// Skonto and write-offs never reach this function: they close a balance without turnover, so
+// partial payments count proportionally across the rates.
 export function istTurnover(input: {
-  received: { amount: number; invoice: TotalsDoc }[]
-  applied: { amount: number; invoice: TotalsDoc; creditNote: TotalsDoc }[]
+  start: string
+  end: string
+  invoices: InvoiceHistory[]
   refunded: { amount: number; creditNote: TotalsDoc }[]
 }): VatBuckets {
-  const out: VatBuckets = { vat: {}, rcBase: 0, nonEuBase: 0 }
+  const out = empty()
+  const inPeriod = (date: string) => date >= input.start && date <= input.end
 
-  function add(d: TotalsDoc, gross: number) {
-    const t = docTotals(d)
-    if (!t.total) return
-    const share = gross / t.total
-    if (d.tax_treatment === 'eu_reverse_charge') out.rcBase += (t.subtotal - t.discount_amount) * share
-    else if (d.tax_treatment === 'non_eu') out.nonEuBase += (t.subtotal - t.discount_amount) * share
-    else {
-      for (const g of t.vat_groups) {
-        out.vat[g.rate] = out.vat[g.rate] ?? { base: 0, vat: 0 }
-        out.vat[g.rate].base += g.base * share
-        out.vat[g.rate].vat += g.amount * share
+  for (const h of input.invoices) {
+    const total = docTotals(h.invoice).total
+    if (!total) continue
+    const remaining = split(h.invoice, total)
+    let open = total
+    let received = 0
+    const unit = () => {
+      const rates = empty()
+      // Credited in full (only an overpayment pays after that): the invoice's own split.
+      addTo(rates, open > 0.005 ? remaining : split(h.invoice, total), 1 / (open > 0.005 ? open : total))
+      return rates
+    }
+    const events = [
+      ...h.credits.map(c => ({ ...c, credit: true })),
+      ...h.payments.map(p => ({ ...p, credit: false, creditNote: null })),
+    ].sort((a, b) => a.date.localeCompare(b.date) || Number(b.credit) - Number(a.credit))
+
+    for (const e of events) {
+      if (!e.credit || !e.creditNote) {
+        if (inPeriod(e.date)) addTo(out, unit(), e.amount)
+        received += e.amount
+        continue
+      }
+      const before = unit()
+      addTo(remaining, split(e.creditNote, e.amount), -1)
+      open -= e.amount
+      if (received && inPeriod(e.date)) {
+        addTo(out, unit(), received)
+        addTo(out, before, -received)
       }
     }
   }
 
-  for (const r of input.received) add(r.invoice, r.amount)
-  for (const a of input.applied) {
-    add(a.invoice, a.amount)
-    add(a.creditNote, -a.amount)
-  }
-  for (const r of input.refunded) add(r.creditNote, -r.amount)
+  for (const r of input.refunded) addTo(out, split(r.creditNote, r.amount), -1)
   return out
 }
