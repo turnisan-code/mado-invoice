@@ -21,7 +21,7 @@ export type IssueOutcome = {
 async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
   const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents')
-      .select('type, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(line_type, sort_order, description, quantity, unit_price, service_date, service_date_end)')
+      .select('type, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
       .eq('id', documentId)
       .maybeSingle(),
     supabase.from('settings').select(`${ISSUER_SETTINGS_COLUMNS}, ui_language`).maybeSingle(),
