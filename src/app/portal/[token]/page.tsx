@@ -71,7 +71,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     .eq('share_token', token)
     .single()
 
-  if (!doc) notFound()
+  if (!doc?.number) notFound()
 
   const settings = (await supabase.from('settings').select('*').single()).data as Settings | null
   if (!settings) notFound()

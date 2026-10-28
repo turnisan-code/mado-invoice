@@ -139,6 +139,8 @@ export interface Document {
   reminder_sent_at?: string | null
   share_token?: string | null
   drive_file_id?: string | null
+  issued_at?: string | null
+  pdf_path?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }

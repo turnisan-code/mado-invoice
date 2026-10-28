@@ -18,7 +18,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
     .eq('share_token', token)
     .single()
 
-  if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!doc?.number) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const filename = `${doc.number}.pdf`
+  const pdfHeaders = {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+  }
+
+  // The frozen copy stored at issuance is what the client received; re-rendering is only a fallback.
+  if (doc.pdf_path) {
+    const { data: stored } = await supabase.storage.from('documents').download(doc.pdf_path)
+    if (stored) return new NextResponse(stored, { headers: pdfHeaders })
+  }
 
   const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
@@ -76,12 +88,5 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any)
 
-  const filename = `${doc.number ?? 'document'}.pdf`
-
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-    },
-  })
+  return new NextResponse(new Uint8Array(buffer), { headers: pdfHeaders })
 }
