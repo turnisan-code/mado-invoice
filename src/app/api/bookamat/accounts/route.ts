@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { today } from '@/lib/utils/document'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'apiKey is required' }, { status: 400 })
   }
 
-  const year = new Date().getFullYear()
+  const year = Number(today().slice(0, 4))
   const base = `https://www.bookamat.com/api/v1/${country}/${year}/`
   const authHeader = `ApiKey ${username}:${apiKey}`
 
