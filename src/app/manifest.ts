@@ -8,25 +8,31 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/invoices',
     display: 'standalone',
     orientation: 'portrait',
-    background_color: '#0a0a0a',
-    theme_color: '#0a0a0a',
+    background_color: '#fafafa',
+    theme_color: '#fafafa',
     icons: [
       {
-        src: '/apple-icon',
-        sizes: '180x180',
-        type: 'image/png',
-      },
-      {
-        src: '/apple-icon',
+        src: '/icon/192',
         sizes: '192x192',
         type: 'image/png',
         purpose: 'any',
       },
       {
-        src: '/apple-icon',
+        src: '/icon/512',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/icon/512-maskable',
         sizes: '512x512',
         type: 'image/png',
         purpose: 'maskable',
+      },
+      {
+        src: '/apple-icon',
+        sizes: '180x180',
+        type: 'image/png',
       },
     ],
   }

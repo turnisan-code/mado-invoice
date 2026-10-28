@@ -29,10 +29,11 @@ export default function ClientEditSection({ client }: { client: Client }) {
     <div className="space-y-0">
       {/* Card header */}
       <div className="flex items-center justify-between mb-5">
-        <p className="text-xs font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider">Details</p>
+        <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Details</p>
         <button
+          type="button"
           onClick={() => setEditing(true)}
-          className="flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors px-2 py-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors px-2 py-2 -my-1 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           <Pencil size={11} /> Edit
         </button>
@@ -75,12 +76,12 @@ export default function ClientEditSection({ client }: { client: Client }) {
 
       {/* Language */}
       <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-        <span className="text-xs text-neutral-400 dark:text-neutral-500">Language</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">Language</span>
         <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{client.language === 'en' ? 'English' : 'Deutsch'}</span>
       </div>
       {client.reminders_opt_out && (
         <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
-          <span className="text-xs text-neutral-400 dark:text-neutral-500">Automatic reminders</span>
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">Automatic reminders</span>
           <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Off</span>
         </div>
       )}

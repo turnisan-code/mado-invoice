@@ -7,13 +7,14 @@ import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, D
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { toast } from 'sonner'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 const statusColor: Record<string, string> = {
-  draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
+  draft: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
   sent: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
   paid: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
   overdue: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
-  cancelled: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
+  cancelled: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
 }
 
 const STATUSES = ['outstanding', 'draft', 'sent', 'paid', 'overdue', 'cancelled']
@@ -94,10 +95,12 @@ function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: Sort
 function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label: string; sort: { key: SortKey; dir: SortDir }; onSort: (key: SortKey) => void; className?: string }) {
   return (
     <th
-      className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`}
-      onClick={() => onSort(col)}
+      aria-sort={sort.key === col ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 ${className}`}
     >
-      <span className={`flex items-center gap-1 ${className.includes('text-right') ? 'justify-end' : ''}`}>{label}<SortIcon col={col} sort={sort} /></span>
+      <button type="button" onClick={() => onSort(col)} className={`flex items-center gap-1 w-full rounded hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className.includes('text-right') ? 'justify-end' : ''}`}>
+        {label}<SortIcon col={col} sort={sort} />
+      </button>
     </th>
   )
 }
@@ -125,7 +128,7 @@ function exportCSV(invoices: Invoice[]) {
   downloadCsv(`invoices-${today()}.csv`, toCsv(['Number', 'Client', 'Company', 'Date', 'Due date', 'Net', 'VAT', 'Total', 'Paid', 'Balance', 'Currency', 'Status'], rows))
 }
 
-const inputClass = 'text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
+const inputClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
 
 export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
   const router = useRouter()
@@ -304,12 +307,13 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
         <h1 className="text-2xl font-semibold">Invoices</h1>
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={handleExport}
             title="Export CSV"
-            className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
+            className="flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400"
           >
             <Download size={14} />
-            <span className="hidden sm:inline">Export</span>
+            <span className="sr-only sm:not-sr-only">Export CSV</span>
           </button>
           <Link href="/invoices/new" className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
             <Plus size={14} /> New Invoice
@@ -319,12 +323,15 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
       <div className="flex gap-3 flex-wrap items-center">
         <input
+          type="search"
+          aria-label="Search invoices"
           value={q}
           onChange={e => updateFilter({ q: e.target.value })}
           placeholder="Search number or client…"
           className={`flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 ${inputClass}`}
         />
         <select
+          aria-label="Status"
           value={status}
           onChange={e => updateFilter({ status: e.target.value })}
           className={inputClass}
@@ -333,6 +340,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           {STATUSES.map(s => <option key={s} value={s}>{s === 'outstanding' ? 'Outstanding (sent + overdue)' : s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
         </select>
         <select
+          aria-label="Client"
           value={client}
           onChange={e => updateFilter({ client: e.target.value })}
           className={`${inputClass} max-w-48`}
@@ -340,17 +348,18 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           <option value="">All clients</option>
           {clientOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
-        <div className="flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500">
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
           <input type="date" value={from} max={to || undefined} onChange={e => updateFilter({ from: e.target.value })} aria-label="From date" className={inputClass} />
           <span>–</span>
           <input type="date" value={to} min={from || undefined} onChange={e => updateFilter({ to: e.target.value })} aria-label="To date" className={inputClass} />
         </div>
         {hasFilters && (
           <button
+            type="button"
             onClick={() => updateFilter({ status: '', q: '', from: '', to: '', client: '' })}
-            className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+            className="flex items-center gap-1 text-xs px-2 py-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
           >
-            <X size={12} /> Clear
+            <X size={12} /> Clear filters
           </button>
         )}
       </div>
@@ -361,7 +370,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           {filtered.length === 0 && (
             <div className="py-16 text-center">
               <FileText size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-              <p className="text-sm text-neutral-400 dark:text-neutral-500">
+              <p className="text-sm text-neutral-500 dark:text-neutral-400">
                 {hasFilters ? 'No invoices match your filters.' : 'No invoices yet.'}
               </p>
               {!hasFilters && (
@@ -379,8 +388,11 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}
               >
                 <button
+                  type="button"
                   onClick={() => toggleOne(doc.id)}
-                  className="shrink-0 text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 transition-colors"
+                  aria-pressed={selected.has(doc.id)}
+                  aria-label={`Select ${doc.number ?? 'draft'}`}
+                  className="shrink-0 h-11 w-11 -ml-3 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
                 >
                   {selected.has(doc.id)
                     ? <CheckSquare size={16} className="text-blue-500" />
@@ -390,7 +402,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 <Link href={`/invoices/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-sm">
-                      {doc.number ?? <span className="text-neutral-400">Draft</span>}
+                      {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">Draft</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
                       {doc.clients?.company ?? doc.clients?.name ?? '—'}
@@ -421,7 +433,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
               <th className="pl-4 py-3 w-8">
-                <button onClick={toggleAll} className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
+                <button type="button" onClick={toggleAll} aria-pressed={allPageSelected} aria-label="Select all on this page" className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                   {allPageSelected
                     ? <CheckSquare size={14} className="text-blue-500" />
                     : <Square size={14} />
@@ -442,7 +454,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
               <tr>
                 <td colSpan={8} className="px-4 py-16 text-center">
                   <FileText size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-                  <p className="text-sm text-neutral-400 dark:text-neutral-500">
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
                     {hasFilters ? 'No invoices match your filters.' : 'No invoices yet.'}
                   </p>
                   {!hasFilters && (
@@ -459,7 +471,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                 className={`transition-colors ${selected.has(doc.id) ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}
               >
                 <td className="pl-4 py-3 w-8">
-                  <button onClick={() => toggleOne(doc.id)} className="text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 transition-colors">
+                  <button type="button" onClick={() => toggleOne(doc.id)} aria-pressed={selected.has(doc.id)} aria-label={`Select ${doc.number ?? 'draft'}`} className="h-8 w-8 -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors">
                     {selected.has(doc.id)
                       ? <CheckSquare size={14} className="text-blue-500" />
                       : <Square size={14} />
@@ -500,18 +512,21 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
       </div>
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</p>
         {filtered.length > PAGE_SIZE && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <button onClick={() => setPage(page - 1)} disabled={page <= 1} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
+            <button type="button" onClick={() => setPage(page - 1)} disabled={page <= 1} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
             <span>Page {page} of {pageCount}</span>
-            <button onClick={() => setPage(page + 1)} disabled={page >= pageCount} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
+            <button type="button" onClick={() => setPage(page + 1)} disabled={page >= pageCount} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
           </div>
         )}
       </div>
 
       {/* Bulk action bar */}
       <div
+        role="region"
+        aria-label="Bulk actions"
+        aria-hidden={!hasSelection}
         className={`fixed left-0 right-0 z-50 transition-all duration-200 ${hasSelection ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'}`}
         style={{ bottom: 0, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
@@ -522,80 +537,69 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
             </span>
             <div className="flex items-center gap-2 flex-1 flex-wrap">
               <button
+                type="button"
                 onClick={() => setBulkConfirm({ action: 'sent', label: 'Mark as sent' })}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
               >
                 <Send size={12} /> Mark Sent
               </button>
               <button
+                type="button"
                 onClick={() => setBulkConfirm({ action: 'paid', label: 'Mark as paid' })}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-white transition-colors disabled:opacity-50"
               >
                 <CheckCircle size={12} /> Mark Paid
               </button>
               <button
+                type="button"
                 onClick={() => {
                   exportCSV(selectedVisible)
                   toast.success(`Exported ${selectedCount} invoice${selectedCount !== 1 ? 's' : ''}.`)
                 }}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-white/20 dark:bg-neutral-900/20 hover:bg-white/30 dark:hover:bg-neutral-900/30 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-white/20 dark:bg-neutral-900/20 hover:bg-white/30 dark:hover:bg-neutral-900/30 transition-colors disabled:opacity-50"
               >
                 <Download size={12} /> Export CSV
               </button>
               <button
+                type="button"
                 onClick={() => setBulkConfirm({ action: 'delete', label: 'Delete' })}
                 disabled={bulkLoading}
-                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors disabled:opacity-50"
               >
                 <Trash2 size={12} /> Delete
               </button>
             </div>
             <button
+              type="button"
               onClick={clearSelection}
-              className="shrink-0 p-1.5 rounded-lg hover:bg-white/20 dark:hover:bg-neutral-900/20 transition-colors"
+              aria-label="Clear selection"
+              className="shrink-0 h-11 w-11 -my-2 -mr-2 flex items-center justify-center rounded-lg hover:bg-white/20 dark:hover:bg-neutral-900/20 transition-colors"
             >
-              <X size={14} />
+              <X size={16} />
             </button>
           </div>
         </div>
       </div>
 
       {/* Bulk action confirmation */}
-      {bulkConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 shadow-xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <div>
-              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">{bulkConfirm.label} {selectedCount} invoice{selectedCount !== 1 ? 's' : ''}?</h3>
-              {bulkConfirm.action === 'delete' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Only drafts are deleted — issued invoices are kept. This cannot be undone.</p>
-              )}
-              {bulkConfirm.action === 'paid' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">The open balance of each invoice is recorded as a payment dated today. Invoices that are already paid or cancelled are left alone; drafts are issued first.</p>
-              )}
-              {bulkConfirm.action === 'sent' && (
-                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">Drafts get the next invoice number assigned; invoices that are already issued are left alone.</p>
-              )}
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setBulkConfirm(null)}
-                className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => bulkConfirm.action === 'delete' ? bulkDelete() : bulkUpdateStatus(bulkConfirm.action)}
-                className={`text-sm px-3 py-1.5 rounded-md text-white transition-colors ${bulkConfirm.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-neutral-900 dark:bg-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100'}`}
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!bulkConfirm}
+        title={bulkConfirm ? `${bulkConfirm.label} ${selectedCount} invoice${selectedCount !== 1 ? 's' : ''}?` : ''}
+        description={
+          bulkConfirm?.action === 'delete' ? 'Only drafts are deleted — issued invoices are kept. This cannot be undone.'
+          : bulkConfirm?.action === 'paid' ? 'The open balance of each invoice is recorded as a payment dated today. Invoices that are already paid or cancelled are left alone; drafts are issued first.'
+          : bulkConfirm?.action === 'sent' ? 'Drafts get the next invoice number assigned; invoices that are already issued are left alone.'
+          : undefined
+        }
+        confirmLabel={bulkLoading ? 'Working…' : 'Confirm'}
+        destructive={bulkConfirm?.action === 'delete'}
+        busy={bulkLoading}
+        onConfirm={() => { if (!bulkConfirm) return; if (bulkConfirm.action === 'delete') void bulkDelete(); else void bulkUpdateStatus(bulkConfirm.action) }}
+        onCancel={() => setBulkConfirm(null)}
+      />
     </div>
   )
 }

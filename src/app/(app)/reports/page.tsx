@@ -140,7 +140,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </Suspense>
       </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 text-sm text-amber-800">
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-300">
         Zeitraum <strong>{period.label}</strong> ({formatDate(period.start)} – {formatDate(period.end)}) · {paymentCount} Zahlungseingang{paymentCount !== 1 ? 'e' : ''} auf {invoiceIds.size} Rechnung{invoiceIds.size !== 1 ? 'en' : ''}
         {creditNoteCount > 0 && <> · {creditNoteCount} Gutschrift{creditNoteCount !== 1 ? 'en' : ''} abgezogen</>}
       </div>
@@ -167,7 +167,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       {rcBase !== 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-800">
+        <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900 rounded-xl px-5 py-4 text-sm text-blue-800 dark:text-blue-300">
           <strong>Zusammenfassende Meldung (ZM):</strong> Reverse-Charge-Leistungen an EU-Unternehmer in diesem Zeitraum: {formatMoney(rcBase)}. In FinanzOnline je Empfänger-UID melden.
         </div>
       )}
@@ -198,7 +198,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </div>
       </div>
 
-      <p className="text-xs text-neutral-400 dark:text-neutral-500">
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
         Teilzahlungen werden anteilig berücksichtigt; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
       </p>
     </div>
@@ -210,7 +210,7 @@ function Row({ label, value, bold = false, note }: { label: string; value: strin
     <div className="px-5 py-3 flex justify-between items-center gap-4">
       <div>
         <span className={bold ? 'font-medium' : 'text-neutral-600 dark:text-neutral-400'}>{label}</span>
-        {note && <span className="ml-2 text-xs text-neutral-400 dark:text-neutral-500">{note}</span>}
+        {note && <span className="ml-2 text-xs text-neutral-500 dark:text-neutral-400">{note}</span>}
       </div>
       <span className={`shrink-0 ${bold ? 'font-semibold' : ''}`}>{value}</span>
     </div>

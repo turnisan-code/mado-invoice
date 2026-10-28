@@ -37,6 +37,19 @@ function SortIcon({ col, sort }: { col: SortKey; sort: { key: SortKey; dir: Sort
   return sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
 }
 
+function Th({ col, label, sort, onSort, className = '' }: { col: SortKey; label: string; sort: { key: SortKey; dir: SortDir }; onSort: (key: SortKey) => void; className?: string }) {
+  return (
+    <th
+      aria-sort={sort.key === col ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 ${className}`}
+    >
+      <button type="button" onClick={() => onSort(col)} className="flex items-center gap-1 w-full rounded hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+        {label}<SortIcon col={col} sort={sort} />
+      </button>
+    </th>
+  )
+}
+
 const PAGE_SIZE = 25
 
 export default function ClientList({ clients, lastInvoicedMap = {} }: { clients: Client[]; lastInvoicedMap?: Record<string, string> }) {
@@ -72,17 +85,6 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
     })
   }, [clients, q, status, sort])
 
-  function Th({ col, label, className = '' }: { col: SortKey; label: string; className?: string }) {
-    return (
-      <th
-        className={`px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors ${className}`}
-        onClick={() => toggleSort(col)}
-      >
-        <span className="flex items-center gap-1">{label}<SortIcon col={col} sort={sort} /></span>
-      </th>
-    )
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -94,15 +96,18 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
 
       <div className="flex gap-3 flex-wrap">
         <input
+          type="search"
+          aria-label="Search clients"
           value={q}
           onChange={e => { setQ(e.target.value); setPage(0) }}
           placeholder="Search name, company, email…"
-          className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
+          className="flex-1 min-w-48 max-w-sm pl-3 pr-3 py-1.5 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         />
         <select
+          aria-label="Status"
           value={status}
           onChange={e => { setStatus(e.target.value); setPage(0) }}
-          className="text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none"
+          className="text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100"
         >
           <option value="">All statuses</option>
           {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
@@ -115,7 +120,7 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
           {filtered.length === 0 && (
             <div className="py-16 text-center">
               <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-              <p className="text-sm text-neutral-400 dark:text-neutral-500">
+              <p className="text-sm text-neutral-500 dark:text-neutral-400">
                 {q || status ? 'No clients match your filters.' : 'No clients yet.'}
               </p>
               {!q && !status && (
@@ -142,7 +147,7 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
               </div>
               <div className="flex items-center gap-2 ml-3 shrink-0">
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[c.status] ?? ''}`}>{c.status}</span>
-                <ChevronRight size={14} className="text-neutral-300 dark:text-neutral-600" />
+                <ChevronRight size={14} aria-hidden="true" className="text-neutral-400 dark:text-neutral-600" />
               </div>
             </Link>
           ))}
@@ -152,18 +157,13 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
         <table className="hidden sm:table w-full text-sm">
           <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
             <tr>
-              <Th col="name" label="Name" className="text-left" />
-              <Th col="company" label="Company" className="text-left" />
-              <Th col="country" label="Country" className="text-left" />
+              <Th col="name" label="Name" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="company" label="Company" sort={sort} onSort={toggleSort} className="text-left" />
+              <Th col="country" label="Country" sort={sort} onSort={toggleSort} className="text-left" />
               <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tax</th>
-              <Th col="status" label="Status" className="text-left" />
+              <Th col="status" label="Status" sort={sort} onSort={toggleSort} className="text-left" />
               <th className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400">Tags</th>
-              <th
-                className="text-left px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
-                onClick={() => toggleSort('last_invoiced')}
-              >
-                <span className="flex items-center gap-1">Last Invoice<SortIcon col="last_invoiced" sort={sort} /></span>
-              </th>
+              <Th col="last_invoiced" label="Last Invoice" sort={sort} onSort={toggleSort} className="text-left" />
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
@@ -171,7 +171,7 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
               <tr>
                 <td colSpan={7} className="px-4 py-16 text-center">
                   <Users size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
-                  <p className="text-sm text-neutral-400 dark:text-neutral-500">
+                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
                     {q || status ? 'No clients match your filters.' : 'No clients yet.'}
                   </p>
                   {!q && !status && (
@@ -209,12 +209,12 @@ export default function ClientList({ clients, lastInvoicedMap = {} }: { clients:
         </table>
       </div>
       <div className="flex items-center justify-between">
-        <p className="text-xs text-neutral-400 dark:text-neutral-500">{filtered.length} client{filtered.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{filtered.length} client{filtered.length !== 1 ? 's' : ''}</p>
         {filtered.length > PAGE_SIZE && (
           <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <button onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
+            <button type="button" onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Prev</button>
             <span>Page {page + 1} of {Math.ceil(filtered.length / PAGE_SIZE)}</span>
-            <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2 py-1 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
+            <button type="button" onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= filtered.length} className="px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">Next</button>
           </div>
         )}
       </div>

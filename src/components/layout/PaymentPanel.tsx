@@ -8,6 +8,8 @@ import { formatMoney, today, roundCents, skontoAmount, skontoDeadline } from '@/
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { Currency, PaymentKind } from '@/types'
 
 interface Payment {
@@ -47,9 +49,14 @@ export default function PaymentPanel({
     setPayments(initial)
   }
   const [payDate, setPayDate] = useState(today())
-  const [amount, setAmount] = useState('')
+  const [amount, setAmount] = useState<number | null>(null)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmOverpay, setConfirmOverpay] = useState(false)
+  const [pendingRemove, setPendingRemove] = useState<Payment | null>(null)
+  const [removing, setRemoving] = useState(false)
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [showBookamatPrompt, setShowBookamatPrompt] = useState(false)
   const [syncingBookamat, setSyncingBookamat] = useState(false)
   const [bookamatId, setBookamatId] = useState(bookamatBookingId ?? null)
@@ -102,16 +109,15 @@ export default function PaymentPanel({
     router.refresh()
   }
 
-  async function addPayment() {
+  async function addPayment(allowOverpayment = false) {
     if (!number) { toast.error('Issue the invoice before recording a payment.'); return }
     if (status === 'cancelled') { toast.error('This invoice is cancelled — record payments on the replacement invoice.'); return }
-    const amt = parseFloat(amount)
+    const amt = amount ?? 0
     if (!amt || amt <= 0) { toast.error('Enter a valid amount.'); return }
-    if (amt > balanceDue + 0.005 && !confirm(
-      `${formatMoney(amt, currency)} is more than the open balance of ${formatMoney(Math.max(balanceDue, 0), currency)}. Record the overpayment anyway?`
-    )) return
+    if (amt > balanceDue + 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
+    setConfirmOverpay(false)
     await recordRow({ date: payDate, amount: amt, note: note || null, kind: 'payment' })
-    setAmount('')
+    setAmount(null)
     setNote('')
   }
 
@@ -122,8 +128,9 @@ export default function PaymentPanel({
   }
 
   async function removePayment(id: string) {
+    setRemoving(true)
     const { error } = await supabase.from('payments').delete().eq('id', id)
-    if (error) { toast.error(error.message); return }
+    if (error) { toast.error(error.message); setRemoving(false); return }
     const next = payments.filter(p => p.id !== id)
     setPayments(next)
 
@@ -132,16 +139,21 @@ export default function PaymentPanel({
       await supabase.from('documents').update({ status: 'sent' }).eq('id', documentId)
     }
 
+    setRemoving(false)
+    setPendingRemove(null)
     router.refresh()
   }
 
   async function resetBookamatSync() {
+    setResetting(true)
     const { error } = await supabase
       .from('documents')
       .update({ bookamat_booking_id: null })
       .eq('id', documentId)
+    setResetting(false)
     if (error) { toast.error(error.message); return }
     setBookamatId(null)
+    setConfirmReset(false)
     toast.success('Sync reset — you can sync again after deleting the booking in Bookamat.')
   }
 
@@ -206,11 +218,11 @@ export default function PaymentPanel({
     setSyncingBookamat(false)
   }
 
-  const settleBtn = 'text-xs px-2.5 py-1 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300'
+  const settleBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300'
 
   return (
-    <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Payments</h2>
         <div className="text-sm text-neutral-500 dark:text-neutral-400">
           Balance: <span className={overpaid ? 'text-red-600 font-semibold' : fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
@@ -222,18 +234,20 @@ export default function PaymentPanel({
       {payments.length > 0 && (
         <div className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
           {payments.map(p => (
-            <div key={p.id} className="flex items-center py-2 gap-3">
-              <span className="text-neutral-400 dark:text-neutral-500 w-24 shrink-0">{p.date}</span>
+            <div key={p.id} className="flex items-center py-1 sm:py-2 gap-3">
+              <span className="text-neutral-500 dark:text-neutral-400 w-24 shrink-0">{p.date}</span>
               <span className="font-medium">{formatMoney(p.amount, currency)}</span>
               {KIND_LABEL[p.kind] && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{KIND_LABEL[p.kind]}</span>
               )}
-              {p.note && <span className="text-neutral-400 dark:text-neutral-500 flex-1 truncate">{p.note}</span>}
+              {p.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
               <button
-                onClick={() => removePayment(p.id)}
-                className="ml-auto text-neutral-300 hover:text-red-500 transition-colors"
+                type="button"
+                onClick={() => setPendingRemove(p)}
+                aria-label={`Remove payment of ${formatMoney(p.amount, currency)} from ${p.date}`}
+                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
-                <Trash2 size={13} />
+                <Trash2 size={14} />
               </button>
             </div>
           ))}
@@ -256,40 +270,40 @@ export default function PaymentPanel({
       )}
 
       {!fullyPaid && !number && (
-        <p className="text-xs text-neutral-400 dark:text-neutral-500 pt-1">Issue the invoice before recording payments.</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400 pt-1">Issue the invoice before recording payments.</p>
       )}
       {!fullyPaid && canRecord && (
         <div className="space-y-2 pt-1">
           <div className="flex gap-2">
             <Input
               type="date"
+              aria-label="Payment date"
               value={payDate}
               onChange={e => setPayDate(e.target.value)}
-              className="text-sm flex-1"
+              className="flex-1 min-w-0"
             />
-            <Input
-              type="number"
+            <MoneyInput
+              aria-label={`Amount (${currency})`}
               placeholder={`Amount (${currency})`}
               value={amount}
-              onChange={e => setAmount(e.target.value)}
-              className="text-sm flex-1"
-              step="0.01"
-              min="0"
+              onValueChange={setAmount}
+              className="flex-1 min-w-0"
             />
           </div>
           <div className="flex gap-2">
             <Input
+              aria-label="Note (optional)"
               placeholder="Note (optional)"
               value={note}
               onChange={e => setNote(e.target.value)}
-              className="text-sm flex-1"
+              className="flex-1 min-w-0"
             />
             <Button
               type="button"
-              onClick={addPayment}
+              onClick={() => addPayment()}
               disabled={saving}
               size="sm"
-              className="shrink-0 flex items-center gap-1.5"
+              className="shrink-0 flex items-center gap-1.5 h-8"
             >
               <Plus size={13} />
               {saving ? 'Saving…' : 'Add'}
@@ -300,7 +314,7 @@ export default function PaymentPanel({
 
       {/* Bookamat sync status */}
       {bookamatConfigured && (
-        <div className="flex items-center justify-between pt-2 border-t border-neutral-100 dark:border-neutral-800">
+        <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-neutral-100 dark:border-neutral-800">
           {bookamatId ? (
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
@@ -308,8 +322,8 @@ export default function PaymentPanel({
               </span>
               <button
                 type="button"
-                onClick={resetBookamatSync}
-                className="text-xs text-neutral-300 dark:text-neutral-600 hover:text-red-400 dark:hover:text-red-500 transition-colors"
+                onClick={() => setConfirmReset(true)}
+                className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 Reset sync
               </button>
@@ -318,46 +332,57 @@ export default function PaymentPanel({
             <button
               type="button"
               onClick={() => setShowBookamatPrompt(true)}
-              className="text-xs font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors flex items-center gap-1"
+              className="text-xs font-medium px-2 py-2 -mx-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors flex items-center gap-1"
             >
               Sync to Bookamat →
             </button>
           ) : (
-            <span className="text-xs text-neutral-400 dark:text-neutral-500">Sync to Bookamat becomes available once the invoice is fully paid</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">Sync to Bookamat becomes available once the invoice is fully paid</span>
           )}
         </div>
       )}
 
-      {/* Bookamat confirmation modal */}
-      {showBookamatPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 w-full max-w-sm space-y-4 shadow-xl">
-            <div>
-              <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">Sync to Bookamat?</h3>
-              <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-                This invoice is fully paid. Add it to your Bookamat bookkeeping?
-              </p>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setShowBookamatPrompt(false)}
-                className="text-sm px-4 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-              >
-                Skip
-              </button>
-              <button
-                type="button"
-                onClick={syncToBookamat}
-                disabled={syncingBookamat}
-                className="text-sm px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
-              >
-                {syncingBookamat ? 'Syncing…' : 'Sync to Bookamat'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirmOverpay}
+        title="Record an overpayment?"
+        description={`${formatMoney(amount ?? 0, currency)} is more than the open balance of ${formatMoney(Math.max(balanceDue, 0), currency)}.`}
+        confirmLabel="Record anyway"
+        busy={saving}
+        onConfirm={() => void addPayment(true)}
+        onCancel={() => setConfirmOverpay(false)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingRemove}
+        title="Remove this payment?"
+        description={pendingRemove ? `${formatMoney(pendingRemove.amount, currency)} from ${pendingRemove.date} is removed and the open balance goes back up.` : undefined}
+        confirmLabel={removing ? 'Removing…' : 'Remove'}
+        destructive
+        busy={removing}
+        onConfirm={() => { if (pendingRemove) void removePayment(pendingRemove.id) }}
+        onCancel={() => setPendingRemove(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmReset}
+        title="Reset the Bookamat sync?"
+        description="Only do this after deleting the booking in Bookamat; the invoice can then be synced again."
+        confirmLabel={resetting ? 'Resetting…' : 'Reset sync'}
+        busy={resetting}
+        onConfirm={resetBookamatSync}
+        onCancel={() => setConfirmReset(false)}
+      />
+
+      <ConfirmDialog
+        open={showBookamatPrompt}
+        title="Sync to Bookamat?"
+        description="This invoice is fully paid. Add it to your Bookamat bookkeeping?"
+        confirmLabel={syncingBookamat ? 'Syncing…' : 'Sync to Bookamat'}
+        cancelLabel="Skip"
+        busy={syncingBookamat}
+        onConfirm={syncToBookamat}
+        onCancel={() => setShowBookamatPrompt(false)}
+      />
     </div>
   )
 }

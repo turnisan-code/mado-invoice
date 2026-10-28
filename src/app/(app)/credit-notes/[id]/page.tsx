@@ -33,12 +33,12 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <Link href="/credit-notes" className="text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors shrink-0">
+          <Link href="/credit-notes" aria-label="Back to credit notes" className="h-11 w-11 -m-3.5 inline-flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors shrink-0">
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
-            {doc.issued_at && <p className="text-xs text-neutral-400 dark:text-neutral-500">Issued {formatDate(doc.issued_at)}</p>}
+            {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">Issued {formatDate(doc.issued_at)}</p>}
           </div>
           {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">Storno zu {reference.number}</span>}
         </div>

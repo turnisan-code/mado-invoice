@@ -54,17 +54,20 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
 
   if (sentAt) {
     const date = new Date(sentAt).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const shortDate = new Date(sentAt).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit' })
     return (
       <div className="flex items-center gap-2">
-        <span className="flex items-center gap-1.5 text-xs text-neutral-400 dark:text-neutral-500">
-          <BellRing size={13} />
+        <span className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          <BellRing size={13} aria-hidden="true" />
+          <span className="sm:hidden">Sent {shortDate}</span>
           <span className="hidden sm:inline">{reminderTitle(level, 'de')} sent {date}</span>
         </span>
         <button
+          type="button"
           onClick={sendReminder}
           disabled={sending}
           title={`Send ${nextTitle} (last reminder ${date})`}
-          className="text-xs text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors disabled:opacity-50"
+          className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors disabled:opacity-50"
         >
           {sending ? 'Sending…' : `Send ${nextTitle}`}
         </button>
@@ -74,12 +77,13 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
 
   return (
     <button
+      type="button"
       onClick={sendReminder}
       disabled={sending}
       className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
     >
-      <Bell size={14} />
-      <span className="hidden sm:inline">{sending ? 'Sending…' : `Send ${nextTitle}`}</span>
+      <Bell size={14} aria-hidden="true" />
+      <span className="sr-only sm:not-sr-only">{sending ? 'Sending…' : `Send ${nextTitle}`}</span>
     </button>
   )
 }
