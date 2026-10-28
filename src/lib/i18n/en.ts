@@ -746,7 +746,6 @@ export const en = {
     title: 'Share link',
     description: 'Anyone with this link can view the document and download the PDF. No login required.',
     urlLabel: 'Share link URL',
-    alsoDrive: 'Also save to Google Drive',
     revokeQuestion: 'Revoke this link? Anyone who has it loses access to the document.',
     keepLink: 'Keep link',
     revoking: 'Revoking…',
@@ -959,6 +958,9 @@ export const en = {
     footer: {
       vat: 'VAT amount',
       emptyLines: 'A line whose variables are all empty (e.g. the due date on a credit note) is left out.',
+    },
+    share: {
+      saveToDrive: 'Save to Google Drive',
     },
   },
   reminders: {

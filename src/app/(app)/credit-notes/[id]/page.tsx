@@ -54,7 +54,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           <DocumentStatusBar document={doc} display={settlement.settled ? 'settled' : undefined} />
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
-          {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
+          {doc.number && <ShareLinkButton document={doc} settings={publicSettings} />}
           <DuplicateDocumentButton docId={doc.id} docType="credit_note" backTo="/credit-notes" />
           <DeleteDocumentButton id={doc.id} backTo="/credit-notes" docNumber={doc.number} docType="credit_note" />
         </div>

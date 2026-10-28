@@ -54,7 +54,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <DocumentStatusBar document={doc} />
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
-          {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
+          {doc.number && <ShareLinkButton document={doc} settings={publicSettings} />}
           {invoice ? (
             <Link href={`/invoices/${invoice.id}`} title={t('lifecycle.convert.openInvoiceTitle')} className={`${buttonVariants({ variant: 'outline', size: 'sm' })} flex items-center gap-1.5`}>
               <FileText size={14} />

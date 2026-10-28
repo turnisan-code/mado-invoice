@@ -748,7 +748,6 @@ export const de = {
     title: 'Freigabelink',
     description: 'Jeder mit diesem Link kann den Beleg ansehen und das PDF herunterladen. Kein Login nötig.',
     urlLabel: 'Freigabelink-URL',
-    alsoDrive: 'Auch in Google Drive speichern',
     revokeQuestion: 'Diesen Link widerrufen? Wer ihn hat, verliert den Zugriff auf den Beleg.',
     keepLink: 'Link behalten',
     revoking: 'Widerrufen…',
@@ -961,6 +960,9 @@ export const de = {
     footer: {
       vat: 'USt.-Betrag',
       emptyLines: 'Eine Zeile, deren Variablen alle leer sind (z. B. das Fälligkeitsdatum auf einer Gutschrift), entfällt.',
+    },
+    share: {
+      saveToDrive: 'In Google Drive speichern',
     },
   },
   reminders: {

@@ -74,7 +74,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <DocumentStatusBar document={doc} />
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
-          {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
+          {doc.number && <ShareLinkButton document={doc} settings={publicSettings} />}
           {doc.number && doc.status !== 'cancelled' && <ConvertDocumentButton kind="credit_note" sourceId={doc.id} />}
           {doc.status !== 'cancelled' && !schedule && <MakeRecurringDialog invoiceId={doc.id} defaultName={recurringName} />}
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
