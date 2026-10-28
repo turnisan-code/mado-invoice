@@ -332,7 +332,7 @@ export default function SettingsForm({ settings }: Props) {
   const [driveDirty, setDriveDirty] = useState(false)
   const [bookamatUsername, setBookamatUsername] = useState(settings?.bookamat_username ?? '')
   const [bookamatApiKey, setBookamatApiKey] = useState('')
-  const [bookamatKeySaved, setBookamatKeySaved] = useState(!!settings?.bookamat_configured)
+  const [bookamatKeySaved, setBookamatKeySaved] = useState(!!settings?.bookamat_key_saved)
   const [bookamatCountry, setBookamatCountry] = useState(settings?.bookamat_country ?? 'at')
   const [bookamatBankId, setBookamatBankId] = useState<number | ''>(settings?.bookamat_bank_account_id ?? '')
   const [bookamatCashId, setBookamatCashId] = useState<number | ''>(settings?.bookamat_cash_account_id ?? '')

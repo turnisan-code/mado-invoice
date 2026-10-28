@@ -94,6 +94,15 @@ create table settings (
   bookamat_vat_account_10     integer,
   bookamat_vat_account_13     integer,
   bookamat_vat_account_20     integer,
+  -- Bookamat fiscal year the account ids above were chosen in (ids differ per year).
+  bookamat_accounts_year      integer,
+  -- Sync paid invoices and refunds to Bookamat in the daily cron.
+  bookamat_auto_sync          boolean not null default false,
+  -- Last failure talking to Bookamat / Google, shown in Settings until a test or sync succeeds.
+  bookamat_last_error         text,
+  bookamat_last_error_at      timestamptz,
+  google_last_error           text,
+  google_last_error_at        timestamptz,
   email_subject_invoice_de    text,
   email_body_invoice_de       text,
   email_subject_invoice_en    text,
@@ -263,7 +272,11 @@ create table documents (
   recurring_schedule_id uuid,
   -- Set only on a Storno credit note, so a plain credit note is never labelled as one.
   cancels_document_id uuid references documents(id),
+  -- Legacy single booking id (before bookamat_bookings); read only.
   bookamat_booking_id text,
+  -- Last Bookamat sync failure (null when the last sync worked) and the claim a running sync holds.
+  bookamat_error      text,
+  bookamat_claimed_at timestamptz,
   reminder_sent_at    timestamptz,
   -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung).
   reminder_level      integer not null default 0,
@@ -318,9 +331,10 @@ create table payments (
   -- 'payment' is money that arrived (the only kind the UVA and revenue figures count);
   -- 'skonto' and 'writeoff' close the remaining balance without a bank transfer; 'credit' is an
   -- issued credit note applied to the invoice it corrects; 'refund' is money paid back on a
-  -- credit note.
+  -- credit note; 'fee' is dunning fees and default interest paid on top of an invoice (money
+  -- received, but neither turnover nor part of the invoice balance).
   kind        text not null default 'payment'
-              constraint payments_kind_check check (kind in ('payment','skonto','writeoff','credit','refund')),
+              constraint payments_kind_check check (kind in ('payment','skonto','writeoff','credit','refund','fee')),
   -- How the money arrived; cash payments book on the Bookamat cash account.
   method      text not null default 'bank' check (method in ('bank','cash')),
   -- Statement transaction an imported payment came from; unique so a re-import skips it.
@@ -372,6 +386,23 @@ create table document_events (
 create index document_events_document_id_created_at_idx on document_events(document_id, created_at);
 create index document_events_unread_responses_idx
   on document_events(created_at) where type = 'portal_responded' and read_at is null;
+
+-- ─── Bookamat bookings ───────────────────────────────────────────────────────
+-- One booking per document, calendar year and kind: under Ist-Besteuerung money received in two
+-- years is booked in both fiscal years; a refund on a credit note books negative.
+create table bookamat_bookings (
+  id              uuid primary key default uuid_generate_v4(),
+  document_id     uuid not null references documents(id) on delete cascade,
+  year            integer not null check (year between 2000 and 2999),
+  booking_id      text not null,
+  amount          numeric(10,2) not null,
+  kind            text not null check (kind in ('income','refund')),
+  booked_on       date,
+  pdf_attached_at timestamptz,
+  created_at      timestamptz not null default now()
+);
+
+create unique index bookamat_bookings_document_year_kind_key on bookamat_bookings(document_id, year, kind);
 
 -- ─── Recurring schedules ─────────────────────────────────────────────────────
 -- A schedule points at a template invoice; every run copies it into a new invoice for the
@@ -911,6 +942,7 @@ alter table payments        enable row level security;
 alter table reminder_log    enable row level security;
 alter table document_events enable row level security;
 alter table recurring_schedules enable row level security;
+alter table bookamat_bookings enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on clients         for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -921,6 +953,7 @@ create policy "owner" on payments        for all to authenticated using (is_app_
 create policy "owner" on reminder_log    for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on document_events for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on recurring_schedules for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on bookamat_bookings for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Storage: issued documents ───────────────────────────────────────────────
 -- The PDF of every issued document is stored once in this private bucket (documents.pdf_path)

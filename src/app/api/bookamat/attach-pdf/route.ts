@@ -1,79 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { attachPdf, BOOKAMAT_SETTINGS_COLUMNS, recordBookamatError, type BookamatSettings } from '@/lib/bookamat'
+import { isBookamatConfigured } from '@/lib/public-settings'
+import { getIssuedPdf } from '@/lib/pdf/snapshot'
 
+export const maxDuration = 60
+
+// Attaches the frozen PDF to the document's existing Bookamat booking(s) again, without booking
+// anything: to the bookings that have no attachment yet, or to all of them when every one has.
+// Country, year and booking ids come from the database, never from the request.
 export async function POST(req: NextRequest) {
-  try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-    let payload: { bookingId?: unknown; pdfBase64?: unknown; filename?: unknown; country?: unknown; year?: unknown } | null
-    try {
-      payload = await req.json()
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-    }
+  const body = await readJsonObject(req)
+  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  if (!isUuid(body.documentId)) return NextResponse.json({ error: 'documentId is required' }, { status: 400 })
+  const documentId = body.documentId
 
-    const { bookingId, pdfBase64, filename, country, year } = payload ?? {}
-    if (typeof pdfBase64 !== 'string' || !pdfBase64 || typeof filename !== 'string' || !filename) {
-      return NextResponse.json({ error: 'pdfBase64 and filename are required' }, { status: 400 })
-    }
-    if (typeof country !== 'string' || !/^[a-z]{2}$/.test(country)) {
-      return NextResponse.json({ error: 'Invalid country' }, { status: 400 })
-    }
-    if (!/^\d{4}$/.test(String(year))) {
-      return NextResponse.json({ error: 'Invalid year' }, { status: 400 })
-    }
-    const booking = Number(bookingId)
-    if (!Number.isInteger(booking)) {
-      return NextResponse.json({ error: 'Invalid bookingId' }, { status: 400 })
-    }
+  const [{ data: settingsRow, error: settingsErr }, { data: bookings, error: bookingsErr }] = await Promise.all([
+    supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single(),
+    supabase.from('bookamat_bookings').select('year, booking_id, pdf_attached_at').eq('document_id', documentId).order('year'),
+  ])
+  if (settingsErr || !settingsRow) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
+  if (bookingsErr) return NextResponse.json({ error: bookingsErr.message }, { status: 500 })
+  const settings = settingsRow as unknown as BookamatSettings
+  if (!isBookamatConfigured(settings)) return NextResponse.json({ error: 'Bookamat is not fully configured', code: 'not_configured' }, { status: 400 })
+  if (!bookings?.length) return NextResponse.json({ error: 'This document has no Bookamat booking yet — sync it first', code: 'not_synced' }, { status: 400 })
 
-    const { data: settings } = await supabase
-      .from('settings')
-      .select('bookamat_username, bookamat_api_key')
-      .single()
-
-    if (!settings?.bookamat_username || !settings?.bookamat_api_key) {
-      return NextResponse.json({ error: 'Bookamat not configured' }, { status: 400 })
-    }
-
-    const authHeader = `ApiKey ${settings.bookamat_username}:${settings.bookamat_api_key}`
-    const baseUrl = `https://www.bookamat.com/api/v1/${country}/${year}/`
-
-    // Strip data URL prefix — keep raw base64 string (Bookamat expects base64 JSON, not multipart)
-    const base64Data = pdfBase64.replace(/^data:[^;]+;base64,/, '')
-
-    // Bookamat: POST /bookings/attachments/ with JSON { booking, name, file }
-    // See: bookamat.com/dokumentation/api/v1/attachments_bookings.html
-    const url = `${baseUrl}bookings/attachments/`
-    const safeName = filename.replace(/"/g, '').slice(0, 50)
-    console.log('[bookamat/attach-pdf] POST', url, 'name:', safeName, 'base64 len:', base64Data.length)
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        booking,
-        name: safeName,
-        file: base64Data,
-      }),
-    })
-
-    const text = await res.text()
-    console.log(`[bookamat/attach-pdf] ${res.status}:`, text.slice(0, 500))
-
-    if (!res.ok) {
-      return NextResponse.json({ error: `Bookamat ${res.status}: ${text}` }, { status: 500 })
-    }
-
-    return NextResponse.json({ ok: true })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.log('[bookamat/attach-pdf] crash:', message)
-    return NextResponse.json({ error: message }, { status: 500 })
+  const missing = bookings.filter(b => !b.pdf_attached_at)
+  const targets = missing.length ? missing : bookings
+  const result = await attachPdf(supabase, settings, documentId, targets, async id => getIssuedPdf(supabase, id, 'on_demand'))
+  if (!result.attached) {
+    await recordBookamatError(supabase, settings.id, null, result.error)
+    return NextResponse.json({ error: result.error ?? 'PDF not attached' }, { status: 502 })
   }
+  return NextResponse.json({ ok: true, attached: result.attached, failed: targets.length - result.attached, error: result.error })
 }

@@ -10,8 +10,9 @@ export type VatRate = 0 | 10 | 13 | 20
 export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
 export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
 // 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer;
-// 'credit' is an issued credit note applied to its invoice; 'refund' is money paid back on a credit note.
-export type PaymentKind = 'payment' | 'skonto' | 'writeoff' | 'credit' | 'refund'
+// 'credit' is an issued credit note applied to its invoice; 'refund' is money paid back on a credit note;
+// 'fee' is dunning fees and interest paid on top of an invoice (money, but no turnover and no balance).
+export type PaymentKind = 'payment' | 'skonto' | 'writeoff' | 'credit' | 'refund' | 'fee'
 export type PaymentMethod = 'bank' | 'cash'
 // Issuer details every issued document needs; one entry per Settings field group.
 export type IssuerField = 'companyName' | 'address' | 'uid' | 'iban'
@@ -93,6 +94,12 @@ export interface Settings {
   bookamat_vat_account_10: number | null
   bookamat_vat_account_13: number | null
   bookamat_vat_account_20: number | null
+  bookamat_accounts_year: number | null
+  bookamat_auto_sync: boolean
+  bookamat_last_error: string | null
+  bookamat_last_error_at: string | null
+  google_last_error: string | null
+  google_last_error_at: string | null
   email_subject_invoice_de: string | null
   email_body_invoice_de: string | null
   email_subject_invoice_en: string | null
@@ -199,6 +206,8 @@ export interface Document {
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
   bookamat_booking_id?: string | null
+  bookamat_error?: string | null
+  bookamat_claimed_at?: string | null
   reminder_sent_at?: string | null
   reminder_level?: number
   skonto_percent?: number | null
@@ -251,6 +260,25 @@ export type PaymentState = 'nothing_due' | 'unpaid' | 'partially_paid' | 'paid' 
 
 // A status as shown: the stored status, or a state derived from payments or dates.
 export type DisplayStatus = DocumentStatus | 'partially_paid' | 'written_off' | 'settled' | 'expired'
+
+// One Bookamat booking: money received on an invoice ('income') or paid back on a credit note
+// ('refund', negative), per calendar year.
+export type BookamatBookingKind = 'income' | 'refund'
+
+export interface BookamatBooking {
+  id: string
+  document_id: string
+  year: number
+  booking_id: string
+  amount: number
+  kind: BookamatBookingKind
+  booked_on: string | null
+  pdf_attached_at: string | null
+  created_at: string
+}
+
+// A document's Bookamat state as lists show it; 'none' when there is nothing to book (yet).
+export type BookamatState = 'synced' | 'unsynced' | 'failed' | 'none'
 
 export interface ReminderLogEntry {
   id: string
