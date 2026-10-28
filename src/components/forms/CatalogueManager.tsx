@@ -20,6 +20,7 @@ interface AddingState { category: string | null }
 type Draft = Partial<CatalogueItem>
 type PendingDelete = { kind: 'item'; id: string } | { kind: 'category'; cat: string; count: number }
 
+const areaCls = 'w-full min-h-16 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 field-sizing-content resize-none'
 const fieldCls = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
 const iconBtn = 'h-10 w-10 sm:h-7 sm:w-7 flex items-center justify-center rounded-md transition-colors'
 
@@ -29,6 +30,19 @@ function draftNames(d: Draft): { name_de: string; name_en: string } | null {
   const en = (d.name_en ?? '').trim()
   if (!de && !en) return null
   return { name_de: de || en, name_en: en || de }
+}
+
+// The columns a user edits; id, active and sort_order are never written back from a draft.
+function editableFields(d: Draft, names: { name_de: string; name_en: string }) {
+  return {
+    ...names,
+    description_de: (d.description_de ?? '').trim() || null,
+    description_en: (d.description_en ?? '').trim() || null,
+    default_price: Number(d.default_price) || 0,
+    unit: d.unit ?? 'flat',
+    vat_rate: d.vat_rate ?? 20,
+    category: (d.category ?? '').trim() || null,
+  }
 }
 
 // Module level on purpose: a component declared inside CatalogueManager would be a new type on
@@ -46,7 +60,11 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
   const { t } = useT()
   const price = typeof d.default_price === 'number' && !isNaN(d.default_price) ? d.default_price : 0
   return (
-    <div className="px-4 py-4 bg-neutral-50 dark:bg-neutral-800/60 border-t border-neutral-100 dark:border-neutral-800">
+    <form
+      onSubmit={e => { e.preventDefault(); onSave() }}
+      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); onCancel() } }}
+      className="px-4 py-4 bg-neutral-50 dark:bg-neutral-800/60 border-t border-neutral-100 dark:border-neutral-800"
+    >
       <datalist id={CAT_DATALIST_ID}>{categories.map(c => <option key={c} value={c} />)}</datalist>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
         <div className="space-y-1">
@@ -74,16 +92,26 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
           <input id={`${id}-section`} value={(d.category as string) ?? ''} onChange={e => setD(p => ({ ...p, category: e.target.value || null }))} list={CAT_DATALIST_ID} placeholder={t('catalogue.sectionPlaceholder')} className={fieldCls} />
         </div>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mb-4">
+        <div className="space-y-1">
+          <label htmlFor={`${id}-desc-de`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('clientData.catalogue.descriptionDe')}</label>
+          <textarea id={`${id}-desc-de`} rows={3} value={d.description_de ?? ''} onChange={e => setD(p => ({ ...p, description_de: e.target.value }))} placeholder={t('clientData.catalogue.descriptionPlaceholder')} className={areaCls} />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor={`${id}-desc-en`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('clientData.catalogue.descriptionEn')}</label>
+          <textarea id={`${id}-desc-en`} rows={3} value={d.description_en ?? ''} onChange={e => setD(p => ({ ...p, description_en: e.target.value }))} placeholder={t('clientData.catalogue.descriptionPlaceholder')} className={areaCls} />
+        </div>
+      </div>
       {error && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>}
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onSave} className="h-8 px-4 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
+        <button type="submit" className="h-8 px-4 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
           {t('common.save')}
         </button>
         <button type="button" onClick={onCancel} className="h-8 px-3 rounded-lg text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
           {t('common.cancel')}
         </button>
       </div>
-    </div>
+    </form>
   )
 }
 
@@ -117,8 +145,10 @@ export default function CatalogueManager({ initialItems }: Props) {
   const hiddenCount = items.filter(i => !i.active).length
   const isVisible = (i: CatalogueItem) =>
     (showHidden || i.active) &&
-    (!query || [i.name_de, i.name_en, i.category ?? ''].some(s => s.toLowerCase().includes(query)))
+    (!query || [i.name_de, i.name_en, i.description_de ?? '', i.description_en ?? '', i.category ?? ''].some(s => s.toLowerCase().includes(query)))
   const anyVisible = items.some(isVisible)
+  // The uncategorised group carries its own "Add item" row; without it (e.g. an empty catalogue) offer one below.
+  const showGlobalAdd = adding === null && !items.some(i => i.category == null && isVisible(i))
 
   function startEdit(item: CatalogueItem) {
     setAdding(null)
@@ -140,10 +170,10 @@ export default function CatalogueManager({ initialItems }: Props) {
     if (!editingId) return
     const names = draftNames(draft)
     if (!names) { setFormError(t('catalogue.nameRequired')); return }
-    const payload = { ...draft, ...names, default_price: Number(draft.default_price) || 0 }
+    const payload = editableFields(draft, names)
     const { error } = await supabase.from('catalogue_items').update(payload).eq('id', editingId)
     if (error) { toast.error(error.message); return }
-    setItems(items.map(i => i.id === editingId ? { ...i, ...payload } as CatalogueItem : i))
+    setItems(items.map(i => i.id === editingId ? { ...i, ...payload } : i))
     setEditingId(null)
     setFormError(null)
   }
@@ -162,7 +192,7 @@ export default function CatalogueManager({ initialItems }: Props) {
 
   async function duplicateItem(item: CatalogueItem) {
     const suffix = t('catalogue.copySuffix')
-    const payload = { name_de: item.name_de + suffix, name_en: item.name_en + suffix, default_price: item.default_price, unit: item.unit, vat_rate: item.vat_rate, category: item.category, sort_order: items.length * 10, active: item.active }
+    const payload = { name_de: item.name_de + suffix, name_en: item.name_en + suffix, description_de: item.description_de, description_en: item.description_en, default_price: item.default_price, unit: item.unit, vat_rate: item.vat_rate, category: item.category, sort_order: items.length * 10, active: item.active }
     const { data, error } = await supabase.from('catalogue_items').insert(payload).select().single()
     if (error) { toast.error(error.message); return }
     setItems([...items, data])
@@ -172,7 +202,7 @@ export default function CatalogueManager({ initialItems }: Props) {
   async function addItem() {
     const names = draftNames(addDraft)
     if (!names) { setFormError(t('catalogue.nameRequired')); return }
-    const payload = { ...names, default_price: Number(addDraft.default_price) || 0, unit: addDraft.unit ?? 'flat', vat_rate: addDraft.vat_rate ?? 20, category: addDraft.category || null, sort_order: items.length * 10, active: true }
+    const payload = { ...editableFields(addDraft, names), sort_order: items.length * 10, active: true }
     const { data, error } = await supabase.from('catalogue_items').insert(payload).select().single()
     if (error) { toast.error(error.message); return }
     setItems([...items, data])
@@ -200,8 +230,8 @@ export default function CatalogueManager({ initialItems }: Props) {
     const withOrder = next.map((item, idx) => ({ ...item, sort_order: idx * 10 }))
     const previous = items
     setItems(withOrder)
-    // One statement for the whole order, so a failure leaves the database as it was.
-    const { error } = await supabase.from('catalogue_items').upsert(withOrder)
+    // One statement that writes only sort_order, so a failure leaves the database as it was.
+    const { error } = await supabase.rpc('reorder_catalogue_items', { p_ids: withOrder.map(i => i.id) })
     if (error) { setItems(previous); toast.error(t('catalogue.orderFailed', { error: error.message })) }
   }
 
@@ -366,6 +396,9 @@ export default function CatalogueManager({ initialItems }: Props) {
                       {item.name_en && item.name_en !== item.name_de && (
                         <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate mt-0.5 leading-snug">{item.name_en}</p>
                       )}
+                      {(item.description_de || item.description_en) && (
+                        <p className="text-xs text-neutral-400 dark:text-neutral-500 line-clamp-1 mt-0.5 leading-snug">{item.description_de || item.description_en}</p>
+                      )}
                     </div>
 
                     {/* Price + meta */}
@@ -430,6 +463,17 @@ export default function CatalogueManager({ initialItems }: Props) {
           </div>
         )
       })}
+
+      {showGlobalAdd && (
+        <button
+          type="button"
+          onClick={() => startAdd(null)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800/40 border border-dashed border-neutral-200 dark:border-neutral-800 transition-colors"
+        >
+          <Plus size={13} />
+          <span>{t('catalogue.addItem')}</span>
+        </button>
+      )}
 
       {/* New section / global controls */}
       <div className="pt-1 flex items-center gap-4">
