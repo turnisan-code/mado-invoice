@@ -23,7 +23,8 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   if (!before) throw new Error('Document not found')
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
-  if (error) throw new Error(error.message)
+  // The code (MI001–MI003, MI010–MI018) lets callers word the failure in the UI language.
+  if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
 
   const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }

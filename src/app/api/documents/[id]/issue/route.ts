@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { issueDocument } from '@/lib/pdf/issue'
+import { asDbError, lifecycleErrorMessage } from '@/lib/status'
+import { getT } from '@/lib/i18n/server'
 
 export const maxDuration = 60
 
@@ -15,6 +17,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   try {
     return NextResponse.json(await issueDocument(supabase, id))
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Issuing failed' }, { status: 400 })
+    const { t } = await getT()
+    const dbError = asDbError(err)
+    return NextResponse.json({ error: lifecycleErrorMessage(dbError, t), code: dbError.code }, { status: 400 })
   }
 }

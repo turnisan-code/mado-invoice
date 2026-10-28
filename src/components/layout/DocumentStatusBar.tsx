@@ -1,32 +1,23 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useId, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { StatusBadge } from '@/components/lists/StatusBadge'
+import { inputClass } from '@/components/lists/ListParts'
 import { toastApiError } from '@/lib/google/toast'
 import { logEvent } from '@/lib/events'
 import { flushPendingEdits } from '@/lib/issued-pdf'
+import { calcTotals, today } from '@/lib/utils/document'
+import { displayStatus, lifecycleErrorMessage, statusLabelKey, statusMenuTargets } from '@/lib/status'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
-
-const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
-const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
-const CREDIT_NOTE_STATUSES = ['draft', 'sent', 'cancelled'] as const
+import type { DisplayStatus, DocumentStatus, DocumentType, PaymentKind, PaymentMethod } from '@/types'
 
 const DESTRUCTIVE = new Set(['cancelled', 'rejected'])
-
-const statusColor: Record<string, string> = {
-  draft:     'text-neutral-500 bg-neutral-100 border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-400',
-  sent:      'text-blue-700 bg-blue-50 border-blue-200 dark:bg-blue-950 dark:border-blue-800 dark:text-blue-300',
-  paid:      'text-green-700 bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800 dark:text-green-300',
-  overdue:   'text-red-700 bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800 dark:text-red-300',
-  accepted:  'text-green-700 bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800 dark:text-green-300',
-  rejected:  'text-red-700 bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800 dark:text-red-300',
-  cancelled: 'text-neutral-500 bg-neutral-50 border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-400',
-}
 
 const itemColor: Record<string, string> = {
   paid:      'text-green-700 dark:text-green-400',
@@ -36,30 +27,62 @@ const itemColor: Record<string, string> = {
   cancelled: 'text-neutral-500 dark:text-neutral-400',
 }
 
+type CalcItems = Parameters<typeof calcTotals>[0]
+
 interface Props {
-  document: { id: string; status: string; type: string; number: string | null }
+  document: {
+    id: string
+    status: string
+    type: string
+    number: string | null
+    due_date?: string | null
+    tax_treatment?: string | null
+    discount_type?: string | null
+    discount_value?: number | null
+    document_items?: CalcItems | null
+    payments?: { amount: number; kind?: PaymentKind | string | null }[] | null
+  }
+  /** A state the page derived itself (a settled credit note); otherwise derived here. */
+  display?: DisplayStatus
 }
 
-export default function DocumentStatusBar({ document: doc }: Props) {
+export default function DocumentStatusBar({ document: doc, display }: Props) {
   const [status, setStatus] = useState(doc.status)
   const [seenStatus, setSeenStatus] = useState(doc.status)
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [paidDate, setPaidDate] = useState('')
+  const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
+  const [paidDateInvalid, setPaidDateInvalid] = useState(false)
   const busyRef = useRef(false)
   const ref = useRef<HTMLDivElement>(null)
+  const uid = useId()
   const router = useRouter()
   const supabase = createClient()
   const { t } = useT()
-  const allStatuses: readonly string[] = doc.type === 'quote' ? QUOTE_STATUSES : doc.type === 'credit_note' ? CREDIT_NOTE_STATUSES : INVOICE_STATUSES
-  // An issued document keeps its number: it can be cancelled, never un-issued.
-  const statuses = allStatuses.filter(s => !(doc.number && s === 'draft'))
-  const statusLabel = (s: string) => t(`status.${s}` as DictKey)
+  const type = doc.type as DocumentType
+  const todayStr = today()
+  const targets = statusMenuTargets({ type, status: status as DocumentStatus })
+  const statusLabel = (s: string) => t(statusLabelKey(s))
 
   if (doc.status !== seenStatus) {
     setSeenStatus(doc.status)
     setStatus(doc.status)
   }
+
+  const shown: DisplayStatus = status !== doc.status ? status as DocumentStatus : display ?? displayStatus({
+    type,
+    status,
+    due_date: doc.due_date ?? null,
+    total: doc.document_items ? calcTotals(
+      doc.document_items,
+      [],
+      doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
+      doc.tax_treatment,
+    ).total : undefined,
+    payments: doc.payments ?? undefined,
+  }, todayStr)
 
   useEffect(() => {
     if (!open) return
@@ -72,28 +95,38 @@ export default function DocumentStatusBar({ document: doc }: Props) {
 
   // Every status beyond draft/cancelled means the document has been issued, which requires a number.
   const needsNumber = (s: string) => !doc.number && s !== 'draft' && s !== 'cancelled'
-  // "Paid" on an invoice goes through the server, which records the open balance as a payment.
-  const recordsPayment = (s: string) => s === 'paid' && doc.type === 'invoice' && doc.status !== 'paid'
+  // "Paid" on an invoice goes through the server, which records the open balance as a payment
+  // on the date and by the method confirmed here.
+  const recordsPayment = (s: string) => s === 'paid' && type === 'invoice'
   // An issued invoice is cancelled with a Storno document, never by just flipping the status.
-  const createsStorno = (s: string) => s === 'cancelled' && doc.type === 'invoice' && !!doc.number
+  const createsStorno = (s: string) => s === 'cancelled' && type === 'invoice' && !!doc.number
 
-  async function changeStatus(newStatus: string) {
-    if (newStatus === status) { setOpen(false); return }
+  function changeStatus(newStatus: string) {
+    setOpen(false)
+    if (newStatus === status) return
     if (DESTRUCTIVE.has(newStatus) || needsNumber(newStatus) || recordsPayment(newStatus)) {
+      if (recordsPayment(newStatus)) {
+        setPaidDate(todayStr)
+        setPaidMethod('bank')
+        setPaidDateInvalid(false)
+      }
       setConfirm(newStatus)
-      setOpen(false)
       return
     }
-    await applyStatus(newStatus)
+    void applyStatus(newStatus)
   }
 
   async function applyStatus(newStatus: string) {
     if (busyRef.current) return
+    if (recordsPayment(newStatus) && (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate) || paidDate > todayStr)) {
+      setPaidDateInvalid(true)
+      return
+    }
     busyRef.current = true
     setBusy(true)
     try {
       // Issuing renders the frozen PDF from the database, so the builder's pending edits go first.
-      if (needsNumber(newStatus) || (recordsPayment(newStatus) && !doc.number)) await flushPendingEdits(doc.id)
+      if (needsNumber(newStatus)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',
@@ -102,8 +135,10 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok) { toast.error(data.error ?? t('statusBar.stornoFailed')); return }
+        if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
+        if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
         setConfirm(null)
-        toast.success(t('statusBar.invoiceCancelled'))
+        toast.success(t('statusBar.invoiceCancelled', { number: data.number ?? '' }))
         router.push(`/credit-notes/${data.creditNoteId}`)
         return
       }
@@ -111,12 +146,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         const res = await fetch('/api/invoices/bulk', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: [doc.id], status: 'paid' }),
+          body: JSON.stringify({ ids: [doc.id], status: 'paid', paidDate, method: paidMethod }),
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
-        await logEvent(supabase, doc.id, 'status_changed', { from: status, to: newStatus })
       } else {
         // Issuing (number, archive copy, Drive) runs on the server and moves a draft to 'sent'.
         let from = status
@@ -130,12 +164,11 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         }
         if (newStatus !== from) {
           const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-          if (error) { toast.error(error.message); return }
+          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
           await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
         }
       }
       setStatus(newStatus)
-      setOpen(false)
       setConfirm(null)
       router.refresh()
       toast.success(recordsPayment(newStatus) ? t('statusBar.markedPaid') : t('statusBar.statusUpdated', { status: statusLabel(newStatus) }))
@@ -148,11 +181,14 @@ export default function DocumentStatusBar({ document: doc }: Props) {
   const confirmText = (s: string) => {
     if (createsStorno(s)) return t('statusBar.confirmStorno', { number: doc.number ?? '' })
     const parts: string[] = []
-    if (needsNumber(s)) parts.push(t('statusBar.confirmNumber', { number: t(`docTypeNumber.${doc.type}` as DictKey), status: statusLabel(s) }))
+    if (needsNumber(s)) parts.push(t('statusBar.confirmNumber', { number: t(`docTypeNumber.${type}` as DictKey), status: statusLabel(s) }))
     if (recordsPayment(s)) parts.push(t('statusBar.confirmPayment'))
     if (DESTRUCTIVE.has(s)) parts.push(t('statusBar.confirmDestructive'))
     return parts.join(' ')
   }
+
+  // Cancelled documents and issued credit notes have nowhere to go: the badge is just a label.
+  if (!targets.length) return <StatusBadge status={shown} label={statusLabel(shown)} className="shrink-0" />
 
   return (
     <div className="relative" ref={ref} onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false) } }}>
@@ -161,16 +197,16 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         onClick={() => setOpen(o => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={t('statusBar.statusAria', { status: statusLabel(status) })}
-        className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${statusColor[status] ?? ''}`}
+        aria-label={t('statusBar.statusAria', { status: statusLabel(shown) })}
+        className="flex items-center gap-0.5 rounded-full py-1 -my-1 text-neutral-500 dark:text-neutral-400"
       >
-        {statusLabel(status)}
-        <ChevronDown size={11} className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+        <StatusBadge status={shown} label={statusLabel(shown)} />
+        <ChevronDown size={12} aria-hidden="true" className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
         <div role="menu" aria-label={t('statusBar.changeStatus')} className="absolute top-full left-0 mt-1.5 z-10 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg py-1 min-w-36 overflow-hidden">
-          {statuses.map(s => (
+          {[status, ...targets].map(s => (
             <button
               key={s}
               type="button"
@@ -190,14 +226,41 @@ export default function DocumentStatusBar({ document: doc }: Props) {
 
       <ConfirmDialog
         open={!!confirm}
-        title={confirm ? t('statusBar.markAsTitle', { status: statusLabel(confirm) }) : ''}
+        title={confirm ? (createsStorno(confirm) ? t('lifecycle.stornoTitle', { number: doc.number ?? '' }) : t('statusBar.markAsTitle', { status: statusLabel(confirm) })) : ''}
         description={confirm ? confirmText(confirm) : undefined}
         confirmLabel={busy ? t('common.working') : t('common.confirm')}
         destructive={!!confirm && DESTRUCTIVE.has(confirm)}
         busy={busy}
         onConfirm={() => { if (confirm) void applyStatus(confirm) }}
         onCancel={() => setConfirm(null)}
-      />
+      >
+        {confirm && recordsPayment(confirm) && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-paid-date`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentDate')}</label>
+              <input
+                id={`${uid}-paid-date`}
+                type="date"
+                value={paidDate}
+                max={todayStr}
+                required
+                aria-invalid={paidDateInvalid || undefined}
+                aria-describedby={paidDateInvalid ? `${uid}-paid-date-error` : undefined}
+                onChange={e => { setPaidDate(e.target.value); setPaidDateInvalid(false) }}
+                className={`w-full ${inputClass} ${paidDateInvalid ? 'border-red-500 dark:border-red-500' : ''}`}
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-paid-method`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentMethod')}</label>
+              <select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)} className={`w-full ${inputClass}`}>
+                <option value="bank">{t('payments.methodBank')}</option>
+                <option value="cash">{t('payments.methodCash')}</option>
+              </select>
+            </div>
+            {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   )
 }
