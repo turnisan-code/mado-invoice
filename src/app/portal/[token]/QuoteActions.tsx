@@ -37,7 +37,8 @@ export default function QuoteActions({ token, lang }: { token: string; lang: 'de
       // The quote expired while the page was open: the server's message names the date.
       const data = await res.json().catch(() => ({}))
       const expired = data.code === 'expired' && typeof data.error === 'string'
-      setError({ message: expired ? data.error : makeT(lang)('lifecycle.portal.respondFailed'), final: expired })
+      const docT = makeT(lang)
+      setError({ message: expired ? `${data.error} ${docT('lifecycle.portal.expiredHint')}` : docT('lifecycle.portal.respondFailed'), final: expired })
       setStatus('idle')
     } catch {
       setError({ message: makeT(lang)('lifecycle.portal.respondFailed'), final: false })

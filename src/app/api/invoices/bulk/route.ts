@@ -55,7 +55,7 @@ export async function PATCH(req: Request) {
   for (const d of invoices.filter(d => !d.number || d.status === 'draft')) {
     try {
       await issueDocument(supabase, d.id)
-      d.status = 'sent'
+      if (d.status === 'draft') d.status = 'sent'
     } catch (err) {
       return NextResponse.json({ error: lifecycleErrorMessage(asDbError(err), t) }, { status: 500 })
     }
