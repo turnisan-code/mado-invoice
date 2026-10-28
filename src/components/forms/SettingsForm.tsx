@@ -12,8 +12,9 @@ import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { isValidBic, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
-import { formatDate } from '@/lib/utils/document'
+import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
+import { formatDate, viennaDate } from '@/lib/utils/document'
+import { NUMBER_TOKENS, formatDocumentNumber, hasYearToken, nextCounter, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
 import type { TaxTreatment, Unit, VatRate } from '@/types'
 
 interface Props { settings: PublicSettings | null }
@@ -32,6 +33,12 @@ const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 const TAX_TREATMENTS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
 
 type CounterKey = 'next_invoice_number' | 'next_quote_number' | 'next_credit_note_number'
+
+const NUMBER_ROWS = [
+  { labelKey: 'settings.numbering.invoice',    prefixKey: 'invoice_prefix',     fmtKey: 'invoice_number_format',     numKey: 'next_invoice_number',     resetKey: 'invoice_number_reset_yearly',     yearKey: 'invoice_counter_year' },
+  { labelKey: 'settings.numbering.quote',      prefixKey: 'quote_prefix',       fmtKey: 'quote_number_format',       numKey: 'next_quote_number',       resetKey: 'quote_number_reset_yearly',       yearKey: 'quote_counter_year' },
+  { labelKey: 'settings.numbering.creditNote', prefixKey: 'credit_note_prefix', fmtKey: 'credit_note_number_format', numKey: 'next_credit_note_number', resetKey: 'credit_note_number_reset_yearly', yearKey: 'credit_note_counter_year' },
+] as const
 
 // Whole days 0–365, or null when the input is not one.
 function parseDays(value: string): number | null {
@@ -223,7 +230,7 @@ export default function SettingsForm({ settings }: Props) {
     country:       settings?.country ?? 'Austria',
     uid_number:    settings?.uid_number ?? '',
   })
-  const [contactErrors, setContactErrors] = useState<{ uid_number?: string }>({})
+  const [contactErrors, setContactErrors] = useState<{ uid_number?: string; email?: string }>({})
 
   // ── Banking state ────────────────────────────────────────────────────────────
   const [banking, setBanking] = useState({
@@ -238,16 +245,35 @@ export default function SettingsForm({ settings }: Props) {
     invoice_prefix:              settings?.invoice_prefix ?? 'R',
     quote_prefix:                settings?.quote_prefix ?? 'A',
     credit_note_prefix:          settings?.credit_note_prefix ?? 'G',
-    next_invoice_number:         String(settings?.next_invoice_number ?? 1),
-    next_quote_number:           String(settings?.next_quote_number ?? 1),
-    next_credit_note_number:     String(settings?.next_credit_note_number ?? 1),
+    next_invoice_number:         (settings?.next_invoice_number ?? 1) as number | null,
+    next_quote_number:           (settings?.next_quote_number ?? 1) as number | null,
+    next_credit_note_number:     (settings?.next_credit_note_number ?? 1) as number | null,
     invoice_number_format:       settings?.invoice_number_format ?? '{prefix}-{YYYY}-{NNN}',
     quote_number_format:         settings?.quote_number_format ?? '{prefix}-{YYYY}-{NNN}',
     credit_note_number_format:   settings?.credit_note_number_format ?? '{prefix}-{YYYY}-{NNN}',
+    invoice_number_reset_yearly:     settings?.invoice_number_reset_yearly ?? false,
+    quote_number_reset_yearly:       settings?.quote_number_reset_yearly ?? false,
+    credit_note_number_reset_yearly: settings?.credit_note_number_reset_yearly ?? false,
+    invoice_counter_year:            settings?.invoice_counter_year ?? null,
+    quote_counter_year:              settings?.quote_counter_year ?? null,
+    credit_note_counter_year:        settings?.credit_note_counter_year ?? null,
   })
   // Only counters the user edited are written back, so a save never rolls back a number issued since page load.
-  const editedCounters = useRef(new Set<CounterKey>())
-  const [docsErrors, setDocsErrors] = useState<Partial<Record<CounterKey, string>>>({})
+  const [editedCounters, setEditedCounters] = useState<ReadonlySet<CounterKey>>(() => new Set())
+  const [docsErrors, setDocsErrors] = useState<Partial<Record<string, string>>>({})
+  // Numbers are previewed with today's date in Vienna, the date the next document most likely carries.
+  const [todayIso] = useState(() => viennaDate(new Date()))
+  const thisYear = Number(todayIso.slice(0, 4))
+
+  // A counter typed in while the yearly restart is on and the series is still last year's starts
+  // this year's series; otherwise the restart would set it straight back to 1.
+  function startsThisYearsSeries(row: (typeof NUMBER_ROWS)[number], resetYearly: boolean): boolean {
+    const cy = docs[row.yearKey]
+    return editedCounters.has(row.numKey) && resetYearly && cy !== null && cy < thisYear
+  }
+  function counterYear(row: (typeof NUMBER_ROWS)[number]): number | null {
+    return startsThisYearsSeries(row, docs[row.resetKey] && hasYearToken(docs[row.fmtKey])) ? thisYear : docs[row.yearKey]
+  }
 
   // ── Defaults state ───────────────────────────────────────────────────────────
   const [defaults, setDefaults] = useState({
@@ -406,11 +432,14 @@ export default function SettingsForm({ settings }: Props) {
   async function saveContact() {
     if (!settings) return
     const uid = normalizeVatId(contact.uid_number)
-    if (uid && !isValidVatId(uid)) { setContactErrors({ uid_number: t('settings.address.uidError') }); return }
-    setContactErrors({})
+    const errors: { uid_number?: string; email?: string } = {}
+    if (uid && !isValidVatId(uid)) errors.uid_number = t('settings.address.uidError')
+    if (contact.email.trim() && !isValidEmail(contact.email)) errors.email = t('clientData.address.emailInvalid')
+    setContactErrors(errors)
+    if (errors.uid_number || errors.email) return
     setSaving('contact')
     const { error } = await supabase.from('settings').update({
-      email:         contact.email,
+      email:         contact.email.trim(),
       phone:         contact.phone         || null,
       website:       contact.website       || null,
       address_line1: contact.address_line1,
@@ -451,28 +480,57 @@ export default function SettingsForm({ settings }: Props) {
 
   async function saveDocsSection() {
     if (!settings) return
+    const errors: Record<string, string> = {}
     const counters: Partial<Record<CounterKey, number>> = {}
-    const errors: Partial<Record<CounterKey, string>> = {}
-    for (const key of editedCounters.current) {
-      const n = /^\d+$/.test(docs[key].trim()) ? Number(docs[key]) : NaN
-      if (n >= 1) counters[key] = n
-      else errors[key] = t('settings.numbering.nextError')
+    const rows = NUMBER_ROWS.map(row => ({ ...row, prefix: docs[row.prefixKey].trim(), fmt: docs[row.fmtKey].trim() }))
+    for (const row of rows) {
+      const prefixIssue = numberPrefixIssue(row.prefix, row.fmt)
+      if (prefixIssue) errors[row.prefixKey] = t(prefixIssue === 'required' ? 'clientData.numbering.prefixRequired' : 'clientData.numbering.prefixInvalid')
+      const fmtIssue = numberFormatIssue(row.fmt)
+      if (fmtIssue) {
+        errors[row.fmtKey] = fmtIssue.kind === 'unknownToken'
+          ? t('clientData.numbering.formatUnknownToken', { token: fmtIssue.token })
+          : t(fmtIssue.kind === 'tooLong' ? 'clientData.numbering.formatTooLong' : 'clientData.numbering.formatNoCounter')
+      }
+      if (editedCounters.has(row.numKey)) {
+        const n = docs[row.numKey]
+        if (n !== null && Number.isInteger(n) && n >= 1) counters[row.numKey] = n
+        else errors[row.numKey] = t('settings.numbering.nextError')
+      }
+    }
+    // A counter set back onto an issued number would only be skipped at issue time; refuse it here.
+    if (!Object.keys(errors).length) {
+      const taken = await Promise.all(rows.map(async row => {
+        const n = counters[row.numKey]
+        if (n === undefined) return null
+        const number = formatDocumentNumber(row.fmt, row.prefix, n, todayIso)
+        const { data } = await supabase.from('documents').select('id').eq('number', number).limit(1)
+        return data?.length ? { key: row.numKey, number } : null
+      }))
+      for (const hit of taken) if (hit) errors[hit.key] = t('clientData.numbering.numberTaken', { number: hit.number })
     }
     setDocsErrors(errors)
     if (Object.keys(errors).length) return
+    const [inv, quote, credit] = rows
+    const config = {
+      invoice_prefix:                  inv.prefix,
+      quote_prefix:                    quote.prefix,
+      credit_note_prefix:              credit.prefix,
+      invoice_number_format:           inv.fmt,
+      quote_number_format:             quote.fmt,
+      credit_note_number_format:       credit.fmt,
+      invoice_number_reset_yearly:     docs.invoice_number_reset_yearly && hasYearToken(inv.fmt),
+      quote_number_reset_yearly:       docs.quote_number_reset_yearly && hasYearToken(quote.fmt),
+      credit_note_number_reset_yearly: docs.credit_note_number_reset_yearly && hasYearToken(credit.fmt),
+    }
+    const years: Partial<Record<(typeof NUMBER_ROWS)[number]['yearKey'], number>> = {}
+    for (const row of rows) if (startsThisYearsSeries(row, config[row.resetKey])) years[row.yearKey] = thisYear
     setSaving('docs')
-    const { error } = await supabase.from('settings').update({
-      invoice_prefix:              docs.invoice_prefix,
-      quote_prefix:                docs.quote_prefix,
-      credit_note_prefix:          docs.credit_note_prefix,
-      invoice_number_format:       docs.invoice_number_format || '{prefix}-{YYYY}-{NNN}',
-      quote_number_format:         docs.quote_number_format || '{prefix}-{YYYY}-{NNN}',
-      credit_note_number_format:   docs.credit_note_number_format || '{prefix}-{YYYY}-{NNN}',
-      ...counters,
-    }).eq('id', settings.id)
+    const { error } = await supabase.from('settings').update({ ...config, ...counters, ...years }).eq('id', settings.id)
     setSaving(null)
     if (error) { toast.error(error.message); return }
-    editedCounters.current.clear()
+    setDocs(d => ({ ...d, ...config, ...years }))
+    setEditedCounters(new Set())
     clearDirty('docs')
     toast.success(t('settings.numbering.saved'))
   }
@@ -726,39 +784,10 @@ export default function SettingsForm({ settings }: Props) {
   const subjectKey = `subject_${activeLang}` as 'subject_de' | 'subject_en'
   const bodyKey    = `body_${activeLang}`    as 'body_de'    | 'body_en'
 
-  const subjectRef = useRef<HTMLInputElement>(null)
-  const bodyRef    = useRef<HTMLTextAreaElement>(null)
-
-  function insertTplVar(token: string) {
-    const target = lastFocused.current
-    if (!target) return
-    const { el, setter } = target
-    const start = el.selectionStart ?? el.value.length
-    const end   = el.selectionEnd ?? start
-    setter(el.value.slice(0, start) + token + el.value.slice(end))
-    markDirty('templates')
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(start + token.length, start + token.length)
-    })
-  }
-
   // ── Number format live preview ───────────────────────────────────────────────
-  function previewFormat(fmt: string, prefix: string, num: string): string {
-    const n = parseInt(num) || 1
-    const now = new Date()
-    const YYYY = now.getFullYear().toString()
-    const YY = YYYY.slice(2)
-    const MM = String(now.getMonth() + 1).padStart(2, '0')
-    return fmt
-      .replace('{prefix}', prefix || '?')
-      .replace('{YYYY}', YYYY)
-      .replace('{YY}', YY)
-      .replace('{MM}', MM)
-      .replace('{NNNN}', String(n).padStart(4, '0'))
-      .replace('{NNN}', String(n).padStart(3, '0'))
-      .replace('{NN}', String(n).padStart(2, '0'))
-      .replace('{N}', String(n))
+  function previewNumber(row: (typeof NUMBER_ROWS)[number]): string {
+    const counter = nextCounter(docs[row.numKey] ?? 1, counterYear(row), docs[row.resetKey], docs[row.fmtKey], thisYear)
+    return formatDocumentNumber(docs[row.fmtKey], docs[row.prefixKey] || '?', counter, todayIso)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -885,9 +914,10 @@ export default function SettingsForm({ settings }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-email`}>{t('settings.address.email')}</label>
-                <input id={`${uid}-contact-email`} type="email" className={inp} value={contact.email}
-                  onChange={e => { setContact(c => ({ ...c, email: e.target.value })); markDirty('contact') }}
+                <input id={`${uid}-contact-email`} type="email" inputMode="email" className={inp} value={contact.email} aria-invalid={!!contactErrors.email || undefined}
+                  onChange={e => { setContact(c => ({ ...c, email: e.target.value })); setContactErrors(er => ({ ...er, email: undefined })); markDirty('contact') }}
                   placeholder="billing@company.com" />
+                {contactErrors.email && <p className={err}>{contactErrors.email}</p>}
               </div>
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-phone`}>{t('settings.address.phone')}</label>
@@ -938,7 +968,7 @@ export default function SettingsForm({ settings }: Props) {
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-uid_number`}>{t('settings.address.uid')}</label>
                 <input id={`${uid}-contact-uid_number`} className={inp} value={contact.uid_number} aria-invalid={!!contactErrors.uid_number || undefined}
-                  onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); setContactErrors({}); markDirty('contact') }}
+                  onChange={e => { setContact(c => ({ ...c, uid_number: e.target.value })); setContactErrors(er => ({ ...er, uid_number: undefined })); markDirty('contact') }}
                   placeholder="ATU…" />
                 {contactErrors.uid_number && <p className={err}>{contactErrors.uid_number}</p>}
               </div>
@@ -992,7 +1022,7 @@ export default function SettingsForm({ settings }: Props) {
             {/* Token reference */}
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-neutral-500 dark:text-neutral-400 pb-1">
               <span className="text-neutral-500 dark:text-neutral-400 font-sans font-medium not-italic mr-1">{t('settings.numbering.tokens')}</span>
-              {['{prefix}','{YYYY}','{YY}','{MM}','{NNN}','{NN}','{N}','{NNNN}'].map(token => (
+              {NUMBER_TOKENS.map(token => (
                 <span key={token}>{token}</span>
               ))}
             </div>
@@ -1006,40 +1036,59 @@ export default function SettingsForm({ settings }: Props) {
             </div>
 
             {/* One row per doc type */}
-            {([
-              { label: t('settings.numbering.invoice'),    prefixKey: 'invoice_prefix' as const,     fmtKey: 'invoice_number_format' as const,     numKey: 'next_invoice_number' as const },
-              { label: t('settings.numbering.quote'),      prefixKey: 'quote_prefix' as const,       fmtKey: 'quote_number_format' as const,       numKey: 'next_quote_number' as const },
-              { label: t('settings.numbering.creditNote'), prefixKey: 'credit_note_prefix' as const, fmtKey: 'credit_note_number_format' as const, numKey: 'next_credit_note_number' as const },
-            ]).map(row => (
-              <div key={row.prefixKey} className="space-y-1.5">
-                <div className="grid grid-cols-[1fr_2fr] sm:grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
-                  <span className="col-span-2 sm:col-span-1 text-sm font-medium sm:font-normal text-neutral-700 dark:text-neutral-300">{row.label}</span>
-                  <div className="space-y-1 min-w-0">
-                    <label htmlFor={`${uid}-${row.prefixKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.prefix')}</label>
-                    <input id={`${uid}-${row.prefixKey}`} className={`${inp} min-w-0`} value={docs[row.prefixKey]}
-                      onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }}
-                      placeholder="R" />
+            {NUMBER_ROWS.map(row => {
+              const yearInFormat = hasYearToken(docs[row.fmtKey])
+              const cy = counterYear(row)
+              const rowErrors = [docsErrors[row.prefixKey], docsErrors[row.fmtKey], docsErrors[row.numKey]].filter(Boolean)
+              return (
+                <div key={row.prefixKey} className="space-y-1.5">
+                  <div className="grid grid-cols-[1fr_2fr] sm:grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
+                    <span className="col-span-2 sm:col-span-1 text-sm font-medium sm:font-normal text-neutral-700 dark:text-neutral-300">{t(row.labelKey)}</span>
+                    <div className="space-y-1 min-w-0">
+                      <label htmlFor={`${uid}-${row.prefixKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.prefix')}</label>
+                      <input id={`${uid}-${row.prefixKey}`} className={`${inp} min-w-0`} value={docs[row.prefixKey]} aria-invalid={!!docsErrors[row.prefixKey] || undefined}
+                        onChange={e => { setDocs(d => ({ ...d, [row.prefixKey]: e.target.value })); markDirty('docs') }}
+                        autoCapitalize="characters" maxLength={10} placeholder="R" />
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <label htmlFor={`${uid}-${row.fmtKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.format')}</label>
+                      <input id={`${uid}-${row.fmtKey}`} className={`${inp} min-w-0 font-mono`} value={docs[row.fmtKey]} aria-invalid={!!docsErrors[row.fmtKey] || undefined}
+                        onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
+                        autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="{prefix}-{YYYY}-{NNN}" />
+                    </div>
+                    <div className="space-y-1 min-w-0 col-span-2 sm:col-span-1">
+                      <label htmlFor={`${uid}-${row.numKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.next')}</label>
+                      <MoneyInput id={`${uid}-${row.numKey}`} integer className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
+                        onValueChange={n => { setEditedCounters(s => new Set(s).add(row.numKey)); setDocs(d => ({ ...d, [row.numKey]: n })); markDirty('docs') }} />
+                    </div>
                   </div>
-                  <div className="space-y-1 min-w-0">
-                    <label htmlFor={`${uid}-${row.fmtKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.format')}</label>
-                    <input id={`${uid}-${row.fmtKey}`} className={`${inp} min-w-0`} value={docs[row.fmtKey]}
-                      onChange={e => { setDocs(d => ({ ...d, [row.fmtKey]: e.target.value })); markDirty('docs') }}
-                      placeholder="{prefix}-{YYYY}-{NNN}" />
-                  </div>
-                  <div className="space-y-1 min-w-0 col-span-2 sm:col-span-1">
-                    <label htmlFor={`${uid}-${row.numKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.next')}</label>
-                    <input id={`${uid}-${row.numKey}`} type="text" inputMode="numeric" pattern="[0-9]*" className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
-                      onChange={e => { editedCounters.current.add(row.numKey); setDocs(d => ({ ...d, [row.numKey]: e.target.value })); markDirty('docs') }} />
+                  <div className="sm:pl-[112px] space-y-1">
+                    <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400 break-all">
+                      → {previewNumber(row)}
+                    </span>
+                    {rowErrors.map(e => <p key={e} className={err}>{e}</p>)}
+                    <label className={`flex items-start gap-2 text-xs py-1 ${yearInFormat ? 'cursor-pointer text-neutral-700 dark:text-neutral-300' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                      <input type="checkbox" className="mt-0.5 accent-neutral-900 dark:accent-white"
+                        checked={docs[row.resetKey] && yearInFormat}
+                        disabled={!yearInFormat}
+                        onChange={e => { setDocs(d => ({ ...d, [row.resetKey]: e.target.checked })); markDirty('docs') }} />
+                      <span>
+                        {t('clientData.numbering.resetYearly')}
+                        <span className="block text-neutral-500 dark:text-neutral-400">
+                          {!yearInFormat
+                            ? t('clientData.numbering.resetYearlyNeedsYear')
+                            : !docs[row.resetKey]
+                              ? null
+                              : cy !== null && cy < thisYear
+                                ? t('clientData.numbering.restartsNext')
+                                : t('clientData.numbering.restartsAt', { year: Math.max(cy ?? thisYear, thisYear) + 1 })}
+                        </span>
+                      </span>
+                    </label>
                   </div>
                 </div>
-                <div className="sm:pl-[112px]">
-                  <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
-                    → {previewFormat(docs[row.fmtKey], docs[row.prefixKey], docs[row.numKey])}
-                  </span>
-                  {docsErrors[row.numKey] && <p className={`${err} mt-1`}>{docsErrors[row.numKey]}</p>}
-                </div>
-              </div>
-            ))}
+              )
+            })}
 
           </SectionCard>
         </div>}
@@ -1420,7 +1469,7 @@ export default function SettingsForm({ settings }: Props) {
             {/* Variable chips */}
             <VarChips
               vars={activeDocTab === 'reminder' ? REMINDER_VARS : EMAIL_VARS}
-              onInsert={insertTplVar}
+              onInsert={insertVar}
             />
             {activeDocTab === 'reminder' && (
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
@@ -1440,7 +1489,6 @@ export default function SettingsForm({ settings }: Props) {
               <label className={lbl} htmlFor={`${uid}-tpl-subjectKey`}>{t('settings.templates.subject')}</label>
               <input id={`${uid}-tpl-subjectKey`}
                 key={`${activeDocTab}-${activeLang}`}
-                ref={subjectRef}
                 className={inp}
                 value={tpl[subjectKey]}
                 onChange={e => setTplField(activeDocTab, subjectKey, e.target.value)}
@@ -1458,7 +1506,6 @@ export default function SettingsForm({ settings }: Props) {
               <label className={lbl} htmlFor={`${uid}-tpl-bodyKey`}>{t('settings.templates.body')}</label>
               <textarea id={`${uid}-tpl-bodyKey`}
                 key={`${activeDocTab}-${activeLang}`}
-                ref={bodyRef}
                 value={tpl[bodyKey]}
                 onChange={e => setTplField(activeDocTab, bodyKey, e.target.value)}
                 onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
