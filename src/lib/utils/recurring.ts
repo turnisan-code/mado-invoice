@@ -74,7 +74,10 @@ export interface GenerateResult {
 
 // Issuing (number, archive copy, Drive) lives in the server-only src/lib/pdf/issue.ts. This module
 // is also imported by client components for its date math, so the route handlers pass it in.
-export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{ snapshotError: string | null }>
+export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
+  snapshotError: string | null
+  driveError: { error: string } | null
+}>
 
 type SourceDocument = Record<string, unknown> & {
   id: string
@@ -163,8 +166,9 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       result.generated.push({ scheduleId: schedule.id, documentId, date: next })
       if (schedule.mode === 'issue') {
         try {
-          const { snapshotError } = await issue(supabase, documentId)
+          const { snapshotError, driveError } = await issue(supabase, documentId)
           if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the archive copy failed (${snapshotError})` })
+          if (driveError) result.errors.push({ scheduleId: schedule.id, message: `${next}: issued, but the Drive archive failed (${driveError.error})` })
         } catch (err) {
           result.errors.push({ scheduleId: schedule.id, message: `${next}: created as draft, issuing failed (${err instanceof Error ? err.message : String(err)})` })
         }
