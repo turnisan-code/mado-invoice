@@ -20,12 +20,41 @@ export function orderItems<T>(items: T[]): T[] {
   return [...items].sort((a, b) => pos(a) - pos(b))
 }
 
-type Amounts = { quantity: number | null; unit_price: number | null }
+type Amounts = {
+  quantity: number | null
+  unit_price: number | null
+  discount_type?: string | null
+  discount_value?: number | null
+}
 type Discount = { type: string; value: number | null } | null | undefined
 
-// The amount a line prints and every view sums: quantity × unit price, rounded to the cent.
+// An item line before and after its own discount (percent 0–100 or a fixed amount up to the
+// line's gross), each rounded to the cent as printed.
+export function lineSummary(item: Amounts) {
+  const gross = roundCents((item.quantity ?? 0) * (item.unit_price ?? 0))
+  const discount = discountAmount(gross, item.discount_type != null ? { type: item.discount_type, value: item.discount_value ?? null } : null)
+  return {
+    gross,
+    discount,
+    net: roundCents(gross - discount),
+    percent: item.discount_type === 'percent' ? clampPercent(item.discount_value) : null,
+  }
+}
+
+// The amount a line prints and every view sums (totals, VAT split, reports, Bookamat):
+// quantity × unit price less the line's own discount, rounded to the cent.
 export function lineAmount(item: Amounts): number {
-  return roundCents((item.quantity ?? 0) * (item.unit_price ?? 0))
+  return lineSummary(item).net
+}
+
+// Why a line discount cannot be issued: a negative value, more than 100 %, or a fixed amount
+// above the line's gross. calcTotals caps such values; issuing refuses them (issue-checks.ts).
+export function lineDiscountOutOfRange(item: Amounts): boolean {
+  if (item.discount_type == null || item.discount_value == null) return false
+  const v = item.discount_value
+  if (!Number.isFinite(v) || v < 0) return true
+  if (item.discount_type === 'percent') return v > 100
+  return v > 0 && v > Math.max(0, roundCents((item.quantity ?? 0) * (item.unit_price ?? 0)))
 }
 
 // Percent is capped at 100 and a fixed amount at its base, so a typo can never make a section

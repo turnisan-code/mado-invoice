@@ -19,9 +19,9 @@ export type IssuerField = 'companyName' | 'address' | 'uid' | 'iban'
 // index in the item list and the 1-based position among item lines.
 export type IssueProblem =
   | { code: 'settingsIncomplete'; fields: IssuerField[] }
-  | { code: 'noClient' | 'noItems' | 'currencyNotEur' | 'reverseChargeNoUid' | 'clientCountryMissing' | 'noServiceDate' }
+  | { code: 'noClient' | 'noItems' | 'currencyNotEur' | 'reverseChargeNoUid' | 'clientCountryMissing' | 'noServiceDate' | 'negativeTotal' }
   | { code: 'periodStartMissing' | 'periodEndBeforeStart'; index?: number; position?: number }
-  | { code: 'blankDescription' | 'badQuantity' | 'missingPrice'; index: number; position: number }
+  | { code: 'blankDescription' | 'badQuantity' | 'missingPrice' | 'badDiscount'; index: number; position: number }
 
 export interface Settings {
   id: string

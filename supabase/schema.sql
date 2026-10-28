@@ -506,9 +506,13 @@ $$;
 --   invoice it corrects),
 --   and, except on a Storno (it mirrors the invoice it cancels): blank_description,
 --   bad_quantity (missing or <= 0), missing_price, period_start_missing,
---   period_end_before_start, and for invoices and credit notes reverse_charge_without_uid,
---   client_country_missing (reverse charge / non-EU) and no_service_date (neither the
---   document nor every item line has one).
+--   period_end_before_start, bad_discount (a line discount below 0, above 100 % or, as a fixed
+--   amount, above the line's quantity × price), for invoices and credit notes
+--   reverse_charge_without_uid, client_country_missing (reverse charge / non-EU) and
+--   no_service_date (neither the document nor every item line has one), and for invoices and
+--   quotes negative_total (money going back is a credit note; computed like calcTotals in
+--   src/lib/utils/document.ts: line discounts, then section discounts, then VAT; the document
+--   discount never changes the sign).
 -- (issued_at belongs to the frozen-copy columns of 20261020_snapshot.sql.)
 alter table documents add column if not exists issued_at timestamptz;
 
@@ -521,6 +525,7 @@ declare
   today    date := (now() at time zone 'Europe/Vienna')::date;
   problems text[] := '{}';
   result   text;
+  doc_total numeric;
 begin
   select * into d from documents where id = p_document_id for update;
   if d.id is null then raise exception 'document % not found', p_document_id; end if;
@@ -570,6 +575,14 @@ begin
                and unit_price is null) then
       problems := array_append(problems, 'missing_price');
     end if;
+    if exists (select 1 from document_items where document_id = d.id and line_type = 'item'
+               and discount_type is not null and discount_value is not null
+               and (discount_value < 0
+                    or (discount_type = 'percent' and discount_value > 100)
+                    or (discount_type = 'fixed' and discount_value > 0
+                        and discount_value > greatest(0, round(coalesce(quantity, 0) * coalesce(unit_price, 0), 2))))) then
+      problems := array_append(problems, 'bad_discount');
+    end if;
     if (d.service_date is null and d.service_date_end is not null)
        or exists (select 1 from document_items where document_id = d.id and line_type = 'item'
                   and service_date is null and service_date_end is not null) then
@@ -593,6 +606,44 @@ begin
                      and service_date is null) then
         problems := array_append(problems, 'no_service_date');
       end if;
+    end if;
+
+    if d.type in ('invoice', 'quote') then
+      -- sec = the number of subtotal lines above a line; a subtotal line closes its section.
+      -- (Aliases avoid d, s and c, which are this function's variables.)
+      with ln as (
+        select line_type, quantity, unit_price, vat_rate, discount_type, discount_value,
+               count(*) filter (where line_type = 'subtotal')
+                 over (order by sort_order rows between unbounded preceding and 1 preceding) as sec
+        from document_items where document_id = d.id
+      ),
+      it as (
+        select sec, vat_rate, gross - case
+                 when discount_type is null or coalesce(discount_value, 0) <= 0 or gross <= 0 then 0
+                 when discount_type = 'percent' then round(gross * least(discount_value, 100) / 100, 2)
+                 else least(discount_value, gross)
+               end as amount
+        from (select *, round(quantity * unit_price, 2) as gross from ln) g
+        where line_type = 'item' and quantity is not null and unit_price is not null and vat_rate is not null
+      ),
+      secs as (
+        select it.sec, sum(it.amount) as gross, min(cl.discount_type) as discount_type, min(cl.discount_value) as discount_value
+        from it left join ln cl on cl.line_type = 'subtotal' and cl.sec = it.sec
+        group by it.sec
+      ),
+      scaled as (
+        select sec, case
+                 when gross <= 0 or discount_type is null or coalesce(discount_value, 0) <= 0 then 1
+                 when discount_type = 'percent' then (gross - round(gross * least(discount_value, 100) / 100, 2)) / gross
+                 else (gross - least(discount_value, gross)) / gross
+               end as factor
+        from secs
+      )
+      select round(sum(it.amount * sc.factor
+               * (1 + case when coalesce(d.tax_treatment, 'at_vat') = 'at_vat' then it.vat_rate else 0 end / 100.0)), 2)
+        into doc_total
+      from it join scaled sc using (sec);
+      if doc_total < 0 then problems := array_append(problems, 'negative_total'); end if;
     end if;
   end if;
 

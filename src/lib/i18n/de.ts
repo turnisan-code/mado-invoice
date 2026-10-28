@@ -1411,6 +1411,16 @@ export const de = {
   },
   editor: {
     settingsTaxNav: 'Steuer',
+    problems: {
+      badDiscount: 'Position {position}: Der Rabatt muss zwischen 0 und 100 % liegen bzw. darf den Positionsbetrag nicht übersteigen.',
+      negativeTotal: 'Der Gesamtbetrag ist negativ. Für eine Rückzahlung eine Gutschrift ausstellen.',
+    },
+    sqlProblems: {
+      blankDescription: 'Eine Position hat keine Beschreibung.',
+      badQuantity: 'Eine Position hat eine Menge von 0 oder weniger.',
+      missingPrice: 'Eine Position hat keinen Preis.',
+      badDiscount: 'Ein Positionsrabatt ist kleiner als 0, größer als 100 % oder höher als die Position.',
+    },
   },
   reports: {
     title: 'UVA-Report',

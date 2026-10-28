@@ -1409,6 +1409,16 @@ export const en = {
   },
   editor: {
     settingsTaxNav: 'Tax',
+    problems: {
+      badDiscount: 'Position {position}: a discount must be between 0 and 100 % or at most the line amount.',
+      negativeTotal: 'The total is negative. To give money back, issue a credit note instead.',
+    },
+    sqlProblems: {
+      blankDescription: 'A line item has no description.',
+      badQuantity: 'A line item has a quantity of 0 or less.',
+      missingPrice: 'A line item has no price.',
+      badDiscount: 'A line discount is below 0, above 100 % or larger than its line.',
+    },
   },
   reports: {
     title: 'UVA Report',
