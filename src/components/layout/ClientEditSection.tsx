@@ -3,23 +3,24 @@
 import { useState } from 'react'
 import { Pencil, Mail, Phone, MapPin, Building2 } from 'lucide-react'
 import ClientForm from '@/components/forms/ClientForm'
-import type { Client } from '@/types'
+import type { Client, ClientDefaults, CountryOption } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
+import { countryName } from '@/lib/utils/country'
 
-export default function ClientEditSection({ client }: { client: Client }) {
+export default function ClientEditSection({ client, defaults, countries }: { client: Client; defaults: ClientDefaults; countries: CountryOption[] }) {
   const [editing, setEditing] = useState(false)
-  const { t } = useT()
+  const { t, lang } = useT()
 
   if (editing) {
-    return <ClientForm client={client} onSaved={() => setEditing(false)} />
+    return <ClientForm client={client} defaults={defaults} countries={countries} onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
   }
 
   const address = [
     client.address_line1,
     client.address_line2,
     [client.zip, client.city].filter(Boolean).join(' '),
-    client.country,
+    countryName(client.country, lang),
   ].filter(Boolean).join(', ')
 
   return (
@@ -67,8 +68,13 @@ export default function ClientEditSection({ client }: { client: Client }) {
       {/* Billing settings */}
       <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800">
         <Stat label={t('clients.tax')} value={t(`taxTreatments.${client.tax_treatment}` as DictKey)} />
-        <Stat label={t('clients.currency')} value={client.currency ?? 'EUR'} />
-        <Stat label={t('clients.payment')} value={t('clients.paymentDaysShort', { days: client.payment_days ?? 14 })} />
+        <Stat label={t('clientData.clientNumber')} value={client.client_number ?? '—'} />
+        <Stat
+          label={t('clients.payment')}
+          value={client.payment_days != null
+            ? t('clients.paymentDaysShort', { days: client.payment_days })
+            : t('clientData.paymentDefault', { days: defaults.payment_days })}
+        />
       </div>
 
       {/* Language */}
