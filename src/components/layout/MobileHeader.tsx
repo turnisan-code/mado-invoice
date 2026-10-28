@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { LogOut, Moon, Sun, MoreHorizontal, X } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import LanguageToggle from '@/components/layout/LanguageToggle'
-import { MOBILE_MORE, MOBILE_TABS, isNavActive } from '@/components/layout/nav'
+import { ACCOUNT_ITEM, MOBILE_MORE, MOBILE_TABS, isNavActive } from '@/components/layout/nav'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
@@ -25,7 +25,8 @@ export default function MobileHeader() {
     window.location.assign('/login')
   }
 
-  const isMore = MOBILE_MORE.some(n => isNavActive(pathname, n.href))
+  const accountActive = isNavActive(pathname, ACCOUNT_ITEM.href)
+  const isMore = accountActive || MOBILE_MORE.some(n => isNavActive(pathname, n.href))
 
   return (
     <>
@@ -129,6 +130,20 @@ export default function MobileHeader() {
           </nav>
 
           <div className="mx-2 border-t border-neutral-100 dark:border-neutral-800 pt-1 pb-2 space-y-0.5">
+            <Link
+              href={ACCOUNT_ITEM.href}
+              aria-current={accountActive ? 'page' : undefined}
+              onClick={() => setMoreOpen(false)}
+              className={cn(
+                'flex items-center gap-3 px-3 py-3 rounded-xl text-sm transition-colors',
+                accountActive
+                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 font-medium'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+              )}
+            >
+              <ACCOUNT_ITEM.icon size={18} />
+              {t(ACCOUNT_ITEM.label)}
+            </Link>
             {/* Both icons/labels are rendered and toggled by the html class, so the server and the hydrating client agree. */}
             <button
               type="button"

@@ -1,8 +1,11 @@
+import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import Logo from '@/components/ui/Logo'
 import { createClient } from '@/lib/supabase/server'
 import { LanguageProvider } from '@/lib/i18n/client'
 import { isUiLang, type UiLang } from '@/lib/i18n'
+
+export const metadata: Metadata = { robots: { index: false, follow: false } }
 
 // Signed-out visitors cannot read settings (RLS), so the browser's preferred language picks DE or EN.
 async function authLanguage(): Promise<UiLang> {

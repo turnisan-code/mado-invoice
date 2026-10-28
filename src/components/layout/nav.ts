@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote, FileX, Repeat,
-  BookOpen, BarChart3, Settings, type LucideIcon,
+  BookOpen, BarChart3, Settings, ShieldCheck, type LucideIcon,
 } from 'lucide-react'
 import type { DictKey } from '@/lib/i18n'
 
@@ -27,6 +27,9 @@ export const NAV_ITEMS: NavItem[] = [
 
 export const MOBILE_TABS = NAV_ITEMS.filter(item => item.tab !== undefined).sort((a, b) => (a.tab ?? 0) - (b.tab ?? 0))
 export const MOBILE_MORE = NAV_ITEMS.filter(item => item.tab === undefined)
+
+// Linked from the sidebar footer and the mobile "More" sheet, next to theme, language and sign-out.
+export const ACCOUNT_ITEM: NavItem = { href: '/account', label: 'account.title', icon: ShieldCheck }
 
 export function isNavActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`)

@@ -6,18 +6,21 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
+import { pendingTotpFactor } from '@/app/auth/mfa'
 import { authErrorKey } from '../_components/auth-errors'
 import FormError from '../_components/FormError'
 
-type Step = 'password' | 'forgot' | 'sent'
+type Step = 'password' | 'forgot' | 'sent' | 'mfa'
 
 const linkButton = 'py-1 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-200 underline-offset-4 hover:underline rounded'
 
-export default function LoginForm({ next, linkError }: { next: string; linkError: boolean }) {
+export default function LoginForm({ next, linkError, mfaFactorId }: { next: string; linkError: boolean; mfaFactorId: string | null }) {
   const { t } = useT()
-  const [step, setStep] = useState<Step>(linkError ? 'forgot' : 'password')
+  const [step, setStep] = useState<Step>(mfaFactorId ? 'mfa' : linkError ? 'forgot' : 'password')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [factorId, setFactorId] = useState(mfaFactorId)
+  const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(linkError ? t('account.linkInvalid') : null)
   const [busy, setBusy] = useState(false)
 
@@ -36,14 +39,48 @@ export default function LoginForm({ next, linkError }: { next: string; linkError
     setBusy(true)
     setError(null)
     try {
-      const { error: signInError } = await createClient().auth.signInWithPassword({ email, password })
-      // Stays busy while the app loads, so a second click cannot start another sign-in.
-      if (!signInError) { enterApp(); return }
-      setError(t(authErrorKey(signInError)))
+      const supabase = createClient()
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+      if (signInError) {
+        setError(t(authErrorKey(signInError)))
+      } else {
+        const pending = await pendingTotpFactor(supabase.auth, data.user)
+        // Stays busy while the app loads, so a second click cannot start another sign-in.
+        if (!pending) { enterApp(); return }
+        setPassword('')
+        setFactorId(pending)
+        setStep('mfa')
+      }
     } catch {
       setError(t('account.genericError'))
     }
     setBusy(false)
+  }
+
+  async function verifyCode(e: React.FormEvent) {
+    e.preventDefault()
+    if (!factorId) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { error: verifyError } = await createClient().auth.mfa.challengeAndVerify({ factorId, code })
+      if (!verifyError) { enterApp(); return }
+      setError(t(authErrorKey(verifyError)))
+      setCode('')
+    } catch {
+      setError(t('account.genericError'))
+    }
+    setBusy(false)
+  }
+
+  // Leaves no half-signed-in (aal1) session behind.
+  async function cancelMfa() {
+    setBusy(true)
+    await createClient().auth.signOut().catch(() => {})
+    setBusy(false)
+    setFactorId(null)
+    setCode('')
+    goTo('password')
   }
 
   // The confirmation never depends on the outcome, so the form cannot be used to probe which addresses have an account.
@@ -62,6 +99,39 @@ export default function LoginForm({ next, linkError }: { next: string; linkError
       setBusy(false)
     }
     setStep('sent')
+  }
+
+  if (step === 'mfa') {
+    return (
+      <form onSubmit={verifyCode} className="space-y-4">
+        <div className="space-y-1 text-center">
+          <h1 className="text-lg font-semibold">{t('account.mfaTitle')}</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('account.mfaPrompt')}</p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="mfa-code">{t('account.code')}</Label>
+          <Input
+            id="mfa-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            autoFocus
+            className="h-10 text-center text-lg tracking-[0.4em] font-mono"
+            value={code}
+            onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            required
+          />
+        </div>
+        <FormError message={error} />
+        <Button type="submit" className="h-10 w-full" disabled={busy || code.length !== 6}>
+          {busy ? t('account.verifying') : t('account.verify')}
+        </Button>
+        <div className="text-center">
+          <button type="button" onClick={cancelMfa} disabled={busy} className={linkButton}>{t('account.signOutInstead')}</button>
+        </div>
+      </form>
+    )
   }
 
   if (step === 'sent') {
