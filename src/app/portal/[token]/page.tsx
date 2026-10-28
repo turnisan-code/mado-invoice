@@ -11,6 +11,9 @@ import { fetchCreditReference } from '@/lib/utils/document-reference'
 import { countryName } from '@/lib/utils/country'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { isShareExpired } from '@/lib/share'
+import { isExpired } from '@/lib/status'
+import { today } from '@/lib/utils/document'
+import { paymentLineLabel, summarizePayments } from '@/lib/payment-summary'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import {
   docNumberLabel, docTitle, documentKind, documentLanguage, documentT, formatIban, formatPercent, formatQuantity,
@@ -111,6 +114,8 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const dueLabel = doc.type === 'quote' ? t('pdfPortal.validUntil') : doc.type === 'invoice' ? t('pdfPortal.dueDate') : null
   const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings)
   const paymentTerms = paymentTermsSentence(doc, totals.total, lang)
+  const paymentLines = summarizePayments(doc.payments ?? [])
+  const expired = isExpired(doc, today())
 
   const payable = doc.type === 'invoice' && (doc.status === 'sent' || doc.status === 'overdue') && totals.balance_due > 0 && !!settings.iban?.trim()
   const beneficiary = epcBeneficiary(settings)
@@ -143,7 +148,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               {t(reference.kind === 'correction' ? 'pdfPortal.correctionOf' : 'pdfPortal.stornoOf', { number: reference.number, date: formatDate(reference.date, lang) })}
             </div>
           )}
-          <StatusBadge status={doc.status} label={statusLabel(t, doc.status)} className="inline-block" />
+          {expired
+            ? <StatusBadge status="expired" label={t('lifecycle.portal.expired')} className="inline-block" />
+            : <StatusBadge status={doc.status} label={statusLabel(t, doc.status)} className="inline-block" />}
         </div>
       </header>
 
@@ -174,7 +181,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           {doc.due_date && dueLabel && (
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">{dueLabel}</dt>
-              <dd className={`font-medium ${doc.status === 'overdue' ? 'text-red-600' : ''}`}>{formatDate(doc.due_date, lang)}</dd>
+              <dd className={`font-medium ${doc.status === 'overdue' || expired ? 'text-red-600' : ''}`}>{formatDate(doc.due_date, lang)}</dd>
             </div>
           )}
         </dl>
@@ -296,10 +303,12 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </div>
           {doc.type === 'invoice' && totals.total_paid > 0 && (
             <>
-              <div className="flex justify-between gap-4 text-neutral-500">
-                <dt>{t('pdfPortal.totals.paid')}</dt>
-                <dd className="text-green-700">{money(-totals.total_paid)}</dd>
-              </div>
+              {paymentLines.map((line, i) => (
+                <div key={i} className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{paymentLineLabel(t, line)}</dt>
+                  <dd className={line.kind === 'paid' ? 'text-green-700' : ''}>{money(-line.amount)}</dd>
+                </div>
+              ))}
               <div className="flex justify-between gap-4 font-semibold text-neutral-900">
                 <dt>{t('pdfPortal.totals.balanceDue')}</dt>
                 <dd className={totals.balance_due > 0 ? 'text-red-600' : 'text-green-700'}>{money(totals.balance_due)}</dd>
@@ -371,23 +380,17 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           <Download size={15} aria-hidden="true" />
           {t('pdfPortal.portal.downloadPdf')}
         </a>
-        {doc.type === 'quote' && doc.status === 'sent' && (
-          <QuoteActions
-            token={token}
-            labels={{
-              accept: t('pdfPortal.portal.quote.accept'),
-              decline: t('pdfPortal.portal.quote.decline'),
-              cancel: t('pdfPortal.portal.quote.cancel'),
-              accepted: t('pdfPortal.portal.quote.accepted'),
-              declined: t('pdfPortal.portal.quote.declined'),
-              confirmAccept: t('pdfPortal.portal.quote.confirmAccept'),
-              confirmDecline: t('pdfPortal.portal.quote.confirmDecline'),
-              acceptHint: t('pdfPortal.portal.quote.acceptHint'),
-              declineHint: t('pdfPortal.portal.quote.declineHint'),
-              failed: t('pdfPortal.portal.quote.failed'),
-            }}
-          />
-        )}
+        {doc.type === 'quote' && doc.status === 'sent' && (expired ? (
+          <div role="status" className="flex items-start gap-2 text-sm text-neutral-600 max-w-sm">
+            <Clock size={15} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
+            <div>
+              <p className="font-medium text-neutral-900">{t('lifecycle.portal.expiredNotice', { date: formatDate(doc.due_date!, lang) })}</p>
+              <p>{t('lifecycle.portal.expiredHint')}</p>
+            </div>
+          </div>
+        ) : (
+          <QuoteActions token={token} lang={lang} />
+        ))}
       </div>
     </main>
   )
