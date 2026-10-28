@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Link2, Check, Loader2, X, HardDrive } from 'lucide-react'
 import { toast } from 'sonner'
+import { toastApiError } from '@/lib/google/toast'
 
 interface Props {
   documentId: string
@@ -64,8 +65,11 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
     setDriveUploading(true)
     try {
       const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toastApiError(data, 'Drive upload failed: ')
+        return
+      }
       toast.success(
         data.webViewLink
           ? <span>Saved to Drive — <a href={data.webViewLink} target="_blank" rel="noopener" className="underline">open</a></span>

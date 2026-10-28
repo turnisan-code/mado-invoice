@@ -17,6 +17,7 @@ import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
+import { toastApiError } from '@/lib/google/toast'
 
 interface LineItem {
   id: string
@@ -141,7 +142,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [activeLine, setActiveLine] = useState<string | null>(null)
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
-  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; documentId: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -486,8 +487,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       const { webViewLink } = await res.json()
       notifyDriveUpload(webViewLink)
     } else {
-      const { error } = await res.json().catch(() => ({ error: 'Unknown error' }))
-      toast.error(`Drive upload failed: ${error}`)
+      toastApiError(await res.json().catch(() => ({})), 'Drive upload failed: ')
     }
   }
 
@@ -623,7 +623,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       setGmailPreview({
         to: client.email, subject: content.subject, body: content.body,
         pdfBase64: await blobToBase64(pdfResult.blob), filename: `${issued.number}.pdf`,
-        newDocId: issued.isNew ? issued.id : undefined,
+        documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
         uploadToDrive: !!settings.drive_folder_id && !issued.driveArchived, driveArchived: issued.driveArchived,
       })
     })
@@ -640,13 +640,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     setGmailSending(false)
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      toast.error(err.error ?? 'Failed to send email.')
+      toastApiError(await res.json().catch(() => ({})), '', 'Failed to send email.')
       return
     }
 
     toast.success('Email sent via Gmail.')
-    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.newDocId ?? doc?.id)
+    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.documentId)
     closeGmailPreview()
   }
 
@@ -1518,17 +1517,17 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <Download size={16} />
               <span className="text-[10px] font-medium">PDF</span>
             </button>
-            {settings.gmail_email && (
+            {settings.gmail_connected && (
               <button type="button" onClick={saveToDrive} disabled={saving}
                 className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
                 <HardDrive size={16} />
                 <span className="text-[10px] font-medium">Drive</span>
               </button>
             )}
-            <button type="button" onClick={settings.gmail_email ? sendViaGmail : openInEmail} disabled={saving}
+            <button type="button" onClick={settings.gmail_connected ? sendViaGmail : openInEmail} disabled={saving}
               className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
               <Mail size={16} />
-              <span className="text-[10px] font-medium">{settings.gmail_email ? 'Gmail' : 'Email'}</span>
+              <span className="text-[10px] font-medium">{settings.gmail_connected ? 'Gmail' : 'Email'}</span>
             </button>
             {doc?.number && !doc.pdf_path && (
               <button type="button" onClick={archiveNow} disabled={saving}
@@ -1567,12 +1566,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <Button type="button" variant="outline" size="sm" onClick={savePdf} disabled={saving} className="flex items-center gap-1.5">
             <Download size={13} /> Download PDF
           </Button>
-          {settings.gmail_email && (
+          {settings.gmail_connected && (
             <Button type="button" variant="outline" size="sm" onClick={saveToDrive} disabled={saving} className="flex items-center gap-1.5">
               <HardDrive size={13} /> Save to Drive
             </Button>
           )}
-          {settings.gmail_email ? (
+          {settings.gmail_connected ? (
             <Button type="button" variant="outline" size="sm" onClick={sendViaGmail} disabled={saving} className="flex items-center gap-1.5">
               <Mail size={13} /> Send via Gmail
             </Button>

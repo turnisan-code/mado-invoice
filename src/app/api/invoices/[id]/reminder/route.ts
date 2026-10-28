@@ -6,6 +6,7 @@ import {
   DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN,
 } from '@/lib/utils/reminder'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -17,9 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: settings } = await supabase.from('settings').select('*').single()
-  if (!settings?.gmail_refresh_token || !settings?.gmail_email) {
-    return NextResponse.json({ error: 'Gmail not connected' }, { status: 400 })
-  }
+  if (!settings?.gmail_refresh_token || !settings?.gmail_email) return googleNotConnected()
 
   const { data: invoice } = await supabase
     .from('documents')
@@ -71,27 +70,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ? (settings.email_body_reminder_en || DEFAULT_BODY_EN)
     : (settings.email_body_reminder_de || DEFAULT_BODY_DE)
 
-  await sendReminderEmail({
-    accessToken: settings.gmail_access_token!,
-    refreshToken: settings.gmail_refresh_token!,
-    tokenExpiry: settings.gmail_token_expiry,
-    from: settings.gmail_email!,
-    to: client.email,
-    subject: fillTemplate(subjectTpl, ctx),
-    body: fillTemplate(bodyTpl, ctx),
-    pdfBase64,
-    filename,
-    onTokenRefresh: async (tokens) => {
-      await supabase.from('settings').update({
-        gmail_access_token: tokens.access_token,
-        ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
-        gmail_token_expiry: tokens.expiry_date,
-      }).eq('id', settings.id)
-    },
-  })
+  try {
+    await sendReminderEmail({
+      auth: getAuthorizedGoogle(settings, supabase),
+      from: settings.gmail_email,
+      to: client.email,
+      subject: fillTemplate(subjectTpl, ctx),
+      body: fillTemplate(bodyTpl, ctx),
+      pdfBase64,
+      filename,
+    })
+  } catch (err) {
+    return googleErrorResponse(err, supabase, settings.id, 'invoices/reminder')
+  }
 
   const now = new Date().toISOString()
-  await supabase.from('documents').update({ reminder_sent_at: now }).eq('id', id)
+  const { error } = await supabase.from('documents').update({ reminder_sent_at: now }).eq('id', id)
+  if (error) console.error('[invoices/reminder] reminder_sent_at not recorded:', error.message)
 
   return NextResponse.json({ ok: true, sentAt: now })
 }

@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
 import { DEFAULT_SUBJECT_DE, DEFAULT_BODY_DE, DEFAULT_SUBJECT_EN, DEFAULT_BODY_EN } from '@/lib/utils/reminder-templates'
 import type { PublicSettings } from '@/lib/public-settings'
+import { toastApiError } from '@/lib/google/toast'
 
 interface Props { settings: PublicSettings | null }
 
@@ -242,10 +243,20 @@ export default function SettingsForm({ settings }: Props) {
   const [activeLang, setActiveLang] = useState<'de' | 'en'>('de')
 
   // ── Integration state ────────────────────────────────────────────────────────
-  const [gmailEmail, setGmailEmail] = useState(settings?.gmail_email ?? null)
+  const [google, setGoogle] = useState({
+    email: settings?.gmail_email ?? null,
+    connected: !!settings?.gmail_connected,
+    connectedAt: settings?.gmail_connected_at ?? null,
+    scopes: settings?.gmail_scopes ?? null,
+  })
+  const driveScopeGranted = !!google.scopes?.includes('/auth/drive')
   const [disconnecting, setDisconnecting] = useState(false)
   const [driveFolder, setDriveFolder] = useState(settings?.drive_folder_id ?? '')
-  const [driveFolderName, setDriveFolderName] = useState(settings?.drive_folder_name ?? '')
+  const [driveSaved, setDriveSaved] = useState<{ id: string | null; name: string | null }>({
+    id: settings?.drive_folder_id ?? null,
+    name: settings?.drive_folder_name ?? null,
+  })
+  const [driveError, setDriveError] = useState<string | null>(null)
   const [savingDrive, setSavingDrive] = useState(false)
   const [driveDirty, setDriveDirty] = useState(false)
   const [bookamatUsername, setBookamatUsername] = useState(settings?.bookamat_username ?? '')
@@ -290,8 +301,8 @@ export default function SettingsForm({ settings }: Props) {
   // ── URL param handling ───────────────────────────────────────────────────────
   useEffect(() => {
     const status = searchParams.get('gmail')
-    if (status === 'connected') toast.success('Gmail connected successfully.')
-    if (status === 'error')     toast.error('Gmail connection failed. Please try again.')
+    if (status === 'connected') toast.success('Google account connected.')
+    if (status === 'error')     toast.error('Google connection failed. Please try again.')
   }, [searchParams])
 
   // ── Save functions ───────────────────────────────────────────────────────────
@@ -435,30 +446,37 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   // ── Integration handlers ─────────────────────────────────────────────────────
-  async function disconnectGmail() {
+  async function disconnectGoogle() {
     setDisconnecting(true)
-    await supabase.from('settings').update({
-      gmail_email: null, gmail_access_token: null,
-      gmail_refresh_token: null, gmail_token_expiry: null,
-    }).eq('id', settings!.id)
-    setGmailEmail(null)
+    const res = await fetch('/api/gmail/auth', { method: 'DELETE' })
     setDisconnecting(false)
-    toast.success('Gmail disconnected.')
+    if (!res.ok) {
+      toastApiError(await res.json().catch(() => ({})), '', 'Could not disconnect.')
+      return
+    }
+    setGoogle({ email: null, connected: false, connectedAt: null, scopes: null })
+    toast.success('Google account disconnected.')
   }
 
   async function saveDriveFolder() {
-    if (!settings) return
     setSavingDrive(true)
-    const match = driveFolder.match(/[-\w]{25,}/)
-    const folderId = match ? match[0] : driveFolder.trim()
-    await supabase.from('settings').update({
-      drive_folder_id:   folderId || null,
-      drive_folder_name: folderId ? (driveFolderName || folderId) : null,
-    }).eq('id', settings.id)
-    setDriveFolder(folderId)
+    setDriveError(null)
+    const res = await fetch('/api/drive/folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId: driveFolder.trim() || null }),
+    })
+    const data = await res.json().catch(() => ({}))
     setSavingDrive(false)
+    if (!res.ok) {
+      setDriveError(typeof data.error === 'string' ? data.error : 'Could not verify the folder.')
+      if (res.status === 401 && data.code) setGoogle(g => ({ ...g, connected: false }))
+      return
+    }
+    setDriveFolder(data.id ?? '')
+    setDriveSaved({ id: data.id ?? null, name: data.name ?? null })
     setDriveDirty(false)
-    toast.success(folderId ? 'Drive folder saved.' : 'Drive folder removed.')
+    toast.success(data.id ? `Drive folder "${data.name ?? data.id}" saved.` : 'Drive folder removed.')
   }
 
   async function loadBookamatAccounts() {
@@ -1125,32 +1143,65 @@ export default function SettingsForm({ settings }: Props) {
             <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">Connect external services to automate your workflow.</p>
           </div>
 
-          {/* Gmail */}
+          {/* Google account (Gmail + Drive grant) */}
           <IntegrationCard
-            title="Gmail"
-            description="Send invoices directly from your Gmail account with the PDF attached."
+            title="Google account"
+            description="Send invoices from your Gmail account with the PDF attached. The same connection is used for Drive."
           >
-            {gmailEmail ? (
-              <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
-                <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-                  <CheckCircle size={14} />
-                  <span>{gmailEmail}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={disconnectGmail}
-                  disabled={disconnecting}
-                  className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
+            {google.connected ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                  <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
+                    <CheckCircle size={14} />
+                    <span>{google.email}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={disconnectGoogle}
+                    disabled={disconnecting}
+                    className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
+                  >
+                    {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+                  </button>
+                </div>
+                <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                  {google.connectedAt
+                    ? `Connected ${new Date(google.connectedAt).toLocaleDateString('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+                    : 'Connected'}
+                  {' · '}
+                  {driveScopeGranted
+                    ? 'Drive access granted'
+                    : <>Drive access not confirmed — <a href="/api/gmail/auth" className="underline">re-connect</a> to grant it</>}
+                </p>
+              </div>
+            ) : google.email ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30">
+                  <span className="text-sm text-amber-700 dark:text-amber-400">
+                    Connection to {google.email} expired or was revoked.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={disconnectGoogle}
+                    disabled={disconnecting}
+                    className="text-xs text-neutral-400 hover:text-red-500 dark:text-neutral-500 dark:hover:text-red-400 transition-colors"
+                  >
+                    {disconnecting ? 'Removing…' : 'Remove'}
+                  </button>
+                </div>
+                <a
+                  href="/api/gmail/auth"
+                  className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
                 >
-                  {disconnecting ? 'Disconnecting…' : 'Disconnect'}
-                </button>
+                  <Mail size={14} /> Reconnect Google
+                </a>
               </div>
             ) : (
               <a
                 href="/api/gmail/auth"
                 className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
               >
-                <Mail size={14} /> Connect Gmail
+                <Mail size={14} /> Connect Google
               </a>
             )}
           </IntegrationCard>
@@ -1160,37 +1211,32 @@ export default function SettingsForm({ settings }: Props) {
             title="Google Drive"
             description="Auto-upload PDFs to a Drive folder when you send or download an invoice."
           >
-            {!gmailEmail ? (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect Gmail first to enable Drive.</p>
+            {!google.connected ? (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500">Connect your Google account first to enable Drive.</p>
             ) : (
               <div className="space-y-3">
+                {!driveScopeGranted && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Drive access could not be confirmed for this connection.{' '}
+                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
+                  </p>
+                )}
                 <div className="space-y-1.5">
                   <label className={lbl}>Folder URL or ID</label>
                   <input
                     type="text"
                     value={driveFolder}
-                    onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true) }}
+                    onChange={e => { setDriveFolder(e.target.value); setDriveDirty(true); setDriveError(null) }}
                     placeholder="https://drive.google.com/drive/folders/…"
                     className={inp}
                   />
+                  {driveError && <p className="text-xs text-red-600 dark:text-red-400">{driveError}</p>}
                 </div>
-                {driveFolder && (
-                  <div className="space-y-1.5">
-                    <label className={lbl}>Display name</label>
-                    <input
-                      type="text"
-                      value={driveFolderName}
-                      onChange={e => { setDriveFolderName(e.target.value); setDriveDirty(true) }}
-                      placeholder="e.g. Invoices 2026"
-                      className={inp}
-                    />
-                  </div>
-                )}
                 <div className="flex items-center gap-3">
-                  {settings?.drive_folder_id && !driveDirty && (
+                  {driveSaved.id && !driveDirty && (
                     <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                       <CheckCircle size={13} />
-                      {settings.drive_folder_name || settings.drive_folder_id}
+                      {driveSaved.name || driveSaved.id}
                     </span>
                   )}
                   {driveDirty && (
@@ -1200,16 +1246,10 @@ export default function SettingsForm({ settings }: Props) {
                       disabled={savingDrive}
                       className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                     >
-                      <HardDrive size={13} /> {savingDrive ? 'Saving…' : 'Save folder'}
+                      <HardDrive size={13} /> {savingDrive ? 'Checking…' : driveFolder.trim() ? 'Verify & save' : 'Remove folder'}
                     </button>
                   )}
                 </div>
-                {settings?.gmail_connected && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    Re-connect your Google account to grant Drive access.{' '}
-                    <a href="/api/gmail/auth" className="underline">Re-connect →</a>
-                  </p>
-                )}
               </div>
             )}
           </IntegrationCard>
