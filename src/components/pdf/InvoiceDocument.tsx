@@ -49,9 +49,10 @@ function footerLineCount(lines: string[]) {
 const noHyphenation = (word: string) => [word]
 
 // An item row moves to the next page as a whole when it fits on one; a row taller than a page has
-// to wrap, or react-pdf draws it past the page bottom. 25 lines are under half a page, and 45
-// characters per line undercount what the description column holds, so the estimate errs high.
-const KEEP_ROW_LINES = 25
+// to wrap, or react-pdf draws it past the page bottom. A page holds about 50 lines, the narrowest
+// description column about 45 characters of ordinary text per line, and 20 estimated lines still
+// fit when wide letters make the real count twice that.
+const KEEP_ROW_LINES = 20
 const ROW_LINE_CHARS = 45
 
 function keepRowTogether(description: string) {
