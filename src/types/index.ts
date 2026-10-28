@@ -1,6 +1,8 @@
 export type Language = 'de' | 'en'
 export type Currency = 'EUR' | 'USD' | 'GBP'
 export type TaxTreatment = 'at_vat' | 'eu_reverse_charge' | 'non_eu'
+// What a document prints as: a credit note that cancels an invoice is a Storno.
+export type DocumentKind = 'invoice' | 'quote' | 'credit_note' | 'storno'
 export type ClientStatus = 'active' | 'inactive' | 'lead'
 export type DocumentType = 'invoice' | 'quote' | 'credit_note'
 export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' | 'rejected' | 'cancelled'
@@ -27,6 +29,7 @@ export interface Settings {
   iban: string
   bic: string
   bank_name: string | null
+  bank_account_holder: string | null
   invoice_prefix: string
   quote_prefix: string
   credit_note_prefix: string
@@ -190,6 +193,8 @@ export interface Document {
   skonto_days?: number | null
   sent_at?: string | null
   share_token?: string | null
+  share_expires_at?: string | null
+  portal_viewed_at?: string | null
   drive_file_id?: string | null
   issued_at?: string | null
   pdf_path?: string | null

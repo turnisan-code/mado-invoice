@@ -6,7 +6,7 @@ import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { registerPdfFonts } from '@/components/pdf/fonts'
 import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
-import { generateEpcQr } from '@/lib/utils/epc-qr'
+import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, Document, DocumentItem, Language, Payment, Settings } from '@/types'
 
 // Server-only (renderToBuffer needs node): import from route handlers and server utilities,
@@ -63,12 +63,13 @@ export async function renderLoadedPdf(
   const lang: Language = doc.language === 'en' ? 'en' : 'de'
   const number = doc.number ?? ''
 
-  const qrCodeDataUri = includeQr && doc.type === 'invoice' && settings.iban && totals.balance_due > 0
+  // EUR only: the QR is a SEPA transfer of the open balance.
+  const qrCodeDataUri = includeQr && doc.type === 'invoice' && doc.currency === 'EUR' && settings.iban && totals.balance_due > 0
     ? await generateEpcQr({
         iban: settings.iban,
         bic: settings.bic ?? '',
-        name: settings.company_name,
-        amountEur: doc.currency === 'EUR' ? totals.balance_due : undefined,
+        name: epcBeneficiary(settings),
+        amountEur: totals.balance_due,
         reference: number,
       })
     : null
