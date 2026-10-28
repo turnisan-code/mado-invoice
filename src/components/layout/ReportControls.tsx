@@ -3,6 +3,7 @@
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useT } from '@/lib/i18n/client'
+import { today } from '@/lib/utils/document'
 import { makePeriod, monthName, periodParams, type Period, type PeriodKind } from '@/app/(app)/reports/period'
 
 interface Props {
@@ -30,8 +31,11 @@ export default function ReportControls({ period, years }: Props) {
     startTransition(() => router.push(`/reports?${periodParams(next)}`))
   }
 
+  // Leaving the year view lands on the current month/quarter when the year is the current one.
   function indexFor(kind: PeriodKind) {
-    return kind === 'month' ? period.month : kind === 'quarter' ? period.quarter : 0
+    const now = today()
+    const month = period.kind === 'year' && Number(now.slice(0, 4)) === period.year ? Number(now.slice(5, 7)) : period.month
+    return kind === 'month' ? month : kind === 'quarter' ? Math.ceil(month / 3) : 0
   }
 
   return (
