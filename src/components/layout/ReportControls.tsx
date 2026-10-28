@@ -1,51 +1,63 @@
 'use client'
 
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { useT } from '@/lib/i18n/client'
+import { makePeriod, monthName, periodParams, type Period, type PeriodKind } from '@/app/(app)/reports/period'
 
 interface Props {
-  year: number
-  quarter: number // 0 = whole year
+  period: Period
   years: number[]
 }
 
-export default function ReportControls({ year, quarter, years }: Props) {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const { t } = useT()
+const KINDS: PeriodKind[] = ['month', 'quarter', 'year']
 
-  function navigate(newYear: number, newQuarter: number) {
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('year', String(newYear))
-    params.set('quarter', newQuarter === 0 ? 'all' : String(newQuarter))
-    router.push(`/reports?${params.toString()}`)
+const segment = (active: boolean, first: boolean) =>
+  `px-3 py-2 sm:py-1.5 text-sm font-medium transition-colors focus-visible:outline-offset-[-2px] ${
+    active
+      ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'
+      : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+  } ${first ? '' : 'border-l border-neutral-200 dark:border-neutral-700'}`
+
+const selectClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100'
+
+export default function ReportControls({ period, years }: Props) {
+  const router = useRouter()
+  const { t, lang } = useT()
+  const [pending, startTransition] = useTransition()
+
+  function go(next: Period) {
+    startTransition(() => router.push(`/reports?${periodParams(next)}`))
+  }
+
+  function indexFor(kind: PeriodKind) {
+    return kind === 'month' ? period.month : kind === 'quarter' ? period.quarter : 0
   }
 
   return (
-    <div className="flex items-center gap-3 flex-wrap">
-      <div role="group" aria-label={t('reports.period')} className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
-        {[1, 2, 3, 4, 0].map((q, i) => (
-          <button
-            key={q}
-            type="button"
-            onClick={() => navigate(year, q)}
-            aria-pressed={q === quarter}
-            className={`px-3 py-2 sm:py-1.5 text-sm font-medium transition-colors focus-visible:outline-offset-[-2px] ${
-              q === quarter
-                ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'
-                : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
-            } ${i > 0 ? 'border-l border-neutral-200 dark:border-neutral-700' : ''}`}
-          >
-            {q === 0 ? t('reports.year') : `Q${q}`}
+    <div className={`flex items-center gap-2 flex-wrap transition-opacity ${pending ? 'opacity-60' : ''}`} aria-busy={pending}>
+      <div role="group" aria-label={t('exports.period.kind')} className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+        {KINDS.map((kind, i) => (
+          <button key={kind} type="button" onClick={() => go(makePeriod(kind, period.year, indexFor(kind)))} aria-pressed={period.kind === kind} className={segment(period.kind === kind, i === 0)}>
+            {t(`exports.period.${kind}`)}
           </button>
         ))}
       </div>
-      <select
-        aria-label={t('reports.year')}
-        value={year}
-        onChange={e => navigate(parseInt(e.target.value), quarter)}
-        className="text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100"
-      >
+      {period.kind === 'month' && (
+        <select aria-label={t('exports.period.month')} value={period.month} onChange={e => go(makePeriod('month', period.year, Number(e.target.value)))} className={selectClass}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{monthName(m, lang)}</option>)}
+        </select>
+      )}
+      {period.kind === 'quarter' && (
+        <div role="group" aria-label={t('exports.period.quarter')} className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+          {[1, 2, 3, 4].map((q, i) => (
+            <button key={q} type="button" onClick={() => go(makePeriod('quarter', period.year, q))} aria-pressed={period.quarter === q} className={segment(period.quarter === q, i === 0)}>
+              Q{q}
+            </button>
+          ))}
+        </div>
+      )}
+      <select aria-label={t('reports.year')} value={period.year} onChange={e => go(makePeriod(period.kind, Number(e.target.value), indexFor(period.kind)))} className={selectClass}>
         {years.map(y => <option key={y} value={y}>{y}</option>)}
       </select>
     </div>
