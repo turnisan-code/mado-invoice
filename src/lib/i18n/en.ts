@@ -635,7 +635,7 @@ export const en = {
       issuedNoDelete: 'Issued documents have to be kept — cancel instead of deleting.',
       quoteNotConvertible: 'Only sent or accepted quotes can be converted to an invoice.',
       alreadyCancelled: 'This invoice is already cancelled.',
-      draftNoStorno: 'A draft has no number to cancel — delete it instead.',
+      draftNoStorno: 'A draft has no number to cancel or credit — edit or delete it instead.',
       notFound: 'Document not found.',
       notOverdue: 'Only overdue invoices with an open balance can be reminded.',
     },

@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
+import { lifecycleErrorMessage } from '@/lib/status'
 
 interface Props {
   id: string
@@ -18,7 +19,9 @@ interface Props {
 }
 
 // Issued (numbered) documents are never deleted — they have to be kept for seven years
-// and their number must stay unique. They are cancelled instead; only drafts can go.
+// and their number must stay unique. They are cancelled instead; only drafts can go. The delete
+// itself only matches unnumbered rows and documents_delete_guard refuses numbered ones, so a
+// stale page cannot delete a document that was issued in another tab.
 export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate = false }: Props) {
   const [loading, setLoading] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -30,8 +33,14 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate
 
   async function handleDelete() {
     setLoading(true)
-    const { error } = await supabase.from('documents').delete().eq('id', id)
-    if (error) { toast.error(error.message); setLoading(false); setConfirming(false); return }
+    const { data, error } = await supabase.from('documents').delete().eq('id', id).is('number', null).select('id')
+    if (error || !data?.length) {
+      toast.error(error ? lifecycleErrorMessage(error, t) : t('lifecycle.errors.issuedNoDelete'))
+      setLoading(false)
+      setConfirming(false)
+      if (!error) router.refresh()
+      return
+    }
     toast.success(t('documents.draftDeleted'))
     router.push(backTo)
   }

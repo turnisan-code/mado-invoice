@@ -637,7 +637,7 @@ export const de = {
       issuedNoDelete: 'Ausgestellte Belege müssen aufbewahrt werden — stornieren statt löschen.',
       quoteNotConvertible: 'Nur versendete oder angenommene Angebote können in eine Rechnung umgewandelt werden.',
       alreadyCancelled: 'Diese Rechnung ist bereits storniert.',
-      draftNoStorno: 'Ein Entwurf hat keine Nummer zum Stornieren — stattdessen löschen.',
+      draftNoStorno: 'Ein Entwurf hat keine Nummer zum Stornieren oder Gutschreiben — stattdessen bearbeiten oder löschen.',
       notFound: 'Beleg nicht gefunden.',
       notOverdue: 'Nur überfällige Rechnungen mit offenem Betrag können gemahnt werden.',
     },

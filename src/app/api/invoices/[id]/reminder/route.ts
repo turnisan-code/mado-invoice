@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, nextReminderLevel } from '@/lib/utils/reminder'
-import { calcTotals } from '@/lib/utils/document'
+import { calcTotals, today } from '@/lib/utils/document'
+import { canRemind } from '@/lib/status'
+import { getT } from '@/lib/i18n/server'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import { logEvent } from '@/lib/events'
 
@@ -25,21 +27,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .single()
 
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
-  if (!invoice.number || !['sent', 'overdue'].includes(invoice.status)) {
-    return NextResponse.json({ error: 'Only issued, unpaid invoices can be reminded' }, { status: 400 })
-  }
-  if (!invoice.clients?.email) return NextResponse.json({ error: 'Client has no email' }, { status: 400 })
-
-  const client = invoice.clients
-  const lang = client.language === 'en' ? 'en' : 'de'
 
   const docDiscount = invoice.discount_type && invoice.discount_value
     ? { type: invoice.discount_type as 'percent' | 'fixed', value: invoice.discount_value }
     : null
   const totals = calcTotals(invoice.document_items ?? [], invoice.payments ?? [], docDiscount, invoice.tax_treatment)
-  if (totals.balance_due <= 0.005) {
-    return NextResponse.json({ error: 'Nothing outstanding on this invoice' }, { status: 400 })
+  // Only an issued invoice past its due date with money still open is dunned; credits, Skonto
+  // and write-offs count towards the balance.
+  if (!canRemind(invoice, totals.balance_due, today())) {
+    const { t } = await getT()
+    return NextResponse.json({ error: t('lifecycle.errors.notOverdue') }, { status: 400 })
   }
+  if (!invoice.clients?.email) return NextResponse.json({ error: 'Client has no email' }, { status: 400 })
+
+  const client = invoice.clients
+  const lang = client.language === 'en' ? 'en' : 'de'
 
   const level = nextReminderLevel(invoice.reminder_level, settings.reminder_max_level)
   const ctx = buildReminderContext({ invoice, client, settings, totals, level, lang })

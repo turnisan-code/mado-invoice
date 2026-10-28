@@ -201,7 +201,7 @@ end;
 $$;
 
 -- ─── Invoice → credit note / Storno ──────────────────────────────────────────
--- Copies the invoice into a draft credit note. With p_cancel it is a Storno: the credit note is
+-- Copies an issued invoice into a draft credit note. With p_cancel it is a Storno: the credit note is
 -- numbered right here (issue_document) and the invoice cancelled in the same transaction, so a
 -- Storno is never a deletable draft and never exists without its cancelled invoice.
 -- Null when the invoice does not exist.
@@ -216,10 +216,11 @@ begin
   select * into inv from documents where id = p_invoice_id and type = 'invoice' for update;
   if inv.id is null then return null; end if;
 
-  if p_cancel and inv.number is null then
-    raise exception using errcode = 'MI018', message = 'A draft has no number to cancel; delete it instead.';
+  -- A credit note corrects an issued invoice; a cancelled one is already reversed by its Storno.
+  if inv.number is null then
+    raise exception using errcode = 'MI018', message = 'A draft has no number to cancel or credit; edit or delete it instead.';
   end if;
-  if p_cancel and inv.status = 'cancelled' then
+  if inv.status = 'cancelled' then
     raise exception using errcode = 'MI017', message = format('%s is already cancelled.', inv.number);
   end if;
 
