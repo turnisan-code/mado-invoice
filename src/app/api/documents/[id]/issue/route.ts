@@ -26,7 +26,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const e = err as { message?: string; code?: string; details?: string }
     const { t } = await getT()
     return NextResponse.json(
-      { error: numberingErrorMessage({ code: e.code, message: e.message || 'Issuing failed', details: e.details }, t), code: e.code ?? null },
+      { error: numberingErrorMessage({ code: e.code, message: e.message || 'Issuing failed', details: e.details }, t), code: e.code ?? null, details: e.details ?? null },
       { status: 400 },
     )
   }

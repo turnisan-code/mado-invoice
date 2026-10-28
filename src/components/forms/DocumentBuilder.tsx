@@ -943,9 +943,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   }
 
   // A stale draft is issued with today's date by default, its due date following the client's terms.
-  function staleOverrides(): Partial<FormState> {
+  function staleOverrides(): { date: string; dueDate: string } {
     const d = today()
-    return { date: d, dueDate: addDays(d, termDays(type, settings, clients.find(c => c.id === formRef.current.clientId))) }
+    return { date: d, dueDate: addDays(d, termDays(type, settings, client)) }
   }
 
   function confirmIssue() {
@@ -1359,6 +1359,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
   const issueDate = pendingIssue?.staleDate && useToday ? today() : (date || today())
+  const issueNumber = pendingIssue ? expectedNumber(settings, type, issueDate) : ''
+  const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
   const restoreTime = restoreOffer
     ? new Date(restoreOffer.savedAt).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
     : ''
@@ -1447,7 +1449,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                 <label className="flex items-center gap-2.5 cursor-pointer">
                   <input type="radio" name={`${uid}-issue-date`} checked={useToday} onChange={() => setUseToday(true)} className="w-4 h-4 accent-neutral-900 dark:accent-white" />
                   {type === 'invoice'
-                    ? t('issueChecks.useTodayDue', { date: formatDate(today(), lang), due: formatDate(staleOverrides().dueDate ?? '', lang) })
+                    ? t('issueChecks.useTodayDue', { date: formatDate(today(), lang), due: formatDate(staleOverrides().dueDate, lang) })
                     : t('issueChecks.useToday', { date: formatDate(today(), lang) })}
                 </label>
                 <label className="flex items-center gap-2.5 cursor-pointer">
@@ -1461,8 +1463,8 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                 {t('issueChecks.earlierThanLatest', { number: latestIssued.number, date: formatDate(latestIssued.date, lang) })}
               </p>
             )}
-            {expectedNumber(settings, type, issueDate) && (
-              <p className="text-neutral-500 dark:text-neutral-400">{t('issueChecks.expectedNumber', { number: expectedNumber(settings, type, issueDate) })}</p>
+            {issueNumber && (
+              <p className="text-neutral-500 dark:text-neutral-400">{t('issueChecks.expectedNumber', { number: issueNumber })}</p>
             )}
           </div>
         )}
@@ -1526,7 +1528,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             <div className="flex-1 space-y-1.5">
               <span id={`${uid}-number`} className="block text-sm leading-none font-medium">{t('issueChecks.number')}</span>
               <p aria-labelledby={`${uid}-number`} className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm truncate ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
-                {doc?.number ?? [t('issueChecks.numberDraft'), expectedNumber(settings, type, date || today()) && t('issueChecks.numberNext', { number: expectedNumber(settings, type, date || today()) })].filter(Boolean).join(' · ')}
+                {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
               </p>
             </div>
             <div className="flex-1 space-y-1.5">
