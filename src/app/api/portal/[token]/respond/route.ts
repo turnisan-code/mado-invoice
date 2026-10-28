@@ -69,10 +69,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (doc.type !== 'quote') return NextResponse.json({ error: 'Not a quote' }, { status: 400 })
 
-  // The client's page is in the quote's language.
+  // The client's page is in the quote's language; 'expired' and 'answered' are final answers the
+  // page can show as they are.
   const docLang = doc.language === 'en' ? 'en' : 'de'
+  const docT = makeT(docLang)
   if (isExpired(doc, today())) {
-    return NextResponse.json({ error: makeT(docLang)('lifecycle.portal.expiredNotice', { date: formatDate(doc.due_date!, docLang) }), code: 'expired' }, { status: 409 })
+    const message = `${docT('lifecycle.portal.expiredNotice', { date: formatDate(doc.due_date!, docLang) })} ${docT('lifecycle.portal.expiredHint')}`
+    return NextResponse.json({ error: message, code: 'expired' }, { status: 409 })
   }
 
   // Conditional on 'sent', so a second answer (or one after the owner decided) changes nothing.
@@ -84,7 +87,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!updated?.length) return NextResponse.json({ error: 'Quote is not in sent status', code: 'answered' }, { status: 409 })
+  if (!updated?.length) return NextResponse.json({ error: docT('lifecycle.portal.answered'), code: 'answered' }, { status: 409 })
 
   await logEvent(supabase, doc.id, 'portal_responded', { action })
   await notifyOwner(supabase, doc as unknown as QuoteRow, action, req.nextUrl.origin)

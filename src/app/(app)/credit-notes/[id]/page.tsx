@@ -8,10 +8,9 @@ import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import CreditNoteSettlement from '@/components/layout/CreditNoteSettlement'
+import { loadCreditNoteSettlement } from '@/lib/credits'
 import { toPublicSettings } from '@/lib/public-settings'
-import { formatDate, roundCents } from '@/lib/utils/document'
-import { documentTotal } from '@/lib/credits'
-import { creditNoteSettled } from '@/lib/status'
+import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -22,34 +21,18 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   const supabase = await createClient()
   const { t, lang } = await getT()
 
-  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { data: appliedRows }] = await Promise.all([
+  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }] = await Promise.all([
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'credit_note').single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
-    // The credit rows that apply this credit note live on its invoice.
-    supabase.from('payments').select('id, date, amount').eq('kind', 'credit').eq('credit_note_id', id),
   ])
 
   if (!doc) notFound()
 
-  const { data: source } = doc.converted_from_id
-    ? await supabase.from('documents').select('id, type, number, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)').eq('id', doc.converted_from_id).maybeSingle()
-    : { data: null }
-  const invoice = source?.type === 'invoice'
-    ? { id: source.id as string, number: source.number as string | null, open: roundCents(documentTotal(source) - (source.payments ?? []).reduce((s: number, p: { amount: number }) => s + p.amount, 0)) }
-    : null
-  const total = documentTotal(doc)
-  const applied = appliedRows ?? []
-  const refunds = (doc.payments ?? []).filter((p: { kind: string }) => p.kind === 'refund')
-  const settled = !!doc.number && doc.status === 'sent' && creditNoteSettled(
-    total,
-    applied.reduce((s, r) => s + r.amount, 0),
-    refunds.reduce((s: number, r: { amount: number }) => s + r.amount, 0),
-  )
-
   const publicSettings = toPublicSettings(settings)
   const reference = await fetchReference(supabase, doc)
+  const settlement = await loadCreditNoteSettlement(supabase, doc)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
@@ -66,7 +49,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
-          <DocumentStatusBar document={doc} display={settled ? 'settled' : undefined} />
+          <DocumentStatusBar document={doc} display={settlement.settled ? 'settled' : undefined} />
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
@@ -88,11 +71,11 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
         <CreditNoteSettlement
           creditNoteId={doc.id}
           issued={!!doc.number}
-          total={total}
+          total={settlement.total}
           currency={doc.currency ?? 'EUR'}
-          invoice={invoice}
-          applied={applied}
-          refunds={refunds}
+          invoice={settlement.invoice}
+          applied={settlement.applied}
+          refunds={settlement.refunds}
         />
       )}
       <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />

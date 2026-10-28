@@ -2,9 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
 import { logEvent } from '@/lib/events'
-import { applyCreditNote } from '@/lib/credits'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
+import { applyCreditNote } from '@/lib/credits'
 
 export type IssueOutcome = {
   number: string
@@ -24,8 +24,7 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   if (!before) throw new Error('Document not found')
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
-  // The code (MI001–MI003, MI010–MI018) lets callers word the failure in the UI language.
-  if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
+  if (error) throw new Error(error.message)
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
   // An issued credit note takes its amount off the open balance of the invoice it corrects; a
   // failure leaves it unapplied, and its page offers to apply it.

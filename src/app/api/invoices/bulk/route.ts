@@ -10,12 +10,14 @@ import type { DocumentStatus } from '@/types'
 // Issuing renders, stores and archives each draft's PDF in turn.
 export const maxDuration = 60
 
-// Drafts are issued first (→ sent); the rest must be allowed to move to the target by the
-// transition table. Cancelling an issued invoice needs a Storno (per-document flow), so it is
-// not offered here; a paid invoice is left alone.
+// "Mark sent" issues drafts and nothing else (overdue → sent is the cron's correction, paid → sent
+// only follows a removed payment). "Mark paid" issues drafts first, then takes every status the
+// transition table lets move to paid. Cancelling an issued invoice needs a Storno (per-document
+// flow), so it is not offered here.
 const TARGETS: readonly DocumentStatus[] = ['sent', 'paid']
-const sourcesFor = (target: DocumentStatus) =>
-  ['draft', ...DOCUMENT_STATUSES.invoice.filter(s => s !== 'draft' && canTransition('invoice', s, target))]
+const sourcesFor = (target: DocumentStatus) => target === 'sent'
+  ? ['draft']
+  : ['draft', ...DOCUMENT_STATUSES.invoice.filter(s => s !== 'draft' && canTransition('invoice', s, target))]
 const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
 
 function isPastIsoDate(value: unknown): value is string {

@@ -2,9 +2,7 @@ import React from 'react'
 import { notFound } from 'next/navigation'
 import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
-import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems, paymentTermsSentence, today } from '@/lib/utils/document'
-import { isExpired } from '@/lib/status'
-import { makeT } from '@/lib/i18n'
+import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems, paymentTermsSentence } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
 import { countryName } from '@/lib/utils/country'
 import { Download } from 'lucide-react'
@@ -89,9 +87,6 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const docType = doc.type as DocumentType
 
   const showPaymentInfo = (doc.status === 'sent' || doc.status === 'overdue') && docType === 'invoice'
-  // Past its valid-until date a quote can no longer be answered here.
-  const expired = isExpired(doc, today())
-  const docT = makeT(lang)
   const paymentTerms = paymentTermsSentence(doc, totals.total, lang)
 
   return (
@@ -117,8 +112,8 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               {docType === 'credit_note' && reference && (
                 <div className="text-xs text-neutral-500">{t('storno_ref', lang)} {reference.number} {t('dated', lang)} {formatDate(reference.date, lang)}</div>
               )}
-              <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium ${expired ? STATUS_COLOR.rejected : STATUS_COLOR[doc.status] ?? ''}`}>
-                {expired ? docT('lifecycle.portal.expired') : STATUS_LABEL[doc.status]?.[lang] ?? doc.status}
+              <span className={`inline-block text-xs px-2.5 py-0.5 rounded-full font-medium ${STATUS_COLOR[doc.status] ?? ''}`}>
+                {STATUS_LABEL[doc.status]?.[lang] ?? doc.status}
               </span>
             </div>
           </div>
@@ -318,13 +313,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               <Download size={15} />
               {t('download_pdf', lang)}
             </a>
-            {docType === 'quote' && doc.status === 'sent' && (expired ? (
-              <p role="status" className="text-sm text-neutral-600">
-                {docT('lifecycle.portal.expiredNotice', { date: formatDate(doc.due_date, lang) })} {docT('lifecycle.portal.expiredHint')}
-              </p>
-            ) : (
+            {docType === 'quote' && doc.status === 'sent' && (
               <QuoteActions token={token} lang={lang} />
-            ))}
+            )}
           </div>
 
         </div>

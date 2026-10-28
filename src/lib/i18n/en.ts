@@ -638,6 +638,8 @@ export const en = {
       draftNoStorno: 'A draft has no number to cancel or credit — edit or delete it instead.',
       notFound: 'Document not found.',
       notOverdue: 'Only overdue invoices with an open balance can be reminded.',
+      settingsIncomplete: 'Your company details in Settings are incomplete (company name, address, UID number or IBAN) — complete them first.',
+      incomplete: 'This cannot be issued yet because details are missing — open the document to see what to complete.',
     },
     paymentDateInvalid: 'Enter a payment date that is not in the future.',
     stornoTitle: 'Cancel {number} with a Storno?',
@@ -656,7 +658,7 @@ export const en = {
       expired: 'Expired',
       expiredNotice: 'This quote expired on {date}.',
       expiredHint: 'Please get in touch for an updated offer.',
-      respondFailed: 'Your answer could not be saved. Please try again.',
+      answered: 'This quote has already been answered.',
     },
     responses: {
       title: 'Client responses',

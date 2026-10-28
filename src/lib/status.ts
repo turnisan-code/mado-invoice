@@ -133,9 +133,11 @@ export function statusLabelKey(status: DisplayStatus | string): DictKey {
 
 type DbError = { code?: string | null; message: string; details?: string | null }
 
-// The lifecycle trigger and RPCs raise English messages with MI010–MI018; numbering MI001–MI003.
+// The lifecycle trigger and RPCs raise English messages with MI010–MI018; numbering MI001–MI003;
+// issue_document MI004 (incomplete; the detail lists why, e.g. when a Storno is numbered).
 export function lifecycleErrorMessage(error: DbError, t: TFn): string {
   switch (error.code) {
+    case 'MI004': return t(error.details?.split(',').includes('settings_incomplete') ? 'lifecycle.errors.settingsIncomplete' : 'lifecycle.errors.incomplete')
     case 'MI010': return t('lifecycle.errors.transition')
     case 'MI011': return t('lifecycle.errors.issueFirst')
     case 'MI012': return t('lifecycle.errors.needsStorno')

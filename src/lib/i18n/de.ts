@@ -630,7 +630,7 @@ export const de = {
     },
     errors: {
       transition: 'Dieser Statuswechsel ist nicht erlaubt.',
-      issueFirst: 'Zuerst ausstellen — nur ein Beleg mit Nummer kann den Entwurf verlassen.',
+      issueFirst: 'Bitte zuerst ausstellen – nur ein nummerierter Beleg kann den Entwurfsstatus verlassen.',
       needsStorno: 'Eine ausgestellte Rechnung wird mit einem Storno aufgehoben.',
       creditNoteFinal: 'Eine ausgestellte Gutschrift kann nicht storniert werden.',
       reopenByPayment: 'Eine bezahlte Rechnung wird nur durch Entfernen einer Zahlung wieder offen.',
@@ -640,6 +640,8 @@ export const de = {
       draftNoStorno: 'Ein Entwurf hat keine Nummer zum Stornieren oder Gutschreiben — stattdessen bearbeiten oder löschen.',
       notFound: 'Beleg nicht gefunden.',
       notOverdue: 'Nur überfällige Rechnungen mit offenem Betrag können gemahnt werden.',
+      settingsIncomplete: 'Die Firmendaten in den Einstellungen sind unvollständig (Firmenname, Adresse, UID-Nummer oder IBAN) — bitte zuerst ergänzen.',
+      incomplete: 'Das kann noch nicht ausgestellt werden, weil Angaben fehlen — den Beleg öffnen, um zu sehen, was zu ergänzen ist.',
     },
     paymentDateInvalid: 'Ein Zahlungsdatum angeben, das nicht in der Zukunft liegt.',
     stornoTitle: '{number} mit einem Storno aufheben?',
@@ -657,8 +659,8 @@ export const de = {
     portal: {
       expired: 'Abgelaufen',
       expiredNotice: 'Dieses Angebot ist am {date} abgelaufen.',
-      expiredHint: 'Für ein aktualisiertes Angebot bitte melden.',
-      respondFailed: 'Die Antwort konnte nicht gespeichert werden. Bitte erneut versuchen.',
+      expiredHint: 'Bitte melden Sie sich für ein aktualisiertes Angebot.',
+      answered: 'Dieses Angebot wurde bereits beantwortet.',
     },
     responses: {
       title: 'Antworten von Kunden',
