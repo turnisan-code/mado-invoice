@@ -1525,9 +1525,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         {/* Number + Date + Due date */}
         <div className="space-y-1.5">
           <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 space-y-1.5">
+            <div role="group" aria-labelledby={`${uid}-number`} className="flex-1 space-y-1.5">
               <span id={`${uid}-number`} className="block text-sm leading-none font-medium">{t('issueChecks.number')}</span>
-              <p aria-labelledby={`${uid}-number`} className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm truncate ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
+              <p className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm truncate ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
                 {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
               </p>
             </div>
@@ -1563,10 +1563,9 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                 <option value="en">{t('common.english')}</option>
               </select>
             </div>
-            <div className="space-y-1.5">
+            <div role="group" aria-labelledby={`${uid}-currency`} aria-describedby={currency !== 'EUR' ? `${uid}-currency-note` : undefined} className="space-y-1.5">
               <span id={`${uid}-currency`} className="block text-sm leading-none font-medium">{t('builder.currency')}</span>
-              <p aria-labelledby={`${uid}-currency`} aria-describedby={currency !== 'EUR' ? `${uid}-currency-note` : undefined}
-                className={`${SELECT_CLS} text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/50`}>
+              <p className={`${SELECT_CLS} text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/50`}>
                 {currency}
               </p>
               {currency !== 'EUR' && <p id={`${uid}-currency-note`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.currencyLegacy')}</p>}

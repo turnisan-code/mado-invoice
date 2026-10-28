@@ -1003,7 +1003,6 @@ export const en = {
     useToday: 'Today, {date}',
     useTodayDue: 'Today, {date} (due {due})',
     keepDate: 'Keep {date}',
-    dateChoice: 'Document date',
     earlierThanLatest: '{number} is already dated {date}. Issuing this document with an earlier date breaks the chronological order of the numbers.',
     expectedNumber: 'Expected number: {number}',
     number: 'Number',

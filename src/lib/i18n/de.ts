@@ -1005,7 +1005,6 @@ export const de = {
     useToday: 'Heute, {date}',
     useTodayDue: 'Heute, {date} (fällig {due})',
     keepDate: '{date} beibehalten',
-    dateChoice: 'Belegdatum',
     earlierThanLatest: '{number} ist bereits mit {date} datiert. Mit einem früheren Datum stimmt die zeitliche Reihenfolge der Nummern nicht mehr.',
     expectedNumber: 'Voraussichtliche Nummer: {number}',
     number: 'Nummer',
