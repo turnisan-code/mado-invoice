@@ -57,12 +57,18 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .lte('date', period.end),
     supabase
       .from('documents')
-      .select(`id, date, tax_treatment, discount_type, discount_value, ${itemCols}`)
+      .select(`id, date, converted_from_id, tax_treatment, discount_type, discount_value, ${itemCols}`)
       .eq('type', 'credit_note')
       .eq('status', 'sent')
       .gte('date', period.start)
       .lte('date', period.end),
   ])
+  const cns = (creditNotes ?? []) as (DocRow & { converted_from_id: string | null })[]
+  const originalIds = cns.map(c => c.converted_from_id).filter((x): x is string => !!x)
+  const { data: originals } = originalIds.length
+    ? await supabase.from('documents').select(`id, tax_treatment, discount_type, discount_value, ${itemCols}, payments(amount, date)`).in('id', originalIds)
+    : { data: [] as unknown[] }
+  const originalById = new Map((originals ?? []).map(o => [(o as DocRow).id, o as DocRow & { payments: { amount: number; date: string }[] }]))
 
   const vat: Record<number, { base: number; vat: number }> = {}
   let rcBase = 0
@@ -84,7 +90,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   }
 
   // Ist-Besteuerung: a payment counts in the period it was received, partial payments
-  // proportionally. Credit notes are deducted in the period of their document date.
+  // proportionally.
   for (const p of payments ?? []) {
     const d = p.documents as unknown as DocRow
     const total = docTotals(d).total
@@ -92,7 +98,23 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     invoiceIds.add(d.id)
     add(d, p.amount / total)
   }
-  for (const cn of creditNotes ?? []) add(cn as unknown as DocRow, -1)
+  // Credit notes reverse turnover in the period of their document date — but a credit note
+  // on an invoice can only give back money that was actually received (a Storno of an unpaid
+  // invoice changes nothing). Standalone credit notes are deducted in full.
+  let creditNoteCount = 0
+  for (const cn of cns) {
+    const creditTotal = docTotals(cn).total
+    if (!creditTotal) continue
+    let refundable = creditTotal
+    const original = cn.converted_from_id ? originalById.get(cn.converted_from_id) : undefined
+    if (original) {
+      const paid = (original.payments ?? []).filter(p => p.date && p.date <= period.end).reduce((s, p) => s + p.amount, 0)
+      refundable = Math.min(creditTotal, Math.max(0, paid + creditTotal - docTotals(original).total))
+    }
+    if (refundable <= 0) continue
+    creditNoteCount++
+    add(cn, -refundable / creditTotal)
+  }
 
   const rates = Object.keys(vat).map(Number).sort((a, b) => b - a)
   const taxableBase = roundCents(rates.reduce((s, r) => s + vat[r].base, 0))
@@ -102,7 +124,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const netTotal = roundCents(taxableBase + rcBase + nonEuBase)
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
   const paymentCount = payments?.length ?? 0
-  const creditNoteCount = creditNotes?.length ?? 0
 
   return (
     <div className="p-4 sm:p-8 max-w-3xl mx-auto space-y-8">
@@ -160,7 +181,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <p className="text-xs text-neutral-400 dark:text-neutral-500">
-        Teilzahlungen werden anteilig berücksichtigt, Gutschriften mit ihrem Belegdatum abgezogen. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
+        Teilzahlungen werden anteilig berücksichtigt. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.
       </p>
     </div>
   )

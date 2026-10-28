@@ -44,7 +44,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">Draft</span>}</h1>
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
-          <DocumentStatusBar document={doc} balanceDue={totals.balance_due} />
+          <DocumentStatusBar document={doc} />
           <div className="flex-1 sm:hidden" />
           <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />
           <ConvertToCreditNoteButton invoiceId={doc.id} />

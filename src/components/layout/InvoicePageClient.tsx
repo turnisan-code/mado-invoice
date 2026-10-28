@@ -63,6 +63,8 @@ export default function InvoicePageClient({
       </div>
       <PaymentPanel
         documentId={document.id}
+        number={document.number ?? null}
+        status={document.status}
         total={total}
         payments={payments}
         currency={currency}

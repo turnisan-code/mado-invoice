@@ -5,7 +5,6 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
-import { today } from '@/lib/utils/document'
 
 const INVOICE_STATUSES = ['draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
 const QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -33,14 +32,15 @@ const itemColor: Record<string, string> = {
 
 interface Props {
   document: { id: string; status: string; type: string; number: string | null }
-  balanceDue?: number
 }
 
-export default function DocumentStatusBar({ document: doc, balanceDue }: Props) {
+export default function DocumentStatusBar({ document: doc }: Props) {
   const [status, setStatus] = useState(doc.status)
   const [seenStatus, setSeenStatus] = useState(doc.status)
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const ref = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const supabase = createClient()
@@ -64,7 +64,10 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
 
   // Every status beyond draft/cancelled means the document has been issued, which requires a number.
   const needsNumber = (s: string) => !doc.number && s !== 'draft' && s !== 'cancelled'
-  const recordsPayment = (s: string) => s === 'paid' && doc.type === 'invoice' && !!balanceDue && balanceDue > 0
+  // "Paid" on an invoice goes through the server, which records the open balance as a payment.
+  const recordsPayment = (s: string) => s === 'paid' && doc.type === 'invoice' && doc.status !== 'paid'
+  // An issued invoice is cancelled with a Storno document, never by just flipping the status.
+  const createsStorno = (s: string) => s === 'cancelled' && doc.type === 'invoice' && !!doc.number
 
   async function changeStatus(newStatus: string) {
     if (newStatus === status) { setOpen(false); return }
@@ -77,24 +80,53 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
   }
 
   async function applyStatus(newStatus: string) {
-    if (needsNumber(newStatus)) {
-      const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
-      if (issueErr) { toast.error(issueErr.message); return }
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      if (createsStorno(newStatus)) {
+        const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cancel: true }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) { toast.error(data.error ?? 'Could not create the Storno'); return }
+        setConfirm(null)
+        toast.success('Invoice cancelled — issue the Storno and send it to the client.')
+        router.push(`/credit-notes/${data.creditNoteId}`)
+        return
+      }
+      if (recordsPayment(newStatus)) {
+        const res = await fetch('/api/invoices/bulk', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [doc.id], status: 'paid' }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) { toast.error(data.error ?? 'Could not mark as paid'); return }
+        if (!data.updated) { toast.error('This invoice cannot be marked as paid in its current status.'); return }
+      } else {
+        if (needsNumber(newStatus)) {
+          const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
+          if (issueErr) { toast.error(issueErr.message); return }
+        }
+        const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
+        if (error) { toast.error(error.message); return }
+      }
+      setStatus(newStatus)
+      setOpen(false)
+      setConfirm(null)
+      router.refresh()
+      toast.success(recordsPayment(newStatus) ? 'Marked as paid — open balance recorded as a payment.' : `Status updated to ${newStatus}.`)
+    } finally {
+      busyRef.current = false
+      setBusy(false)
     }
-    if (recordsPayment(newStatus)) {
-      const { error: payErr } = await supabase.from('payments').insert({ document_id: doc.id, date: today(), amount: balanceDue, note: null })
-      if (payErr) { toast.error(payErr.message); return }
-    }
-    const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-    if (error) { toast.error(error.message); return }
-    setStatus(newStatus)
-    setOpen(false)
-    setConfirm(null)
-    router.refresh()
-    toast.success(recordsPayment(newStatus) ? 'Marked as paid — payment recorded.' : `Status updated to ${newStatus}.`)
   }
 
   const confirmText = (s: string) => {
+    if (createsStorno(s)) return `Creates a Stornorechnung that cancels ${doc.number} and marks this invoice as cancelled. You then issue the Storno and send it to the client.`
     const parts: string[] = []
     if (needsNumber(s)) parts.push(`This assigns the next ${doc.type.replace('_', ' ')} number and marks the document as ${s}. Numbers cannot be taken back.`)
     if (recordsPayment(s)) parts.push('The open balance is recorded as a payment dated today.')
@@ -137,11 +169,11 @@ export default function DocumentStatusBar({ document: doc, balanceDue }: Props) 
               <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{confirmText(confirm)}</p>
             </div>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirm(null)} className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              <button onClick={() => setConfirm(null)} disabled={busy} className="text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50">
                 Cancel
               </button>
-              <button onClick={() => applyStatus(confirm)} className="text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-                Confirm
+              <button onClick={() => applyStatus(confirm)} disabled={busy} className="text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50">
+                {busy ? 'Working…' : 'Confirm'}
               </button>
             </div>
           </div>
