@@ -782,7 +782,6 @@ export const en = {
       pageTitle: '{title} {number} · {company}',
       downloadPdf: 'Download PDF',
       notes: 'Notes',
-      taxNote: 'Tax note',
       expiredTitle: 'This link has expired',
       expiredBody: 'Please ask {company} for a new link.',
       notFoundTitle: 'Document not found',

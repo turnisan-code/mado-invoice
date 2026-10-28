@@ -784,7 +784,6 @@ export const de = {
       pageTitle: '{title} {number} · {company}',
       downloadPdf: 'PDF herunterladen',
       notes: 'Hinweise',
-      taxNote: 'Steuerhinweis',
       expiredTitle: 'Dieser Link ist abgelaufen',
       expiredBody: 'Bitte fordern Sie bei {company} einen neuen Link an.',
       notFoundTitle: 'Beleg nicht gefunden',

@@ -1,5 +1,5 @@
 import { makeT, n, type DictKey, type TFn } from '@/lib/i18n'
-import { countryName } from '@/lib/utils/country'
+import { countryName, toCountryCode } from '@/lib/utils/country'
 import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import { epcBeneficiary } from '@/lib/utils/epc-qr'
 import type { DocumentKind, DocumentType, Language, Settings, Unit } from '@/types'
@@ -76,7 +76,8 @@ export function issuerBlocks(s: IssuerSettings, t: TFn, lang: Language) {
       s.address_line1,
       s.address_line2,
       [s.zip, s.city].map(v => v?.trim()).filter(Boolean).join(' '),
-      countryName(s.country, lang),
+      // Settings may still hold a free-text name such as the old default 'Austria'.
+      countryName(toCountryCode(s.country) ?? s.country, lang),
     ]),
     contact: lines([
       s.phone,
