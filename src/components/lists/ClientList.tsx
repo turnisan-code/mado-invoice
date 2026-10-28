@@ -113,7 +113,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
       }
     }
     return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
-  }, [clients, q, status, tag, sort, balanceMap, lastInvoicedMap])
+  }, [clients, q, status, tag, sort, balanceMap, lastInvoicedMap, lang])
 
   const { page, pageCount, pageItems } = paginate(filtered, list.page)
   const selection = useSelection(filtered, pageItems)
