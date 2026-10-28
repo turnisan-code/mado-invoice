@@ -25,6 +25,8 @@ interface ImportResponse {
   imported: number
   duplicates: number
   paid: string[]
+  /** Recorded as dunning fees / interest beyond the open balances. */
+  fees?: number
   errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled'; message: string }[]
 }
 
@@ -147,6 +149,8 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   const [dragOver, setDragOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmOverpay, setConfirmOverpay] = useState(false)
+  // What the credits beyond an open balance are: dunning fees and interest, or an overpayment.
+  const [excessAs, setExcessAs] = useState<'fee' | 'payment'>('fee')
   const [result, setResult] = useState<ImportResult | null>(null)
 
   const plural = (count: number, one: DictKey, other: DictKey) => n(count, t(one, { count }), t(other, { count }))
@@ -233,10 +237,17 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
       date: r.transaction.date,
       amount: r.transaction.amount,
       note: noteFor(r.transaction),
+      reference: r.transaction.reference,
       skonto_amount: skontoFor(r),
+      ...(excessTotal > 0.005 && excessAs === 'fee' ? { excess: 'fee' as const } : {}),
     }))
     if (!payload.length) return
-    if (excessTotal > 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
+    if (excessTotal > 0.005 && !allowOverpayment) {
+      // A reminded invoice paid with more than its balance is most likely a paid Mahnung.
+      setExcessAs(overpaid.some(id => (invoiceById.get(id)?.reminderLevel ?? 0) > 0) ? 'fee' : 'payment')
+      setConfirmOverpay(true)
+      return
+    }
     setConfirmOverpay(false)
     // Snapshot the labels now: router.refresh() below drops the invoices this import pays off.
     const labels: InvoiceLabel[] = [...new Set(payload.map(p => p.document_id))].flatMap(id => {
@@ -338,6 +349,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
         <ul className="text-sm space-y-1">
           <li>{plural(result.imported, 'bankImport.resultImportedOne', 'bankImport.resultImportedOther')}</li>
           {result.duplicates > 0 && <li className="text-neutral-500 dark:text-neutral-400">{plural(result.duplicates, 'bankImport.resultDuplicatesOne', 'bankImport.resultDuplicatesOther')}</li>}
+          {(result.fees ?? 0) > 0.005 && <li className="text-neutral-500 dark:text-neutral-400">{t('books.fees.resultFees', { amount: money(result.fees ?? 0, currency) })}</li>}
           {result.errors.length > 0 && <li className="text-red-600 dark:text-red-400">{plural(result.errors.length, 'bankImport.resultErrorsOne', 'bankImport.resultErrorsOther')}</li>}
         </ul>
         {result.errors.length > 0 && (
@@ -368,7 +380,11 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                 )
               })}
             </ul>
-            {bookamatConfigured && <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">{t('bankImport.bookamatHint')}</p>}
+            {bookamatConfigured && (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-2">
+                <Link href="/invoices?bookamat=unsynced" className="underline underline-offset-2 hover:text-neutral-700 dark:hover:text-neutral-200">{t('bankImport.bookamatHint')}</Link>
+              </p>
+            )}
           </div>
         )}
         <div className="flex flex-wrap gap-2 pt-1">
@@ -558,17 +574,32 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
 
           <ConfirmDialog
             open={confirmOverpay}
-            title={t('bankImport.overpayTitle')}
+            title={t('books.fees.importTitle')}
             description={n(
               overpaid.length,
-              t('bankImport.overpayDescOne', { amount: money(excessTotal, currency) }),
-              t('bankImport.overpayDescOther', { count: overpaid.length, amount: money(excessTotal, currency) }),
+              t('books.fees.importDescOne', { amount: money(excessTotal, currency) }),
+              t('books.fees.importDescOther', { count: overpaid.length, amount: money(excessTotal, currency) }),
             )}
-            confirmLabel={t('bankImport.importAnyway')}
+            confirmLabel={t('bankImport.importButton')}
             busy={busy}
             onConfirm={() => void doImport(true)}
             onCancel={() => setConfirmOverpay(false)}
-          />
+          >
+            <fieldset className="space-y-2">
+              <legend className="sr-only">{t('books.fees.importTitle')}</legend>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="radio" name="bank-import-excess" className="mt-1 shrink-0" checked={excessAs === 'fee'} onChange={() => setExcessAs('fee')} />
+                <span>
+                  {t('books.fees.importAsFee')}
+                  <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{t('books.fees.splitFeeHint')}</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input type="radio" name="bank-import-excess" className="mt-1 shrink-0" checked={excessAs === 'payment'} onChange={() => setExcessAs('payment')} />
+                <span>{t('books.fees.importAsPayment')}</span>
+              </label>
+            </fieldset>
+          </ConfirmDialog>
         </>
       )}
     </div>
