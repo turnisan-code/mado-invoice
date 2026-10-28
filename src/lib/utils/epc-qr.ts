@@ -1,15 +1,25 @@
 import QRCode from 'qrcode'
+import type { Settings } from '@/types'
 
 /**
- * Generates an EPC QR code (GiroCode) for SEPA bank transfers.
- * Supported by all major European banking apps (George, Sparkasse, etc.)
- *
- * For EUR invoices the amount is pre-filled. For non-EUR invoices (e.g. GBP, USD)
- * the amount field is left empty — banking apps will prompt the user to enter it,
- * but IBAN and reference are still pre-filled.
- *
- * Spec: https://www.europeanpaymentscouncil.eu/document-library/guidance-documents/quick-response-code-guidelines-enable-data-capture-initiation
+ * EPC QR code (GiroCode) for SEPA credit transfers, read by every major European banking app.
+ * Spec: EPC069-12 "Quick Response Code: Guidelines to Enable Data Capture for the Initiation of a
+ * SEPA Credit Transfer", version 002 (BIC optional, UTF-8).
  */
+
+type BeneficiarySettings = Pick<Settings, 'bank_account_holder' | 'company_name' | 'owner_name'>
+
+// Verification of Payee compares this name with the account holder, so the holder from Settings
+// wins over the trade name; the owner's name is the last resort because the name is mandatory.
+export function epcBeneficiary(settings: BeneficiarySettings): string {
+  return settings.bank_account_holder?.trim() || settings.company_name?.trim() || settings.owner_name?.trim() || ''
+}
+
+// The payload is line based, so a line break inside a value would shift every following field.
+function field(value: string, max: number): string {
+  return value.replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
 export function buildEpcPayload({
   bic,
   name,
@@ -20,36 +30,26 @@ export function buildEpcPayload({
   bic: string
   name: string
   iban: string
-  amountEur?: number  // omit for non-EUR invoices
+  amountEur?: number
   reference: string
 }): string {
-  const cleanIban = iban.replace(/\s/g, '').toUpperCase()
-  const cleanBic = bic.replace(/\s/g, '').toUpperCase().slice(0, 11)
-  const cleanName = name.slice(0, 70)
-  const cleanRef = reference.slice(0, 35)
-  // Amount is optional in EPC spec — omit for non-EUR so the bank app asks the user
-  const amountStr = amountEur != null && amountEur > 0 ? `EUR${amountEur.toFixed(2)}` : ''
-
+  const amount = amountEur != null && amountEur >= 0.01 ? `EUR${amountEur.toFixed(2)}` : ''
   return [
-    'BCD',        // Service tag
-    '002',        // Version
-    '1',          // Character set: UTF-8
-    'SCT',        // SEPA Credit Transfer
-    cleanBic,     // BIC of beneficiary bank
-    cleanName,    // Beneficiary name
-    cleanIban,    // Beneficiary IBAN
-    amountStr,    // Amount (empty = bank app asks user)
-    '',           // Purpose code (empty)
-    '',           // Remittance reference (structured, empty)
-    cleanRef,     // Remittance information (unstructured)
+    'BCD',
+    '002',
+    '1',                                      // UTF-8
+    'SCT',
+    bic.replace(/\s/g, '').toUpperCase().slice(0, 11),
+    field(name, 70),
+    iban.replace(/\s/g, '').toUpperCase(),
+    amount,                                   // empty: the banking app asks for it
+    '',                                       // purpose code
+    '',                                       // structured creditor reference (RF…)
+    field(reference, 140),                    // unstructured remittance information
   ].join('\n')
 }
 
-/**
- * Returns a base64 PNG data URI of the EPC QR code, or null if IBAN is missing.
- * Works for any invoice currency — EUR invoices get the amount pre-filled,
- * non-EUR invoices get IBAN + reference pre-filled (amount left for user to enter).
- */
+// PNG data URI of the QR code, or null without an IBAN or a beneficiary name.
 export async function generateEpcQr(params: {
   bic: string
   name: string
@@ -57,16 +57,14 @@ export async function generateEpcQr(params: {
   amountEur?: number
   reference: string
 }): Promise<string | null> {
-  if (!params.iban || !params.name) return null
+  if (!params.iban.trim() || !params.name.trim()) return null
   try {
-    const payload = buildEpcPayload(params)
-    const dataUri = await QRCode.toDataURL(payload, {
+    return await QRCode.toDataURL(buildEpcPayload(params), {
       errorCorrectionLevel: 'M',
       margin: 1,
-      width: 120,
+      width: 240,
       color: { dark: '#000000', light: '#ffffff' },
     })
-    return dataUri
   } catch {
     return null
   }

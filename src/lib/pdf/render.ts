@@ -1,14 +1,19 @@
+import path from 'path'
 import { createElement, type ComponentProps } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
+import { preparePdfFonts, registerPdfFonts } from '@/components/pdf/fonts'
 import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
-import { fetchReference } from '@/lib/utils/document-reference'
-import { generateEpcQr } from '@/lib/utils/epc-qr'
+import { fetchCreditReference } from '@/lib/utils/document-reference'
+import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, Document, DocumentItem, Language, Payment, Settings } from '@/types'
 
 // Server-only (renderToBuffer needs node): import from route handlers and server utilities,
 // never from a client component.
+
+// next.config.ts traces public/fonts into every function that renders.
+registerPdfFonts(path.join(process.cwd(), 'public', 'fonts'))
 
 export type PdfDocument = Document & {
   document_items: DocumentItem[] | null
@@ -43,8 +48,8 @@ export function pdfFilename(number: string): string {
 }
 
 // The single assembly of everything the PDF prints: ordered lines, totals after payments and
-// section discounts, the tax note with the settings overrides, the Storno reference and, for an
-// invoice with an open balance, the EPC payment QR.
+// section discounts, the tax note with the settings overrides, the Storno or correction reference
+// and, for a EUR invoice with an open balance, the EPC payment QR.
 export async function renderLoadedPdf(
   supabase: SupabaseClient,
   doc: PdfDocument,
@@ -58,12 +63,13 @@ export async function renderLoadedPdf(
   const lang: Language = doc.language === 'en' ? 'en' : 'de'
   const number = doc.number ?? ''
 
-  const qrCodeDataUri = includeQr && doc.type === 'invoice' && settings.iban && totals.balance_due > 0
+  // EUR only: the QR is a SEPA transfer of the open balance.
+  const qrCodeDataUri = includeQr && doc.type === 'invoice' && doc.currency === 'EUR' && settings.iban && totals.balance_due > 0
     ? await generateEpcQr({
         iban: settings.iban,
         bic: settings.bic ?? '',
-        name: settings.company_name,
-        amountEur: doc.currency === 'EUR' ? totals.balance_due : undefined,
+        name: epcBeneficiary(settings),
+        amountEur: totals.balance_due,
         reference: number,
       })
     : null
@@ -90,10 +96,11 @@ export async function renderLoadedPdf(
       skonto_days: doc.skonto_days ?? null,
       items,
       totals,
-      reference: await fetchReference(supabase, doc),
+      reference: await fetchCreditReference(supabase, doc),
     },
   }
 
+  await preparePdfFonts()
   return renderToBuffer(createElement(InvoiceDocument, props) as unknown as PdfElement)
 }
 
