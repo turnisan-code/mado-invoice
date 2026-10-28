@@ -13,11 +13,13 @@ interface Props {
   backTo: string
   docNumber: string | null
   docType: string
+  /** The document is the template of a recurring schedule, which goes with it. */
+  isTemplate?: boolean
 }
 
 // Issued (numbered) documents are never deleted — they have to be kept for seven years
 // and their number must stay unique. They are cancelled instead; only drafts can go.
-export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
+export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate = false }: Props) {
   const [loading, setLoading] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const router = useRouter()
@@ -48,7 +50,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber }: Props) {
       <ConfirmDialog
         open={confirming}
         title={t('documents.deleteDraftTitle')}
-        description={t('documents.cannotUndo')}
+        description={isTemplate ? `${t('documents.cannotUndo')} ${t('recurring.deleteRemovesSchedule')}` : t('documents.cannotUndo')}
         confirmLabel={loading ? t('common.deleting') : t('common.delete')}
         destructive
         busy={loading}

@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2 } from 'lucide-react'
+import { Plus, ArrowUpDown, ArrowUp, ArrowDown, FileText, CheckSquare, Square, Download, CheckCircle, Send, X, Trash2, Repeat } from 'lucide-react'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { toast } from 'sonner'
@@ -133,7 +133,7 @@ function exportCSV(invoices: Invoice[], t: TFn) {
 
 const inputClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
 
-export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
+export default function InvoiceList({ invoices, recurringSourceIds = [] }: { invoices: Invoice[]; recurringSourceIds?: string[] }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -147,6 +147,13 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const invoiceCount = (count: number) => n(count, t('invoices.countOne', { count }), t('invoices.countOther', { count }))
+  // Template invoices of a recurring schedule; the generated invoices are ordinary invoices.
+  const recurring = new Set(recurringSourceIds)
+  const recurringBadge = (
+    <span className="inline-flex items-center gap-1 align-middle text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+      <Repeat size={10} />{t('recurring.badge')}
+    </span>
+  )
 
   // Filter state lives in the component for instant feedback and is mirrored to the URL
   // (debounced, so typing does not navigate per keystroke) to survive reloads and back/forward.
@@ -416,6 +423,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                   <div className="min-w-0">
                     <p className="font-medium text-sm">
                       {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
+                      {recurring.has(doc.id) && <span className="ml-1.5">{recurringBadge}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
                       {doc.clients?.company ?? doc.clients?.name ?? '—'}
@@ -495,6 +503,7 @@ export default function InvoiceList({ invoices }: { invoices: Invoice[] }) {
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
                     {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
+                  {recurring.has(doc.id) && <span className="ml-1.5">{recurringBadge}</span>}
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{doc.clients?.company ?? doc.clients?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>

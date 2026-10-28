@@ -150,6 +150,7 @@ export interface Document {
   notes: string | null
   notes_internal: string | null
   converted_from_id: string | null
+  recurring_schedule_id?: string | null
   cancels_document_id?: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
@@ -209,4 +210,23 @@ export interface DocumentTotals {
   total: number
   total_paid: number
   balance_due: number
+}
+
+export type RecurringInterval = 'weekly' | 'monthly' | 'quarterly' | 'half_yearly' | 'yearly'
+export type RecurringMode = 'draft' | 'issue'
+
+export interface RecurringSchedule {
+  id: string
+  created_at: string
+  source_document_id: string
+  name: string
+  interval: RecurringInterval
+  anchor_day: number
+  next_date: string
+  end_date: string | null
+  active: boolean
+  in_advance: boolean
+  mode: RecurringMode
+  last_generated_at: string | null
+  last_document_id: string | null
 }

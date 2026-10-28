@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX
+  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, Repeat
 } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import LanguageToggle from '@/components/layout/LanguageToggle'
@@ -21,6 +21,7 @@ const nav: { href: string; label: DictKey; icon: typeof LayoutDashboard }[] = [
   { href: '/invoices',      label: 'nav.invoices',    icon: FileText },
   { href: '/quotes',        label: 'nav.quotes',      icon: MessageSquareQuote },
   { href: '/credit-notes',  label: 'nav.creditNotes', icon: FileX },
+  { href: '/recurring',     label: 'nav.recurring',   icon: Repeat },
   { href: '/catalogue',     label: 'nav.catalogue',   icon: BookOpen },
   { href: '/reports',       label: 'nav.reports',     icon: BarChart3 },
   { href: '/settings',      label: 'nav.settings',    icon: Settings },
