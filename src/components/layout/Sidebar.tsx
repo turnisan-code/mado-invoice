@@ -2,51 +2,34 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import {
-  LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, Repeat
-} from 'lucide-react'
+import { LogOut, Moon, Sun } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import LanguageToggle from '@/components/layout/LanguageToggle'
+import { NAV_ITEMS, isNavActive } from '@/components/layout/nav'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { useTheme } from 'next-themes'
 import { useT } from '@/lib/i18n/client'
-import type { DictKey } from '@/lib/i18n'
-
-const nav: { href: string; label: DictKey; icon: typeof LayoutDashboard }[] = [
-  { href: '/dashboard',     label: 'nav.dashboard',   icon: LayoutDashboard },
-  { href: '/clients',       label: 'nav.clients',     icon: Users },
-  { href: '/invoices',      label: 'nav.invoices',    icon: FileText },
-  { href: '/quotes',        label: 'nav.quotes',      icon: MessageSquareQuote },
-  { href: '/credit-notes',  label: 'nav.creditNotes', icon: FileX },
-  { href: '/recurring',     label: 'nav.recurring',   icon: Repeat },
-  { href: '/catalogue',     label: 'nav.catalogue',   icon: BookOpen },
-  { href: '/reports',       label: 'nav.reports',     icon: BarChart3 },
-  { href: '/settings',      label: 'nav.settings',    icon: Settings },
-]
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
-  const supabase = createClient()
   const { resolvedTheme, setTheme } = useTheme()
   const { t } = useT()
 
+  // A full load drops the client router cache, so Back cannot show cached app pages after sign-out.
   async function signOut() {
-    await supabase.auth.signOut()
-    router.push('/login')
+    await createClient().auth.signOut()
+    window.location.assign('/login')
   }
 
   return (
-    <aside className="hidden md:flex w-56 shrink-0 flex-col h-screen sticky top-0 border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+    <aside className="hidden md:flex w-56 shrink-0 flex-col h-dvh sticky top-0 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
       <Link href="/dashboard" aria-label={t('nav.logoLabel')} className="block px-4 py-5 border-b border-neutral-100 dark:border-neutral-800">
         <Logo />
       </Link>
-      <nav aria-label={t('nav.main')} className="flex-1 py-3 px-2 space-y-0.5">
-        {nav.map(({ href, label, icon: Icon }) => {
-          const active = pathname.startsWith(href)
+      <nav aria-label={t('nav.main')} className="flex-1 min-h-0 overflow-y-auto py-3 px-2 space-y-0.5">
+        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+          const active = isNavActive(pathname, href)
           return (
             <Link
               key={href}

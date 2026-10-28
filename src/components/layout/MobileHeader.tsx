@@ -1,63 +1,36 @@
 'use client'
 
 import { useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import {
-  LayoutDashboard, Users, FileText, MessageSquareQuote,
-  BookOpen, Settings, BarChart3, LogOut, Moon, Sun, FileX, MoreHorizontal, X, Repeat,
-} from 'lucide-react'
+import { LogOut, Moon, Sun, MoreHorizontal, X } from 'lucide-react'
 import Logo from '@/components/ui/Logo'
 import LanguageToggle from '@/components/layout/LanguageToggle'
+import { MOBILE_MORE, MOBILE_TABS, isNavActive } from '@/components/layout/nav'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n/client'
-import type { DictKey } from '@/lib/i18n'
-
-type NavItem = { href: string; label: DictKey; icon: typeof LayoutDashboard }
-
-// Primary tabs shown in the bottom bar
-const PRIMARY_NAV: NavItem[] = [
-  { href: '/dashboard',  label: 'nav.dashboard', icon: LayoutDashboard },
-  { href: '/invoices',   label: 'nav.invoices',  icon: FileText },
-  { href: '/clients',    label: 'nav.clients',   icon: Users },
-  { href: '/quotes',     label: 'nav.quotes',    icon: MessageSquareQuote },
-]
-
-// Overflow items in the "More" bottom sheet
-const MORE_NAV: NavItem[] = [
-  { href: '/credit-notes', label: 'nav.creditNotes', icon: FileX },
-  { href: '/recurring',    label: 'nav.recurring',   icon: Repeat },
-  { href: '/catalogue',    label: 'nav.catalogue',   icon: BookOpen },
-  { href: '/reports',      label: 'nav.reports',     icon: BarChart3 },
-  { href: '/settings',     label: 'nav.settings',    icon: Settings },
-]
 
 export default function MobileHeader() {
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname()
-  const router = useRouter()
-  const supabase = createClient()
   const { resolvedTheme, setTheme } = useTheme()
   const { t } = useT()
 
   async function signOut() {
     setMoreOpen(false)
-    await supabase.auth.signOut()
-    router.push('/login')
+    await createClient().auth.signOut()
+    window.location.assign('/login')
   }
 
-  const isMore = MORE_NAV.some(n => pathname.startsWith(n.href))
+  const isMore = MOBILE_MORE.some(n => isNavActive(pathname, n.href))
 
   return (
     <>
       {/* Slim top bar — logo only; padded below the iOS status bar in the installed app */}
-      <div
-        className="md:hidden sticky top-0 z-30 flex items-center px-4 pb-3 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900"
-        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
-      >
+      <div className="md:hidden sticky top-0 z-30 flex items-center px-4 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-3 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
         <Link href="/dashboard" aria-label={t('nav.logoLabel')} className="rounded-md">
           <Logo />
         </Link>
@@ -66,11 +39,10 @@ export default function MobileHeader() {
       {/* Bottom tab bar */}
       <nav
         aria-label={t('nav.main')}
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-stretch"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800 flex items-stretch"
       >
-        {PRIMARY_NAV.map(({ href, label, icon: Icon }) => {
-          const active = pathname.startsWith(href)
+        {MOBILE_TABS.map(({ href, label, icon: Icon }) => {
+          const active = isNavActive(pathname, href)
           return (
             <Link
               key={href}
@@ -115,7 +87,7 @@ export default function MobileHeader() {
         hideTitle
         panelClassName="md:hidden bg-white dark:bg-neutral-900"
       >
-        <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="pb-[env(safe-area-inset-bottom)]">
           {/* Handle */}
           <div className="flex justify-center pt-3 pb-1">
             <div className="w-10 h-1 rounded-full bg-neutral-200 dark:bg-neutral-700" />
@@ -134,8 +106,8 @@ export default function MobileHeader() {
           </div>
 
           <nav aria-label={t('nav.more')} className="px-2 pb-2 space-y-0.5">
-            {MORE_NAV.map(({ href, label, icon: Icon }) => {
-              const active = pathname.startsWith(href)
+            {MOBILE_MORE.map(({ href, label, icon: Icon }) => {
+              const active = isNavActive(pathname, href)
               return (
                 <Link
                   key={href}
