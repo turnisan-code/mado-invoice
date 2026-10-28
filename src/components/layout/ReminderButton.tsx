@@ -80,8 +80,11 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
     }
   }
 
+  // Loading the draft can be abandoned; sending or recording cannot.
+  const locked = busy !== null && busy !== 'loading'
+
   function close() {
-    if (busy) return
+    if (locked) return
     setOpen(false)
   }
 
@@ -185,11 +188,16 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
         open={open}
         onClose={close}
         title={draft ? t('dunning.dialogTitle', { title: draft.title, number: draft.number }) : nextTitle}
-        busy={!!busy}
+        busy={locked}
         panelClassName="max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         {!draft ? (
-          <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">{t('dunning.loading')}</p>
+          <>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400" role="status">{t('dunning.loading')}</p>
+            <div className="flex justify-end">
+              <Button type="button" variant="ghost" onClick={close}>{t('common.cancel')}</Button>
+            </div>
+          </>
         ) : (
           <>
             {!gmail && <p className="text-xs text-amber-700 dark:text-amber-400">{t('dunning.noGmail')}</p>}
