@@ -1,4 +1,5 @@
 import type { Language, Settings } from '@/types'
+import { makeT } from '@/lib/i18n'
 import type { NamedClient } from './clients'
 import { addDays, roundCents, today as viennaToday } from './document'
 import {
@@ -14,9 +15,10 @@ function ordinal(n: number): string {
 }
 
 // Level 1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung, …
-export function reminderTitle(level: number, lang: 'de' | 'en'): string {
-  if (level <= 1) return lang === 'de' ? 'Zahlungserinnerung' : 'Payment reminder'
-  return lang === 'de' ? `${level - 1}. Mahnung` : `${ordinal(level - 1)} dunning notice`
+export function reminderTitle(level: number, lang: Language): string {
+  const t = makeT(lang)
+  if (level <= 1) return t('dunning.titles.reminder')
+  return t('dunning.titles.dunning', { n: level - 1, ordinal: ordinal(level - 1) })
 }
 
 // The level the next reminder carries: one above the current one, never above the configured maximum

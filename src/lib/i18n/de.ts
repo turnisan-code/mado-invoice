@@ -714,15 +714,20 @@ export const de = {
     attachments: 'Anhänge: {files}',
     viewPdf: '{title} ansehen (PDF)',
     sendGmail: 'Über Gmail senden',
-    openEmailApp: 'PDF laden + E-Mail-Programm öffnen',
+    openEmailApp: 'PDFs laden + E-Mail-Programm öffnen',
     markSent: 'Mahnung als gesendet markieren',
     markSentHint: 'Aus dem E-Mail-Programm oder per Post verschickt? Hier festhalten, damit die nächste Mahnung eine Stufe höher geht.',
-    noGmail: 'Gmail ist nicht verbunden: PDF laden, aus dem E-Mail-Programm senden und die Mahnung danach als gesendet markieren.',
+    noGmail: 'Gmail ist nicht verbunden: Mahnschreiben und Rechnungskopie laden, im E-Mail-Programm anhängen und senden, danach die Mahnung als gesendet markieren.',
     recorded: '{title} als gesendet vermerkt.',
     couldNotPrepare: 'Mahnung konnte nicht vorbereitet werden: ',
     couldNotRecord: 'Mahnung konnte nicht vermerkt werden: ',
     pdfFailed: 'PDF konnte nicht erstellt werden: {error}',
     portalLinkFailed: 'Der Kundenportal-Link konnte nicht erstellt werden; die E-Mail enthält ihn daher nicht.',
+    invoiceCopyFailed: 'Die Rechnungskopie konnte nicht geladen werden; bitte im E-Mail-Programm selbst anhängen.',
+    titles: {
+      reminder: 'Zahlungserinnerung',
+      dunning: '{n}. Mahnung',
+    },
     errors: {
       not_remindable: 'Nur ausgestellte, offene Rechnungen können gemahnt werden.',
       nothing_outstanding: 'Auf dieser Rechnung ist nichts offen.',
@@ -735,8 +740,9 @@ export const de = {
     settings: {
       noGmail: 'Google ist nicht verbunden: Der tägliche Lauf markiert Rechnungen als überfällig, kann sie aber nicht mailen. Mahnungen auf der Rechnungsseite erstellen (PDF + eigenes E-Mail-Programm) und dort als gesendet markieren.',
       defaultHint: 'Ein leeres Feld verwendet den grau angezeigten Standardtext.',
-      reminderHint: 'Ohne eigenen Text verwendet jede Stufe ihren eigenen Standardtext; ein eigener Text gilt für alle Stufen.',
+      reminderHint: 'Ohne eigenen Text verwendet jede Stufe ihren eigenen Standardtext. Ein eigener Text gilt für alle Stufen und sollte daher {fee}, {interest} und {total} enthalten, damit die E-Mail denselben Betrag nennt wie das Mahnschreiben.',
       useDefault: 'Mit dem Standardtext beginnen',
+      useDefaultReminder: 'Mit einem Text für alle Stufen beginnen',
       preview: 'Vorschau',
       previewNote: 'Mit Beispieldaten. Zeilen, deren Variablen alle leer sind, entfallen.',
       level: 'Stufe',
@@ -794,7 +800,7 @@ export const de = {
       },
       reminder1: {
         subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
-        body: 'Guten Tag,\n\nlaut unseren Unterlagen ist Rechnung {{invoice_number}} vom {{date}} über {{amount}} noch offen. Sie war am {{due_date}} fällig und ist Ihnen vielleicht einfach entgangen.\n\nBitte überweisen Sie den offenen Betrag bis {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nDie Zahlungserinnerung und eine Kopie der Rechnung finden Sie im Anhang. Sollte sich Ihre Zahlung mit dieser Nachricht überschnitten haben, betrachten Sie sie bitte als gegenstandslos.\n\nMit freundlichen Grüßen\n{{sender}}',
+        body: 'Guten Tag,\n\nlaut unseren Unterlagen ist Rechnung {{invoice_number}} vom {{date}} noch mit {{amount}} offen. Sie war am {{due_date}} fällig und ist Ihnen vielleicht einfach entgangen.\n\nVerzugszinsen: {{interest}}\nZu zahlen: {{total_due}}\n\nBitte überweisen Sie den Betrag bis {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nDie Zahlungserinnerung und eine Kopie der Rechnung finden Sie im Anhang. Sollte sich Ihre Zahlung mit dieser Nachricht überschnitten haben, betrachten Sie sie bitte als gegenstandslos.\n\nMit freundlichen Grüßen\n{{sender}}',
       },
       reminder2: {
         subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
@@ -803,6 +809,10 @@ export const de = {
       reminder3: {
         subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
         body: 'Guten Tag,\n\nRechnung {{invoice_number}} vom {{date}} ist trotz Zahlungserinnerung und Mahnung noch immer offen und seit {{days_overdue}} Tagen überfällig.\n\nOffener Betrag: {{amount}}\nMahnspesen: {{fee}}\nVerzugszinsen: {{interest}}\nZu zahlen: {{total_due}}\n\nBitte überweisen Sie den Betrag bis spätestens {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nGeht bis dahin keine Zahlung ein, folgen ohne weitere Ankündigung weitere Schritte zur Einbringung der Forderung; die dadurch entstehenden Kosten gehen zu Ihren Lasten.\n\nDie Mahnung und eine Kopie der Rechnung finden Sie im Anhang.\n\nMit freundlichen Grüßen\n{{sender}}',
+      },
+      reminderCustom: {
+        subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
+        body: 'Guten Tag,\n\nRechnung {{invoice_number}} vom {{date}} war am {{due_date}} fällig und ist seit {{days_overdue}} Tagen überfällig.\n\nOffener Betrag: {{amount}}\nMahnspesen: {{fee}}\nVerzugszinsen: {{interest}}\nZu zahlen: {{total_due}}\n\nBitte überweisen Sie den Betrag bis {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nDas Mahnschreiben und eine Kopie der Rechnung finden Sie im Anhang. Sollte sich Ihre Zahlung mit dieser Nachricht überschnitten haben, betrachten Sie sie bitte als gegenstandslos.\n\nMit freundlichen Grüßen\n{{sender}}',
       },
     },
     pdf: {
@@ -817,7 +827,6 @@ export const de = {
       intro3: 'trotz Zahlungserinnerung und Mahnung ist die folgende Rechnung noch immer offen.',
       invoice: 'Rechnung {number} vom {date}',
       due: 'Fällig am {date}, {days} überfällig',
-      invoiceTotal: 'Rechnungsbetrag',
       paid: 'Bereits bezahlt',
       open: 'Offener Betrag',
       fee: 'Mahnspesen',

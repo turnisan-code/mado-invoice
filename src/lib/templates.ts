@@ -138,6 +138,12 @@ export function defaultTemplate(kind: EmailTemplateKind, lang: Language, level =
   return level <= 1 ? defaults.reminder1 : level === 2 ? defaults.reminder2 : defaults.reminder3
 }
 
+// What "Start from the built-in text" puts in the field. The owner's reminder text serves every
+// level, so it starts from one that lists fee, interest and total wherever the Mahnung charges them.
+export function starterTemplate(kind: EmailTemplateKind, lang: Language): TemplateText {
+  return kind === 'reminder' ? getDict(lang).dunning.defaults.reminderCustom : defaultTemplate(kind, lang)
+}
+
 // The owner's text where there is one, the built-in text for the rest (subject and body separately).
 export function resolveTemplate(settings: TemplateSettings, kind: EmailTemplateKind, lang: Language, level = 1): TemplateText {
   const fallback = defaultTemplate(kind, lang, level)

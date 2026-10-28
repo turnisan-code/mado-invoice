@@ -35,6 +35,12 @@ function reportError(t: TFn, payload: unknown, prefix: string) {
   else toastApiError(t, payload, prefix, t('common.failed'))
 }
 
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  Object.assign(document.createElement('a'), { href: url, download: filename }).click()
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
+}
+
 const inputCls = 'w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 aria-invalid:border-red-500'
 const labelCls = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
 
@@ -125,15 +131,19 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
     if (!draft) return
     setBusy('mailto')
     try {
-      const res = await fetch(pdfUrl)
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        toast.error(t('dunning.pdfFailed', { error: typeof data.error === 'string' ? data.error : res.statusText }))
+      // The email promises the invoice copy too: the same copy the Gmail send attaches.
+      const [mahnung, copy] = await Promise.all([
+        fetch(pdfUrl),
+        fetch(`/api/documents/${documentId}/pdf?for=reminder`).catch(() => null),
+      ])
+      if (!mahnung.ok) {
+        reportError(t, await mahnung.json().catch(() => ({})), t('dunning.couldNotPrepare'))
         return
       }
-      const url = URL.createObjectURL(await res.blob())
-      Object.assign(document.createElement('a'), { href: url, download: draft.attachments[0] }).click()
-      setTimeout(() => URL.revokeObjectURL(url), 10000)
+      download(await mahnung.blob(), draft.attachments[0])
+      const copyBlob = copy?.ok ? await copy.blob().catch(() => null) : null
+      if (copyBlob) download(copyBlob, draft.attachments[1])
+      else toast.warning(t('dunning.invoiceCopyFailed'))
 
       const cc = parseEmailList(fields.cc).emails
       const query = [

@@ -8,7 +8,7 @@ import type { DictKey, UiLang } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
 import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/reminder-templates'
-import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, variablesFor } from '@/lib/templates'
+import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -772,7 +772,7 @@ export default function SettingsForm({ settings }: Props) {
     }
     const skonto = { percent: terms.default_skonto_percent ? Number(terms.default_skonto_percent) : null, days: terms.default_skonto_days ? Number(terms.default_skonto_days) : null }
     const { doc, client, totals } = sampleDocument(activeDocTab, activeLang, todayIso, skonto)
-    const portalLink = portalUrl(process.env.NEXT_PUBLIC_APP_URL ?? '', SAMPLE_PORTAL_TOKEN)
+    const portalLink = portalUrl(process.env.NEXT_PUBLIC_APP_URL || (typeof window === 'undefined' ? '' : window.location.origin), SAMPLE_PORTAL_TOKEN)
     const vars = activeDocTab === 'reminder'
       ? reminderVariables({
           doc, client, issuer, totals, portalLink,
@@ -786,8 +786,9 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   function prefillBuiltIn() {
-    if (!tpl[subjectKey]) setTplField(activeDocTab, subjectKey, builtIn.subject)
-    setTplField(activeDocTab, bodyKey, builtIn.body)
+    const starter = starterTemplate(activeDocTab, activeLang)
+    if (!tpl[subjectKey]) setTplField(activeDocTab, subjectKey, starter.subject)
+    setTplField(activeDocTab, bodyKey, starter.body)
   }
 
   const preview = activeSection === 'templates' ? emailPreview() : null
@@ -1494,7 +1495,7 @@ export default function SettingsForm({ settings }: Props) {
               </dl>
             </details>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              {activeDocTab === 'reminder' ? `${t('dunning.settings.reminderHint')} ` : ''}
+              {activeDocTab === 'reminder' ? `${t('dunning.settings.reminderHint', { fee: '{{fee}}', interest: '{{interest}}', total: '{{total_due}}' })} ` : ''}
               {t('settings.templates.reminderHint', { token: '{{fee}}' })}
             </p>
 
@@ -1506,7 +1507,7 @@ export default function SettingsForm({ settings }: Props) {
               {!tpl[bodyKey] && (
                 <button type="button" onClick={prefillBuiltIn}
                   className="text-xs py-1 underline underline-offset-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200">
-                  {t('dunning.settings.useDefault')}
+                  {activeDocTab === 'reminder' ? t('dunning.settings.useDefaultReminder') : t('dunning.settings.useDefault')}
                 </button>
               )}
             </div>

@@ -712,15 +712,20 @@ export const en = {
     attachments: 'Attached: {files}',
     viewPdf: 'View {title} (PDF)',
     sendGmail: 'Send via Gmail',
-    openEmailApp: 'Download PDF + open email app',
+    openEmailApp: 'Download PDFs + open email app',
     markSent: 'Mark reminder as sent',
     markSentHint: 'Sent from your email app or by post? Record it, so the next reminder moves up a level.',
-    noGmail: 'Gmail is not connected: download the PDF, send it from your email app, then mark the reminder as sent.',
+    noGmail: 'Gmail is not connected: download the reminder letter and the invoice copy, attach both in your email app and send, then mark the reminder as sent.',
     recorded: '{title} recorded as sent.',
     couldNotPrepare: 'Could not prepare the reminder: ',
     couldNotRecord: 'Could not record the reminder: ',
     pdfFailed: 'Could not create the PDF: {error}',
     portalLinkFailed: 'The client-portal link could not be created, so the email leaves it out.',
+    invoiceCopyFailed: 'The invoice copy could not be downloaded; attach it in your email app yourself.',
+    titles: {
+      reminder: 'Payment reminder',
+      dunning: '{ordinal} dunning notice',
+    },
     errors: {
       not_remindable: 'Only issued, unpaid invoices can be reminded.',
       nothing_outstanding: 'Nothing is outstanding on this invoice.',
@@ -733,8 +738,9 @@ export const en = {
     settings: {
       noGmail: 'Google is not connected: the daily run marks invoices overdue but cannot email them. Send reminders from the invoice page (PDF + your email app) and mark them as sent there.',
       defaultHint: 'An empty field uses the built-in text shown in grey.',
-      reminderHint: 'Without your own text every level uses its own built-in text; your own text serves every level.',
+      reminderHint: 'Without your own text every level uses its own built-in text. Your own text serves every level, so it should contain {fee}, {interest} and {total}; then the email asks for the same amount as the reminder letter.',
       useDefault: 'Start from the built-in text',
+      useDefaultReminder: 'Start from a text for every level',
       preview: 'Preview',
       previewNote: 'With sample data. Lines whose variables are all empty are left out.',
       level: 'Level',
@@ -759,7 +765,7 @@ export const en = {
       sender: 'Company, else your name',
       company: 'Your company',
       owner: 'Your name',
-      reminder_title: 'Zahlungserinnerung / 1. Mahnung / 2. Mahnung',
+      reminder_title: 'Payment reminder / 1st / 2nd dunning notice',
       level: 'Reminder level',
       amount: 'Outstanding amount',
       days_overdue: 'Days overdue',
@@ -792,7 +798,7 @@ export const en = {
       },
       reminder1: {
         subject: '{{reminder_title}}: invoice {{invoice_number}}',
-        body: 'Dear {{contact}},\n\nAccording to our records, invoice {{invoice_number}} dated {{date}} for {{amount}} is still open. It was due on {{due_date}} and may simply have been overlooked.\n\nPlease transfer the outstanding amount by {{new_deadline}} to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nYou will find this reminder and a copy of the invoice attached. If your payment has crossed with this message, please disregard it.\n\nKind regards,\n{{sender}}',
+        body: 'Dear {{contact}},\n\nAccording to our records, {{amount}} is still outstanding on invoice {{invoice_number}} dated {{date}}. It was due on {{due_date}} and may simply have been overlooked.\n\nLate payment interest: {{interest}}\nAmount due: {{total_due}}\n\nPlease transfer the amount by {{new_deadline}} to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nYou will find this reminder and a copy of the invoice attached. If your payment has crossed with this message, please disregard it.\n\nKind regards,\n{{sender}}',
       },
       reminder2: {
         subject: '{{reminder_title}}: invoice {{invoice_number}}',
@@ -801,6 +807,10 @@ export const en = {
       reminder3: {
         subject: '{{reminder_title}}: invoice {{invoice_number}}',
         body: 'Dear {{contact}},\n\nDespite our payment reminder and dunning notice, invoice {{invoice_number}} dated {{date}} is still unpaid and now {{days_overdue}} days overdue.\n\nOutstanding: {{amount}}\nReminder fee: {{fee}}\nLate payment interest: {{interest}}\nAmount due: {{total_due}}\n\nPlease transfer the amount by {{new_deadline}} at the latest to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nIf no payment is received by then, further steps to collect the debt will follow without further notice; the resulting costs are at your expense.\n\nYou will find the dunning notice and a copy of the invoice attached.\n\nKind regards,\n{{sender}}',
+      },
+      reminderCustom: {
+        subject: '{{reminder_title}}: invoice {{invoice_number}}',
+        body: 'Dear {{contact}},\n\nInvoice {{invoice_number}} dated {{date}} was due on {{due_date}} and is now {{days_overdue}} days overdue.\n\nOutstanding: {{amount}}\nReminder fee: {{fee}}\nLate payment interest: {{interest}}\nAmount due: {{total_due}}\n\nPlease transfer the amount by {{new_deadline}} to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nYou will find the reminder letter and a copy of the invoice attached. If your payment has crossed with this message, please disregard it.\n\nKind regards,\n{{sender}}',
       },
     },
     pdf: {
@@ -815,7 +825,6 @@ export const en = {
       intro3: 'Despite our payment reminder and dunning notice the invoice below is still unpaid.',
       invoice: 'Invoice {number} dated {date}',
       due: 'Due {date}, {days} overdue',
-      invoiceTotal: 'Invoice total',
       paid: 'Already paid',
       open: 'Outstanding',
       fee: 'Reminder fee',
