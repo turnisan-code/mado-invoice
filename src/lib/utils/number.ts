@@ -33,5 +33,7 @@ export function formatLocaleNumber(n: number | null, decimals: number): string {
 }
 
 // The one definition; utils/document.ts re-exports it (that module imports '@/types' and
-// cannot be loaded by node for verification).
-export const roundCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+// cannot be loaded by node for verification). Half away from zero like Postgres and MoneyInput,
+// so −1.005 and 1.005 round alike; toPrecision drops binary noise (1234.565 × 100 = 123456.4999…),
+// and `|| 0` avoids a −0 that would print as "-0,00 €".
+export const roundCents = (n: number) => (Math.sign(n) * Math.round(Number((Math.abs(n) * 100).toPrecision(15)))) / 100 || 0
