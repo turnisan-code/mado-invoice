@@ -84,6 +84,7 @@ const DocumentBuilder = forwardRef<DocumentBuilderHandle, Props>(function Docume
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
   const [date, setDate] = useState(doc?.date ?? today())
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
+  const [serviceDateEnd, setServiceDateEnd] = useState(doc?.service_date_end ?? '')
   const [dueDate, setDueDate] = useState(doc?.due_date ?? addDays(today(), settings.default_payment_days))
   const [language, setLanguage] = useState<Language>(doc?.language ?? settings.default_language as Language ?? 'de')
   const [currency, setCurrency] = useState<Currency>(doc?.currency ?? 'EUR')
@@ -274,6 +275,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   function currentDocFields(effectiveDate: string, effectiveDueDate: string | null) {
     return {
       client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
+      service_date_end: serviceDateEnd || null,
       due_date: effectiveDueDate, language, currency, tax_treatment: taxTreatment,
       notes: notes || null, notes_internal: notesInternal || null,
       discount_type: discountType, discount_value: discountValue || null,
@@ -331,7 +333,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!client) { toast.error('Select a client first.'); return null }
     const docData = {
       number: numOverride ?? doc?.number ?? 'DRAFT',
-      date, service_date: serviceDate || null, due_date: dueDate || null,
+      date, service_date: serviceDate || null, service_date_end: serviceDateEnd || null, due_date: dueDate || null,
       type, language, currency, tax_treatment: taxTreatment,
       notes: notes || null, tax_note: taxNote,
       discount_type: discountType, discount_value: discountValue || null,
@@ -623,7 +625,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
     setAutoSaving(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, clientId, date, serviceDate, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving, saveError])
+  }, [doc, clientId, date, serviceDate, serviceDateEnd, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, lines, saving, saveError])
 
   useEffect(() => {
     if (!doc) return
@@ -769,7 +771,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             {showDetails ? 'Hide details' : 'Language, currency & tax'}
           </button>
 
-          <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
+          <div className={`grid grid-cols-2 sm:grid-cols-5 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
             <div className="space-y-1.5">
               <Label>Language</Label>
               <select value={language} onChange={e => setLanguage(e.target.value as Language)}
@@ -797,8 +799,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label>Service date</Label>
+              <Label>Service from</Label>
               <Input type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} className="text-sm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Service to</Label>
+              <Input type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} className="text-sm" />
             </div>
           </div>
         </div>

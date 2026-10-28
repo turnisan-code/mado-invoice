@@ -24,6 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     client_id: quote.client_id,
     date: today(),
     service_date: quote.service_date,
+    service_date_end: quote.service_date_end,
     due_date: null,
     status: 'draft',
     language: quote.language,

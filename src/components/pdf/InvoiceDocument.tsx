@@ -69,6 +69,12 @@ const LABELS: Record<string, Record<'de' | 'en', string>> = {
   due_label:     { de: 'Fälligkeitsdatum:',    en: 'Due Date:' },
   valid_label:   { de: 'Gültig bis:',          en: 'Valid Until:' },
   service_label: { de: 'Leistungsdatum:',      en: 'Service Date:' },
+  period_label:  { de: 'Leistungszeitraum:',   en: 'Service period:' },
+  credit_note_no:{ de: 'Gutschriftsnummer:',   en: 'Credit Note No.' },
+  section_sub:   { de: 'Zwischensumme',        en: 'Subtotal' },
+  net:           { de: 'Netto',                en: 'Net' },
+  net_of:        { de: 'davon Netto',          en: 'Net at' },
+  vat:           { de: 'USt.',                 en: 'VAT' },
   description:   { de: 'Beschreibung',         en: 'Description' },
   qty:           { de: 'Menge',                en: 'Qty' },
   rate:          { de: 'Preis',                en: 'Rate' },
@@ -83,6 +89,15 @@ const LABELS: Record<string, Record<'de' | 'en', string>> = {
 
 function L(key: string, lang: 'de' | 'en'): string {
   return LABELS[key]?.[lang] ?? key
+}
+
+const UNIT_LABELS: Record<string, Record<'de' | 'en', string>> = {
+  hour:    { de: 'Std.',     en: 'hr' },
+  day:     { de: 'Tag',      en: 'day' },
+  flat:    { de: 'pauschal', en: 'flat' },
+  piece:   { de: 'Stk.',     en: 'pc' },
+  month:   { de: 'Monat',    en: 'month' },
+  session: { de: 'Session',  en: 'session' },
 }
 
 function replaceVars(text: string, vars: Record<string, string>): string {
@@ -105,6 +120,7 @@ interface DocData {
   number: string
   date: string
   service_date: string | null
+  service_date_end?: string | null
   due_date: string | null
   type: DocumentType
   language: Language
@@ -140,7 +156,7 @@ function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   const lang = doc.language as 'de' | 'en'
   const fmt = (n: number) => formatMoney(n, doc.currency)
-  const noLabel = doc.type === 'quote' ? L('quote_no', lang) : L('invoice_no', lang)
+  const noLabel = doc.type === 'quote' ? L('quote_no', lang) : doc.type === 'credit_note' ? L('credit_note_no', lang) : L('invoice_no', lang)
 
   const footerVars: Record<string, string> = {
     invoice_number: doc.number,
@@ -177,7 +193,11 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
             <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
             {!!doc.service_date && (
-              <Text style={s.metaLine}>{L('service_label', lang)} {formatDate(doc.service_date, lang)}</Text>
+              <Text style={s.metaLine}>
+                {doc.service_date_end && doc.service_date_end !== doc.service_date
+                  ? `${L('period_label', lang)} ${formatDate(doc.service_date, lang)} – ${formatDate(doc.service_date_end, lang)}`
+                  : `${L('service_label', lang)} ${formatDate(doc.service_date, lang)}`}
+              </Text>
             )}
           </View>
         </View>
@@ -235,7 +255,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             return (
               <View key={i}>
                 <View style={s.subtotalRow}>
-                  <Text style={s.subtotalLabel}>Subtotal</Text>
+                  <Text style={s.subtotalLabel}>{L('section_sub', lang)}</Text>
                   <Text style={[s.subtotalValue, discAmt > 0 ? { color: '#9b9b9b', textDecoration: 'line-through' } as never : {}]}>{fmt(gross)}</Text>
                 </View>
                 {discAmt > 0 && (
@@ -244,10 +264,10 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                       <Text style={s.subtotalLabel}>
                         {item.discount_type === 'percent' ? `${L('discount', lang)} (${item.discount_value}%)` : L('discount', lang)}
                       </Text>
-                      <Text style={s.subtotalValue}>−{fmt(discAmt)}</Text>
+                      <Text style={s.subtotalValue}>-{fmt(discAmt)}</Text>
                     </View>
                     <View style={s.subtotalRow}>
-                      <Text style={[s.subtotalLabel, { fontFamily: 'Helvetica-Bold' }]}>Net</Text>
+                      <Text style={[s.subtotalLabel, { fontFamily: 'Helvetica-Bold' }]}>{L('net', lang)}</Text>
                       <Text style={[s.subtotalValue, { fontFamily: 'Helvetica-Bold' }]}>{fmt(net)}</Text>
                     </View>
                   </>
@@ -266,7 +286,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 )}
               </View>
               <Text style={s.colQty}>{item.quantity}</Text>
-              <Text style={s.colRate}>{fmt(item.unit_price)}/{item.unit}</Text>
+              <Text style={s.colRate}>{fmt(item.unit_price)}/{UNIT_LABELS[item.unit]?.[lang] ?? item.unit}</Text>
               <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
             </View>
           )
@@ -277,7 +297,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         <View style={s.bottomDivider} />
         <View style={s.bottomRow}>
           <View>
-            {!!doc.due_date && (
+            {!!doc.due_date && doc.type !== 'credit_note' && (
               <View>
                 <Text style={s.dueDateLabel}>{doc.type === 'quote' ? L('valid_label', lang) : L('due_label', lang)}</Text>
                 <Text style={s.dueDateValue}>{formatDate(doc.due_date, lang)}</Text>
@@ -294,13 +314,22 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 <Text style={s.totalsLabel}>
                   {L('discount', lang)}{doc.discount_type === 'percent' && doc.discount_value ? ` (${doc.discount_value}%)` : ''}
                 </Text>
-                <Text>−{fmt(doc.totals.discount_amount)}</Text>
+                <Text>-{fmt(doc.totals.discount_amount)}</Text>
               </View>
             )}
+            {/* §11 UStG: with several rates the net amount per rate must be stated, not just the tax */}
             {doc.tax_treatment === 'at_vat' && doc.totals.vat_groups.map(g => (
-              <View key={g.rate} style={s.totalsRow}>
-                <Text style={s.totalsLabel}>USt. {g.rate}%</Text>
-                <Text>{fmt(g.amount)}</Text>
+              <View key={g.rate}>
+                {doc.totals.vat_groups.length > 1 && (
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{L('net_of', lang)} {g.rate}%</Text>
+                    <Text>{fmt(g.base)}</Text>
+                  </View>
+                )}
+                <View style={s.totalsRow}>
+                  <Text style={s.totalsLabel}>{L('vat', lang)} {g.rate}%</Text>
+                  <Text>{fmt(g.amount)}</Text>
+                </View>
               </View>
             ))}
             <View style={s.totalsDivider} />
@@ -331,7 +360,13 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           <View>
             <Text style={s.footerTitle}>{L('contact', lang)}</Text>
             <Text style={s.footerText}>
-              {[settings.phone, settings.email, `${settings.address_line1}, ${settings.zip} ${settings.city}`].filter(Boolean).join('\n')}
+              {[
+                settings.company_name,
+                `${settings.address_line1}, ${settings.zip} ${settings.city}`,
+                settings.phone,
+                settings.email,
+                settings.uid_number ? `${L('uid', lang)} ${settings.uid_number}` : null,
+              ].filter(Boolean).join('\n')}
             </Text>
           </View>
           <View>
