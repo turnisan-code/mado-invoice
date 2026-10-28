@@ -2,6 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
 import { logEvent } from '@/lib/events'
+import { isUiLang, makeT } from '@/lib/i18n'
+import { orderItems } from '@/lib/utils/document'
+import { ISSUER_SETTINGS_COLUMNS, IssueCheckError, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 
@@ -13,6 +16,33 @@ export type IssueOutcome = {
   driveError: { error: string; code?: string } | null
 }
 
+// The checks the builder shows inline, run on the stored document before a number is taken, so
+// every issuance path refuses an incomplete document with readable reasons (IssueCheckError).
+async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
+  const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
+    supabase.from('documents')
+      .select('type, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(line_type, sort_order, description, quantity, unit_price, service_date, service_date_end)')
+      .eq('id', documentId)
+      .maybeSingle(),
+    supabase.from('settings').select(`${ISSUER_SETTINGS_COLUMNS}, ui_language`).maybeSingle(),
+  ])
+  if (error) throw new Error(error.message)
+  if (settingsErr) throw new Error(settingsErr.message)
+  if (!doc) throw new Error('Document not found')
+  const problems = issueProblems({
+    type: doc.type,
+    taxTreatment: doc.tax_treatment,
+    serviceDate: doc.service_date,
+    serviceDateEnd: doc.service_date_end,
+    isStorno: !!doc.cancels_document_id,
+    // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
+    client: doc.clients as unknown as IssueCheckInput['client'],
+    items: orderItems(doc.document_items ?? []),
+    settings,
+  })
+  if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(settings?.ui_language) ? settings.ui_language : 'en'))
+}
+
 // Every issuance path goes through here: issue_document assigns the number atomically, then the
 // PDF is frozen in the private bucket and archived to Drive when a folder is configured. Only a
 // failed number assignment throws; archive failures are returned so the caller can report them
@@ -21,9 +51,10 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   const { data: before, error: lookupErr } = await supabase.from('documents').select('number').eq('id', documentId).maybeSingle()
   if (lookupErr) throw new Error(lookupErr.message)
   if (!before) throw new Error('Document not found')
+  if (!before.number) await assertIssuable(supabase, documentId)
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
-  if (error) throw new Error(error.message)
+  if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
 
   const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }
