@@ -55,6 +55,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
   const [paidDate, setPaidDate] = useState('')
   const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
   const [paidDateInvalid, setPaidDateInvalid] = useState(false)
+  const [stornoReason, setStornoReason] = useState('')
   const busyRef = useRef(false)
   const ref = useRef<HTMLDivElement>(null)
   const uid = useId()
@@ -110,6 +111,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         setPaidMethod('bank')
         setPaidDateInvalid(false)
       }
+      if (createsStorno(newStatus)) setStornoReason('')
       setConfirm(newStatus)
       return
     }
@@ -125,13 +127,14 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     busyRef.current = true
     setBusy(true)
     try {
-      // Issuing renders the frozen PDF from the database, so the builder's pending edits go first.
-      if (needsNumber(newStatus)) await flushPendingEdits(doc.id)
+      // Issuing renders the frozen PDF from the database and a Storno copies the invoice's lines
+      // from there, so the builder's pending edits go first.
+      if (needsNumber(newStatus) || createsStorno(newStatus)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cancel: true }),
+          body: JSON.stringify({ cancel: true, reason: stornoReason.trim() || undefined }),
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok) { toast.error(data.error ?? t('statusBar.stornoFailed')); return }
@@ -258,6 +261,20 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
               </select>
             </div>
             {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
+          </div>
+        )}
+        {confirm && createsStorno(confirm) && (
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-storno-reason`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('lifecycle.storno.reason')}</label>
+            <input
+              id={`${uid}-storno-reason`}
+              type="text"
+              value={stornoReason}
+              maxLength={500}
+              placeholder={t('lifecycle.storno.reasonPlaceholder')}
+              onChange={e => setStornoReason(e.target.value)}
+              className={`w-full ${inputClass}`}
+            />
           </div>
         )}
       </ConfirmDialog>

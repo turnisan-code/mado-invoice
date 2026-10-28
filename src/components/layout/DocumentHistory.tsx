@@ -22,6 +22,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
   const d = event.detail ?? {}
   const statusLabel = (value: unknown) => (str(value) ? t(`status.${str(value)}` as DictKey) : '')
   const subject = str(d.subject) ? t('archive.subject', { subject: str(d.subject)! }) : null
+  const reason = str(d.reason) ? t('lifecycle.storno.reasonShort', { reason: str(d.reason)! }) : null
 
   switch (event.type) {
     case 'issued': {
@@ -59,6 +60,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const id = str(d.credit_note_id)
       return {
         text: t('archive.events.storno_created'),
+        sub: reason,
         link: id ? { href: `/credit-notes/${id}`, label: t('archive.openStorno') } : undefined,
       }
     }
@@ -71,6 +73,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const id = str(d.from_id)
       return {
         text: number ? t('archive.events.converted', { number }) : t('archive.events.convertedPlain'),
+        sub: reason,
         link: path && id ? { href: `/${path}/${id}`, label: t('archive.openSource') } : undefined,
       }
     }

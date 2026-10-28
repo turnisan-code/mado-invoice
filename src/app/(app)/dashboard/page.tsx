@@ -7,6 +7,8 @@ import { StatusBadge } from '@/components/lists/StatusBadge'
 import { getT } from '@/lib/i18n/server'
 import { n, type DictKey } from '@/lib/i18n'
 import { makePeriod, periodParams } from '@/app/(app)/reports/period'
+import { unappliedCreditNotes } from '@/lib/credits'
+import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
 
 // Month keys come from the Vienna calendar date and are shifted in UTC, so neither the server's
 // time zone nor a 31st (setMonth overflow) can move a payment into the wrong month.
@@ -50,7 +52,7 @@ export default async function DashboardPage() {
   const items = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
   const invoiceCols = `id, number, status, due_date, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${items}, payments(amount)`
 
-  const [{ data: activeInvoices }, { data: received }, { data: paidPayments }, { data: quotes }, { data: responseEvents }] = await Promise.all([
+  const [{ data: activeInvoices }, { data: received }, { data: paidPayments }, { data: quotes }, { data: responseEvents }, unapplied] = await Promise.all([
     supabase.from('documents').select(invoiceCols).eq('type', 'invoice').in('status', ['sent', 'overdue']),
     // Revenue is cash-based (Ist-Besteuerung): every money payment counts on the day it arrived,
     // whatever the invoice status; Skonto and write-offs close invoices without revenue.
@@ -75,6 +77,11 @@ export default async function DashboardPage() {
       .is('read_at', null)
       .order('created_at', { ascending: false })
       .limit(10),
+    // Credit notes that should already have reduced their invoice's balance.
+    unappliedCreditNotes(supabase).catch(err => {
+      console.error('[dashboard] unapplied credit notes:', err)
+      return []
+    }),
   ])
   const responses = (responseEvents ?? []) as unknown as { id: string; created_at: string; detail: { action?: string }; documents: { id: string; number: string | null; clients: ClientRef } }[]
 
@@ -203,6 +210,17 @@ export default async function DashboardPage() {
             {' '}{t('dashboard.overdueAlertTail', { amount: formatMoney(overdueTotal) })}
           </span>
         </Link>
+      )}
+
+      {unapplied.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-sm text-amber-800 dark:text-amber-300 flex-wrap sm:flex-nowrap">
+          <AlertTriangle size={15} className="shrink-0 mt-0.5" aria-hidden="true" />
+          <span className="flex-1 min-w-0">
+            <strong>{n(unapplied.length, t('lifecycle.credit.unappliedOne', { count: unapplied.length }), t('lifecycle.credit.unappliedOther', { count: unapplied.length }))}</strong>
+            {' '}{t('lifecycle.credit.unappliedHint')}
+          </span>
+          <ApplyCreditNotesButton />
+        </div>
       )}
 
       {responses.length > 0 && (

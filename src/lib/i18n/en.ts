@@ -643,6 +643,11 @@ export const en = {
     },
     paymentDateInvalid: 'Enter a payment date that is not in the future.',
     stornoTitle: 'Cancel {number} with a Storno?',
+    storno: {
+      reason: 'Reason (optional)',
+      reasonPlaceholder: 'e.g. wrong amount, issued twice',
+      reasonShort: 'Reason: {reason}',
+    },
     recurring: {
       issueFailed: '{date}: created as a draft, issuing failed ({error})',
       snapshotFailed: '{date}: issued, but the archive copy failed ({error})',
@@ -710,6 +715,15 @@ export const en = {
       removeRefund: 'Remove refund of {amount} from {date}',
       removeRefundTitle: 'Remove this refund?',
       removeRefundDesc: '{amount} from {date} is removed and the credit note is open again.',
+      unappliedOne: '{count} credit note is not applied to its invoice yet.',
+      unappliedOther: '{count} credit notes are not applied to their invoices yet.',
+      unappliedHint: 'Those invoices still show the credited amount as open, so reminders keep asking for it. Each credit is dated on its credit note.',
+      applyAll: 'Apply now',
+      applyingAll: 'Applying…',
+      appliedAllOne: '{count} credit note applied to its invoice.',
+      appliedAllOther: '{count} credit notes applied to their invoices.',
+      applyAllNone: 'Nothing to apply — the credit notes are applied or their invoices have no open balance.',
+      applyAllFailed: 'Not applied: {list}',
     },
     history: {
       convertedToInvoice: 'Converted to an invoice',

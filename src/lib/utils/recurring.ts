@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { RecurringInterval, RecurringSchedule } from '@/types'
 import type { TFn } from '@/lib/i18n'
-import { numberingErrorMessage } from './numbering'
 
 // Date math is self-contained (type-only imports) so plain node can run this module for checks.
 const MONTHS_PER_INTERVAL: Record<Exclude<RecurringInterval, 'weekly'>, number> = {
@@ -137,9 +136,9 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
 }
 
 // Issue failures as the manual button shows them: in the UI language when the route passes t
-// (numbering errors worded from the dictionaries), in English for the cron log.
-function issueMessages(t: TFn | undefined) {
-  const reason = (err: unknown) => err instanceof Error ? (t ? numberingErrorMessage(err, t) : err.message) : String(err)
+// (and describeError to word database errors), in English for the cron log.
+function issueMessages(t: TFn | undefined, describeError: ((err: unknown) => string) | undefined) {
+  const reason = (err: unknown) => describeError ? describeError(err) : err instanceof Error ? err.message : String(err)
   return {
     snapshot: (date: string, error: string) => t ? t('lifecycle.recurring.snapshotFailed', { date, error }) : `${date}: issued, but the archive copy failed (${error})`,
     drive: (date: string, error: string) => t ? t('lifecycle.recurring.driveFailed', { date, error }) : `${date}: issued, but the Drive archive failed (${error})`,
@@ -147,8 +146,10 @@ function issueMessages(t: TFn | undefined) {
   }
 }
 
-async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult, t?: TFn) {
-  const messages = issueMessages(t)
+type Wording = { t?: TFn; describeError?: (err: unknown) => string }
+
+async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult, wording: Wording) {
+  const messages = issueMessages(wording.t, wording.describeError)
   const { data: source, error } = await supabase
     .from('documents')
     .select('*, document_items(*), clients(payment_days)')
@@ -216,7 +217,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
 export async function generateDueSchedules(
   supabase: SupabaseClient,
   asOf: string,
-  opts: { scheduleId?: string; force?: boolean; issue: IssueDocumentFn; t?: TFn },
+  opts: { scheduleId?: string; force?: boolean; issue: IssueDocumentFn } & Wording,
 ): Promise<GenerateResult> {
   const result: GenerateResult = { generated: [], skipped: [], errors: [] }
 
@@ -235,7 +236,7 @@ export async function generateDueSchedules(
 
   for (const schedule of (schedules ?? []) as RecurringSchedule[]) {
     try {
-      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result, opts.t)
+      await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result, opts)
     } catch (err) {
       result.errors.push({ scheduleId: schedule.id, message: err instanceof Error ? err.message : String(err) })
     }

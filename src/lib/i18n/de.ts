@@ -645,6 +645,11 @@ export const de = {
     },
     paymentDateInvalid: 'Ein Zahlungsdatum angeben, das nicht in der Zukunft liegt.',
     stornoTitle: '{number} mit einem Storno aufheben?',
+    storno: {
+      reason: 'Grund (optional)',
+      reasonPlaceholder: 'z. B. falscher Betrag, doppelt ausgestellt',
+      reasonShort: 'Grund: {reason}',
+    },
     recurring: {
       issueFailed: '{date}: als Entwurf erstellt, Ausstellen fehlgeschlagen ({error})',
       snapshotFailed: '{date}: ausgestellt, aber die Archivkopie ist fehlgeschlagen ({error})',
@@ -712,6 +717,15 @@ export const de = {
       removeRefund: 'Rückzahlung über {amount} vom {date} entfernen',
       removeRefundTitle: 'Diese Rückzahlung entfernen?',
       removeRefundDesc: '{amount} vom {date} wird entfernt, und die Gutschrift ist wieder offen.',
+      unappliedOne: '{count} Gutschrift ist noch nicht mit ihrer Rechnung verrechnet.',
+      unappliedOther: '{count} Gutschriften sind noch nicht mit ihren Rechnungen verrechnet.',
+      unappliedHint: 'Diese Rechnungen zeigen den gutgeschriebenen Betrag noch als offen, daher wird er weiter gemahnt. Jede Verrechnung erhält das Datum ihrer Gutschrift.',
+      applyAll: 'Jetzt verrechnen',
+      applyingAll: 'Verrechnen…',
+      appliedAllOne: '{count} Gutschrift mit ihrer Rechnung verrechnet.',
+      appliedAllOther: '{count} Gutschriften mit ihren Rechnungen verrechnet.',
+      applyAllNone: 'Nichts zu verrechnen — die Gutschriften sind verrechnet oder ihre Rechnungen haben keinen offenen Betrag.',
+      applyAllFailed: 'Nicht verrechnet: {list}',
     },
     history: {
       convertedToInvoice: 'In eine Rechnung umgewandelt',

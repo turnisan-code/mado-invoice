@@ -14,6 +14,7 @@ type Created = { credit_note_id: string; number: string | null; invoice_status: 
 // Creates a draft credit note from an issued invoice; it takes its amount off the invoice's open
 // balance when it is issued. With { cancel: true } it is a Storno: create_credit_note numbers it
 // and cancels the invoice in one transaction, then it gets its frozen PDF and is applied here.
+// An optional { reason } is kept in the history of both documents.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
@@ -23,6 +24,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const body = await req.json().catch(() => ({}))
   const cancel = body?.cancel === true
+  const reason = cancel && typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) || undefined : undefined
 
   const { data, error } = await supabase.rpc('create_credit_note', { p_invoice_id: id, p_cancel: cancel })
   if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI017' || error.code === 'MI018' ? 409 : 500 })
@@ -31,11 +33,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const creditNoteId = created.credit_note_id
 
   const { data: invoice } = await supabase.from('documents').select('number').eq('id', id).single()
-  await logEvent(supabase, creditNoteId, 'converted', { from_id: id, from_number: invoice?.number ?? null, from_type: 'invoice', storno: cancel })
+  await logEvent(supabase, creditNoteId, 'converted', { from_id: id, from_number: invoice?.number ?? null, from_type: 'invoice', storno: cancel, reason })
   if (!cancel) return NextResponse.json({ creditNoteId })
 
   await logEvent(supabase, creditNoteId, 'issued', { number: created.number })
-  await logEvent(supabase, id, 'storno_created', { credit_note_id: creditNoteId, credit_note_number: created.number, from: created.invoice_status })
+  await logEvent(supabase, id, 'storno_created', { credit_note_id: creditNoteId, credit_note_number: created.number, from: created.invoice_status, reason })
 
   // The number is taken; the frozen PDF and the Drive copy follow (a failure is reported and the
   // page offers to create the archive copy), then the credit settles the invoice's open balance.

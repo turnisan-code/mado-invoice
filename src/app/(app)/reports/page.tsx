@@ -9,6 +9,8 @@ import { parsePeriod, periodLabel, periodParams, MAX_PDFS, MIN_YEAR, type Period
 import { fetchZmRows } from './zm'
 import { istTurnover } from './ist'
 import { creditNoteOpen } from '@/lib/status'
+import { unappliedCreditNotes } from '@/lib/credits'
+import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
 
 // FinanzOnline field names stay German in both UI languages.
 const KZ: Record<number, { base: string; vat: string }> = {
@@ -52,7 +54,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const supabase = await createClient()
   const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
   const docCols = `id, number, date, type, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company)`
-  const [{ data: payments }, { data: credits }, { data: refunds }, { data: openCreditNotes }, zm, { count: issuedCount }] = await Promise.all([
+  const [{ data: payments }, { data: credits }, { data: refunds }, { data: openCreditNotes }, zm, { count: issuedCount }, unapplied] = await Promise.all([
     supabase
       .from('payments')
       .select(`id, amount, date, method, document_id, documents!inner(${docCols})`)
@@ -96,6 +98,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       .not('number', 'is', null)
       .gte('date', period.start)
       .lte('date', period.end),
+    unappliedCreditNotes(supabase).catch(err => {
+      console.error('[reports] unapplied credit notes:', err)
+      return []
+    }),
   ])
   type Dated = DocRow & { date: string }
   const creditRows = (credits ?? []) as unknown as { id: string; amount: number; date: string; credit_note_id: string; documents: Dated }[]
@@ -144,6 +150,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     ...refunded.map(r => ({ key: `r-${r.id}`, doc: r.creditNote, date: r.date, amount: r.amount, appliedTo: null })),
   ].sort((a, b) => a.date.localeCompare(b.date))
   const creditNoteCount = new Set(countedCredits.map(c => c.doc.id)).size
+  // Only refunds take turnover off; an applied credit moves no money.
+  const deductedCount = new Set(refunded.map(r => r.creditNote.id)).size
 
   const appliedByCn = new Map<string, number>()
   for (const r of (appliedToOpen ?? []) as { credit_note_id: string; amount: number }[]) {
@@ -185,15 +193,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-300">
         {t('reports.period')} <strong>{label}</strong> ({formatDate(period.start, lang)} – {formatDate(period.end, lang)}) · {n(paymentCount, t('reports.paymentsOne', { count: paymentCount }), t('reports.paymentsOther', { count: paymentCount }))} {n(invoiceIds.size, t('reports.onInvoicesOne', { count: invoiceIds.size }), t('reports.onInvoicesOther', { count: invoiceIds.size }))}
-        {creditNoteCount > 0 && <> · {n(creditNoteCount, t('reports.creditNotesDeductedOne', { count: creditNoteCount }), t('reports.creditNotesDeductedOther', { count: creditNoteCount }))}</>}
+        {deductedCount > 0 && <> · {n(deductedCount, t('reports.creditNotesDeductedOne', { count: deductedCount }), t('reports.creditNotesDeductedOther', { count: deductedCount }))}</>}
       </div>
 
       {unsettled.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl px-5 py-4 text-sm text-amber-800 dark:text-amber-300 space-y-2">
-          <p className="flex items-start gap-2">
+          <div className="flex items-start gap-2 flex-wrap sm:flex-nowrap">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden="true" />
-            <span><strong>{t('lifecycle.reports.unsettledTitle')}</strong> — {t('lifecycle.reports.unsettledHint')}</span>
-          </p>
+            <span className="flex-1 min-w-0"><strong>{t('lifecycle.reports.unsettledTitle')}</strong> — {t('lifecycle.reports.unsettledHint')}</span>
+            {unapplied.length > 0 && <ApplyCreditNotesButton />}
+          </div>
           <ul className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
             {unsettled.map(c => (
               <li key={c.doc.id}>
