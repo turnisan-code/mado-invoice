@@ -3,7 +3,7 @@ import { createElement, type ComponentProps } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
-import { registerPdfFonts } from '@/components/pdf/fonts'
+import { preparePdfFonts, registerPdfFonts } from '@/components/pdf/fonts'
 import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
 import { fetchCreditReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
@@ -100,6 +100,7 @@ export async function renderLoadedPdf(
     },
   }
 
+  await preparePdfFonts()
   return renderToBuffer(createElement(InvoiceDocument, props) as unknown as PdfElement)
 }
 

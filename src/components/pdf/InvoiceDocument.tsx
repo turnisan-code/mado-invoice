@@ -9,9 +9,10 @@ import {
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import type { DocReference } from '@/lib/utils/document-reference'
-import { PDF_FONT_FAMILY, registerPdfFonts } from './fonts'
+import { PDF_FONT_FAMILY, preparePdfFonts, registerPdfFonts } from './fonts'
 
-if (typeof window !== 'undefined') registerPdfFonts('/fonts')
+const inBrowser = typeof window !== 'undefined'
+if (inBrowser) registerPdfFonts('/fonts')
 
 const PAGE_X = 52
 // The footer is fixed to every page, so the body's bottom padding is derived from its height:
@@ -22,9 +23,40 @@ const FOOTER_FONT = 7.5
 const FOOTER_LINE = FOOTER_FONT * 1.4
 const FOOTER_TITLE_GAP = 2
 const FOOTER_AIR = 18
+// A long bank name or street takes a second line (then an ellipsis). A column is about 127pt on
+// invoices, which holds a little over 30 characters; counting from 30 errs towards more room.
+const FOOTER_MAX_LINES = 2
+const FOOTER_LINE_CHARS = 30
 
 function bodyPaddingBottom(footerLines: number) {
   return FOOTER_BOTTOM + FOOTER_PAD_TOP + FOOTER_LINE + FOOTER_TITLE_GAP + footerLines * FOOTER_LINE + FOOTER_AIR
+}
+
+// Footer entries wrap at spaces and are never hyphenated: an inserted hyphen would change an
+// e-mail address or IBAN. A long entry without spaces (e-mail, web address) breaks after @ or /
+// or before a dot instead.
+function footerEntry(line: string): string[] {
+  if (line.length <= FOOTER_LINE_CHARS || /\s/.test(line)) return [line]
+  const head = line.slice(0, FOOTER_LINE_CHARS)
+  const cut = Math.max(head.lastIndexOf('@') + 1, head.lastIndexOf('/') + 1, head.lastIndexOf('.'))
+  return cut > 0 ? [line.slice(0, cut), line.slice(cut)] : [line]
+}
+
+function footerLineCount(lines: string[]) {
+  return lines.flatMap(footerEntry).reduce((sum, line) => sum + Math.min(FOOTER_MAX_LINES, Math.ceil(line.length / FOOTER_LINE_CHARS)), 0)
+}
+
+const noHyphenation = (word: string) => [word]
+
+// An item row moves to the next page as a whole when it fits on one; a row taller than a page has
+// to wrap, or react-pdf draws it past the page bottom. 25 lines are under half a page, and 45
+// characters per line undercount what the description column holds, so the estimate errs high.
+const KEEP_ROW_LINES = 25
+const ROW_LINE_CHARS = 45
+
+function keepRowTogether(description: string) {
+  const lines = description.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / ROW_LINE_CHARS)), 0)
+  return lines <= KEEP_ROW_LINES
 }
 
 const GREY = '#6b6b6b'
@@ -88,7 +120,7 @@ const s = StyleSheet.create({
   footer: { position: 'absolute', bottom: FOOTER_BOTTOM, left: PAGE_X, right: PAGE_X, borderTopWidth: 0.5, borderTopColor: RULE, paddingTop: FOOTER_PAD_TOP, flexDirection: 'row' },
   footerCol: { flex: 1, paddingRight: 10 },
   footerTitle: { fontSize: FOOTER_FONT, lineHeight: 1.4, fontWeight: 'bold', marginBottom: FOOTER_TITLE_GAP },
-  footerText: { fontSize: FOOTER_FONT, lineHeight: 1.4, color: '#4b4b4b', maxLines: 1 },
+  footerText: { fontSize: FOOTER_FONT, lineHeight: 1.4, color: '#4b4b4b', maxLines: FOOTER_MAX_LINES, textOverflow: 'ellipsis' },
   footerPage: { width: 80, fontSize: FOOTER_FONT, color: LIGHT, textAlign: 'right' },
 })
 
@@ -140,6 +172,9 @@ function replaceVars(text: string, vars: Record<string, string>): string {
 }
 
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
+  // The builder renders with pdf().toBlob(), which loads the fonts after this runs; the server
+  // awaits preparePdfFonts() in render.ts. A font that fails to load fails the render itself.
+  if (inBrowser) preparePdfFonts().catch(() => {})
   const lang: Language = doc.language === 'en' ? 'en' : 'de'
   const t = documentT(lang)
   const refKind = doc.reference ? (doc.reference.kind ?? 'storno') : null
@@ -165,7 +200,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
     { title: t('pdfPortal.issuer.contact'), lines: issuer.contact },
     { title: t('pdfPortal.issuer.bank'), lines: bankLines },
   ].filter(c => c.lines.length)
-  const paddingBottom = bodyPaddingBottom(Math.max(1, ...footerColumns.map(c => c.lines.length)))
+  const paddingBottom = bodyPaddingBottom(Math.max(1, ...footerColumns.map(c => footerLineCount(c.lines))))
 
   const senderLine = [settings.company_name || settings.owner_name, settings.address_line1, [settings.zip, settings.city].filter(Boolean).join(' ')]
     .map(v => v?.trim()).filter(Boolean).join(' · ')
@@ -296,7 +331,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             if (item.quantity == null || item.unit_price == null) return null
             const period = servicePeriod(item.service_date, item.service_date_end, lang)
             return (
-              <View key={i} style={s.tableRow} wrap={false}>
+              <View key={i} style={s.tableRow} wrap={!keepRowTogether(item.description)}>
                 <View style={s.colDesc}>
                   <Text>{item.description}</Text>
                   {period && <Text style={s.colDescSub}>{period.text}</Text>}
@@ -388,7 +423,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           {footerColumns.map(col => (
             <View key={col.title} style={s.footerCol}>
               <Text style={s.footerTitle}>{col.title}</Text>
-              {col.lines.map((line, i) => <Text key={i} style={s.footerText}>{line}</Text>)}
+              {col.lines.flatMap(footerEntry).map((line, i) => (
+                <Text key={i} style={s.footerText} hyphenationCallback={noHyphenation}>{line}</Text>
+              ))}
             </View>
           ))}
           <Text style={s.footerPage} render={({ pageNumber, totalPages }) => t('pdfPortal.page', { page: pageNumber, pages: totalPages })} />
