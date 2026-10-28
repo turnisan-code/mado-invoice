@@ -1525,10 +1525,12 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
         {/* Number + Date + Due date */}
         <div className="space-y-1.5">
           <div className="flex flex-col sm:flex-row gap-3">
-            <div role="group" aria-labelledby={`${uid}-number`} className="flex-1 space-y-1.5">
+            <div role="group" aria-labelledby={`${uid}-number`} className="flex-1 min-w-0 space-y-1.5">
               <span id={`${uid}-number`} className="block text-sm leading-none font-medium">{t('issueChecks.number')}</span>
-              <p className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm truncate ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
-                {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
+              <p className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
+                <span className="truncate">
+                  {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
+                </span>
               </p>
             </div>
             <div className="flex-1 space-y-1.5">
