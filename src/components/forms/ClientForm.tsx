@@ -171,7 +171,8 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
     resolver: zodResolver(schema),
     defaultValues: initial,
   })
-  const [taxManual, setTaxManual] = useState(false)
+  // A saved client's treatment counts as chosen: editing its country or UID only shows the suggestion.
+  const [taxManual, setTaxManual] = useState(!!client)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)

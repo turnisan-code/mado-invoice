@@ -6,11 +6,14 @@ import ClientForm from '@/components/forms/ClientForm'
 import type { Client, ClientDefaults, CountryOption } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
-import { countryName } from '@/lib/utils/country'
 
-export default function ClientEditSection({ client, defaults, countries }: { client: Client; defaults: ClientDefaults; countries: CountryOption[] }) {
+// countryLabel comes from the server: Node's and the browser's ICU can name a region differently,
+// which would break hydration.
+export default function ClientEditSection({ client, countryLabel, defaults, countries }: {
+  client: Client; countryLabel: string; defaults: ClientDefaults; countries: CountryOption[]
+}) {
   const [editing, setEditing] = useState(false)
-  const { t, lang } = useT()
+  const { t } = useT()
 
   if (editing) {
     return <ClientForm client={client} defaults={defaults} countries={countries} onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
@@ -20,7 +23,7 @@ export default function ClientEditSection({ client, defaults, countries }: { cli
     client.address_line1,
     client.address_line2,
     [client.zip, client.city].filter(Boolean).join(' '),
-    countryName(client.country, lang),
+    countryLabel,
   ].filter(Boolean).join(', ')
 
   return (

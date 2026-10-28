@@ -4,7 +4,7 @@ import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatDate, formatMoney } from '@/lib/utils/document'
-import { countryOptions } from '@/lib/utils/country'
+import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
@@ -117,7 +117,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
         {/* Client details */}
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
-          <ClientEditSection client={client} defaults={toClientDefaults(settings)} countries={countryOptions(lang)} />
+          <ClientEditSection client={client} countryLabel={countryName(client.country, lang)} defaults={toClientDefaults(settings)} countries={countryOptions(lang)} />
         </div>
 
         {/* Documents */}
