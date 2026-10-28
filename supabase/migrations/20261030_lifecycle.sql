@@ -186,9 +186,10 @@ begin
 
   -- Whole rows, so columns added to document_items later are copied too.
   insert into document_items
-  select (jsonb_populate_record(null::document_items,
-            to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', inv_id))).*
-  from document_items i
+  select r.*
+  from document_items i,
+       lateral jsonb_populate_record(null::document_items,
+         to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', inv_id)) r
   where i.document_id = q.id
   order by i.sort_order;
 
@@ -235,9 +236,10 @@ begin
   ) returning id into cn_id;
 
   insert into document_items
-  select (jsonb_populate_record(null::document_items,
-            to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', cn_id))).*
-  from document_items i
+  select r.*
+  from document_items i,
+       lateral jsonb_populate_record(null::document_items,
+         to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', cn_id)) r
   where i.document_id = inv.id
   order by i.sort_order;
 

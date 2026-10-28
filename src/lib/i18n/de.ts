@@ -693,7 +693,6 @@ export const de = {
       appliedTo: 'Verrechnet mit {number}',
       refund: 'Rückzahlung',
       open: 'Noch auszugleichen: {amount}',
-      settled: 'Ausgeglichen',
       notIssued: 'Die Gutschrift ausstellen, um sie zu verrechnen oder zurückzuzahlen.',
       invoiceHint: 'Beim Ausstellen wird die Gutschrift mit dem offenen Betrag von {number} verrechnet; was darüber hinausgeht, wird dem Kunden zurückgezahlt und hier erfasst.',
       standaloneHint: 'Erfassen, was dem Kunden zurückgezahlt wird; der USt-Bericht zieht es im Zeitraum der Rückzahlung ab.',

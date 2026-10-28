@@ -691,7 +691,6 @@ export const en = {
       appliedTo: 'Applied to {number}',
       refund: 'Refund',
       open: 'Still to settle: {amount}',
-      settled: 'Settled',
       notIssued: 'Issue the credit note to apply or refund it.',
       invoiceHint: 'Issuing applies the credit to the open balance of {number}; whatever exceeds it is paid back to the client and recorded here.',
       standaloneHint: 'Record what you pay back to the client; the VAT report deducts it in the period of the refund.',
