@@ -10,6 +10,15 @@ export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 
 // 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer.
 export type PaymentKind = 'payment' | 'skonto' | 'writeoff'
 export type PaymentMethod = 'bank' | 'cash'
+// Issuer details every issued document needs; one entry per Settings field group.
+export type IssuerField = 'companyName' | 'address' | 'uid' | 'iban'
+// Why a document cannot be issued yet (src/lib/utils/issue-checks.ts). Line problems carry the
+// index in the item list and the 1-based position among item lines.
+export type IssueProblem =
+  | { code: 'settingsIncomplete'; fields: IssuerField[] }
+  | { code: 'noClient' | 'noItems' | 'currencyNotEur' | 'reverseChargeNoUid' | 'clientCountryMissing' | 'noServiceDate' }
+  | { code: 'periodStartMissing' | 'periodEndBeforeStart'; index?: number; position?: number }
+  | { code: 'blankDescription' | 'badQuantity' | 'missingPrice'; index: number; position: number }
 
 export interface Settings {
   id: string
@@ -204,6 +213,8 @@ export interface DocumentItem {
   line_type: LineType
   description: string
   service_date: string | null
+  // End of the line's service period; null = a single day (service_date).
+  service_date_end?: string | null
   quantity: number | null
   unit: Unit | null
   unit_price: number | null
