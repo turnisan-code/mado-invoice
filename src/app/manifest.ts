@@ -5,9 +5,12 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Mado Invoice',
     short_name: 'Mado',
     description: 'Invoicing for Mado',
-    start_url: '/invoices',
+    // The id was derived from the old start_url; keeping it lets installed copies pick up this manifest.
+    id: '/invoices',
+    start_url: '/dashboard',
+    scope: '/',
     display: 'standalone',
-    orientation: 'portrait',
+    orientation: 'any',
     background_color: '#fafafa',
     theme_color: '#fafafa',
     icons: [
