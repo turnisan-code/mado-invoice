@@ -2,6 +2,9 @@ import { createClient } from '@/lib/supabase/server'
 import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
 
+// Issuing renders, stores and archives each draft's PDF in turn.
+export const maxDuration = 60
+
 // Only drafts can be issued in bulk; accepted/rejected/cancelled quotes are per-document decisions.
 export async function PATCH(req: Request) {
   const supabase = await createClient()

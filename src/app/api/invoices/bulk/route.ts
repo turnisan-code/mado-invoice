@@ -3,6 +3,9 @@ import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
 import { calcTotals, today } from '@/lib/utils/document'
 
+// Issuing renders, stores and archives each draft's PDF in turn.
+export const maxDuration = 60
+
 // Which current statuses may move to the requested one. Paid/cancelled invoices are left alone;
 // cancelling an issued invoice needs a Storno (per-document flow), so it is not offered here.
 const SOURCE: Record<string, string[]> = {
