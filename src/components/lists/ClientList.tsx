@@ -11,8 +11,8 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
-  SortableTh, PlainTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton,
-  inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  SortableTh, PlainTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
+  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
 } from './ListParts'
 
 const STATUSES = ['active', 'inactive', 'lead'] as const
@@ -146,10 +146,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('clients.title')}</h1>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered)} title={t('lists.exportCsv')} className={headerButtonClass}>
-            <Download size={14} />
-            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
-          </button>
+          <ExportButton onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered)} />
           <Link href="/clients/new" className={primaryLinkClass}>
             <Plus size={14} /> {t('clients.new')}
           </Link>

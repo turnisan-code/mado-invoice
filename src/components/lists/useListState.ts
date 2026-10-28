@@ -60,6 +60,8 @@ export function useListState<F extends string, K extends string>(config: ListCon
     const next = serializeView(config, view)
     if (next === urlQs) return
     const timer = setTimeout(() => {
+      // A row was opened in the meantime: never rewrite the next page's history entry.
+      if (window.location.pathname !== pathname) return
       written.current.add(next)
       window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname)
     }, 250)

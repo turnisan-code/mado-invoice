@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, X, Loader2, type LucideIcon } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, X, Loader2, Download, type LucideIcon } from 'lucide-react'
 import { useT } from '@/lib/i18n/client'
 import type { Sort } from './useListState'
 
@@ -29,6 +29,17 @@ export function SortableTh<K extends string>({ col, label, sort, onSort, align =
         {!active ? <ArrowUpDown size={12} className="opacity-30" /> : sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
       </button>
     </th>
+  )
+}
+
+// Header export: the selected rows if any, otherwise everything the filters show.
+export function ExportButton({ onClick }: { onClick: () => void }) {
+  const { t } = useT()
+  return (
+    <button type="button" onClick={onClick} title={t('lists.exportCsv')} className={headerButtonClass}>
+      <Download size={14} />
+      <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
+    </button>
   )
 }
 

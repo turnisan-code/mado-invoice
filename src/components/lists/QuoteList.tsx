@@ -13,8 +13,8 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
-  SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton,
-  inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
+  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
 } from './ListParts'
 
 const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -158,10 +158,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('quotes.title')}</h1>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered, false)} title={t('lists.exportCsv')} className={headerButtonClass}>
-            <Download size={14} />
-            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
-          </button>
+          <ExportButton onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered, false)} />
           <Link href="/quotes/new" className={primaryLinkClass}>
             <Plus size={14} /> {t('quotes.new')}
           </Link>

@@ -13,7 +13,7 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
-  SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton,
+  SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
   inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
 } from './ListParts'
 
@@ -249,10 +249,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
             <Landmark size={14} />
             <span className="sr-only sm:not-sr-only">{t('bankImport.button')}</span>
           </Link>
-          <button type="button" onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered, false)} title={t('lists.exportCsv')} className={headerButtonClass}>
-            <Download size={14} />
-            <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
-          </button>
+          <ExportButton onClick={() => handleExport(selectedCount ? selection.selectedVisible : filtered, false)} />
           <Link href="/invoices/new" className={primaryLinkClass}>
             <Plus size={14} /> {t('invoices.new')}
           </Link>
