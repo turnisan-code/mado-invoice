@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useId } from 'react'
+import { useState, useRef, useEffect, useId, useMemo } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -12,13 +13,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Dialog, ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { calcTotals, formatMoney, addDays, today, getTaxNote, orderItems } from '@/lib/utils/document'
+import { calcTotals, formatMoney, formatDate, addDays, today, getTaxNote, orderItems, sectionSummary, clampPercent } from '@/lib/utils/document'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
 import { catalogueLineText } from '@/lib/utils/catalogue'
-import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
+import { clientLabel } from '@/lib/utils/clients'
+import { formatDocumentNumber, nextCounter, numberingErrorMessage } from '@/lib/utils/numbering'
+import { issueProblems, issueProblemMessage, missingIssuerFields, type IssueCheckInput } from '@/lib/utils/issue-checks'
+import type { Client, ClientStatus, CatalogueItem, Document, DocumentItem, DocumentType, IssueProblem, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { fetchIssuedPdf, blobToBase64, archiveErrorMessage, FLUSH_EDITS_EVENT, type FlushEditsDetail } from '@/lib/issued-pdf'
@@ -31,6 +35,7 @@ interface LineItem {
   line_type: LineType
   description: string
   service_date: string | null
+  service_date_end: string | null
   quantity: number
   unit: Unit
   unit_price: number
@@ -38,6 +43,26 @@ interface LineItem {
   catalogue_item_id: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number
+}
+
+// Everything the editor writes. One snapshot feeds every save (autosave, Save draft, issuing,
+// the flush on leaving) and the device backup, so no path can write stale values.
+interface FormState {
+  clientId: string
+  date: string
+  serviceDate: string
+  serviceDateEnd: string
+  dueDate: string
+  language: Language
+  currency: Currency
+  taxTreatment: TaxTreatment
+  notes: string
+  notesInternal: string
+  discountType: 'percent' | 'fixed' | null
+  discountValue: number
+  skontoPercent: number | ''
+  skontoDays: number | ''
+  lines: LineItem[]
 }
 
 interface Props {
@@ -52,14 +77,17 @@ interface Props {
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
+const CLIENT_GROUPS: ClientStatus[] = ['active', 'lead', 'inactive']
+const AUTOSAVE_DELAY = 2000
 
 const SELECT_CLS = 'w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
 const LINE_SELECT_CLS = 'h-9 sm:h-8 min-w-0 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
+const INVALID_CLS = 'border-red-400 dark:border-red-500'
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
 function blankLine(settings: PublicSettings): LineItem {
-  return { id: makeId(), line_type: 'item', description: '', service_date: null, quantity: 1, unit: settings.default_unit ?? 'flat', unit_price: 0, vat_rate: settings.default_vat_rate ?? 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
+  return { id: makeId(), line_type: 'item', description: '', service_date: null, service_date_end: null, quantity: 1, unit: settings.default_unit ?? 'flat', unit_price: 0, vat_rate: settings.default_vat_rate ?? 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
 }
 
 // Quotes carry their validity period in due_date; invoices and credit notes a payment term.
@@ -69,16 +97,93 @@ function termDays(type: DocumentType, settings: PublicSettings, client?: Client 
 }
 
 function blankSpecial(type: LineType): LineItem {
-  return { id: makeId(), line_type: type, description: '', service_date: null, quantity: 0, unit: 'flat', unit_price: 0, vat_rate: 0, catalogue_item_id: null, discount_type: null, discount_value: 0 }
+  return { id: makeId(), line_type: type, description: '', service_date: null, service_date_end: null, quantity: 0, unit: 'flat', unit_price: 0, vat_rate: 0, catalogue_item_id: null, discount_type: null, discount_value: 0 }
 }
 
-function calcSectionSubtotal(lines: LineItem[], upToIdx: number): number {
-  let sum = 0
-  for (let i = upToIdx - 1; i >= 0; i--) {
-    if (lines[i].line_type === 'subtotal') break
-    if (lines[i].line_type === 'item') sum += lines[i].quantity * lines[i].unit_price
+// The documents columns the editor owns; an empty date falls back to today.
+function docFields(type: DocumentType, f: FormState) {
+  const skonto = type === 'invoice' && f.skontoPercent !== '' && f.skontoPercent > 0
+    ? { skonto_percent: f.skontoPercent, skonto_days: f.skontoDays === '' ? null : f.skontoDays }
+    : { skonto_percent: null, skonto_days: null }
+  return {
+    client_id: f.clientId, date: f.date || today(), service_date: f.serviceDate || null,
+    service_date_end: f.serviceDateEnd || null,
+    due_date: f.dueDate || null, language: f.language, currency: f.currency, tax_treatment: f.taxTreatment,
+    notes: f.notes || null, notes_internal: f.notesInternal || null,
+    discount_type: f.discountType, discount_value: f.discountValue || null,
+    ...skonto,
+    ...(f.currency === 'EUR' ? { exchange_rate: 1 } : {}),
   }
-  return sum
+}
+
+function itemsPayload(lines: LineItem[]) {
+  return lines.map((l, i) => {
+    const item = l.line_type === 'item'
+    return {
+      sort_order: i,
+      line_type: l.line_type,
+      description: l.description,
+      service_date: item ? (l.service_date || null) : null,
+      service_date_end: item ? (l.service_date_end || null) : null,
+      quantity: item ? l.quantity : null,
+      unit: item ? l.unit : null,
+      unit_price: item ? l.unit_price : null,
+      vat_rate: item ? l.vat_rate : null,
+      catalogue_item_id: item ? l.catalogue_item_id : null,
+      discount_type: l.line_type === 'subtotal' ? (l.discount_type || null) : null,
+      discount_value: l.line_type === 'subtotal' ? (l.discount_value || null) : null,
+    }
+  })
+}
+
+// Exactly what a save writes, so a document reloaded from the database has the key it was saved with.
+function savedKeyOf(type: DocumentType, f: FormState): string {
+  return JSON.stringify([docFields(type, f), itemsPayload(f.lines)])
+}
+
+// What the user wrote beyond the client and what follows from it (language, tax, due date):
+// a new document is only created once there is something worth keeping.
+function contentKeyOf(f: FormState): string {
+  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.skontoPercent, f.skontoDays, itemsPayload(f.lines)])
+}
+
+// Unsaved edits kept on this device per document ('new' until the draft exists). `base` is the
+// saved key the edits started from: a server copy that moved on since then is newer. It is null
+// until the draft and its items were first saved.
+interface Backup { savedAt: number; base: string | null; form: FormState }
+
+function readBackup(key: string): Backup | null {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const b = JSON.parse(raw) as Partial<Backup> | null
+    if (!b || typeof b.savedAt !== 'number' || !b.form || !Array.isArray(b.form.lines)) return null
+    return { savedAt: b.savedAt, base: typeof b.base === 'string' ? b.base : null, form: b.form }
+  } catch {
+    return null
+  }
+}
+
+function writeBackup(key: string, backup: Backup) {
+  try { window.localStorage.setItem(key, JSON.stringify(backup)) } catch { /* storage full or blocked */ }
+}
+
+function removeBackup(key: string) {
+  try { window.localStorage.removeItem(key) } catch { /* storage blocked */ }
+}
+
+// The number issue_document would assign if nothing else is issued first (it skips taken numbers).
+function expectedNumber(settings: PublicSettings, type: DocumentType, isoDate: string): string {
+  const fmt = settings[`${type}_number_format`]
+  if (!fmt) return ''
+  const counter = nextCounter(settings[`next_${type}_number`], settings[`${type}_counter_year`] ?? null, !!settings[`${type}_number_reset_yearly`], fmt, Number(isoDate.slice(0, 4)))
+  return formatDocumentNumber(fmt, settings[`${type}_prefix`] ?? '', counter, isoDate)
+}
+
+// The same caps calcTotals applies, so what the input shows is what the PDF takes off.
+function clampDiscount(kind: 'percent' | 'fixed' | null, value: number, base: number): number {
+  if (kind === 'percent') return clampPercent(value)
+  return Math.min(Math.max(0, value), Math.max(0, base))
 }
 
 const typeLabel: Record<DocumentType, { de: string; en: string }> = {
@@ -88,16 +193,6 @@ const typeLabel: Record<DocumentType, { de: string; en: string }> = {
 }
 
 const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
-
-async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
-  const res = await fetch(url, {
-    method: 'POST',
-    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error ?? res.statusText)
-  return data as T
-}
 
 function errorMessage(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback
@@ -112,19 +207,123 @@ function notifyDriveUpload(t: TFn, webViewLink?: string | null, existing = false
   )
 }
 
+// Searchable client combobox: active clients first, then leads, then inactive ones.
+function ClientPicker({ id, clients, value, onChange, invalid }: { id: string; clients: Client[]; value: string; onChange: (id: string) => void; invalid?: boolean }) {
+  const { t } = useT()
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const listId = `${id}-list`
+  const sorted = useMemo(() => [...clients].sort((a, b) => clientLabel(a).localeCompare(clientLabel(b))), [clients])
+  const selected = clients.find(c => c.id === value) ?? null
+  const q = query.trim().toLowerCase()
+  const groups = CLIENT_GROUPS
+    .map(status => ({
+      status,
+      items: sorted.filter(c => (c.status ?? 'active') === status
+        && (!q || [clientLabel(c), c.client_number, c.email].some(s => s?.toLowerCase().includes(q)))),
+    }))
+    .filter(g => g.items.length > 0)
+  const options = groups.flatMap(g => g.items)
+  const active = open ? options[highlight] : undefined
+
+  function close() { setOpen(false); setQuery('') }
+  function pick(c: Client) { onChange(c.id); close() }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHighlight(0) }
+      return
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, options.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter' && active) { e.preventDefault(); pick(active) }
+    else if (e.key === 'Escape') { e.preventDefault(); close() }
+  }
+
+  return (
+    <div className="relative" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close() }}>
+      <input
+        id={id}
+        type="text"
+        role="combobox"
+        autoComplete="off"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={active ? `${listId}-${active.id}` : undefined}
+        aria-invalid={invalid || undefined}
+        value={open ? query : clientLabel(selected)}
+        placeholder={open ? t('issueChecks.searchClients') : t('builder.selectClientPlaceholder')}
+        onFocus={() => { setOpen(true); setHighlight(0) }}
+        onClick={() => setOpen(true)}
+        onChange={e => { setQuery(e.target.value); setOpen(true); setHighlight(0) }}
+        onKeyDown={onKeyDown}
+        className={`${SELECT_CLS} ${invalid ? INVALID_CLS : ''}`}
+      />
+      {open && (
+        <div id={listId} role="listbox" aria-label={t('builder.client')}
+          className="absolute z-30 left-0 right-0 mt-1 max-h-72 overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-lg py-1">
+          {groups.map(g => (
+            <div key={g.status} role="group" aria-labelledby={`${listId}-${g.status}`}>
+              <p id={`${listId}-${g.status}`} className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                {t(`status.${g.status}`)}
+              </p>
+              {g.items.map(c => {
+                const i = options.indexOf(c)
+                return (
+                  <button
+                    key={c.id}
+                    id={`${listId}-${c.id}`}
+                    type="button"
+                    role="option"
+                    tabIndex={-1}
+                    aria-selected={c.id === value}
+                    onMouseDown={e => e.preventDefault()}
+                    onMouseEnter={() => setHighlight(i)}
+                    onClick={() => pick(c)}
+                    className={`w-full text-left px-3 py-2.5 sm:py-2 text-sm flex items-center justify-between gap-3 ${i === highlight ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'} ${c.id === value ? 'font-medium' : ''}`}
+                  >
+                    <span className="min-w-0 truncate">{clientLabel(c)}</span>
+                    {c.client_number && <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{c.client_number}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+          {options.length === 0 && (
+            <p className="px-3 py-4 text-xs text-neutral-500 dark:text-neutral-400 text-center">{t('issueChecks.noClients')}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function DocumentBuilder({ type, settings, clients, catalogue, document: doc, defaultClientId, reference }: Props) {
   const router = useRouter()
   const supabase = createClient()
-  const { t } = useT()
+  const { t, lang } = useT()
+
+  // A new document opened for a client starts with that client's language, tax and terms.
+  const initialClient = () => (!doc && defaultClientId ? clients.find(c => c.id === defaultClientId) ?? null : null)
 
   const [clientId, setClientId] = useState(doc?.client_id ?? defaultClientId ?? '')
   const [date, setDate] = useState(doc?.date ?? today())
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
   const [serviceDateEnd, setServiceDateEnd] = useState(doc?.service_date_end ?? '')
-  const [dueDate, setDueDate] = useState(doc?.due_date ?? addDays(today(), termDays(type, settings)))
-  const [language, setLanguage] = useState<Language>(doc?.language ?? settings.default_language as Language ?? 'de')
-  const [currency, setCurrency] = useState<Currency>(doc?.currency ?? 'EUR')
-  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>((doc?.tax_treatment as TaxTreatment | undefined) ?? settings.default_tax_treatment ?? 'at_vat')
+  // A stored due date is kept. A new document, or a draft without one (e.g. a duplicate), follows
+  // the client's terms, as issuing would; a Storno has none.
+  const [dueDate, setDueDate] = useState(() => {
+    if (doc && (doc.due_date || doc.number || doc.cancels_document_id)) return doc.due_date ?? ''
+    const c = doc ? clients.find(x => x.id === doc.client_id) : initialClient()
+    return addDays(doc?.date || today(), termDays(type, settings, c))
+  })
+  const [language, setLanguage] = useState<Language>(() => doc?.language ?? initialClient()?.language ?? settings.default_language ?? 'de')
+  // EUR only. An issued document keeps the currency it was written in, a credit note the one of
+  // the invoice it corrects; any other draft (a duplicate, a converted quote) becomes EUR.
+  const currency: Currency = doc && (doc.number || type === 'credit_note') ? doc.currency : 'EUR'
+  const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>(() => (doc?.tax_treatment as TaxTreatment | undefined) ?? initialClient()?.tax_treatment ?? settings.default_tax_treatment ?? 'at_vat')
   const [notes, setNotes] = useState(doc?.notes ?? '')
   const [notesInternal, setNotesInternal] = useState(doc?.notes_internal ?? '')
   const [discountType, setDiscountType] = useState<'percent' | 'fixed' | null>(doc?.discount_type ?? null)
@@ -143,6 +342,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
           line_type: (i.line_type ?? 'item') as LineType,
           description: i.description,
           service_date: i.service_date ?? null,
+          service_date_end: i.service_date_end ?? null,
           quantity: i.quantity ?? 1,
           unit: (i.unit ?? 'flat') as Unit,
           unit_price: i.unit_price ?? 0,
@@ -166,18 +366,46 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const isFirstRender = useRef(true)
-  const writeChain = useRef<Promise<void>>(Promise.resolve())
-  const issuingRef = useRef(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [pendingIssue, setPendingIssue] = useState<(() => Promise<void>) | null>(null)
+  const [docId, setDocId] = useState<string | null>(doc?.id ?? null)
+  const [restoreOffer, setRestoreOffer] = useState<Backup | null>(null)
+  const [pendingIssue, setPendingIssue] = useState<{ run: (overrides: Partial<FormState> | null) => Promise<void>; staleDate: string | null } | null>(null)
+  const [useToday, setUseToday] = useState(true)
+  const [latestIssued, setLatestIssued] = useState<{ number: string; date: string } | null>(null)
+  const [checking, setChecking] = useState(false)
+  // What the server refused, for the form state it checked.
+  const [serverProblems, setServerProblems] = useState<{ key: string; problems: IssueProblem[] } | null>(null)
+  const [revealTick, setRevealTick] = useState(0)
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
   const [addingItem, setAddingItem] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
   const [newItemDraft, setNewItemDraft] = useState({ name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' })
   const [dragOver, setDragOver] = useState<number | null>(null)
   const dragIdx = useRef<number | null>(null)
+  const problemsRef = useRef<HTMLDivElement>(null)
+
+  const form: FormState = {
+    clientId, date, serviceDate, serviceDateEnd, dueDate, language, currency, taxTreatment,
+    notes, notesInternal, discountType, discountValue, skontoPercent, skontoDays, lines,
+  }
+  const formKey = savedKeyOf(type, form)
+  const contentKey = contentKeyOf(form)
+  const [initialKeys] = useState(() => ({ saved: formKey, content: contentKey }))
+
+  const formRef = useRef(form)
+  const docIdRef = useRef<string | null>(doc?.id ?? null)
+  const savedKeyRef = useRef(initialKeys.saved)
+  // False from inserting a new draft until its items are written too.
+  const savedOnceRef = useRef(!!doc)
+  // Mounted without a document at a document's URL (see the restore effect): never insert one.
+  const misplacedRef = useRef(false)
+  const saveErrorRef = useRef<string | null>(null)
+  const pendingWritesRef = useRef(0)
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const writeChain = useRef<Promise<void>>(Promise.resolve())
+  const issuingRef = useRef(false)
+  const mountedRef = useRef(false)
+  const offerPendingRef = useRef(false)
 
   function toggleDatePop(lineId: string, e: React.MouseEvent<HTMLButtonElement>) {
     if (activeDateLine === lineId) {
@@ -186,7 +414,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
       return
     }
     const rect = e.currentTarget.getBoundingClientRect()
-    const flipUp = rect.bottom + 100 > window.innerHeight
+    const flipUp = rect.bottom + 180 > window.innerHeight
     setDatePop(flipUp
       ? { bottom: window.innerHeight - rect.top + 4, right: window.innerWidth - rect.right }
       : { top: rect.bottom + 4, right: window.innerWidth - rect.right }
@@ -209,28 +437,19 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   const client = clients.find(c => c.id === clientId)
   const discount = discountType && discountValue > 0 ? { type: discountType, value: discountValue } : null
+  const needsClient = !docId && !clientId && contentKey !== initialKeys.content
   const saveStatus = saveError
     ? { text: t('builder.notSaved', { error: saveError }), cls: 'text-red-500' }
     : autoSaving ? { text: t('common.saving'), cls: '' }
+    : needsClient ? { text: t('issueChecks.chooseClientToSave'), cls: 'text-amber-600 dark:text-amber-400' }
     : lastSaved ? { text: t('builder.saved', { time: lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }), cls: '' }
     : null
 
   function applyClientDefaults(c: Client) {
     if (c.language) setLanguage(c.language)
-    if (c.currency) setCurrency(c.currency as Currency)
     setTaxTreatment(c.tax_treatment as TaxTreatment)
     if (!doc?.number) setDueDate(addDays(date || today(), termDays(type, settings, c)))
   }
-
-  // Apply client defaults on mount when pre-selecting a client (e.g. navigating from client page)
-  useEffect(() => {
-    if (defaultClientId && !doc) {
-      const c = clients.find(cl => cl.id === defaultClientId)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (c) applyClientDefaults(c)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   function handleClientChange(id: string) {
     const c = clients.find(cl => cl.id === id)
@@ -288,49 +507,36 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     setActiveLine(null)
   }
 
-  const totals = calcTotals(
-    lines.map(l => ({
-      id: l.id, document_id: '', sort_order: 0, line_type: l.line_type, service_date: null,
-      description: l.description, quantity: l.quantity, unit: l.unit,
-      unit_price: l.unit_price, vat_rate: l.vat_rate, catalogue_item_id: l.catalogue_item_id,
-      discount_type: l.discount_type, discount_value: l.discount_value,
-    })),
-    doc?.payments,
-    discount,
-    taxTreatment
-  )
+  const totals = calcTotals(lines, doc?.payments, discount, taxTreatment)
 
-const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
+  const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
-  function buildItemsPayload(docId: string) {
-    return lines.map((l, i) => ({
-      document_id: docId,
-      sort_order: i,
-      line_type: l.line_type,
-      description: l.description,
-      service_date: l.line_type === 'item' ? (l.service_date || null) : null,
-      quantity: l.line_type === 'item' ? l.quantity : null,
-      unit: l.line_type === 'item' ? l.unit : null,
-      unit_price: l.line_type === 'item' ? l.unit_price : null,
-      vat_rate: l.line_type === 'item' ? l.vat_rate : null,
-      catalogue_item_id: l.line_type === 'item' ? l.catalogue_item_id : null,
-      discount_type: l.line_type === 'subtotal' ? (l.discount_type || null) : null,
-      discount_value: l.line_type === 'subtotal' ? (l.discount_value || null) : null,
-    }))
+  // ─── Saving ────────────────────────────────────────────────────────────────
+
+  const backupKey = (id: string | null) => `mado-invoice:unsaved:${type}:${id ?? 'new'}`
+
+  // A new document has unsaved work once something beyond the client was entered.
+  function isDirty(f: FormState) {
+    return docIdRef.current ? savedKeyOf(type, f) !== savedKeyRef.current : contentKeyOf(f) !== initialKeys.content
   }
 
-  const skontoFields = type === 'invoice' && skontoPercent !== '' && skontoPercent > 0
-    ? { skonto_percent: skontoPercent, skonto_days: skontoDays === '' ? null : skontoDays }
-    : { skonto_percent: null, skonto_days: null }
+  function canPersist(f: FormState) {
+    return !misplacedRef.current && !!f.clientId && (!!docIdRef.current || contentKeyOf(f) !== initialKeys.content)
+  }
 
-  function currentDocFields(effectiveDate: string, effectiveDueDate: string | null) {
-    return {
-      client_id: clientId, date: effectiveDate, service_date: serviceDate || null,
-      service_date_end: serviceDateEnd || null,
-      due_date: effectiveDueDate, language, currency, tax_treatment: taxTreatment,
-      notes: notes || null, notes_internal: notesInternal || null,
-      discount_type: discountType, discount_value: discountValue || null,
-      ...skontoFields,
+  // A backup taken before the draft's first complete save has no base: the server copy may lack
+  // the items, so it is offered whenever it differs.
+  function backupNow() {
+    const f = formRef.current
+    if (!isDirty(f)) return
+    const base = docIdRef.current && savedOnceRef.current ? savedKeyRef.current : null
+    writeBackup(backupKey(docIdRef.current), { savedAt: Date.now(), base, form: f })
+  }
+
+  function cancelAutoSave() {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current)
+      autoSaveTimer.current = null
     }
   }
 
@@ -341,56 +547,288 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     return run
   }
 
-  // Writes header + items (inserting a draft for a new document) and returns the document id.
-  async function persist(forIssue: boolean): Promise<string | null> {
-    const effectiveDate = date || today()
-    const effectiveDueDate = dueDate || (forIssue && client ? addDays(effectiveDate, termDays(type, settings, client)) : null)
-    const fields = currentDocFields(effectiveDate, effectiveDueDate)
-    let docId: string
-    if (doc) {
-      const { error } = await supabase.from('documents').update(fields).eq('id', doc.id)
-      if (error) { toast.error(error.message); return null }
-      docId = doc.id
-    } else {
-      const { data: newDoc, error } = await supabase.from('documents')
-        .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
-        .select('id').single()
-      if (error) { toast.error(error.message); return null }
-      docId = newDoc.id
-    }
-    const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: docId, p_items: buildItemsPayload(docId) })
-    if (itemsErr) { toast.error(t('builder.itemsError', { error: itemsErr.message })); return null }
-    if (!date) setDate(effectiveDate)
-    if (!dueDate && effectiveDueDate) setDueDate(effectiveDueDate)
-    return docId
+  // The first write of a new document creates the draft; the address bar then shows its own URL
+  // without leaving the editor, so a reload or Back finds the draft instead of an empty form.
+  function adoptId(id: string) {
+    docIdRef.current = id
+    setDocId(id)
+    removeBackup(backupKey(null))
+    backupNow()
+    const newPath = `/${PATHS[type]}/new`
+    if (mountedRef.current && window.location.pathname === newPath) window.history.replaceState(null, '', `/${PATHS[type]}/${id}`)
   }
 
-  async function save(status: 'draft' | 'sent') {
-    if (status === 'sent') { requestSent(); return }
-    if (!clientId) { toast.error(t('builder.selectClient')); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error(t('builder.addLineItem')); return }
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+  // The one write path: header + items of `f`, inserting the draft once for a new document.
+  // Throws on failure; returns the document id.
+  async function persist(f: FormState, mode: 'auto' | 'save' | 'issue' = 'auto'): Promise<string> {
+    const effectiveDate = f.date || today()
+    const c = clients.find(x => x.id === f.clientId)
+    const effective: FormState = {
+      ...f,
+      date: effectiveDate,
+      dueDate: f.dueDate || (mode === 'issue' && c ? addDays(effectiveDate, termDays(type, settings, c)) : ''),
+    }
+    const fields = docFields(type, effective)
+    const items = itemsPayload(effective.lines)
+    pendingWritesRef.current++
+    try {
+      let id = docIdRef.current
+      if (id) {
+        const { error } = await supabase.from('documents').update(fields).eq('id', id)
+        if (error) throw new Error(error.message)
+      } else {
+        if (misplacedRef.current) throw new Error(t('common.unknownError'))
+        if (!fields.client_id) throw new Error(t('builder.selectClient'))
+        const { data, error } = await supabase.from('documents')
+          .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
+          .select('id').single()
+        if (error) throw new Error(error.message)
+        id = data.id as string
+        adoptId(id)
+      }
+      const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
+      if (itemsErr) throw new Error(t('builder.itemsError', { error: itemsErr.message }))
+
+      savedKeyRef.current = JSON.stringify([fields, items])
+      savedOnceRef.current = true
+      // Saving or issuing shows the date and due date that were filled in, and keeps the snapshot
+      // in step so the next flush does not write the empty values back. An autosave leaves the
+      // fields alone: a date input is empty while it is being typed in.
+      if (mode !== 'auto' && (effective.date !== f.date || effective.dueDate !== f.dueDate)) {
+        const cur = formRef.current
+        formRef.current = { ...cur, date: cur.date || effective.date, dueDate: cur.dueDate || effective.dueDate }
+        setDate(d => d || effective.date)
+        setDueDate(d => d || effective.dueDate)
+      }
+      saveErrorRef.current = null
+      setSaveError(null)
+      setLastSaved(new Date())
+      // Edits made while this was being written stay backed up, now against what was saved.
+      if (isDirty(formRef.current)) backupNow()
+      else removeBackup(backupKey(id))
+      return id
+    } finally {
+      pendingWritesRef.current--
+    }
+  }
+
+  // Writes pending edits now (autosave timer, leaving the page, the status menu, Cmd+S).
+  // Resolves once everything queued so far is written.
+  function flush(): Promise<void> {
+    cancelAutoSave()
+    if (issuingRef.current || !isDirty(formRef.current) || !canPersist(formRef.current)) return writeChain.current
+    setAutoSaving(true)
+    return serialized(async () => {
+      const latest = formRef.current
+      if (!isDirty(latest) || !canPersist(latest)) return
+      await persist(latest)
+    })
+      .catch(e => {
+        const msg = errorMessage(e, t('common.unknownError'))
+        if (!saveErrorRef.current) toast.error(t('builder.notSavedToast', { error: msg }))
+        saveErrorRef.current = msg
+        setSaveError(msg)
+      })
+      .finally(() => setAutoSaving(false))
+  }
+
+  async function saveDraft() {
+    if (!formRef.current.clientId) { toast.error(t('builder.selectClient')); return }
+    cancelAutoSave()
     setSaving(true)
-    const id = await serialized(() => persist(false))
-    setSaving(false)
-    if (!id) return
-    setSaveError(null)
-    setLastSaved(new Date())
-    toast.success(t('builder.draftSaved'))
-    if (!doc) router.push(`/${PATHS[type]}/${id}`)
-    else router.refresh()
+    try {
+      const id = await serialized(() => persist(formRef.current, 'save'))
+      toast.success(t('builder.draftSaved'))
+      if (!doc) router.replace(`/${PATHS[type]}/${id}`)
+      else router.refresh()
+    } catch (e) {
+      toast.error(errorMessage(e, t('common.unknownError')))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function restoreBackup() {
+    if (!restoreOffer) return
+    const f: FormState = { ...formRef.current, ...restoreOffer.form, currency }
+    setClientId(f.clientId)
+    setDate(f.date)
+    setServiceDate(f.serviceDate)
+    setServiceDateEnd(f.serviceDateEnd)
+    setDueDate(f.dueDate)
+    setLanguage(f.language)
+    setTaxTreatment(f.taxTreatment)
+    setNotes(f.notes)
+    setNotesInternal(f.notesInternal)
+    setDiscountType(f.discountType)
+    setDiscountValue(f.discountValue)
+    setSkontoPercent(f.skontoPercent)
+    setSkontoDays(f.skontoDays)
+    setLines(f.lines.map(l => ({ ...l, service_date_end: l.service_date_end ?? null })))
+    offerPendingRef.current = false
+    setRestoreOffer(null)
+    toast.success(t('issueChecks.restored'))
+  }
+
+  function discardBackup() {
+    offerPendingRef.current = false
+    setRestoreOffer(null)
+    // Edits made since opening are the backup now; only an untouched form drops it.
+    if (!isDirty(formRef.current)) removeBackup(backupKey(docIdRef.current))
+  }
+
+  // Listeners, timers and the actions that run after issuing call the latest render's functions
+  // and read the latest form (the issue dialog may have changed the date since the click).
+  const latest = useRef({ flush, saveDraft, isDirty, buildEmailContent })
+  useEffect(() => {
+    formRef.current = form
+    latest.current = { flush, saveDraft, isDirty, buildEmailContent }
+  })
+
+  // An earlier visit left edits on this device that the server copy does not have.
+  useEffect(() => {
+    // Back to a draft that was created here can restore the empty editor it was started in (the
+    // address bar switched to the draft without a navigation); load the draft itself instead.
+    if (!doc && window.location.pathname !== `/${PATHS[type]}/new`) {
+      misplacedRef.current = true
+      router.replace(window.location.pathname + window.location.search)
+      return
+    }
+    const key = backupKey(docIdRef.current)
+    const b = readBackup(key)
+    if (!b) return
+    const merged = { ...formRef.current, ...b.form, currency }
+    const newer = docIdRef.current
+      ? (b.base === null || b.base === initialKeys.saved) && savedKeyOf(type, merged) !== initialKeys.saved
+      : contentKeyOf(merged) !== initialKeys.content
+    if (!newer) { removeBackup(key); return }
+    offerPendingRef.current = true
+    setRestoreOffer(b)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Every edit is backed up on the device at once and written to the server 2 s later.
+  useEffect(() => {
+    const f = formRef.current
+    if (misplacedRef.current) return
+    if (!latest.current.isDirty(f)) {
+      if (!offerPendingRef.current) removeBackup(backupKey(docIdRef.current))
+      return
+    }
+    backupNow()
+    if (!canPersist(f)) return
+    cancelAutoSave()
+    autoSaveTimer.current = setTimeout(() => { autoSaveTimer.current = null; void latest.current.flush() }, AUTOSAVE_DELAY)
+    return cancelAutoSave
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formKey])
+
+  // Leaving never drops edits: hiding the tab, closing it and unmounting flush the autosave
+  // instead of cancelling it, and closing with unsaved work asks first.
+  useEffect(() => {
+    mountedRef.current = true
+    const flushNow = () => { void latest.current.flush() }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushNow() }
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pendingWritesRef.current > 0 || latest.current.isDirty(formRef.current)) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flushNow)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      mountedRef.current = false
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flushNow)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      flushNow()
+    }
+  }, [])
+
+  // The status menu issues this document from outside the builder; edits still waiting for the
+  // autosave are written first, so the frozen PDF the server renders includes them.
+  useEffect(() => {
+    function onFlush(e: Event) {
+      const { documentId, waitUntil } = (e as CustomEvent<FlushEditsDetail>).detail
+      if (documentId !== docIdRef.current) return
+      waitUntil(latest.current.flush())
+    }
+    window.addEventListener(FLUSH_EDITS_EVENT, onFlush)
+    return () => window.removeEventListener(FLUSH_EDITS_EVENT, onFlush)
+  }, [])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (docIdRef.current) void latest.current.flush()
+        else void latest.current.saveDraft()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (revealTick) problemsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [revealTick])
+
+  // ─── Issuing ───────────────────────────────────────────────────────────────
+
+  function checkInput(f: FormState): IssueCheckInput {
+    return {
+      type,
+      currency: f.currency,
+      taxTreatment: f.taxTreatment,
+      serviceDate: f.serviceDate || null,
+      serviceDateEnd: f.serviceDateEnd || null,
+      isStorno: !!doc?.cancels_document_id,
+      client: clients.find(c => c.id === f.clientId) ?? null,
+      items: f.lines,
+      settings,
+    }
+  }
+
+  const liveProblems = checking && !doc?.number ? issueProblems(checkInput(form)) : []
+  const shownProblems = liveProblems.length ? liveProblems
+    : checking && serverProblems?.key === formKey ? serverProblems.problems : []
+  const missingIssuer = missingIssuerFields(settings)
+  const issuerFieldList = (fields: string[]) => fields.map(f => t(`issueChecks.issuerFields.${f}` as DictKey)).join(', ')
+
+  function lineIssues(idx: number) {
+    const codes = new Set(shownProblems.filter(p => 'index' in p && p.index === idx).map(p => p.code))
+    const undated = shownProblems.some(p => p.code === 'noServiceDate') && !lines[idx]?.service_date
+    return {
+      description: codes.has('blankDescription'),
+      quantity: codes.has('badQuantity'),
+      price: codes.has('missingPrice'),
+      date: undated || codes.has('periodStartMissing') || codes.has('periodEndBeforeStart'),
+    }
+  }
+
+  // driveFailed: issuing tried Drive and already reported the error.
+  type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean; driveFailed: boolean }
+  type IssueResponse = {
+    number: string
+    snapshotError: string | null
+    drive: { webViewLink: string | null; existing: boolean } | null
+    driveError: { error: string; code?: string } | null
   }
 
   async function buildPdfBlob(numOverride?: string, includeQr = false) {
     if (!client) { toast.error(t('builder.selectClientFirst')); return null }
+    const f = formRef.current
+    const { date: effectiveDate, skonto_percent, skonto_days } = docFields(type, f)
     const docData = {
       number: numOverride ?? doc?.number ?? 'DRAFT',
-      date, service_date: serviceDate || null, service_date_end: serviceDateEnd || null, due_date: dueDate || null,
-      type, language, currency, tax_treatment: taxTreatment,
-      notes: notes || null, tax_note: taxNote,
-      discount_type: discountType, discount_value: discountValue || null,
-      ...skontoFields,
-      items: lines.map(l => ({ ...l })),
+      date: effectiveDate, service_date: f.serviceDate || null, service_date_end: f.serviceDateEnd || null, due_date: f.dueDate || null,
+      type, language: f.language, currency, tax_treatment: f.taxTreatment,
+      notes: f.notes || null, tax_note: getTaxNote(f.taxTreatment, f.language, settings),
+      discount_type: f.discountType, discount_value: f.discountValue || null,
+      skonto_percent, skonto_days,
+      items: f.lines.map(l => ({ ...l })),
       totals,
       reference: reference ?? null,
     }
@@ -419,15 +857,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
   }
 
-  // driveFailed: issuing tried Drive and already reported the error.
-  type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean; driveFailed: boolean }
-  type IssueResponse = {
-    number: string
-    snapshotError: string | null
-    drive: { webViewLink: string | null; existing: boolean } | null
-    driveError: { error: string; code?: string } | null
-  }
-
   // Issuing froze the PDF and archived it to Drive on the server; a failure there never undoes
   // the issue, it is only reported (the page then offers to create the archive copy).
   function reportArchive(result: IssueResponse) {
@@ -436,28 +865,46 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     else if (result.drive) notifyDriveUpload(t, result.drive.webViewLink, result.drive.existing)
   }
 
+  // The issue dialog's choices (today's date, the due date that follows) go into the snapshot and
+  // the fields before anything is written, so the server renders exactly these values.
+  function applyOverrides(o: Partial<FormState>) {
+    formRef.current = { ...formRef.current, ...o }
+    if (o.date !== undefined) setDate(o.date)
+    if (o.dueDate !== undefined) setDueDate(o.dueDate)
+  }
+
   // Persists, then issues server-side: number + status 'sent' (issue_document), the frozen PDF
   // and the Drive archive. Re-entrant calls are ignored.
-  async function issueDocument(): Promise<Issued | null> {
+  async function issueDocument(overrides: Partial<FormState> | null): Promise<Issued | null> {
     if (doc?.number) return { number: doc.number, id: doc.id, isNew: false, driveArchived: false, driveFailed: false }
     if (issuingRef.current) return null
     issuingRef.current = true
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    cancelAutoSave()
+    if (overrides) applyOverrides(overrides)
+    const f = formRef.current
     setSaving(true)
     try {
       return await serialized(async () => {
-        const id = await persist(true)
-        if (!id) return null
-        let result: IssueResponse
+        let id: string
         try {
-          result = await postJson<IssueResponse>(`/api/documents/${id}/issue`)
+          id = await persist(f, 'issue')
         } catch (e) {
           toast.error(errorMessage(e, t('common.unknownError')))
-          if (!doc) router.push(`/${PATHS[type]}/${id}`)
           return null
         }
-        setSaveError(null)
-        setLastSaved(new Date())
+        const res = await fetch(`/api/documents/${id}/issue`, { method: 'POST' })
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 422 && Array.isArray(data.problems)) {
+          setServerProblems({ key: savedKeyRef.current, problems: data.problems as IssueProblem[] })
+          setChecking(true)
+          setRevealTick(n => n + 1)
+          return null
+        }
+        if (!res.ok) {
+          toast.error(numberingErrorMessage({ code: data.code, message: typeof data.error === 'string' && data.error ? data.error : res.statusText, details: data.details }, t))
+          return null
+        }
+        const result = data as IssueResponse
         reportArchive(result)
         return { number: result.number, id, isNew: !doc, driveArchived: !!result.drive, driveFailed: !!result.driveError }
       })
@@ -492,25 +939,57 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
   }
 
-  // Issued documents run the action directly; drafts ask first, because issuing consumes
-  // the next number and marks the document as sent.
+  async function loadLatestIssued() {
+    let q = supabase.from('documents').select('number, date').eq('type', type).not('number', 'is', null)
+    if (docIdRef.current) q = q.neq('id', docIdRef.current)
+    const { data } = await q.order('date', { ascending: false }).limit(1).maybeSingle()
+    if (data?.number) setLatestIssued({ number: data.number, date: data.date })
+  }
+
+  // Issued documents run the action directly. Drafts are checked first (problems are shown inline,
+  // never issued), then confirmed, because issuing consumes the next number and marks them sent.
   function withIssued(action: (issued: Issued) => Promise<void>) {
-    if (!clientId) { toast.error(t('builder.selectClient')); return }
-    if (!lines.some(l => l.line_type === 'item')) { toast.error(t('builder.addLineItem')); return }
-    const run = async () => {
-      const issued = await issueDocument()
+    const run = async (overrides: Partial<FormState> | null) => {
+      const issued = await issueDocument(overrides)
       if (!issued) return
       // A freshly issued document navigates away when the action finishes; keep the toolbar
       // locked until then so a second click cannot create and issue another document.
       if (issued.isNew) setSaving(true)
       try { await action(issued) } finally { if (issued.isNew) setSaving(false) }
     }
-    if (doc?.number) void run()
-    else setPendingIssue(() => run)
+    if (doc?.number) { void run(null); return }
+    const f = formRef.current
+    const problems = issueProblems(checkInput(f))
+    setServerProblems(null)
+    setChecking(problems.length > 0)
+    if (problems.length) {
+      // On phones the document's service date sits in the collapsed details.
+      if (problems.some(p => p.code === 'noServiceDate' || ((p.code === 'periodStartMissing' || p.code === 'periodEndBeforeStart') && p.index == null))) setShowDetails(true)
+      setRevealTick(n => n + 1)
+      return
+    }
+    const effectiveDate = f.date || today()
+    setUseToday(true)
+    setLatestIssued(null)
+    setPendingIssue({ run, staleDate: effectiveDate < today() ? effectiveDate : null })
+    void loadLatestIssued()
+  }
+
+  // A stale draft is issued with today's date by default, its due date following the client's terms.
+  function staleOverrides(): { date: string; dueDate: string } {
+    const d = today()
+    return { date: d, dueDate: addDays(d, termDays(type, settings, client)) }
+  }
+
+  function confirmIssue() {
+    const p = pendingIssue
+    if (!p) return
+    setPendingIssue(null)
+    void p.run(p.staleDate && useToday ? staleOverrides() : null)
   }
 
   function afterIssue(issued: Issued) {
-    if (issued.isNew) router.push(`/${PATHS[type]}/${issued.id}`)
+    if (issued.isNew) router.replace(`/${PATHS[type]}/${issued.id}`)
     else router.refresh()
   }
 
@@ -622,7 +1101,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = buildEmailContent(issued.number)
+      const content = latest.current.buildEmailContent(issued.number)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       triggerDownload(blob, `${issued.number}.pdf`)
@@ -638,7 +1117,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = buildEmailContent(issued.number)
+      const content = latest.current.buildEmailContent(issued.number)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
@@ -675,7 +1154,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   function closeGmailPreview() {
     const newDocId = gmailPreview?.newDocId
     setGmailPreview(null)
-    if (newDocId) router.push(`/${PATHS[type]}/${newDocId}`)
+    if (newDocId) router.replace(`/${PATHS[type]}/${newDocId}`)
     else router.refresh()
   }
 
@@ -685,66 +1164,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       afterIssue(issued)
     })
   }
-
-  const autoSave = useCallback(async () => {
-    if (!doc || !clientId || saving || issuingRef.current) return
-    if (!date) { setSaveError(t('builder.dateRequired')); return }
-    setAutoSaving(true)
-    const failure = await serialized(async () => {
-      const { error } = await supabase.from('documents').update(currentDocFields(date, dueDate || null)).eq('id', doc.id)
-      if (error) return error.message
-      const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: doc.id, p_items: buildItemsPayload(doc.id) })
-      return itemsErr ? itemsErr.message : null
-    })
-    if (failure) {
-      if (!saveError) toast.error(t('builder.notSavedToast', { error: failure }))
-      setSaveError(failure)
-    } else {
-      setSaveError(null)
-      setLastSaved(new Date())
-    }
-    setAutoSaving(false)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, clientId, date, serviceDate, serviceDateEnd, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, skontoPercent, skontoDays, lines, saving, saveError])
-
-  useEffect(() => {
-    if (!doc) return
-    if (isFirstRender.current) { isFirstRender.current = false; return }
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
-    autoSaveTimer.current = setTimeout(() => { autoSaveTimer.current = null; void autoSave() }, 2000)
-    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
-  }, [autoSave, doc])
-
-  // The status menu issues this document from outside the builder; edits still waiting for the
-  // autosave are written first, so the frozen PDF the server renders includes them.
-  useEffect(() => {
-    if (!doc) return
-    const docId = doc.id
-    function onFlush(e: Event) {
-      const { documentId, waitUntil } = (e as CustomEvent<FlushEditsDetail>).detail
-      if (documentId !== docId) return
-      if (autoSaveTimer.current) {
-        clearTimeout(autoSaveTimer.current)
-        autoSaveTimer.current = null
-        waitUntil(autoSave())
-      }
-      waitUntil(writeChain.current)
-    }
-    window.addEventListener(FLUSH_EDITS_EVENT, onFlush)
-    return () => window.removeEventListener(FLUSH_EDITS_EVENT, onFlush)
-  }, [autoSave, doc])
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault()
-        if (doc) autoSave()
-        else save('draft')
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [autoSave, doc, save])
 
   const deleteBtn = (id: string) => (
     <button type="button" onClick={() => removeLine(id)} aria-label={t('builder.removeLine')}
@@ -805,13 +1224,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   // The phone and desktop layouts both stay mounted, so each gets its own listbox ids.
   const catalogueListId = (mobile: boolean) => `${listboxId}-${mobile ? 'm' : 'd'}`
 
-  function descriptionProps(line: LineItem, mobile: boolean) {
+  function descriptionProps(line: LineItem, mobile: boolean, invalid: boolean) {
     const open = catalogueOpenFor(line)
     const lbId = catalogueListId(mobile)
     return {
       value: line.description,
       placeholder: t('builder.descriptionPlaceholder'),
       'aria-label': t('builder.description'),
+      'aria-invalid': invalid || undefined,
       role: 'combobox' as const,
       'aria-expanded': open,
       'aria-controls': open ? lbId : undefined,
@@ -825,6 +1245,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       onFocus: (e: React.FocusEvent<HTMLInputElement>) => openCatalogue(line, e.currentTarget, mobile),
       onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => handleCatalogueKeyDown(e, line, mobile),
     }
+  }
+
+  function serviceDateLabel(line: LineItem) {
+    if (!line.service_date) return t('builder.setServiceDate')
+    if (line.service_date_end && line.service_date_end !== line.service_date) {
+      return t('issueChecks.servicePeriodLabel', { from: formatDate(line.service_date, lang), to: formatDate(line.service_date_end, lang) })
+    }
+    return t('builder.serviceDateLabel', { date: formatDate(line.service_date, lang) })
   }
 
   const popupFieldCls = 'text-base md:text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100'
@@ -906,12 +1334,11 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     `text-xs px-2 py-1 sm:px-1.5 sm:py-0.5 rounded-full border transition-colors ${active ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 border-transparent' : 'border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500'}`
   const removeDiscountBtn = 'h-9 w-9 -my-2 sm:h-7 sm:w-7 sm:-my-1 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0'
 
+  // The subtotal block with the same clamped section discount calcTotals and the PDF apply.
   const sectionDiscount = (line: LineItem, idx: number) => {
-    const gross = calcSectionSubtotal(lines, idx)
-    const discAmt = line.discount_type && line.discount_value > 0
-      ? line.discount_type === 'percent' ? gross * (line.discount_value / 100) : Math.min(line.discount_value, gross)
-      : 0
-    const net = gross - discAmt
+    const { gross, discount: discAmt, net } = sectionSummary(lines, idx)
+    const setSectionDiscount = (kind: 'percent' | 'fixed', value: number) =>
+      updateLine(line.id, { discount_type: kind, discount_value: clampDiscount(kind, value, gross) })
     return (
       <div className="flex-1 space-y-1.5 pr-1 min-w-0">
         <div className="flex justify-end items-center gap-3">
@@ -922,12 +1349,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           <div className="space-y-1.5">
             <div className="flex items-center justify-end gap-2 flex-wrap">
               <div role="group" aria-label={t('builder.discountType')} className="flex rounded border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
-                <button type="button" aria-pressed={line.discount_type === 'percent'} onClick={() => updateLine(line.id, { discount_type: 'percent' })} className={discountToggle(line.discount_type === 'percent')}>%</button>
-                <button type="button" aria-pressed={line.discount_type === 'fixed'} onClick={() => updateLine(line.id, { discount_type: 'fixed' })} className={discountToggle(line.discount_type === 'fixed')}>{currency}</button>
+                <button type="button" aria-pressed={line.discount_type === 'percent'} onClick={() => setSectionDiscount('percent', line.discount_value)} className={discountToggle(line.discount_type === 'percent')}>%</button>
+                <button type="button" aria-pressed={line.discount_type === 'fixed'} onClick={() => setSectionDiscount('fixed', line.discount_value)} className={discountToggle(line.discount_type === 'fixed')}>{currency}</button>
               </div>
               <MoneyInput
                 value={line.discount_value}
-                onValueChange={n => updateLine(line.id, { discount_value: n ?? 0 })}
+                onValueChange={n => setSectionDiscount(line.discount_type ?? 'percent', n ?? 0)}
                 aria-label={t('builder.sectionDiscount')}
                 className="w-20 h-8 sm:h-7 md:text-xs text-right"
               />
@@ -958,7 +1385,18 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     )
   }
 
+  const setDocumentDiscount = (kind: 'percent' | 'fixed', value: number) => {
+    setDiscountType(kind)
+    setDiscountValue(clampDiscount(kind, value, totals.subtotal))
+  }
+
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
+  const issueDate = pendingIssue?.staleDate && useToday ? today() : (date || today())
+  const issueNumber = pendingIssue ? expectedNumber(settings, type, issueDate) : ''
+  const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
+  const restoreTime = restoreOffer
+    ? new Date(restoreOffer.savedAt).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
+    : ''
 
   return (
     <div className="space-y-6">
@@ -1033,9 +1471,54 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         title={t(`builder.issueTitle.${type}`)}
         description={t('builder.issueDesc', { number: t(`docTypeNumber.${type}`) })}
         confirmLabel={t('builder.issueAndContinue')}
-        onConfirm={() => { const run = pendingIssue; setPendingIssue(null); if (run) void run() }}
+        onConfirm={confirmIssue}
         onCancel={() => setPendingIssue(null)}
-      />
+      >
+        {pendingIssue && (
+          <div className="space-y-3 text-sm">
+            {pendingIssue.staleDate && (
+              <fieldset className="space-y-2">
+                <legend className="text-neutral-700 dark:text-neutral-300 mb-2">{t('issueChecks.staleDate', { date: formatDate(pendingIssue.staleDate, lang) })}</legend>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="radio" name={`${uid}-issue-date`} checked={useToday} onChange={() => setUseToday(true)} className="w-4 h-4 accent-neutral-900 dark:accent-white" />
+                  {type === 'invoice'
+                    ? t('issueChecks.useTodayDue', { date: formatDate(today(), lang), due: formatDate(staleOverrides().dueDate, lang) })
+                    : t('issueChecks.useToday', { date: formatDate(today(), lang) })}
+                </label>
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input type="radio" name={`${uid}-issue-date`} checked={!useToday} onChange={() => setUseToday(false)} className="w-4 h-4 accent-neutral-900 dark:accent-white" />
+                  {t('issueChecks.keepDate', { date: formatDate(pendingIssue.staleDate, lang) })}
+                </label>
+              </fieldset>
+            )}
+            {latestIssued && issueDate < latestIssued.date && (
+              <p role="alert" className="text-amber-700 dark:text-amber-300">
+                {t('issueChecks.earlierThanLatest', { number: latestIssued.number, date: formatDate(latestIssued.date, lang) })}
+              </p>
+            )}
+            {issueNumber && (
+              <p className="text-neutral-500 dark:text-neutral-400">{t('issueChecks.expectedNumber', { number: issueNumber })}</p>
+            )}
+          </div>
+        )}
+      </ConfirmDialog>
+
+      {restoreOffer && (
+        <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 px-4 py-3 text-sm text-blue-800 dark:text-blue-300 flex flex-col sm:flex-row sm:items-center gap-3">
+          <p className="flex-1">{t('issueChecks.restoreBody', { time: restoreTime })}</p>
+          <div className="flex gap-2 shrink-0">
+            <Button type="button" size="sm" onClick={restoreBackup} className="h-9 sm:h-8">{t('issueChecks.restore')}</Button>
+            <Button type="button" variant="outline" size="sm" onClick={discardBackup} className="h-9 sm:h-8 bg-white dark:bg-neutral-900">{t('issueChecks.discard')}</Button>
+          </div>
+        </div>
+      )}
+
+      {!doc?.number && missingIssuer.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center gap-3">
+          <p className="flex-1">{t('issueChecks.settingsBanner', { fields: issuerFieldList(missingIssuer) })}</p>
+          <Link href="/settings" className="shrink-0 self-start sm:self-auto text-sm font-medium underline underline-offset-2 py-2 -my-2">{t('issueChecks.openSettings')}</Link>
+        </div>
+      )}
 
       {doc?.number && doc.status !== 'draft' && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
@@ -1068,24 +1551,31 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         {/* Client selector — full width always */}
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-client`}>{t('builder.client')}</Label>
-          <select id={`${uid}-client`} value={clientId} onChange={e => handleClientChange(e.target.value)} className={SELECT_CLS}>
-            <option value="">{t('builder.selectClientPlaceholder')}</option>
-            {clients.sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)).map(c => (
-              <option key={c.id} value={c.id}>{c.company && c.name ? `${c.company} (${c.name})` : c.company || c.name}</option>
-            ))}
-          </select>
+          <ClientPicker id={`${uid}-client`} clients={clients} value={clientId} onChange={handleClientChange}
+            invalid={shownProblems.some(p => p.code === 'noClient')} />
         </div>
 
-        {/* Date + Due date */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor={`${uid}-date`}>{t('builder.date')}</Label>
-            <Input id={`${uid}-date`} type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 w-full" />
+        {/* Number + Date + Due date */}
+        <div className="space-y-1.5">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div role="group" aria-labelledby={`${uid}-number`} className="flex-1 min-w-0 space-y-1.5">
+              <span id={`${uid}-number`} className="block text-sm leading-none font-medium">{t('issueChecks.number')}</span>
+              <p className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
+                <span className="truncate">
+                  {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
+                </span>
+              </p>
+            </div>
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor={`${uid}-date`}>{t('builder.date')}</Label>
+              <Input id={`${uid}-date`} type="date" value={date} onChange={e => setDate(e.target.value)} className="h-10 w-full" />
+            </div>
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? t('builder.dueDate') : t('builder.validUntil')}</Label>
+              <Input id={`${uid}-due`} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="h-10 w-full" />
+            </div>
           </div>
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? t('builder.dueDate') : t('builder.validUntil')}</Label>
-            <Input id={`${uid}-due`} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="h-10 w-full" />
-          </div>
+          {!doc?.number && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.numberHint')}</p>}
         </div>
 
         {/* Details toggle (mobile) / always visible (desktop) */}
@@ -1108,13 +1598,12 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <option value="en">{t('common.english')}</option>
               </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`${uid}-currency`}>{t('builder.currency')}</Label>
-              <select id={`${uid}-currency`} value={currency} onChange={e => setCurrency(e.target.value as Currency)} className={SELECT_CLS}>
-                <option value="EUR">EUR</option>
-                <option value="USD">USD</option>
-                <option value="GBP">GBP</option>
-              </select>
+            <div role="group" aria-labelledby={`${uid}-currency`} aria-describedby={currency !== 'EUR' ? `${uid}-currency-note` : undefined} className="space-y-1.5">
+              <span id={`${uid}-currency`} className="block text-sm leading-none font-medium">{t('builder.currency')}</span>
+              <p className={`${SELECT_CLS} text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/50`}>
+                {currency}
+              </p>
+              {currency !== 'EUR' && <p id={`${uid}-currency-note`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.currencyLegacy')}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${uid}-tax`}>{t('builder.taxTreatment')}</Label>
@@ -1126,11 +1615,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${uid}-service-from`}>{t('builder.serviceFrom')}</Label>
-              <Input id={`${uid}-service-from`} type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)} />
+              <Input id={`${uid}-service-from`} type="date" value={serviceDate} onChange={e => setServiceDate(e.target.value)}
+                aria-invalid={shownProblems.some(p => p.code === 'noServiceDate' || ((p.code === 'periodStartMissing' || p.code === 'periodEndBeforeStart') && p.index == null)) || undefined} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${uid}-service-to`}>{t('builder.serviceTo')}</Label>
-              <Input id={`${uid}-service-to`} type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)} />
+              <Input id={`${uid}-service-to`} type="date" value={serviceDateEnd} min={serviceDate || undefined} onChange={e => setServiceDateEnd(e.target.value)}
+                aria-invalid={shownProblems.some(p => p.code === 'periodEndBeforeStart' && p.index == null) || undefined} />
             </div>
             {type === 'invoice' && (
               <>
@@ -1151,7 +1642,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
         {taxNote && (
           <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-md px-3 py-2">
-            {taxNote}
+            <span className="font-medium">{t('issueChecks.taxNoteLabel')}</span> {taxNote}
           </div>
         )}
       </div>{/* end Client & Dates */}
@@ -1229,12 +1720,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             }
 
             // item — mobile card
+            const issues = lineIssues(idx)
             return (
               <div key={line.id} className="rounded-xl border border-neutral-200 dark:border-neutral-700 p-3 space-y-3 mb-2">
                 {/* Description + delete */}
                 <div className="flex items-center gap-2">
                   <div className="relative flex-1 min-w-0" onBlur={handleCatalogueBlur}>
-                    <Input {...descriptionProps(line, true)} className="w-full" />
+                    <Input {...descriptionProps(line, true, issues.description)} className="w-full" />
                     {cataloguePopup(line, true)}
                   </div>
                   {deleteBtn(line.id)}
@@ -1244,7 +1736,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <div className="space-y-1">
                     <label htmlFor={`${uid}-qty-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">{t('builder.qtyUnit')}</label>
                     <div className="flex gap-1.5">
-                      <MoneyInput id={`${uid}-qty-${line.id}`} value={line.quantity} decimals={4}
+                      <MoneyInput id={`${uid}-qty-${line.id}`} value={line.quantity} decimals={4} aria-invalid={issues.quantity || undefined}
                         onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })}
                         className="w-16 shrink-0" />
                       <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label={t('builder.unit')}
@@ -1255,7 +1747,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   </div>
                   <div className="space-y-1">
                     <label htmlFor={`${uid}-price-${line.id}`} className="block text-xs text-neutral-500 dark:text-neutral-400">{t('builder.price')}</label>
-                    <MoneyInput id={`${uid}-price-${line.id}`} value={line.unit_price}
+                    <MoneyInput id={`${uid}-price-${line.id}`} value={line.unit_price} aria-invalid={issues.price || undefined}
                       onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })}
                       className="w-full" />
                   </div>
@@ -1273,10 +1765,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
-                    title={line.service_date ?? t('builder.setServiceDate')}
-                    aria-label={line.service_date ? t('builder.serviceDateLabel', { date: line.service_date }) : t('builder.setServiceDate')}
+                    title={serviceDateLabel(line)}
+                    aria-label={serviceDateLabel(line)}
                     aria-expanded={activeDateLine === line.id}
-                    className={`h-11 w-11 flex items-center justify-center rounded-md border transition-colors ${line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
+                    className={`h-11 w-11 flex items-center justify-center rounded-md border transition-colors ${issues.date ? `${INVALID_CLS} text-red-500` : line.service_date ? 'border-blue-300 dark:border-blue-700 text-blue-500' : 'border-neutral-200 dark:border-neutral-700 text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
                     <Calendar size={16} />
                   </button>
@@ -1372,20 +1864,21 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             }
 
             // item
+            const issues = lineIssues(idx)
             return (
               <div key={line.id} className={dragOverClass}>
                 <div {...dragProps} className="grid gap-2 items-start" style={{ gridTemplateColumns: '16px 1fr 70px 80px 90px 60px 24px 32px' }}>
                   {handle}
                   <div className="relative min-w-0" onBlur={handleCatalogueBlur}>
-                    <Input {...descriptionProps(line, false)} />
+                    <Input {...descriptionProps(line, false, issues.description)} />
                     {cataloguePopup(line, false)}
                   </div>
-                  <MoneyInput value={line.quantity} decimals={4} aria-label={t('builder.quantity')}
+                  <MoneyInput value={line.quantity} decimals={4} aria-label={t('builder.quantity')} aria-invalid={issues.quantity || undefined}
                     onValueChange={n => updateLine(line.id, { quantity: n ?? 0 })} />
                   <select value={line.unit} onChange={e => updateLine(line.id, { unit: e.target.value as Unit })} aria-label={t('builder.unit')} className={LINE_SELECT_CLS}>
                     {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
                   </select>
-                  <MoneyInput value={line.unit_price} aria-label={t('builder.unitPrice')}
+                  <MoneyInput value={line.unit_price} aria-label={t('builder.unitPrice')} aria-invalid={issues.price || undefined}
                     onValueChange={n => updateLine(line.id, { unit_price: n ?? 0 })} />
                   <select value={line.vat_rate} aria-label={t('builder.vatRate')}
                     onChange={e => updateLine(line.id, { vat_rate: parseInt(e.target.value) as VatRate })}
@@ -1395,10 +1888,10 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                   <button
                     type="button"
                     onClick={(e) => toggleDatePop(line.id, e)}
-                    title={line.service_date ?? t('builder.setServiceDate')}
-                    aria-label={line.service_date ? t('builder.serviceDateLabel', { date: line.service_date }) : t('builder.setServiceDate')}
+                    title={serviceDateLabel(line)}
+                    aria-label={serviceDateLabel(line)}
                     aria-expanded={activeDateLine === line.id}
-                    className={`h-9 w-6 flex items-center justify-center rounded-md transition-colors ${line.service_date ? 'text-blue-500' : 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
+                    className={`h-9 w-6 flex items-center justify-center rounded-md transition-colors ${issues.date ? 'text-red-500' : line.service_date ? 'text-blue-500' : 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'}`}
                   >
                     <Calendar size={13} />
                   </button>
@@ -1450,16 +1943,16 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
                 <span className="text-neutral-500 dark:text-neutral-400 text-xs shrink-0">{t('builder.discount')}</span>
                 {/* % / flat toggle */}
                 <div role="group" aria-label={t('builder.discountType')} className="flex rounded-md border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs shrink-0">
-                  <button type="button" aria-pressed={discountType === 'percent'} onClick={() => setDiscountType('percent')}
+                  <button type="button" aria-pressed={discountType === 'percent'} onClick={() => setDocumentDiscount('percent', discountValue)}
                     className={`px-2.5 py-1.5 sm:py-1 transition-colors ${discountType === 'percent' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
                     %
                   </button>
-                  <button type="button" aria-pressed={discountType === 'fixed'} onClick={() => setDiscountType('fixed')}
+                  <button type="button" aria-pressed={discountType === 'fixed'} onClick={() => setDocumentDiscount('fixed', discountValue)}
                     className={`px-2.5 py-1.5 sm:py-1 transition-colors ${discountType === 'fixed' ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900' : 'bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300'}`}>
                     {currency}
                   </button>
                 </div>
-                <MoneyInput value={discountValue} onValueChange={n => setDiscountValue(n ?? 0)} aria-label={t('builder.discountValue')} className="w-20 text-right" />
+                <MoneyInput value={discountValue} onValueChange={n => setDocumentDiscount(discountType, n ?? 0)} aria-label={t('builder.discountValue')} className="w-20 text-right" />
                 <span className="flex-1 text-right text-neutral-500 dark:text-neutral-400">−{formatMoney(totals.discount_amount, currency)}</span>
                 <button type="button" aria-label={t('builder.removeDiscount')} onClick={() => { setDiscountType(null); setDiscountValue(0) }} className={removeDiscountBtn}>
                   <X size={13} />
@@ -1524,6 +2017,23 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         </div>
       </div>
 
+      {/* Why the document cannot be issued yet; updates while the problems are fixed */}
+      {shownProblems.length > 0 && (
+        <div ref={problemsRef} role="alert" className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-800 dark:text-red-300">
+          <p className="font-medium">{t('issueChecks.title')}</p>
+          <ul className="mt-1.5 list-disc pl-5 space-y-1">
+            {shownProblems.map((p, i) => (
+              <li key={`${p.code}-${i}`}>
+                {issueProblemMessage(p, t)}
+                {p.code === 'settingsIncomplete' && (
+                  <> <Link href="/settings" className="underline underline-offset-2 font-medium">{t('issueChecks.openSettings')}</Link></>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Date popover */}
       {activeDateLine && datePop && (() => {
         const line = lines.find(l => l.id === activeDateLine && l.line_type === 'item')
@@ -1541,11 +2051,17 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             >
               <label htmlFor={`${uid}-service-date-${line.id}`} className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.serviceDate')}</label>
               <Input id={`${uid}-service-date-${line.id}`} type="date" value={line.service_date ?? ''}
-                onChange={e => updateLine(line.id, { service_date: e.target.value || null })}
+                onChange={e => updateLine(line.id, e.target.value ? { service_date: e.target.value } : { service_date: null, service_date_end: null })}
                 className="w-44" autoFocus />
-              {line.service_date && (
+              <label htmlFor={`${uid}-service-date-end-${line.id}`} className="block text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('issueChecks.serviceUntil')}</label>
+              <Input id={`${uid}-service-date-end-${line.id}`} type="date" value={line.service_date_end ?? ''}
+                min={line.service_date ?? undefined} disabled={!line.service_date}
+                aria-invalid={(!!line.service_date && !!line.service_date_end && line.service_date_end < line.service_date) || undefined}
+                onChange={e => updateLine(line.id, { service_date_end: e.target.value || null })}
+                className="w-44" />
+              {(line.service_date || line.service_date_end) && (
                 <button type="button"
-                  onClick={() => { updateLine(line.id, { service_date: null }); closeDatePop() }}
+                  onClick={() => { updateLine(line.id, { service_date: null, service_date_end: null }); closeDatePop() }}
                   className="text-xs py-2 -my-1 text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors">
                   {t('builder.clearDate')}
                 </button>
@@ -1587,7 +2103,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           {/* Primary CTAs */}
           <div className="flex gap-2">
             {!doc && (
-              <Button type="button" variant="outline" onClick={() => save('draft')} disabled={saving} className="flex-1 h-11 text-sm">
+              <Button type="button" variant="outline" onClick={() => void saveDraft()} disabled={saving} className="flex-1 h-11 text-sm">
                 {t('builder.saveDraft')}
               </Button>
             )}
@@ -1598,7 +2114,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             )}
           </div>
           {/* Auto-save status */}
-          {doc && saveStatus && (
+          {saveStatus && (
             <p aria-live="polite" className={`text-[11px] text-center -mt-1 ${saveStatus.cls || 'text-neutral-500 dark:text-neutral-400'}`}>
               {saveStatus.text}
             </p>
@@ -1628,13 +2144,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             </Button>
           )}
           <div className="flex-1" />
-          {doc && saveStatus && (
+          {saveStatus && (
             <span aria-live="polite" className={`text-xs mr-1 ${saveStatus.cls || 'text-neutral-500 dark:text-neutral-400'}`}>
               {saveStatus.text}
             </span>
           )}
           {!doc && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => save('draft')} disabled={saving}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => void saveDraft()} disabled={saving}>
               {t('builder.saveDraft')}
             </Button>
           )}
