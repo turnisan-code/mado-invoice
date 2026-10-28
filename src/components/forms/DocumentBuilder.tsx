@@ -20,6 +20,8 @@ import { generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { fetchIssuedPdf, blobToBase64 } from '@/lib/issued-pdf'
+import { logEvent } from '@/lib/events'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey, TFn } from '@/lib/i18n'
 
@@ -104,11 +106,11 @@ function errorMessage(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback
 }
 
-function notifyDriveUpload(t: TFn, webViewLink?: string | null) {
+function notifyDriveUpload(t: TFn, webViewLink?: string | null, existing = false) {
   toast.success(
     webViewLink
-      ? <span>{t('builder.driveUploaded')}<a href={webViewLink} target="_blank" rel="noopener" className="underline">{t('common.open')}</a></span>
-      : t('builder.driveUploadedPlain'),
+      ? <span>{t(existing ? 'archive.driveExisting' : 'builder.driveUploaded')}<a href={webViewLink} target="_blank" rel="noopener" className="underline">{t('common.open')}</a></span>
+      : t(existing ? 'archive.driveExistingPlain' : 'builder.driveUploadedPlain'),
     { duration: 5000 }
   )
 }
@@ -424,28 +426,27 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   useImperativeHandle(ref, () => ({ buildPdfBlob }))
 
-  type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean }
-
-  // Stores the final PDF as the frozen issued copy and, when Google is connected, archives a
-  // server-rendered copy to Drive. Failures are reported but never block issuing.
-  async function archiveIssued(id: string, number: string): Promise<{ snapshot: boolean; drive: boolean }> {
-    const result = await buildPdfBlob(number, true)
-    const snapshot = result
-      ? postJson(`/api/documents/${id}/snapshot`, { pdfBase64: await blobToBase64(result.blob) })
-      : null
-    const drive = settings.drive_folder_id && settings.gmail_connected
-      ? postJson<{ webViewLink?: string | null }>(`/api/documents/${id}/drive-pdf`)
-      : null
-    const [snap, drv] = await Promise.allSettled([snapshot, drive])
-    if (snap.status === 'rejected') toast.error(t('builder.snapshotFailed', { error: errorMessage(snap.reason, t('common.unknownError')) }))
-    if (drv.status === 'rejected') toast.error(t('builder.driveFailed', { error: errorMessage(drv.reason, t('common.unknownError')) }))
-    else if (drv.value) notifyDriveUpload(t, drv.value.webViewLink)
-    return { snapshot: snap.status === 'fulfilled' && !!snap.value, drive: drv.status === 'fulfilled' && !!drv.value }
+  // driveFailed: issuing tried Drive and already reported the error.
+  type Issued = { number: string; id: string; isNew: boolean; driveArchived: boolean; driveFailed: boolean }
+  type IssueResponse = {
+    number: string
+    snapshotError: string | null
+    drive: { webViewLink: string | null; existing: boolean } | null
+    driveError: { error: string; code?: string } | null
   }
 
-  // Persists, then assigns number + status 'sent' atomically (issue_document). Re-entrant calls are ignored.
+  // Issuing froze the PDF and archived it to Drive on the server; a failure there never undoes
+  // the issue, it is only reported (the page then offers to create the archive copy).
+  function reportArchive(result: IssueResponse) {
+    if (result.snapshotError) toast.error(t('builder.snapshotFailed', { error: result.snapshotError }))
+    if (result.driveError) toastApiError(t, result.driveError, t('builder.driveFailedPrefix'))
+    else if (result.drive) notifyDriveUpload(t, result.drive.webViewLink, result.drive.existing)
+  }
+
+  // Persists, then issues server-side: number + status 'sent' (issue_document), the frozen PDF
+  // and the Drive archive. Re-entrant calls are ignored.
   async function issueDocument(): Promise<Issued | null> {
-    if (doc?.number) return { number: doc.number, id: doc.id, isNew: false, driveArchived: false }
+    if (doc?.number) return { number: doc.number, id: doc.id, isNew: false, driveArchived: false, driveFailed: false }
     if (issuingRef.current) return null
     issuingRef.current = true
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
@@ -454,16 +455,18 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       return await serialized(async () => {
         const id = await persist(true)
         if (!id) return null
-        const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: id })
-        if (error) {
-          toast.error(error.message)
+        let result: IssueResponse
+        try {
+          result = await postJson<IssueResponse>(`/api/documents/${id}/issue`)
+        } catch (e) {
+          toast.error(errorMessage(e, t('common.unknownError')))
           if (!doc) router.push(`/${PATHS[type]}/${id}`)
           return null
         }
         setSaveError(null)
         setLastSaved(new Date())
-        const archived = await archiveIssued(id, number as string)
-        return { number: number as string, id, isNew: !doc, driveArchived: archived.drive }
+        reportArchive(result)
+        return { number: result.number, id, isNew: !doc, driveArchived: !!result.drive, driveFailed: !!result.driveError }
       })
     } finally {
       issuingRef.current = false
@@ -471,14 +474,25 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
   }
 
-  // For documents issued without the builder (status menu, bulk actions, before snapshots existed).
+  // For documents issued before archive copies existed: the server renders one from the stored data.
   function archiveNow() {
     if (!doc?.number) return
-    const { id, number } = doc
+    const { id } = doc
     setSaving(true)
-    void serialized(() => archiveIssued(id, number))
-      .then(archived => { if (archived.snapshot) { toast.success(t('builder.issuedArchived')); router.refresh() } })
+    void serialized(() => postJson(`/api/documents/${id}/snapshot`))
+      .then(() => { toast.success(t('builder.issuedArchived')); router.refresh() })
+      .catch(e => toast.error(t('builder.snapshotFailed', { error: errorMessage(e, t('common.unknownError')) })))
       .finally(() => setSaving(false))
+  }
+
+  // The stored issued copy; outgoing PDFs of a numbered document never come from the editor.
+  async function issuedPdf(issued: Issued): Promise<Blob | null> {
+    try {
+      return await fetchIssuedPdf(issued.id)
+    } catch (e) {
+      toast.error(t('archive.pdfFailed', { error: errorMessage(e, t('common.unknownError')) }))
+      return null
+    }
   }
 
   // Issued documents run the action directly; drafts ask first, because issuing consumes
@@ -503,47 +517,26 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     else router.refresh()
   }
 
-  async function uploadToDrive(pdfBase64: string, filename: string, documentId?: string) {
-    if (!settings.drive_folder_id) {
-      toast.error(t('builder.noDriveFolder'))
-      return
-    }
-    const res = await fetch('/api/drive/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdfBase64, filename, documentId }),
-    })
-    if (res.ok) {
-      const { webViewLink } = await res.json()
-      notifyDriveUpload(t, webViewLink)
-    } else {
-      toastApiError(t, await res.json().catch(() => ({})), t('builder.driveFailedPrefix'))
-    }
+  // The server uploads the stored copy and never overwrites: an archived file comes back as is.
+  async function saveIssuedToDrive(documentId: string) {
+    const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (res.ok) notifyDriveUpload(t, data.webViewLink, data.existing)
+    else toastApiError(t, data, t('builder.driveFailedPrefix'))
   }
 
   function saveToDrive() {
     if (!settings.drive_folder_id) { toast.error(t('builder.noDriveFolder')); return }
     withIssued(async issued => {
-      // Issuing just archived to Drive; a second upload would only overwrite the same file.
-      if (issued.driveArchived) { afterIssue(issued); return }
-      const result = await buildPdfBlob(issued.number, true)
-      if (!result) { afterIssue(issued); return }
-      await uploadToDrive(await blobToBase64(result.blob), `${issued.number}.pdf`, issued.id)
+      // Issuing just archived it to Drive (or reported why it could not); the toast says which.
+      if (!issued.driveArchived && !issued.driveFailed) await saveIssuedToDrive(issued.id)
       afterIssue(issued)
     })
   }
 
-  async function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve((reader.result as string).split(',')[1])
-      reader.onerror = () => reject(new Error('Failed to read PDF blob'))
-      reader.readAsDataURL(blob)
-    })
-  }
-
+  // Preview of the editor's current state; it is never sent anywhere.
   async function downloadPdf() {
-    const result = await buildPdfBlob()
+    const result = await buildPdfBlob(undefined, !!doc?.number)
     if (!result) return
     const url = URL.createObjectURL(result.blob)
     // Use a hidden <a> with target="_blank" — not blocked by popup blockers
@@ -566,8 +559,8 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
 
   function savePdf() {
     withIssued(async issued => {
-      const result = await buildPdfBlob(issued.number, true)
-      if (!result) { afterIssue(issued); return }
+      const blob = await issuedPdf(issued)
+      if (!blob) { afterIssue(issued); return }
       const filename = `${issued.number}.pdf`
 
       if ('showSaveFilePicker' in window) {
@@ -577,7 +570,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
             types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }],
           })
           const writable = await handle.createWritable()
-          await writable.write(result.blob)
+          await writable.write(blob)
           await writable.close()
           afterIssue(issued)
           return
@@ -586,7 +579,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
         }
       }
 
-      triggerDownload(result.blob, filename)
+      triggerDownload(blob, filename)
       afterIssue(issued)
     })
   }
@@ -633,12 +626,13 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
       const content = buildEmailContent(issued.number)
-      const result = await buildPdfBlob(issued.number, true)
-      if (!content || !result) { afterIssue(issued); return }
-      triggerDownload(result.blob, `${issued.number}.pdf`)
+      const blob = await issuedPdf(issued)
+      if (!content || !blob) { afterIssue(issued); return }
+      triggerDownload(blob, `${issued.number}.pdf`)
       Object.assign(document.createElement('a'), {
         href: `mailto:${client.email}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`,
       }).click()
+      await logEvent(supabase, issued.id, 'mailto_opened', { to: client.email, subject: content.subject })
       afterIssue(issued)
     })
   }
@@ -648,13 +642,14 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
       const content = buildEmailContent(issued.number)
-      const pdfResult = await buildPdfBlob(issued.number, true)
-      if (!content || !pdfResult) { afterIssue(issued); return }
+      const blob = await issuedPdf(issued)
+      if (!content || !blob) { afterIssue(issued); return }
+      const driveArchived = issued.driveArchived || !!doc?.drive_file_id
       setGmailPreview({
         to: client.email, subject: content.subject, body: content.body,
-        pdfBase64: await blobToBase64(pdfResult.blob), filename: `${issued.number}.pdf`,
+        pdfBase64: await blobToBase64(blob), filename: `${issued.number}.pdf`,
         documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
-        uploadToDrive: !!settings.drive_folder_id && !issued.driveArchived, driveArchived: issued.driveArchived,
+        uploadToDrive: !!settings.drive_folder_id && !driveArchived, driveArchived,
       })
     })
   }
@@ -675,7 +670,7 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
     }
 
     toast.success(t('builder.emailSent'))
-    if (gmailPreview.uploadToDrive) void uploadToDrive(gmailPreview.pdfBase64, gmailPreview.filename, gmailPreview.documentId)
+    if (gmailPreview.uploadToDrive) void saveIssuedToDrive(gmailPreview.documentId)
     closeGmailPreview()
   }
 
@@ -1029,6 +1024,15 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
       {doc?.number && doc.status !== 'draft' && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <strong>{t('builder.issuedWarning', { number: doc.number })}</strong> {t('builder.issuedWarningBody')}
+        </div>
+      )}
+
+      {doc?.number && !doc.pdf_path && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center gap-3">
+          <p className="flex-1"><strong>{t('archive.missingTitle')}</strong> {t('archive.missingBody')}</p>
+          <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="shrink-0 self-start sm:self-auto flex items-center gap-1.5 h-9 sm:h-8 bg-white dark:bg-neutral-900">
+            <Archive size={13} /> {t('archive.create')}
+          </Button>
         </div>
       )}
 
@@ -1554,13 +1558,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
               <Mail size={16} />
               <span className="text-[11px] font-medium">{settings.gmail_connected ? t('builder.gmail') : t('builder.email')}</span>
             </button>
-            {doc?.number && !doc.pdf_path && (
-              <button type="button" onClick={archiveNow} disabled={saving}
-                className="flex-1 flex flex-col items-center gap-1 py-2.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 active:bg-neutral-100 dark:active:bg-neutral-700 transition-colors disabled:opacity-50">
-                <Archive size={16} />
-                <span className="text-[11px] font-medium">{t('builder.archive')}</span>
-              </button>
-            )}
           </div>
           {/* Primary CTAs */}
           <div className="flex gap-2">
@@ -1603,11 +1600,6 @@ const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
           ) : (
             <Button type="button" variant="outline" size="sm" onClick={openInEmail} disabled={saving} className="flex items-center gap-1.5">
               <Mail size={13} /> {t('builder.sendViaSuperhuman')}
-            </Button>
-          )}
-          {doc?.number && !doc.pdf_path && (
-            <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="flex items-center gap-1.5">
-              <Archive size={13} /> {t('builder.archivePdf')}
             </Button>
           )}
           <div className="flex-1" />
