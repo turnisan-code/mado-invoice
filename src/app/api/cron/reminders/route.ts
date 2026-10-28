@@ -4,13 +4,12 @@ import { authorizeCron } from '@/lib/utils/cron'
 import {
   fillTemplate, sendReminderEmail, buildReminderContext, reminderTemplates, daysBetween,
 } from '@/lib/utils/reminder'
-import { calcTotals, getTaxNote, today, addDays, viennaDate } from '@/lib/utils/document'
+import { calcTotals, today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
-import { generateEpcQr } from '@/lib/utils/epc-qr'
-import { pdf } from '@react-pdf/renderer'
-import InvoiceDocument from '@/components/pdf/InvoiceDocument'
-import React from 'react'
-import type { Settings, Client, TaxTreatment, Language, Currency } from '@/types'
+import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { pdfFilename, renderLoadedPdf, type PdfDocument } from '@/lib/pdf/render'
+import { logEvent } from '@/lib/events'
+import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
 
@@ -76,74 +75,23 @@ export async function GET(req: NextRequest) {
     const tpl = reminderTemplates(settings, lang)
     const subject = fillTemplate(tpl.subject, ctx)
 
-    // Generate PDF server-side
+    // Attach the issued copy the client received; rendering from the stored data (with payments,
+    // section discounts and the QR) is only the fallback when the archive is unreachable.
     let pdfBase64: string | undefined
     let filename: string | undefined
     try {
-      const items = (invoice.document_items ?? [])
-      const totals = emailTotals
-      const taxTreatment = (invoice.tax_treatment ?? 'at_vat') as TaxTreatment
-      const invLang = (invoice.language ?? 'de') as Language
-      const taxNote = getTaxNote(taxTreatment, invLang, settings as Settings)
-      const docData = {
-        number: invoice.number ?? 'DRAFT',
-        date: invoice.date ?? '',
-        service_date: invoice.service_date ?? null,
-        service_date_end: invoice.service_date_end ?? null,
-        due_date: invoice.due_date ?? null,
-        type: invoice.type,
-        language: invLang,
-        currency: (invoice.currency ?? 'EUR') as Currency,
-        tax_treatment: taxTreatment,
-        notes: invoice.notes ?? null,
-        tax_note: taxNote,
-        discount_type: invoice.discount_type ?? null,
-        discount_value: invoice.discount_value ?? null,
-        skonto_percent: invoice.skonto_percent ?? null,
-        skonto_days: invoice.skonto_days ?? null,
-        items: items.map((i: Record<string, unknown>) => ({
-          line_type: i.line_type,
-          description: i.description as string,
-          service_date: (i.service_date as string | null) ?? null,
-          quantity: i.quantity as number | null,
-          unit: i.unit as string | null,
-          unit_price: i.unit_price as number | null,
-          vat_rate: i.vat_rate as number | null,
-        })),
-        totals,
+      const issued = await getIssuedPdf(supabase, invoice.id, 'on_demand')
+      pdfBase64 = issued.buffer.toString('base64')
+      filename = issued.filename
+    } catch (archiveErr) {
+      console.warn(`[cron/reminders] archive copy unavailable for ${invoice.number}:`, archiveErr)
+      try {
+        pdfBase64 = (await renderLoadedPdf(supabase, invoice as PdfDocument, settings as Settings)).toString('base64')
+        filename = pdfFilename(invoice.number)
+      } catch (pdfErr) {
+        // Send without attachment rather than skipping entirely
+        console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
       }
-      let qrCodeDataUri: string | null = null
-      if (settings.iban && totals.balance_due > 0) {
-        try {
-          qrCodeDataUri = await generateEpcQr({
-            iban: settings.iban,
-            bic: settings.bic ?? '',
-            name: settings.company_name,
-            amountEur: invoice.currency === 'EUR' ? totals.balance_due : undefined,
-            reference: invoice.number,
-          })
-        } catch {
-          // QR generation is best-effort
-        }
-      }
-      const stream = await pdf(React.createElement(InvoiceDocument, {
-        settings: settings as unknown as Settings,
-        client: client as unknown as Client,
-        document: docData,
-        qrCodeDataUri,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      }) as any).toBuffer()
-      const chunks: Buffer[] = []
-      await new Promise<void>((resolve, reject) => {
-        stream.on('data', (chunk: Buffer | Uint8Array) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
-        stream.on('end', resolve)
-        stream.on('error', reject)
-      })
-      pdfBase64 = Buffer.concat(chunks).toString('base64')
-      filename = `${invoice.number}.pdf`
-    } catch (pdfErr) {
-      console.warn(`[cron/reminders] PDF generation failed for ${invoice.number}:`, pdfErr)
-      // Send without attachment rather than skipping entirely
     }
 
     try {
@@ -164,6 +112,7 @@ export async function GET(req: NextRequest) {
       ])
       if (markErr) errors.push(`${invoice.number}: sent but reminder level not recorded (${markErr.message})`)
       if (logErr) errors.push(`${invoice.number}: sent but reminder_log not written (${logErr.message})`)
+      await logEvent(supabase, invoice.id, 'reminder_sent', { level, to: client.email, subject, automatic: true })
 
       sent++
     } catch (err) {
