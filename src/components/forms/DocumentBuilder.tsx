@@ -112,6 +112,7 @@ function docFields(type: DocumentType, f: FormState) {
     notes: f.notes || null, notes_internal: f.notesInternal || null,
     discount_type: f.discountType, discount_value: f.discountValue || null,
     ...skonto,
+    ...(f.currency === 'EUR' ? { exchange_rate: 1 } : {}),
   }
 }
 
@@ -310,11 +311,17 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const [date, setDate] = useState(doc?.date ?? today())
   const [serviceDate, setServiceDate] = useState(doc?.service_date ?? '')
   const [serviceDateEnd, setServiceDateEnd] = useState(doc?.service_date_end ?? '')
-  // An existing document keeps its stored due date; a new one follows the client's terms.
-  const [dueDate, setDueDate] = useState(() => doc ? (doc.due_date ?? '') : addDays(today(), termDays(type, settings, initialClient())))
+  // A stored due date is kept. A new document, or a draft without one (e.g. a duplicate), follows
+  // the client's terms, as issuing would; a Storno has none.
+  const [dueDate, setDueDate] = useState(() => {
+    if (doc && (doc.due_date || doc.number || doc.cancels_document_id)) return doc.due_date ?? ''
+    const c = doc ? clients.find(x => x.id === doc.client_id) : initialClient()
+    return addDays(doc?.date || today(), termDays(type, settings, c))
+  })
   const [language, setLanguage] = useState<Language>(() => doc?.language ?? initialClient()?.language ?? settings.default_language ?? 'de')
-  // EUR only; an older document keeps the currency it was written in.
-  const currency: Currency = doc?.currency ?? 'EUR'
+  // EUR only. An issued document keeps the currency it was written in, a credit note the one of
+  // the invoice it corrects; any other draft (a duplicate, a converted quote) becomes EUR.
+  const currency: Currency = doc && (doc.number || type === 'credit_note') ? doc.currency : 'EUR'
   const [taxTreatment, setTaxTreatment] = useState<TaxTreatment>(() => (doc?.tax_treatment as TaxTreatment | undefined) ?? initialClient()?.tax_treatment ?? settings.default_tax_treatment ?? 'at_vat')
   const [notes, setNotes] = useState(doc?.notes ?? '')
   const [notesInternal, setNotesInternal] = useState(doc?.notes_internal ?? '')
@@ -749,6 +756,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   function checkInput(f: FormState): IssueCheckInput {
     return {
       type,
+      currency: f.currency,
       taxTreatment: f.taxTreatment,
       serviceDate: f.serviceDate || null,
       serviceDateEnd: f.serviceDateEnd || null,

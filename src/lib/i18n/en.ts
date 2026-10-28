@@ -980,6 +980,7 @@ export const en = {
       settingsIncomplete: 'Your company details are incomplete: {fields}.',
       noClient: 'Choose a client.',
       noItems: 'Add at least one line item.',
+      currencyNotEur: 'Invoices and quotes are issued in EUR only. Open the draft in the editor to switch it to EUR.',
       reverseChargeNoUid: 'Reverse charge needs the client’s UID number. Add it to the client.',
       clientCountryMissing: 'The client’s address has no country, which reverse charge and non-EU documents must state.',
       noServiceDate: 'Enter the service date or period, either for the whole document or on every line.',
@@ -1014,7 +1015,7 @@ export const en = {
     noClients: 'No clients found',
     serviceUntil: 'Until (optional)',
     servicePeriodLabel: 'Service period {from} – {to}',
-    currencyLegacy: 'Kept as issued. New documents are in EUR only.',
+    currencyLegacy: 'Kept from the original document. New invoices and quotes are in EUR only.',
   },
   reports: {
     title: 'UVA Report',

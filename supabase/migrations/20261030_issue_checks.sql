@@ -4,6 +4,8 @@
 --   * issue_document refuses documents that are not complete enough to be issued (error MI004,
 --     detail = the problem codes). The app runs the same checks first and shows them inline
 --     (src/lib/utils/issue-checks.ts); this is the last line for every issuance path.
+--   * issue_document fills an empty due date (invoices: client terms, quotes: validity), so an
+--     invoice issued from the status menu or a bulk action still becomes overdue
 -- Every statement is a no-op when already applied, so the file can be run any number of times.
 
 alter table document_items add column if not exists service_date_end date;
@@ -44,9 +46,13 @@ $$;
 -- burned. Idempotent for already numbered documents. Issuing keeps an already reached status
 -- (e.g. a deposit recorded before issuing left the invoice 'paid'); only drafts move to 'sent'.
 -- Cancelled documents cannot be issued. issued_at records when the number was assigned.
+-- An invoice issued without a due date gets one from the client's payment terms (settings
+-- default as fallback), a quote from the validity period, so every invoice can become overdue.
 -- Error code MI001 = the document date is more than one day in the future (Vienna time).
 -- Error code MI004 = the document is incomplete; detail lists the problems, comma-separated:
 --   settings_incomplete (company name, address, UID or IBAN missing), no_client, no_items,
+--   currency_not_eur (invoices and quotes are EUR only; a credit note keeps the currency of the
+--   invoice it corrects),
 --   and, except on a Storno (it mirrors the invoice it cancels): blank_description,
 --   bad_quantity (missing or <= 0), missing_price, period_start_missing,
 --   period_end_before_start, and for invoices and credit notes reverse_charge_without_uid,
@@ -91,6 +97,10 @@ begin
 
   if not exists (select 1 from document_items where document_id = d.id and line_type = 'item') then
     problems := array_append(problems, 'no_items');
+  end if;
+
+  if d.type in ('invoice', 'quote') and d.currency is distinct from 'EUR' then
+    problems := array_append(problems, 'currency_not_eur');
   end if;
 
   if d.cancels_document_id is null then
@@ -143,7 +153,12 @@ begin
   update documents
   set number = result,
       status = case when status = 'draft' then 'sent' else status end,
-      issued_at = coalesce(issued_at, now())
+      issued_at = coalesce(issued_at, now()),
+      due_date = case
+        when due_date is not null or d.type = 'credit_note' then due_date
+        when d.type = 'quote' then coalesce(d.date, today) + coalesce(s.default_quote_validity_days, 14)
+        else coalesce(d.date, today) + coalesce(c.payment_days, s.default_payment_days, 14)
+      end
   where id = d.id;
   return result;
 end;

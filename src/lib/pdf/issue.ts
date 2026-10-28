@@ -21,7 +21,7 @@ export type IssueOutcome = {
 async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
   const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents')
-      .select('type, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
+      .select('type, currency, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
       .eq('id', documentId)
       .maybeSingle(),
     supabase.from('settings').select(`${ISSUER_SETTINGS_COLUMNS}, ui_language`).maybeSingle(),
@@ -31,6 +31,7 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
   if (!doc) throw new Error('Document not found')
   const problems = issueProblems({
     type: doc.type,
+    currency: doc.currency,
     taxTreatment: doc.tax_treatment,
     serviceDate: doc.service_date,
     serviceDateEnd: doc.service_date_end,

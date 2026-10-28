@@ -982,6 +982,7 @@ export const de = {
       settingsIncomplete: 'Die Firmendaten sind unvollständig: {fields}.',
       noClient: 'Kunde auswählen.',
       noItems: 'Mindestens eine Position hinzufügen.',
+      currencyNotEur: 'Rechnungen und Angebote werden nur in EUR ausgestellt. Den Entwurf im Editor öffnen, um ihn auf EUR umzustellen.',
       reverseChargeNoUid: 'Reverse Charge braucht die UID-Nummer des Kunden. Beim Kunden ergänzen.',
       clientCountryMissing: 'In der Kundenadresse fehlt das Land, das bei Reverse Charge und Drittland angegeben sein muss.',
       noServiceDate: 'Leistungsdatum oder Leistungszeitraum angeben, entweder für den ganzen Beleg oder bei jeder Position.',
@@ -1016,7 +1017,7 @@ export const de = {
     noClients: 'Keine Kunden gefunden',
     serviceUntil: 'Bis (optional)',
     servicePeriodLabel: 'Leistungszeitraum {from} – {to}',
-    currencyLegacy: 'Bleibt wie ausgestellt. Neue Belege nur in EUR.',
+    currencyLegacy: 'Wie im ursprünglichen Beleg. Neue Rechnungen und Angebote nur in EUR.',
   },
   reports: {
     title: 'UVA-Report',

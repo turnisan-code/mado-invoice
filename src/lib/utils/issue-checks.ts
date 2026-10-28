@@ -26,6 +26,7 @@ export const ISSUER_SETTINGS_COLUMNS = 'company_name, address_line1, zip, city, 
 
 export interface IssueCheckInput {
   type: DocumentType
+  currency: string | null
   taxTreatment: string | null
   serviceDate: string | null
   serviceDateEnd: string | null
@@ -61,6 +62,8 @@ export function issueProblems(input: IssueCheckInput): IssueProblem[] {
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => (item.line_type ?? 'item') === 'item')
   if (!items.length) problems.push({ code: 'noItems' })
+  // Invoices and quotes are EUR only; a credit note keeps the currency of the invoice it corrects.
+  if (input.type !== 'credit_note' && input.currency !== 'EUR') problems.push({ code: 'currencyNotEur' })
   if (input.isStorno) return problems
 
   const invoiceLike = input.type !== 'quote'
