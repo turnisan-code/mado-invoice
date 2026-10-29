@@ -1298,28 +1298,37 @@ alter table app_users enable row level security;
 insert into app_users(user_id) select id from auth.users on conflict do nothing;
 
 -- With a verified MFA factor the owner passes only with an aal2 JWT (the code was entered); an
--- owner without one is unaffected (20261103_final.sql, which also has the rollback). A token
--- without an 'aal' claim counts as aal1.
+-- owner without one is unaffected (20261103_final.sql, which also has the rollback). Runs as its
+-- owner, which reads auth.mfa_factors. A token without an 'aal' claim counts as aal1.
+create or replace function mfa_satisfied()
+returns boolean
+language sql stable security definer
+set search_path = ''
+as $$
+  select coalesce(auth.jwt() ->> 'aal', '') = 'aal2'
+    or not exists (
+      select 1 from auth.mfa_factors f
+      where f.user_id = auth.uid() and f.status = 'verified'
+    )
+$$;
+
+revoke execute on function mfa_satisfied() from public, anon;
+grant execute on function mfa_satisfied() to authenticated;
+
 create or replace function is_app_user()
 returns boolean
 language sql stable security definer
 set search_path = ''
 as $$
-  select exists (select 1 from public.app_users where user_id = auth.uid())
-    and (
-      coalesce(auth.jwt() ->> 'aal', '') = 'aal2'
-      or not exists (
-        select 1 from auth.mfa_factors f
-        where f.user_id = auth.uid() and f.status = 'verified'
-      )
-    )
+  select exists (select 1 from public.app_users where user_id = auth.uid()) and public.mfa_satisfied()
 $$;
 
 revoke execute on function is_app_user() from public, anon;
 grant execute on function is_app_user() to authenticated;
 
--- is_app_user() reads app_users as its owner, past this policy, so the two do not recurse.
-create policy "own row" on app_users for select to authenticated using (user_id = auth.uid() and is_app_user());
+-- mfa_satisfied(), not is_app_user(): that one reads app_users, and through this policy would
+-- call itself.
+create policy "own row" on app_users for select to authenticated using (user_id = auth.uid() and mfa_satisfied());
 
 alter table settings        enable row level security;
 alter table clients         enable row level security;
