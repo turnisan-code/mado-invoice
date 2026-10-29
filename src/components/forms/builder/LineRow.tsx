@@ -23,7 +23,7 @@ const DESCRIPTION_CLS = `${controlClass} ${CONTROL_MIN_HEIGHT} py-2 sm:py-1 lead
 // The unit and VAT columns are narrow: less padding, the chevron closer to the edge.
 const NARROW_SELECT = { className: 'pl-1.5 pr-5', style: { backgroundPosition: 'right 0.25rem center' } }
 const iconBtn = 'flex items-center justify-center rounded-md transition-colors shrink-0'
-const mutedBtn = 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'
+const mutedBtn = 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'
 
 // The desktop grid: handle, description, quantity, unit, price, [VAT], discount, date, delete.
 export function itemColumns(vatApplies: boolean) {
@@ -85,7 +85,7 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
   )
   const deleteBtn = (className = '') => (
     <button type="button" onClick={remove} aria-label={t('builder.removeLine')}
-      className={`h-11 w-11 sm:h-9 sm:w-8 ${iconBtn} text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 ${className}`}>
+      className={`h-11 w-11 sm:h-9 sm:w-8 ${iconBtn} text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 ${className}`}>
       <Trash2 size={14} />
     </button>
   )

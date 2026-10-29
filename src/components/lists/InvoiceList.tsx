@@ -400,7 +400,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                       {markers(doc)}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -447,7 +447,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                   {markers(doc)}
                 </td>
@@ -455,7 +455,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.date, lang)}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.due_date, lang)}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
-                <td className={`px-4 py-3 text-right ${isOpen(doc) && docBalance(doc) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                <td className={`px-4 py-3 text-right ${isOpen(doc) && docBalance(doc) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-500'}`}>
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
@@ -475,7 +475,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 </td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.total, currency)}</td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.open, currency)}</td>
-                <td className="px-4 py-2.5 text-neutral-400 dark:text-neutral-500">{t('invoices.open')}</td>
+                <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-500">{t('invoices.open')}</td>
               </tr>
             </tfoot>
           )}

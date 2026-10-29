@@ -373,7 +373,7 @@ export default function PaymentPanel({
                 type="button"
                 onClick={() => setPendingRemove(p)}
                 aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: formatDate(p.date, lang) })}
-                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>

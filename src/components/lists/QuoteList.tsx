@@ -197,7 +197,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                       {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
+                    <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">
                       {listDate(doc.date, lang)}{doc.due_date && <> · {t('quotes.validUntilInline', { date: listDate(doc.due_date, lang) })}</>}
                     </p>
                   </div>
@@ -235,7 +235,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/quotes/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>

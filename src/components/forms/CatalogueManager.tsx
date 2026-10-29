@@ -387,7 +387,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                 ) : (
                   <>
                     <span className="text-xs font-semibold tracking-widest uppercase text-neutral-500 dark:text-neutral-400">{cat}</span>
-                    <span className="text-xs text-neutral-400 dark:text-neutral-600 font-medium">{group.length}</span>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-600 font-medium">{group.length}</span>
                     <div className="flex items-center gap-0.5 ml-1 sm:opacity-0 sm:group-hover/header:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button type="button" onClick={() => startRenameCat(cat)} title={t('catalogue.rename')} aria-label={t('catalogue.renameSection', { name: cat })} className={`${iconBtn} text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200`}><Pencil size={12} /></button>
                       <button type="button" onClick={() => setPendingDelete({ kind: 'category', cat, count: items.filter(i => i.category === cat).length })} title={t('catalogue.deleteSection')} aria-label={t('catalogue.deleteSectionNamed', { name: cat })} className={`${iconBtn} text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400`}><Trash2 size={12} /></button>
@@ -443,7 +443,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                         <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate mt-0.5 leading-snug">{item.name_en}</p>
                       )}
                       {(item.description_de || item.description_en) && (
-                        <p className="text-xs text-neutral-400 dark:text-neutral-500 line-clamp-1 mt-0.5 leading-snug">{item.description_de || item.description_en}</p>
+                        <p className="text-xs text-neutral-500 dark:text-neutral-500 line-clamp-1 mt-0.5 leading-snug">{item.description_de || item.description_en}</p>
                       )}
                       {(usage[item.id]?.uses ?? 0) > 0 && (
                         <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 leading-snug">

@@ -150,7 +150,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {allDocs.length === 0 && (
               <div className="px-5 py-12 text-center">
-                <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('clients.noDocuments')}</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-500">{t('clients.noDocuments')}</p>
                 <Link href={`/invoices/new?client=${id}`} className="mt-2 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
                   {t('clients.createFirstInvoice')}
                 </Link>
@@ -172,9 +172,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">
-                      {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
+                      {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
                     </div>
-                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
                   </div>
                   <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
                   <StatusBadge status={shown} label={t(statusLabelKey(shown))} className="shrink-0" />

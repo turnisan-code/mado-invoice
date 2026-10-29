@@ -280,7 +280,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     return (
       <div className="space-y-0.5">
         <span title={reasons || undefined} className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${PILL[kind]}`}>{label}</span>
-        {reasons && <p className="text-[11px] text-neutral-400 dark:text-neutral-500 leading-tight">{reasons}</p>}
+        {reasons && <p className="text-[11px] text-neutral-500 dark:text-neutral-500 leading-tight">{reasons}</p>}
       </div>
     )
   }
@@ -423,7 +423,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                 {plural(parsed.transactions.length, 'bankImport.transactionsOne', 'bankImport.transactionsOther')}
               </p>
             </div>
-            <button type="button" onClick={reset} aria-label={t('bankImport.changeFile')} title={t('bankImport.changeFile')} className="h-11 w-11 -mr-3 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+            <button type="button" onClick={reset} aria-label={t('bankImport.changeFile')} title={t('bankImport.changeFile')} className="h-11 w-11 -mr-3 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
               <X size={16} />
             </button>
           </div>
@@ -481,7 +481,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                             <p className="text-sm font-semibold shrink-0">{money(r.transaction.amount, r.transaction.currency)}</p>
                           </div>
                           <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate" title={r.transaction.text}>{r.transaction.text || '—'}</p>
-                          <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{formatDate(r.transaction.date, lang)}</p>
+                          <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{formatDate(r.transaction.date, lang)}</p>
                         </div>
                       </div>
                       {invoiceSelect(r)}

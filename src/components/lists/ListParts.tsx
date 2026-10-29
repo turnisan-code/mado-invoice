@@ -65,7 +65,7 @@ export function SelectToggle({ checked, onToggle, label, large = false }: { chec
       onClick={onToggle}
       aria-pressed={checked}
       aria-label={label}
-      className={`${large ? 'shrink-0 h-11 w-11 -ml-3' : 'h-8 w-8'} -my-2 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors`}
+      className={`${large ? 'shrink-0 h-11 w-11 -ml-3' : 'h-8 w-8'} -my-2 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors`}
     >
       {checked ? <CheckSquare size={size} className="text-blue-500" /> : <Square size={size} />}
     </button>

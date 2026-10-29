@@ -249,7 +249,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
                 <td className="px-4 py-3">
                   <div className="flex gap-1 flex-wrap">{(c.tags ?? []).map(tagChip)}</div>
                 </td>
-                <td className={`px-4 py-3 text-right whitespace-nowrap ${balance(c) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                <td className={`px-4 py-3 text-right whitespace-nowrap ${balance(c) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-500'}`}>
                   {balance(c) > 0 ? formatMoney(balance(c)) : '—'}
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs whitespace-nowrap">

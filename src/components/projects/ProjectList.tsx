@@ -51,7 +51,7 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
   const statusBadge = (s: ProjectStatus) => (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${projectStatusColor[s]}`}>{t(`projects.statuses.${s}`)}</span>
   )
-  const budget = (p: ProjectRow) => p.budgetShare === null ? <span className="text-neutral-400 dark:text-neutral-500">—</span> : (
+  const budget = (p: ProjectRow) => p.budgetShare === null ? <span className="text-neutral-500 dark:text-neutral-500">—</span> : (
     <span className="inline-flex items-center gap-2 tabular-nums">
       <span className="h-1.5 w-14 rounded-full bg-neutral-100 dark:bg-neutral-800 overflow-hidden" aria-hidden>
         <span className={`block h-full rounded-full ${budgetBarColor(p.budgetShare)}`} style={{ width: `${Math.min(100, p.budgetShare * 100)}%` }} />
@@ -64,7 +64,7 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
     <div className="py-16 px-6 text-center">
       <FolderKanban size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
       <p className="text-sm text-neutral-500 dark:text-neutral-400">{projects.length ? t('projects.noMatch') : t('projects.empty')}</p>
-      {!projects.length && <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('projects.emptyHint')}</p>}
+      {!projects.length && <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('projects.emptyHint')}</p>}
     </div>
   )
 

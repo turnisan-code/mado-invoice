@@ -1027,7 +1027,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               ) : (
                 <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">
-                  <span className="text-[10px] text-neutral-400 dark:text-neutral-500 text-center leading-tight px-1">{t('settings.company.noLogo')}</span>
+                  <span className="text-[10px] text-neutral-500 dark:text-neutral-500 text-center leading-tight px-1">{t('settings.company.noLogo')}</span>
                 </div>
               )}
               <div className="space-y-1.5">

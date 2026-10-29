@@ -115,7 +115,7 @@ export default function ExpenseDialog({ projectId, expense, defaultVatRate, onCl
           {values.billable && price !== null && (
             <p className="text-xs text-neutral-500 dark:text-neutral-400 text-right">{t('projects.expense.price', { amount: formatMoney(price) })}</p>
           )}
-          <p className="text-xs text-neutral-400 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
         </div>
         <div className="flex gap-2 justify-end">
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>{t('common.cancel')}</Button>

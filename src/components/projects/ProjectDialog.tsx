@@ -93,7 +93,7 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
     router.push(`/projects/${data.id}`)
   }
 
-  const optional = <span className="font-normal text-neutral-400 dark:text-neutral-500">({t('projects.form.optional')})</span>
+  const optional = <span className="font-normal text-neutral-500 dark:text-neutral-500">({t('projects.form.optional')})</span>
 
   return (
     <Dialog open onClose={onClose} title={project ? t('projects.form.editTitle') : t('projects.form.createTitle')} busy={saving} panelClassName="max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto">

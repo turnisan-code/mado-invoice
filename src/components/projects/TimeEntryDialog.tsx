@@ -135,7 +135,7 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
                   {formatDuration(m)}
                 </button>
               ))}
-              <span id={`${id}-duration-hint`} className="text-xs text-neutral-400 dark:text-neutral-500 basis-full">{t('projects.time.durationHint')}</span>
+              <span id={`${id}-duration-hint`} className="text-xs text-neutral-500 dark:text-neutral-500 basis-full">{t('projects.time.durationHint')}</span>
             </div>
             <div>
               <label htmlFor={`${id}-description`} className={labelClass}>{t('projects.time.description')}</label>
@@ -152,7 +152,7 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
               </div>
             </div>
             {values.billable && (
-              <p className="text-xs text-neutral-400 dark:text-neutral-500 -mt-1 text-right">
+              <p className="text-xs text-neutral-500 dark:text-neutral-500 -mt-1 text-right">
                 {project?.hourly_rate != null
                   ? t('projects.time.rateHint', { rate: formatMoney(project.hourly_rate) })
                   : t('projects.time.rateHintNone')}

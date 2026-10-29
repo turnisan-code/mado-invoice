@@ -164,7 +164,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                       {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -199,7 +199,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/credit-notes/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>

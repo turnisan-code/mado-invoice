@@ -158,7 +158,7 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
                   type="button"
                   onClick={() => setRemoving(factor)}
                   aria-label={`${t('account.factorRemove')}: ${factor.friendly_name || t('account.factorDefaultName')}`}
-                  className="h-11 w-11 sm:h-9 sm:w-9 -mr-2 shrink-0 flex items-center justify-center rounded-md text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+                  className="h-11 w-11 sm:h-9 sm:w-9 -mr-2 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                 >
                   <Trash2 size={16} />
                 </button>

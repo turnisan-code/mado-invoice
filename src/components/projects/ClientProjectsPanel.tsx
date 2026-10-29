@@ -29,7 +29,7 @@ export default function ClientProjectsPanel({ client, projects }: { client: Clie
         <div className="min-w-0">
           <span className="text-sm font-medium">{t('projects.client.title')}</span>
           {unbilled > 0 && <span className="ml-2 text-xs text-amber-600 tabular-nums">{t('projects.client.unbilled', { amount: formatMoney(unbilled) })}</span>}
-          {!projects.length && <span className="block text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t('projects.client.none')}</span>}
+          {!projects.length && <span className="block text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{t('projects.client.none')}</span>}
         </div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={() => setStatement(true)} className="text-xs">
