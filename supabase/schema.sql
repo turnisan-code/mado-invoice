@@ -277,6 +277,8 @@ create table documents (
   -- Last Bookamat sync failure (null when the last sync worked) and the claim a running sync holds.
   bookamat_error      text,
   bookamat_claimed_at timestamptz,
+  -- Bookings a sync is posting, or posted but could not record: the next sync settles them first.
+  bookamat_pending    jsonb,
   reminder_sent_at    timestamptz,
   -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung).
   reminder_level      integer not null default 0,

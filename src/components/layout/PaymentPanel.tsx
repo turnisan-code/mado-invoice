@@ -17,7 +17,7 @@ import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import { logEvent } from '@/lib/events'
 import { canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
-import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, requestBookamatSync, type BookingRow } from '@/lib/bookamat'
+import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
 
 interface Payment {
   id: string
@@ -147,9 +147,13 @@ export default function PaymentPanel({
   const bookings = bookamat?.bookings ?? []
   const synced = bookings.length > 0 || (!bookamat && !!bookamatBookingId)
   const canSync = hasMoneyToBook({ number, status, payments })
-  // Money received in a year that has no booking yet (e.g. the rest paid after New Year).
-  const bookedYears = new Set(bookings.filter(b => b.kind === 'income').map(b => b.year))
-  const unbookedMoney = canSync && bookings.length > 0 && payments.some(p => p.kind === 'payment' && !bookedYears.has(Number(p.date.slice(0, 4))))
+  // Money received in a year that has no booking yet (e.g. the rest paid after New Year), as far
+  // as the bookings made do not cover it already; the sync books exactly this.
+  const planned = canSync && bookings.length > 0 ? planBookings({ type: 'invoice', total, rows: payments }).bookings : []
+  const unbookedMoney = unbookedPlan(planned, bookings).length > 0
+  // A year without its own booking whose money an existing booking already covers (one booking
+  // from before yearly bookings, or a payment date moved across New Year): only a reset helps.
+  const coveredYears = unbookedMoney ? [] : planned.filter(p => !bookings.some(b => b.year === p.year && b.kind === p.kind)).map(p => p.year)
 
   async function recordRows(rows: NewPayment[]): Promise<boolean> {
     setSaving(true)
@@ -487,6 +491,9 @@ export default function PaymentPanel({
             </button>
           ) : (
             <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('payments.syncAvailableWhenPaid')}</span>
+          )}
+          {coveredYears.length > 0 && (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">{t('books.sync.coveredElsewhere', { years: coveredYears.join(', '), bookings: formatBookings(t, bookings) })}</p>
           )}
           {bookamat?.error && (
             <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">{t('books.sync.lastError', { error: bookamat.error })}</p>

@@ -208,6 +208,7 @@ export interface Document {
   bookamat_booking_id?: string | null
   bookamat_error?: string | null
   bookamat_claimed_at?: string | null
+  bookamat_pending?: BookamatPending[] | null
   reminder_sent_at?: string | null
   reminder_level?: number
   skonto_percent?: number | null
@@ -279,6 +280,18 @@ export interface BookamatBooking {
 
 // A document's Bookamat state as lists show it; 'none' when there is nothing to book (yet).
 export type BookamatState = 'synced' | 'unsynced' | 'failed' | 'none'
+
+// documents.bookamat_pending: a booking a sync was about to post (no booking_id: the outcome is
+// unknown until Bookamat is asked) or posted but could not record. The next sync settles it first.
+export interface BookamatPending {
+  year: number
+  kind: BookamatBookingKind
+  booking_id: string | null
+  amount: number
+  date: string
+  title: string
+  at: string
+}
 
 export interface ReminderLogEntry {
   id: string

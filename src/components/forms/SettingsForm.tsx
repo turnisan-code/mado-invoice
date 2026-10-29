@@ -11,7 +11,7 @@ import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/r
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
-import { bookamatErrorMessage } from '@/lib/bookamat'
+import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'

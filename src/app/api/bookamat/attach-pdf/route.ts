@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
-import { attachPdf, BOOKAMAT_SETTINGS_COLUMNS, recordBookamatError, type BookamatSettings } from '@/lib/bookamat'
+import { attachPdf, BOOKAMAT_SETTINGS_COLUMNS, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 
@@ -33,8 +33,9 @@ export async function POST(req: NextRequest) {
   const targets = missing.length ? missing : bookings
   const result = await attachPdf(supabase, settings, documentId, targets, async id => getIssuedPdf(supabase, id, 'on_demand'))
   if (!result.attached) {
-    await recordBookamatError(supabase, settings.id, null, result.error)
-    return NextResponse.json({ error: result.error ?? 'PDF not attached' }, { status: 502 })
+    const error = result.error ?? settingsT(settings)('books.sync.attachNone')
+    await recordBookamatError(supabase, settings.id, null, error)
+    return NextResponse.json({ error }, { status: 502 })
   }
   return NextResponse.json({ ok: true, attached: result.attached, failed: targets.length - result.attached, error: result.error })
 }

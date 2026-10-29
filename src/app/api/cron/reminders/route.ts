@@ -22,14 +22,15 @@ export const maxDuration = 60
 type Skipped = { number: string; reason: string }
 
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
-// result in the log. Runs before the reminders, whatever their settings.
+// result in the log. Runs before the reminders, whatever their settings, and every Bookamat call
+// ends by the step's deadline, so the reminders keep more than half of the function's time.
 async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
   if (!isBookamatConfigured(settings)) {
     console.warn('[cron/bookamat] skipped: automatic sync is on, but Bookamat is not fully configured')
     return { error: 'not_configured' }
   }
   try {
-    const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, budgetMs: 25_000 })
+    const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, deadline: Date.now() + 25_000 })
     if (!results.length) console.log('[cron/bookamat] nothing to sync')
     for (const r of results) {
       if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)

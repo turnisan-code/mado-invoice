@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
-import { BOOKAMAT_SETTINGS_COLUMNS, BookamatError, credentialsOf, fetchBookamatAccounts, recordBookamatError, type BookamatSettings } from '@/lib/bookamat'
+import { BOOKAMAT_SETTINGS_COLUMNS, BookamatError, credentialsOf, fetchBookamatAccounts, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
+import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { today } from '@/lib/utils/document'
 
 // Settings → Bookamat → Test connection: the stored credentials reach Bookamat and every
@@ -17,6 +18,7 @@ export async function POST() {
     return NextResponse.json({ error: 'Bookamat is not configured', code: 'not_configured' }, { status: 400 })
   }
 
+  const t = settingsT(settings)
   const year = settings.bookamat_accounts_year ?? Number(today().slice(0, 4))
   try {
     const accounts = await fetchBookamatAccounts(credentialsOf(settings), year)
@@ -33,16 +35,19 @@ export async function POST() {
     ]
     const missing = checks.filter(([, id, list]) => id != null && !list.some(a => a.id === id)).map(([key]) => key)
     if (missing.length) {
-      const message = `Configured Bookamat accounts missing in ${year}: ${missing.join(', ')}`
-      await recordBookamatError(supabase, settings.id, null, message)
-      return NextResponse.json({ error: message, code: 'account_missing', detail: { year, account: missing.join(', ') } }, { status: 400 })
+      // Saved before the year was stored, the ids may be from another year: choose them again.
+      const payload = settings.bookamat_accounts_year == null
+        ? { error: `Configured Bookamat accounts not found in ${year}: ${missing.join(', ')}`, code: 'accounts_stale' as const, detail: {} }
+        : { error: `Configured Bookamat accounts missing in ${year}: ${missing.join(', ')}`, code: 'account_missing' as const, detail: { year, account: missing.join(', ') } }
+      await recordBookamatError(supabase, settings.id, null, bookamatErrorMessage(t, payload))
+      return NextResponse.json(payload, { status: 400 })
     }
     await recordBookamatError(supabase, settings.id, null, null)
     return NextResponse.json({ ok: true, year })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Bookamat request failed'
-    await recordBookamatError(supabase, settings.id, null, message)
     const e = err instanceof BookamatError ? err : null
-    return NextResponse.json({ error: message, code: e?.code, detail: e?.detail }, { status: 502 })
+    const payload = { error: err instanceof Error ? err.message : 'Bookamat request failed', code: e?.code, detail: e?.detail }
+    await recordBookamatError(supabase, settings.id, null, bookamatErrorMessage(t, payload))
+    return NextResponse.json(payload, { status: 502 })
   }
 }

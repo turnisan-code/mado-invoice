@@ -6,6 +6,8 @@
 --    which stays readable; its ids are copied over.
 --  - documents.bookamat_error / bookamat_claimed_at: the last sync failure, and the claim a sync
 --    takes before it posts, so two syncs can never book the same document twice.
+--  - documents.bookamat_pending: bookings a sync is posting or posted but could not record; the
+--    next sync takes them over (or looks them up in Bookamat) instead of booking again.
 --  - settings: optional daily automatic sync, the Bookamat year the account ids were chosen in,
 --    and the last Google / Bookamat error for Settings.
 -- Idempotent — safe to re-run.
@@ -56,6 +58,7 @@ where d.bookamat_booking_id is not null
 -- ─── Documents ───────────────────────────────────────────────────────────────
 alter table documents add column if not exists bookamat_error text;
 alter table documents add column if not exists bookamat_claimed_at timestamptz;
+alter table documents add column if not exists bookamat_pending jsonb;
 
 -- ─── Settings ────────────────────────────────────────────────────────────────
 alter table settings add column if not exists bookamat_auto_sync boolean not null default false;

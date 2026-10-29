@@ -12,7 +12,10 @@ export async function POST(req: NextRequest) {
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   if (!isUuid(body.documentId)) return NextResponse.json({ error: 'documentId is required' }, { status: 400 })
 
-  const error = await resetBookamatSync(auth.supabase, body.documentId)
-  if (error) return NextResponse.json({ error }, { status: 500 })
+  const failure = await resetBookamatSync(auth.supabase, body.documentId)
+  if (failure) {
+    const { status, ...payload } = failure
+    return NextResponse.json(payload, { status })
+  }
   return NextResponse.json({ ok: true })
 }

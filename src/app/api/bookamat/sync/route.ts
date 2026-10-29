@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
-import { BOOKAMAT_SETTINGS_COLUMNS, syncBookamatDocument, type BookamatSettings, type PendingBooking } from '@/lib/bookamat'
+import { BOOKAMAT_SETTINGS_COLUMNS, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
+import type { AdoptBooking } from '@/lib/bookamat-client'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 
 export const maxDuration = 60
 
-function parseAdopt(value: unknown): PendingBooking[] | null {
+function parseAdopt(value: unknown): AdoptBooking[] | null {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > 10) return null
-  const out: PendingBooking[] = []
+  const out: AdoptBooking[] = []
   for (const v of value) {
     if (!v || typeof v !== 'object') return null
     const { year, kind, bookingId } = v as Record<string, unknown>
