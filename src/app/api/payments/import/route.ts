@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/auth'
+import { apiError, databaseError, invalidJson, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, roundCents, settlesBalance } from '@/lib/utils/document'
 import { logEvent } from '@/lib/events'
 
@@ -58,17 +58,18 @@ export async function POST(req: Request) {
   if (!auth.ok) return auth.response
   const { supabase } = auth
 
-  const body = await req.json().catch(() => null)
-  const rows: unknown[] = Array.isArray(body?.rows) ? body.rows : []
-  if (!rows.length) return NextResponse.json({ error: 'rows required' }, { status: 400 })
-  if (rows.length > MAX_ROWS) return NextResponse.json({ error: `At most ${MAX_ROWS} rows per import` }, { status: 400 })
-  if (!rows.every(isImportRow)) return NextResponse.json({ error: 'Invalid row' }, { status: 400 })
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  const rows: unknown[] = Array.isArray(body.rows) ? body.rows : []
+  if (!rows.length) return apiError(400, 'invalid_request', 'rows required')
+  if (rows.length > MAX_ROWS) return apiError(400, 'too_many_rows', `At most ${MAX_ROWS} rows per import`)
+  if (!rows.every(isImportRow)) return apiError(400, 'invalid_request', 'Invalid row')
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
     .select(`id, type, number, status, tax_treatment, discount_type, discount_value, ${ITEM_COLS}, payments(amount, kind)`)
     .in('id', [...new Set(rows.map(r => r.document_id))])
-  if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
+  if (lookupErr) return databaseError(lookupErr)
   const byId = new Map(((docs ?? []) as DocRow[]).map(d => [d.id, { ...d, payments: d.payments ?? [] }]))
   const totalOf = (d: DocRow) => calcTotals(
     d.document_items ?? [],
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
   const txIds = rows.map(r => r.transaction_id)
   for (let i = 0; i < txIds.length; i += 100) {
     const { data, error } = await supabase.from('payments').select('import_ref, amount').in('import_ref', txIds.slice(i, i + 100))
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return databaseError(error)
     for (const r of data ?? []) earlier.set(r.import_ref as string, roundCents(Number(r.amount)))
   }
 
@@ -160,7 +161,7 @@ export async function POST(req: Request) {
   }
   if (paidIds.length) {
     const { data: updated, error } = await supabase.from('documents').update({ status: 'paid' }).in('id', paidIds).in('status', ['sent', 'overdue']).select('id')
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return databaseError(error)
     for (const { id } of updated ?? []) await logEvent(supabase, id, 'status_changed', { from: byId.get(id)!.status, to: 'paid' })
   }
 

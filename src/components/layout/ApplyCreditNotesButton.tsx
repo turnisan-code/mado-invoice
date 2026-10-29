@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 
 // Applies every issued credit note that still could reduce its invoice's open balance.
 export default function ApplyCreditNotesButton() {
@@ -17,15 +18,15 @@ export default function ApplyCreditNotesButton() {
     try {
       const res = await fetch('/api/credit-notes/apply-all', { method: 'POST' })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) { toast.error(data.error ?? t('common.unknownError')); return }
+      if (!res.ok) { toast.error(apiErrorMessage(t, data)); return }
       const applied: number = data.applied ?? 0
       const failed: string[] = data.failed ?? []
       if (applied) toast.success(n(applied, t('lifecycle.credit.appliedAllOne', { count: applied }), t('lifecycle.credit.appliedAllOther', { count: applied })))
       if (failed.length) toast.error(t('lifecycle.credit.applyAllFailed', { list: failed.join('; ') }))
       if (!applied && !failed.length) toast.info(t('lifecycle.credit.applyAllNone'))
       router.refresh()
-    } catch {
-      toast.error(t('common.unknownError'))
+    } catch (err) {
+      toast.error(requestErrorMessage(t, err))
     } finally {
       setBusy(false)
     }

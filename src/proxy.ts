@@ -50,7 +50,7 @@ export async function proxy(request: NextRequest) {
 
   if (signedIn || isPublicPath(pathname)) return response
 
-  if (pathname.startsWith('/api/')) return withCookies(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+  if (pathname.startsWith('/api/')) return withCookies(NextResponse.json({ error: 'Unauthorized', code: 'unauthorized' }, { status: 401 }))
   const login = new URL('/login', request.url)
   if (mfaPending) login.searchParams.set('mfa', '1')
   if (pathname !== '/') login.searchParams.set('next', `${pathname}${search}`)
