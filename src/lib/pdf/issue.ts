@@ -56,7 +56,8 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   if (!before.number) await assertIssuable(supabase, documentId)
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
-  if (error) throw new Error(error.message)
+  // With its code and detail (MI001–MI004 say why), so every caller can word the refusal.
+  if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
   // An issued credit note takes its amount off the open balance of the invoice it corrects; a
   // failure leaves it unapplied, and its page offers to apply it.
