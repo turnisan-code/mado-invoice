@@ -1,21 +1,23 @@
 'use client'
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { formatDate, formatMoney, today, roundCents, skontoAmount, skontoDeadline } from '@/lib/utils/document'
+import { formatDate, formatMoney, today, roundCents, settlesBalance, skontoAmount, skontoDeadline } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
-import type { Currency, PaymentKind, PaymentMethod } from '@/types'
+import type { BookamatPending, Currency, PaymentKind, PaymentMethod } from '@/types'
 import { useT } from '@/lib/i18n/client'
+import { n } from '@/lib/i18n'
 import { logEvent } from '@/lib/events'
 import { canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
+import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
 
 interface Payment {
   id: string
@@ -33,6 +35,25 @@ type NewPayment = Omit<Payment, 'id' | 'credit_note_id'>
 // Statuses a settled invoice moves to 'paid' from.
 const PAYABLE: readonly string[] = DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid'))
 
+// `pending`: bookings a sync posted but could not record or confirm; the next sync settles them.
+type BookamatInfo = { bookings: BookingRow[]; error: string | null; pending: BookamatPending[] }
+
+async function fetchBookamatInfo(documentId: string): Promise<BookamatInfo | null> {
+  const { data, error } = await createClient()
+    .from('documents')
+    .select(`bookamat_error, bookamat_pending, bookamat_bookings(${BOOKING_COLUMNS})`)
+    .eq('id', documentId)
+    .maybeSingle()
+  if (error || !data) return null
+  return {
+    bookings: ((data.bookamat_bookings ?? []) as BookingRow[]).sort((a, b) => a.year - b.year),
+    error: data.bookamat_error ?? null,
+    pending: Array.isArray(data.bookamat_pending) ? data.bookamat_pending as BookamatPending[] : [],
+  }
+}
+
+const settledSum = (rows: { amount: number; kind?: string | null }[]) => roundCents(rows.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
+
 interface Props {
   documentId: string
   number: string | null
@@ -44,13 +65,15 @@ interface Props {
   skontoPercent?: number | null
   skontoDays?: number | null
   bookamatConfigured?: boolean
+  // Legacy single booking id; shown until the bookings are loaded.
   bookamatBookingId?: string | null
+  // Unused: the server attaches the stored issued copy itself.
   generatePdfForBookamat?: () => Promise<{ base64: string; filename: string } | null>
 }
 
 export default function PaymentPanel({
   documentId, number, status, date, total, payments: initial, currency, skontoPercent, skontoDays,
-  bookamatConfigured, bookamatBookingId, generatePdfForBookamat,
+  bookamatConfigured, bookamatBookingId,
 }: Props) {
   const [payments, setPayments] = useState<Payment[]>(initial)
   // Payments can also be added elsewhere on the page (status pill → paid); follow server refreshes.
@@ -66,17 +89,17 @@ export default function PaymentPanel({
   const [reference, setReference] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('bank')
   const [saving, setSaving] = useState(false)
-  const [confirmOverpay, setConfirmOverpay] = useState(false)
+  const [overpay, setOverpay] = useState<{ amount: number; choice: 'fee' | 'payment' } | null>(null)
   const [writingOff, setWritingOff] = useState(false)
   const [writeOffReason, setWriteOffReason] = useState('')
   const [writeOffInvalid, setWriteOffInvalid] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<Payment | null>(null)
   const [removing, setRemoving] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [showBookamatPrompt, setShowBookamatPrompt] = useState(false)
-  const [syncingBookamat, setSyncingBookamat] = useState(false)
-  const [bookamatId, setBookamatId] = useState(bookamatBookingId ?? null)
+  const [bookamatBusy, setBookamatBusy] = useState<'sync' | 'attach' | 'reset' | null>(null)
+  // null until loaded from the database.
+  const [bookamat, setBookamat] = useState<BookamatInfo | null>(null)
   const router = useRouter()
   const supabase = createClient()
   const uid = useId()
@@ -84,14 +107,15 @@ export default function PaymentPanel({
 
   const kindLabel: Record<PaymentKind, string | null> = {
     payment: null, skonto: t('payments.skonto'), writeoff: t('payments.writtenOff'),
-    credit: t('lifecycle.payments.creditNotePlain'), refund: t('lifecycle.credit.refund'),
+    credit: t('lifecycle.payments.creditNotePlain'), refund: t('lifecycle.credit.refund'), fee: t('books.fees.kind'),
   }
 
-  // The balance counts every kind: a Skonto taken, a write-off or an applied credit note closes
-  // the invoice like money would.
-  const totalPaid = roundCents(payments.reduce((s, p) => s + p.amount, 0))
+  // The balance counts every kind but 'fee': a Skonto taken, a write-off or an applied credit note
+  // closes the invoice like money would; dunning fees and interest are paid on top of it.
+  const settling = payments.filter(settlesBalance)
+  const totalPaid = settledSum(payments)
   const balanceDue = roundCents(total - totalPaid)
-  const state = paymentState(total, payments)
+  const state = paymentState(total, settling)
   // An empty or zero invoice has nothing to pay, so it is never "paid in full".
   const nothingDue = state === 'nothing_due'
   const fullyPaid = !nothingDue && balanceDue <= 0.005
@@ -113,30 +137,62 @@ export default function PaymentPanel({
   const offerWriteoff = canRecord && !fullyPaid && balanceDue < SMALL_DIFFERENCE
   const offerUncollectible = canRecord && !fullyPaid && balanceDue >= SMALL_DIFFERENCE
 
-  async function recordRow(row: NewPayment): Promise<boolean> {
+  useEffect(() => {
+    if (!bookamatConfigured) return
+    let active = true
+    void fetchBookamatInfo(documentId).then(info => { if (active && info) setBookamat(info) })
+    return () => { active = false }
+  }, [bookamatConfigured, documentId])
+
+  async function loadBookamat() {
+    const info = await fetchBookamatInfo(documentId)
+    if (info) setBookamat(info)
+  }
+
+  const bookings = bookamat?.bookings ?? []
+  const synced = bookings.length > 0 || (!bookamat && !!bookamatBookingId)
+  // What may exist in Bookamat without being recorded here; a reset has to name it.
+  const unsettled = (bookamat?.pending ?? []).map(p => p.booking_id
+    ? t('books.sync.booking', { id: p.booking_id, year: p.year })
+    : t('books.sync.pendingTitle', { title: p.title, year: p.year }))
+  const resetDesc = [
+    bookings.length ? t('books.sync.resetDesc', { bookings: formatBookings(t, bookings) }) : null,
+    unsettled.length ? t('books.sync.resetPendingDesc', { bookings: unsettled.join(', ') }) : null,
+  ].filter(Boolean).join(' ') || t('payments.resetDesc')
+  const canSync = hasMoneyToBook({ number, status, payments })
+  // Money received in a year that has no booking yet (e.g. the rest paid after New Year), as far
+  // as the bookings made do not cover it already; the sync books exactly this.
+  const planned = canSync && bookings.length > 0 ? planBookings({ type: 'invoice', total, rows: payments }).bookings : []
+  const unbookedMoney = unbookedPlan(planned, bookings).length > 0
+  // A year without its own booking whose money an existing booking already covers (one booking
+  // from before yearly bookings, or a payment date moved across New Year): only a reset helps.
+  const coveredYears = unbookedMoney ? [] : planned.filter(p => !bookings.some(b => b.year === p.year && b.kind === p.kind)).map(p => p.year)
+
+  async function recordRows(rows: NewPayment[]): Promise<boolean> {
     setSaving(true)
     try {
       const { data, error } = await supabase
         .from('payments')
-        .insert({ document_id: documentId, ...row })
+        .insert(rows.map(row => ({ document_id: documentId, ...row })))
         .select()
-        .single()
       if (error) { toast.error(error.message); return false }
 
-      const next = [...payments, data]
+      const next = [...payments, ...(data ?? [])]
       setPayments(next)
-      await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method, reference: row.reference ?? undefined })
+      for (const row of rows) {
+        await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method, reference: row.reference ?? undefined })
+      }
 
-      const newTotal = next.reduce((s, p) => s + p.amount, 0)
-      const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
-      if (newTotal >= total - 0.005 && PAYABLE.includes(status)) {
+      const fee = rows.find(r => r.kind === 'fee')
+      const kind = rows[0].kind
+      const label = fee && rows.length > 1 ? t('books.fees.recordedSplit', { amount: formatMoney(fee.amount, currency) })
+        : kind === 'skonto' ? t('payments.skontoRecorded') : kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
+      if (settledSum(next) >= total - 0.005 && PAYABLE.includes(status)) {
         const { data: updated, error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE).select('id')
         if (statusErr) toast.error(lifecycleErrorMessage(statusErr, t))
         else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
         toast.success(t('payments.recordedAndPaid', { label }))
-        if (!bookamatId && bookamatConfigured) {
-          setShowBookamatPrompt(true)
-        }
+        if (!synced && bookamatConfigured) setShowBookamatPrompt(true)
       } else {
         toast.success(t('payments.recorded', { label }))
       }
@@ -147,7 +203,7 @@ export default function PaymentPanel({
     }
   }
 
-  async function addPayment(allowOverpayment = false) {
+  async function addPayment() {
     if (!number) { toast.error(t('payments.issueBeforePayment')); return }
     if (status === 'cancelled') { toast.error(t('payments.cancelledInvoice')); return }
     const issue = paymentDateIssue(payDate, today())
@@ -155,19 +211,37 @@ export default function PaymentPanel({
     if (issue) { toast.error(t(issue === 'required' ? 'lifecycle.payments.dateRequired' : 'lifecycle.payments.dateFuture')); return }
     const amt = amount ?? 0
     if (!amt || amt <= 0) { toast.error(t('payments.invalidAmount')); return }
-    if (amt > balanceDue + 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
-    setConfirmOverpay(false)
-    const ok = await recordRow({ date: payDate, amount: amt, note: note.trim() || null, kind: 'payment', method, reference: reference.trim() || null })
-    if (!ok) return
+    // More than is open: most often a Mahnung paid with its fees and interest.
+    if (amt > balanceDue + 0.005) { setOverpay({ amount: amt, choice: balanceDue > 0.005 ? 'fee' : 'payment' }); return }
+    await submitPayment([paymentRow(amt)])
+  }
+
+  function paymentRow(amt: number, kind: PaymentKind = 'payment'): NewPayment {
+    return { date: payDate, amount: amt, note: note.trim() || null, kind, method, reference: reference.trim() || null }
+  }
+
+  async function submitPayment(rows: NewPayment[]) {
+    if (!(await recordRows(rows))) return
+    setOverpay(null)
     setAmount(null)
     setNote('')
     setReference('')
   }
 
+  async function confirmOverpay() {
+    if (!overpay) return
+    const open = Math.max(0, balanceDue)
+    const excess = roundCents(overpay.amount - open)
+    const rows = overpay.choice === 'payment' || excess <= 0.005
+      ? [paymentRow(overpay.amount)]
+      : [...(open > 0.005 ? [paymentRow(open)] : []), paymentRow(excess, 'fee')]
+    await submitPayment(rows)
+  }
+
   async function settleRemaining(kind: 'skonto' | 'writeoff', reason: string | null = null): Promise<boolean> {
     if (balanceDue <= 0.005) return false
     const settleNote = kind === 'skonto' ? `Skonto ${skontoPercent} %` : reason
-    return recordRow({ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' })
+    return recordRows([{ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' }])
   }
 
   async function writeOffUncollectible() {
@@ -182,7 +256,7 @@ export default function PaymentPanel({
   async function removePayment(id: string) {
     const removed = payments.find(p => p.id === id)
     const next = payments.filter(p => p.id !== id)
-    const reopen = status === 'paid' && next.reduce((s, p) => s + p.amount, 0) < total - 0.005
+    const reopen = status === 'paid' && settledSum(next) < total - 0.005
     setRemoving(true)
     // One transaction: the row goes and a paid invoice that is open again reopens (the only way
     // the lifecycle trigger lets paid go back to sent/overdue).
@@ -197,80 +271,63 @@ export default function PaymentPanel({
     router.refresh()
   }
 
-  async function resetBookamatSync() {
-    setResetting(true)
-    const { error } = await supabase
-      .from('documents')
-      .update({ bookamat_booking_id: null })
-      .eq('id', documentId)
-    setResetting(false)
-    if (error) { toast.error(error.message); return }
-    setBookamatId(null)
+  async function syncToBookamat() {
+    setShowBookamatPrompt(false)
+    setBookamatBusy('sync')
+    const res = await requestBookamatSync(documentId)
+    setBookamatBusy(null)
+    if (!res.ok) {
+      toast.error(t('books.sync.failed', { error: bookamatErrorMessage(t, res.payload) }))
+      void loadBookamat()
+      return
+    }
+    const { created, bookings: all, pdf, fees } = res.data
+    setBookamat({ bookings: all, error: null, pending: [] })
+    const made = formatBookings(t, created)
+    if (!created.length) toast.info(t('books.sync.alreadySynced', { bookings: formatBookings(t, all) }))
+    else if (pdf.error) toast.warning(t('books.sync.pdfNotAttached', { bookings: made, error: pdf.error }))
+    else if (pdf.attached) toast.success(t('books.sync.syncedWithPdf', { bookings: made }))
+    else toast.success(t('books.sync.syncedToast', { bookings: made }))
+    if (fees > 0) toast.info(t('books.sync.feesNotBooked', { amount: formatMoney(fees, currency) }), { duration: 8000 })
+  }
+
+  async function attachAgain() {
+    setBookamatBusy('attach')
+    const res = await fetch('/api/bookamat/attach-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId }),
+    }).catch(() => null)
+    setBookamatBusy(null)
+    const payload = res ? await res.json().catch(() => ({})) : {}
+    if (!res?.ok) { toast.error(t('books.sync.attachFailed', { error: bookamatErrorMessage(t, payload) })); return }
+    const count = Number(payload.attached) || 0
+    if (payload.error) toast.warning(t('books.sync.attachFailed', { error: String(payload.error) }))
+    else toast.success(n(count, t('books.sync.attachedOne'), t('books.sync.attachedOther', { count })))
+    void loadBookamat()
+  }
+
+  async function resetSync() {
+    setBookamatBusy('reset')
+    const res = await fetch('/api/bookamat/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documentId }),
+    }).catch(() => null)
+    setBookamatBusy(null)
+    if (!res?.ok) {
+      const payload = res ? await res.json().catch(() => ({})) : {}
+      toast.error(bookamatErrorMessage(t, payload))
+      return
+    }
+    setBookamat({ bookings: [], error: null, pending: [] })
     setConfirmReset(false)
     toast.success(t('payments.syncReset'))
   }
 
-  async function syncToBookamat() {
-    setSyncingBookamat(true)
-    setShowBookamatPrompt(false)
-
-    // The stored issued copy is what Bookamat keeps as the receipt.
-    let pdfResult: { base64: string; filename: string } | null = null
-    if (generatePdfForBookamat) {
-      try {
-        pdfResult = await generatePdfForBookamat()
-      } catch (err) {
-        console.warn('PDF pre-generation failed:', err)
-      }
-    }
-
-    const res = await fetch('/api/bookamat/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documentId }),
-    })
-
-    if (!res.ok) {
-      setSyncingBookamat(false)
-      if (res.status === 409) {
-        toast.info(t('payments.alreadySynced'))
-      } else {
-        const { error } = await res.json().catch(() => ({ error: t('common.unknownError') }))
-        toast.error(t('payments.syncFailed', { error }))
-      }
-      return
-    }
-
-    const { bookingId, country, year } = await res.json()
-    setBookamatId(String(bookingId))
-
-    // Attach pre-generated PDF
-    if (!pdfResult) {
-      toast.success(t('payments.syncedPlain'))
-    } else {
-      try {
-        const attachRes = await fetch('/api/bookamat/attach-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId, pdfBase64: pdfResult.base64, filename: pdfResult.filename, country, year }),
-        })
-
-        if (attachRes.ok) {
-          toast.success(t('payments.syncedWithPdf'))
-        } else {
-          const { error } = await attachRes.json().catch(() => ({ error: t('common.unknownError') }))
-          toast.warning(t('payments.pdfNotAttached', { error }))
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        toast.warning(t('payments.pdfNotAttached', { error: msg }))
-      }
-    }
-
-    setSyncingBookamat(false)
-  }
-
   const settleBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300'
+  const linkBtn = 'text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors disabled:opacity-50'
+  const overpayExcess = overpay ? roundCents(overpay.amount - Math.max(0, balanceDue)) : 0
 
   return (
     <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-4">
@@ -309,7 +366,7 @@ export default function PaymentPanel({
               ) : kindLabel[p.kind] && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{kindLabel[p.kind]}</span>
               )}
-              {p.method === 'cash' && p.kind === 'payment' && (
+              {p.method === 'cash' && (p.kind === 'payment' || p.kind === 'fee') && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 shrink-0">{t('payments.cashBadge')}</span>
               )}
               {p.reference && <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono truncate min-w-0">{t('lifecycle.payments.referenceShort', { reference: p.reference })}</span>}
@@ -400,7 +457,7 @@ export default function PaymentPanel({
             />
             <Button
               type="button"
-              onClick={() => addPayment()}
+              onClick={() => void addPayment()}
               disabled={saving}
               size="sm"
               className="shrink-0 flex items-center gap-1.5 h-8"
@@ -412,45 +469,84 @@ export default function PaymentPanel({
         </div>
       )}
 
-      {/* Bookamat sync status */}
       {bookamatConfigured && (
-        <div className="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-neutral-100 dark:border-neutral-800">
-          {bookamatId ? (
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
-                <CheckCircle2 size={13} /> {t('payments.synced')}
+        <div className="space-y-1.5 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+          {synced ? (
+            <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+              <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 min-w-0">
+                <CheckCircle2 size={13} className="shrink-0" />
+                <span className="break-words">{bookings.length ? t('books.sync.synced', { bookings: formatBookings(t, bookings) }) : t('payments.synced')}</span>
               </span>
+              <span className="flex items-center gap-1 flex-wrap">
+                {unbookedMoney && (
+                  <button type="button" onClick={() => setShowBookamatPrompt(true)} disabled={!!bookamatBusy} className={linkBtn}>
+                    {t('books.sync.newMoney')}
+                  </button>
+                )}
+                {bookings.length > 0 && (
+                  <button type="button" onClick={() => void attachAgain()} disabled={!!bookamatBusy} className={linkBtn}>
+                    {bookamatBusy === 'attach' ? t('books.sync.attaching') : t('books.sync.attachAgain')}
+                  </button>
+                )}
+                <button type="button" onClick={() => setConfirmReset(true)} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
+                  {t('payments.resetSync')}
+                </button>
+              </span>
+            </div>
+          ) : canSync ? (
+            <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
               <button
                 type="button"
-                onClick={() => setConfirmReset(true)}
-                className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                onClick={() => setShowBookamatPrompt(true)}
+                disabled={!!bookamatBusy}
+                className={`${linkBtn} -mx-2 font-medium`}
               >
-                {t('payments.resetSync')}
+                {bookamatBusy === 'sync' ? t('payments.syncing') : bookamat?.error ? t('books.sync.retry') : t('payments.syncTo')}
               </button>
+              {unsettled.length > 0 && (
+                <button type="button" onClick={() => setConfirmReset(true)} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
+                  {t('payments.resetSync')}
+                </button>
+              )}
             </div>
-          ) : fullyPaid ? (
-            <button
-              type="button"
-              onClick={() => setShowBookamatPrompt(true)}
-              className="text-xs font-medium px-2 py-2 -mx-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors flex items-center gap-1"
-            >
-              {t('payments.syncTo')}
-            </button>
           ) : (
             <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('payments.syncAvailableWhenPaid')}</span>
+          )}
+          {coveredYears.length > 0 && (
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">{t('books.sync.coveredElsewhere', { years: coveredYears.join(', '), bookings: formatBookings(t, bookings) })}</p>
+          )}
+          {bookamat?.error && (
+            <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">{t('books.sync.lastError', { error: bookamat.error })}</p>
           )}
         </div>
       )}
 
       <ConfirmDialog
-        open={confirmOverpay}
-        title={t('payments.overpayTitle')}
-        description={t('payments.overpayDesc', { amount: formatMoney(amount ?? 0, currency), balance: formatMoney(Math.max(balanceDue, 0), currency) })}
-        confirmLabel={t('payments.recordAnyway')}
+        open={!!overpay}
+        title={t('books.fees.splitTitle')}
+        description={overpay ? t('books.fees.splitDesc', { amount: formatMoney(overpay.amount, currency), excess: formatMoney(overpayExcess, currency), balance: formatMoney(Math.max(balanceDue, 0), currency) }) : undefined}
+        confirmLabel={saving ? t('common.saving') : t('books.fees.record')}
         busy={saving}
-        onConfirm={() => void addPayment(true)}
-        onCancel={() => setConfirmOverpay(false)}
-      />
+        onConfirm={() => void confirmOverpay()}
+        onCancel={() => setOverpay(null)}
+      >
+        {overpay && (
+          <fieldset className="space-y-2">
+            <legend className="sr-only">{t('books.fees.splitTitle')}</legend>
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <input type="radio" name={`${uid}-overpay`} className="mt-1 shrink-0" checked={overpay.choice === 'fee'} onChange={() => setOverpay({ ...overpay, choice: 'fee' })} />
+              <span>
+                {t('books.fees.splitFee', { balance: formatMoney(Math.max(balanceDue, 0), currency), excess: formatMoney(overpayExcess, currency) })}
+                <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{t('books.fees.splitFeeHint')}</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
+              <input type="radio" name={`${uid}-overpay`} className="mt-1 shrink-0" checked={overpay.choice === 'payment'} onChange={() => setOverpay({ ...overpay, choice: 'payment' })} />
+              <span>{t('books.fees.splitOverpay', { amount: formatMoney(overpay.amount, currency) })}</span>
+            </label>
+          </fieldset>
+        )}
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={writingOff}
@@ -491,10 +587,11 @@ export default function PaymentPanel({
       <ConfirmDialog
         open={confirmReset}
         title={t('payments.resetTitle')}
-        description={t('payments.resetDesc')}
-        confirmLabel={resetting ? t('payments.resetting') : t('payments.resetSync')}
-        busy={resetting}
-        onConfirm={resetBookamatSync}
+        description={resetDesc}
+        confirmLabel={bookamatBusy === 'reset' ? t('payments.resetting') : t('payments.resetSync')}
+        destructive
+        busy={bookamatBusy === 'reset'}
+        onConfirm={() => void resetSync()}
         onCancel={() => setConfirmReset(false)}
       />
 
@@ -502,10 +599,10 @@ export default function PaymentPanel({
         open={showBookamatPrompt}
         title={t('payments.syncTitle')}
         description={t('payments.syncDesc')}
-        confirmLabel={syncingBookamat ? t('payments.syncing') : t('payments.syncButton')}
+        confirmLabel={bookamatBusy === 'sync' ? t('payments.syncing') : t('payments.syncButton')}
         cancelLabel={t('common.skip')}
-        busy={syncingBookamat}
-        onConfirm={syncToBookamat}
+        busy={bookamatBusy === 'sync'}
+        onConfirm={() => void syncToBookamat()}
         onCancel={() => setShowBookamatPrompt(false)}
       />
     </div>

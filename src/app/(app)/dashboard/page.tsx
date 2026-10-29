@@ -31,7 +31,7 @@ type InvoiceRow = {
   discount_value: number | null
   clients: ClientRef
   document_items: DocItems
-  payments: { amount: number }[]
+  payments: { amount: number; kind?: string | null }[]
 }
 
 const clientName = (c: ClientRef) => c ? c.company || c.name : ''
@@ -50,21 +50,23 @@ export default async function DashboardPage() {
   const since = `${[chartMonths[0], lastMonth, `${thisYear}-01`].sort()[0]}-01`
 
   const items = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
-  const invoiceCols = `id, number, status, due_date, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${items}, payments(amount)`
+  const invoiceCols = `id, number, status, due_date, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${items}, payments(amount, kind)`
 
-  const [{ data: activeInvoices }, { data: received }, { data: paidPayments }, { data: quotes }, { data: responseEvents }, unapplied] = await Promise.all([
+  const [{ data: activeInvoices }, { data: received }, { data: refundRows }, { data: paidPayments }, { data: quotes }, { data: responseEvents }, unapplied, { data: unarchived, count: unarchivedCount }] = await Promise.all([
     supabase.from('documents').select(invoiceCols).eq('type', 'invoice').in('status', ['sent', 'overdue']),
     // Revenue is cash-based (Ist-Besteuerung): every money payment counts on the day it arrived,
     // whatever the invoice status; Skonto and write-offs close invoices without revenue.
     supabase.from('payments').select('amount, date, document_id, documents!inner(type)').eq('documents.type', 'invoice').eq('kind', 'payment').gte('date', since),
+    // Money paid back on credit notes leaves again on the day it was paid.
+    supabase.from('payments').select('amount, date').eq('kind', 'refund').gte('date', since),
     // Recently paid = the invoices whose latest payment is newest, not the newest invoices.
     supabase
       .from('payments')
       .select(`id, date, document_id, documents!inner(type, ${invoiceCols})`)
       .eq('documents.type', 'invoice')
       .eq('documents.status', 'paid')
-      // An applied credit note is no money received, so it never dates a payment here.
-      .neq('kind', 'credit')
+      // An applied credit note is no money received and fees come on top; neither dates a payment here.
+      .in('kind', ['payment', 'skonto', 'writeoff'])
       .order('date', { ascending: false })
       .order('id', { ascending: false })
       .limit(40),
@@ -82,11 +84,22 @@ export default async function DashboardPage() {
       console.error('[dashboard] unapplied credit notes:', err)
       return []
     }),
+    // Issued documents whose frozen PDF (the archive copy) was never stored.
+    supabase
+      .from('documents')
+      .select('id, type, number', { count: 'exact' })
+      .in('type', ['invoice', 'credit_note'])
+      .not('number', 'is', null)
+      .is('pdf_path', null)
+      .order('date', { ascending: false })
+      .limit(5),
   ])
   const responses = (responseEvents ?? []) as unknown as { id: string; created_at: string; detail: { action?: string }; documents: { id: string; number: string | null; clients: ClientRef } }[]
 
   const active = (activeInvoices ?? []) as unknown as InvoiceRow[]
   const payments = (received ?? []) as unknown as { amount: number; date: string; document_id: string }[]
+  // Revenue is money received less money paid back.
+  const moneyRows = [...payments, ...((refundRows ?? []) as { amount: number; date: string }[]).map(r => ({ amount: -r.amount, date: r.date }))]
 
   const docTotals = (doc: InvoiceRow) => calcTotals(
     doc.document_items ?? [],
@@ -109,15 +122,15 @@ export default async function DashboardPage() {
     ? Math.max(...withDueDate.map(i => Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)))
     : null
 
-  const inMonth = (m: string) => payments.filter(p => p.date?.startsWith(m))
+  const inMonth = (m: string) => moneyRows.filter(p => p.date?.startsWith(m))
   const sum = (ps: { amount: number }[]) => roundCents(ps.reduce((s, p) => s + p.amount, 0))
   const revenueThisMonth = sum(inMonth(thisMonth))
   const revenueLastMonth = sum(inMonth(lastMonth))
-  const paidThisMonthCount = new Set(inMonth(thisMonth).map(p => p.document_id)).size
+  const paidThisMonthCount = new Set(payments.filter(p => p.date?.startsWith(thisMonth)).map(p => p.document_id)).size
   const momDelta = revenueLastMonth > 0
     ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100)
     : null
-  const revenueThisYear = sum(payments.filter(p => p.date?.startsWith(thisYear)))
+  const revenueThisYear = sum(moneyRows.filter(p => p.date?.startsWith(thisYear)))
 
   const recentPaid: { doc: InvoiceRow; paidOn: string }[] = []
   const seen = new Set<string>()
@@ -133,7 +146,7 @@ export default async function DashboardPage() {
   const months: MonthData[] = chartMonths.map(key => ({
     label: monthLabels[Number(key.slice(5, 7)) - 1],
     yearMonth: key,
-    revenue: sum(payments.filter(p => p.date?.startsWith(key))),
+    revenue: sum(inMonth(key)),
     current: key === thisMonth,
   }))
   const chartTotal = sum(months.map(m => ({ amount: m.revenue })))
@@ -210,6 +223,23 @@ export default async function DashboardPage() {
             {' '}{t('dashboard.overdueAlertTail', { amount: formatMoney(overdueTotal) })}
           </span>
         </Link>
+      )}
+
+      {(unarchivedCount ?? 0) > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle size={15} className="shrink-0 mt-0.5" aria-hidden="true" />
+          <span className="flex-1 min-w-0">
+            <strong>{n(unarchivedCount ?? 0, t('books.dashboard.noArchiveOne', { count: unarchivedCount ?? 0 }), t('books.dashboard.noArchiveOther', { count: unarchivedCount ?? 0 }))}</strong>
+            {' '}{t('books.dashboard.noArchiveHint')}{' '}
+            {(unarchived ?? []).map((d, i) => (
+              <span key={d.id}>
+                {i > 0 && ', '}
+                <Link href={`/${d.type === 'credit_note' ? 'credit-notes' : 'invoices'}/${d.id}`} className="underline underline-offset-2 font-medium">{d.number}</Link>
+              </span>
+            ))}
+            {(unarchivedCount ?? 0) > (unarchived?.length ?? 0) && ' …'}
+          </span>
+        </div>
       )}
 
       {unapplied.length > 0 && (

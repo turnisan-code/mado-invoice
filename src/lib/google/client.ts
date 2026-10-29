@@ -1,5 +1,5 @@
 import { google } from 'googleapis'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Settings } from '@/types'
 import { GOOGLE_NOT_CONNECTED_MESSAGE, GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from './reauth'
@@ -24,23 +24,41 @@ export function getAuthorizedGoogle(settings: GoogleTokenSettings, supabase: Sup
     refresh_token: settings.gmail_refresh_token,
     expiry_date: settings.gmail_token_expiry,
   })
+  // A refreshed token is written back after the response at the latest: on serverless a write
+  // left dangling would be cut off, and every later call would refresh again.
   oauth2.on('tokens', tokens => {
-    void supabase.from('settings').update({
+    const write = Promise.resolve(supabase.from('settings').update({
       gmail_access_token: tokens.access_token,
       ...(tokens.refresh_token ? { gmail_refresh_token: tokens.refresh_token } : {}),
       gmail_token_expiry: tokens.expiry_date,
-    }).eq('id', settings.id).then(({ error }) => {
+    }).eq('id', settings.id)).then(({ error }) => {
       if (error) console.error('[google] token write-back failed:', error.message)
     })
+    try {
+      after(write)
+    } catch {
+      // Outside a request (scripts): the write still runs, nothing waits for it.
+    }
   })
   return oauth2
 }
 
-export async function clearGoogleTokens(supabase: SupabaseClient, settingsId: string) {
+// The last Google failure, shown in Settings until a test or a reconnect succeeds.
+export async function recordGoogleError(supabase: SupabaseClient, settingsId: string, message: string | null) {
+  const { error } = await supabase.from('settings')
+    .update({ google_last_error: message, google_last_error_at: message ? new Date().toISOString() : null })
+    .eq('id', settingsId)
+  if (error) console.error('[google] last error not recorded:', error.message)
+}
+
+// The grant is gone (revoked, invalid_grant): the tokens are cleared so every page shows the
+// reconnect state; the account email stays for that message.
+export async function clearGoogleTokens(supabase: SupabaseClient, settingsId: string, reason = GOOGLE_REAUTH_MESSAGE) {
   const { error } = await supabase.from('settings')
     .update({ gmail_access_token: null, gmail_refresh_token: null, gmail_token_expiry: null })
     .eq('id', settingsId)
   if (error) console.error('[google] could not clear tokens:', error.message)
+  await recordGoogleError(supabase, settingsId, reason)
 }
 
 type GoogleErrorShape = {
@@ -80,8 +98,10 @@ export function googleErrorMessage(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'Google request failed'
 }
 
-export function googleNotConnected() {
-  return NextResponse.json({ error: GOOGLE_NOT_CONNECTED_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: 400 })
+// No tokens: never connected, or the connection expired (the account email is still on record).
+export function googleNotConnected(settings?: Pick<Settings, 'gmail_email'> | null) {
+  const expired = !!settings?.gmail_email
+  return NextResponse.json({ error: expired ? GOOGLE_REAUTH_MESSAGE : GOOGLE_NOT_CONNECTED_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: expired ? 401 : 400 })
 }
 
 export async function googleErrorResponse(err: unknown, supabase: SupabaseClient, settingsId: string, context: string) {
@@ -90,9 +110,11 @@ export async function googleErrorResponse(err: unknown, supabase: SupabaseClient
     return NextResponse.json({ error: GOOGLE_REAUTH_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: 401 })
   }
   if (isGoogleScopeError(err)) {
+    await recordGoogleError(supabase, settingsId, GOOGLE_SCOPE_MESSAGE)
     return NextResponse.json({ error: GOOGLE_SCOPE_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: 403 })
   }
   const message = googleErrorMessage(err)
   console.error(`[${context}]`, message)
+  await recordGoogleError(supabase, settingsId, message)
   return NextResponse.json({ error: message }, { status: 502 })
 }
