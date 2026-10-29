@@ -6,7 +6,7 @@ import { Plus, Users, ChevronRight, Download, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatMoney, roundCents, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
-import { clientDisplayName } from '@/lib/utils/clients'
+import { clientDisplayName, clientMatches } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
@@ -49,15 +49,6 @@ export interface ClientRow {
 
 // The contact person, shown under the company when a client has both.
 const contactLine = (c: ClientRow) => c.company && c.name ? c.name : ''
-const compact = (s: string) => s.replace(/\s+/g, '').toLowerCase()
-
-function matches(c: ClientRow, q: string): boolean {
-  const needle = q.trim().toLowerCase()
-  if (!needle) return true
-  const text = [c.client_number, c.name, c.company, c.email, c.city, c.uid_number, ...(c.tags ?? [])].filter(Boolean).join(' ').toLowerCase()
-  // A VAT ID is typed with or without spaces (ATU 123 456 78).
-  return text.includes(needle) || (!!c.uid_number && compact(c.uid_number).includes(compact(needle)))
-}
 
 function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastInvoiced: Record<string, string>, t: TFn, lang: UiLang) {
   const rows = clients.map(c => [
@@ -109,7 +100,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
     let rows = clients
     if (status) rows = rows.filter(c => c.status === status)
     if (tag) rows = rows.filter(c => (c.tags ?? []).includes(tag))
-    if (q) rows = rows.filter(c => matches(c, q))
+    if (q) rows = rows.filter(c => clientMatches(c, q))
     const value = (c: ClientRow): string | number => {
       switch (sort.key) {
         case 'name': return clientDisplayName(c)
