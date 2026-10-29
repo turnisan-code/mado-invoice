@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import CatalogueManager from '@/components/forms/CatalogueManager'
 import { getT } from '@/lib/i18n/server'
+import type { CatalogueUsage } from '@/types'
 
 export default async function CataloguePage() {
   const supabase = await createClient()
@@ -9,8 +10,9 @@ export default async function CataloguePage() {
     supabase.from('catalogue_items').select('*').order('sort_order'),
     supabase.rpc('catalogue_usage'),
   ])
-  const usage: Record<string, number> = Object.fromEntries(
-    ((usageRows ?? []) as { catalogue_item_id: string; uses: number }[]).map(r => [r.catalogue_item_id, Number(r.uses)]),
+  const usage: Record<string, CatalogueUsage> = Object.fromEntries(
+    ((usageRows ?? []) as { catalogue_item_id: string; uses: number; last_used: string | null }[])
+      .map(r => [r.catalogue_item_id, { uses: Number(r.uses), lastUsed: r.last_used ?? null }]),
   )
 
   return (
