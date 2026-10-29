@@ -1179,7 +1179,6 @@ export const de = {
       quoteNotConvertible: 'Nur versendete oder angenommene Angebote können in eine Rechnung umgewandelt werden.',
       alreadyCancelled: 'Diese Rechnung ist bereits storniert.',
       draftNoStorno: 'Ein Entwurf hat keine Nummer zum Stornieren oder Gutschreiben — stattdessen bearbeiten oder löschen.',
-      notFound: 'Beleg nicht gefunden.',
       notOverdue: 'Nur überfällige Rechnungen mit offenem Betrag können gemahnt werden.',
       settingsIncomplete: 'Die Firmendaten in den Einstellungen sind unvollständig (Firmenname, Adresse, UID-Nummer oder IBAN) — bitte zuerst ergänzen.',
       incomplete: 'Das kann noch nicht ausgestellt werden, weil Angaben fehlen — den Beleg öffnen, um zu sehen, was zu ergänzen ist.',

@@ -1178,7 +1178,6 @@ export const en = {
       quoteNotConvertible: 'Only sent or accepted quotes can be converted to an invoice.',
       alreadyCancelled: 'This invoice is already cancelled.',
       draftNoStorno: 'A draft has no number to cancel or credit — edit or delete it instead.',
-      notFound: 'Document not found.',
       notOverdue: 'Only overdue invoices with an open balance can be reminded.',
       settingsIncomplete: 'Your company details in Settings are incomplete (company name, address, UID number or IBAN) — complete them first.',
       incomplete: 'This cannot be issued yet because details are missing — open the document to see what to complete.',
