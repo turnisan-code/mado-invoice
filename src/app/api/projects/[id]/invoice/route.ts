@@ -1,14 +1,35 @@
 import { NextResponse } from 'next/server'
 import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import type { createClient } from '@/lib/supabase/server'
 import { buildInvoiceLines, INVOICE_GROUPINGS } from '@/lib/projects'
 import type { InvoiceGrouping, Project, ProjectExpense, TimeEntry, VatRate } from '@/types'
 
+type ServerClient = Awaited<ReturnType<typeof createClient>>
+
 const MAX_ROWS = 500
+// .in() lists travel in the URL, so the ids are looked up in slices.
+const SLICE = 100
 
 function uuidList(value: unknown): string[] | null {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > MAX_ROWS || !value.every(isUuid)) return null
   return [...new Set(value)]
+}
+
+// The requested rows that are still unbilled billable entries of the project.
+async function unbilledRows<T>(supabase: ServerClient, table: 'time_entries' | 'project_expenses', projectId: string, ids: string[]): Promise<T[]> {
+  const slices = []
+  for (let i = 0; i < ids.length; i += SLICE) slices.push(ids.slice(i, i + SLICE))
+  const results = await Promise.all(slices.map(slice => supabase
+    .from(table)
+    .select('*')
+    .eq('project_id', projectId)
+    .in('id', slice)
+    .eq('billable', true)
+    .is('invoiced_document_id', null)))
+  const failed = results.find(r => r.error)
+  if (failed?.error) throw new Error(failed.error.message)
+  return results.flatMap(r => (r.data ?? []) as T[])
 }
 
 // "Invoice unbilled": the chosen unbilled billable time entries and expenses of a project become
@@ -33,22 +54,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: 'Nothing to invoice', code: 'nothing' }, { status: 400 })
   }
 
-  const [{ data: project, error: projectErr }, entriesRes, expensesRes, { data: settings }] = await Promise.all([
+  const [{ data: project, error: projectErr }, { data: settings }] = await Promise.all([
     supabase.from('projects').select('*').eq('id', id).maybeSingle(),
-    timeEntryIds.length
-      ? supabase.from('time_entries').select('*').eq('project_id', id).in('id', timeEntryIds).eq('billable', true).is('invoiced_document_id', null)
-      : Promise.resolve({ data: [] as TimeEntry[], error: null }),
-    expenseIds.length
-      ? supabase.from('project_expenses').select('*').eq('project_id', id).in('id', expenseIds).eq('billable', true).is('invoiced_document_id', null)
-      : Promise.resolve({ data: [] as ProjectExpense[], error: null }),
     supabase.from('settings').select('default_vat_rate').maybeSingle(),
   ])
-  const loadError = projectErr ?? entriesRes.error ?? expensesRes.error
-  if (loadError) return NextResponse.json({ error: loadError.message, code: 'failed' }, { status: 500 })
+  if (projectErr) return NextResponse.json({ error: projectErr.message, code: 'failed' }, { status: 500 })
   if (!project) return NextResponse.json({ error: 'Project not found', code: 'not_found' }, { status: 404 })
 
-  const entries = (entriesRes.data ?? []) as TimeEntry[]
-  const expenses = (expensesRes.data ?? []) as ProjectExpense[]
+  let entries: TimeEntry[]
+  let expenses: ProjectExpense[]
+  try {
+    [entries, expenses] = await Promise.all([
+      unbilledRows<TimeEntry>(supabase, 'time_entries', id, timeEntryIds),
+      unbilledRows<ProjectExpense>(supabase, 'project_expenses', id, expenseIds),
+    ])
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Load failed', code: 'failed' }, { status: 500 })
+  }
   if (entries.length !== timeEntryIds.length || expenses.length !== expenseIds.length) {
     return NextResponse.json({ error: 'Some entries are no longer unbilled', code: 'entries_changed' }, { status: 409 })
   }
