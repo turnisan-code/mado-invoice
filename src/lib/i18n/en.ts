@@ -401,7 +401,6 @@ export const en = {
       synced: 'Deductions updated to match the deducted invoices.',
       removeAll: 'Remove the deductions',
       issuedHint: 'This final invoice is issued: its deductions stay as they were issued.',
-      fullTotal: 'Whole service',
       remaining: 'Remaining amount',
     },
     quote: {

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
 import {
-  deductionItems, deductionParts, discountOf, linkDeposit, loadClientDeposits, sameDeductions, unlinkDeposit,
+  deductionItems, deductionParts, depositErrorMessage, discountOf, linkDeposit, loadClientDeposits, sameDeductions, unlinkDeposit,
   type DepositCheck, type DepositInvoice,
 } from '@/lib/deposits'
 import { lineAmount } from '@/lib/utils/document'
@@ -77,7 +77,7 @@ export function useDeposits({ type, doc, docId, form, setLines, flush }: {
       await action()
       setVersion(v => v + 1)
     } catch (e) {
-      toast.error(t('deposits.builder.failed', { error: e instanceof Error ? e.message : String(e) }))
+      toast.error(t('deposits.builder.failed', { error: depositErrorMessage(e, t) }))
     } finally {
       setBusy(false)
     }

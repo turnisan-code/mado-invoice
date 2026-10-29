@@ -282,6 +282,17 @@ export function advanceItems(quote: QuoteForAdvance, gross: number, percent: num
 
 // ─── Loading and linking ─────────────────────────────────────────────────────
 
+// The database guards (20261101_deposits.sql) in the UI language; anything else as it came.
+export function depositErrorMessage(err: unknown, t: TFn): string {
+  const code = err && typeof err === 'object' && 'code' in err ? (err as { code?: unknown }).code : null
+  if (code === 'MI019') return t('deposits.errors.useFinal')
+  if (code === 'MI020') return t('deposits.errors.deducted')
+  if (code === 'MI021') return t('deposits.errors.invalidLink')
+  return err instanceof Error ? err.message : String(err)
+}
+
+const failure = (error: { message: string; code?: string }) => Object.assign(new Error(error.message), { code: error.code })
+
 const DEPOSIT_COLS = 'id, number, date, status, client_id, invoice_kind, final_invoice_id, converted_from_id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind, credit_note_id)'
 
 type DepositRow = Omit<DepositInvoice, 'refunded' | 'final'>
@@ -384,10 +395,10 @@ export async function writeDeductions(supabase: SupabaseClient, finalId: string)
 export async function linkDeposit(supabase: SupabaseClient, finalId: string, invoiceId: string): Promise<'ok' | 'taken'> {
   const { error: kindErr } = await supabase.from('documents').update({ invoice_kind: 'final' })
     .eq('id', finalId).eq('type', 'invoice').is('number', null)
-  if (kindErr) throw new Error(kindErr.message)
+  if (kindErr) throw failure(kindErr)
   const { data, error } = await supabase.from('documents').update({ final_invoice_id: finalId })
     .eq('id', invoiceId).is('final_invoice_id', null).select('id')
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   if (!data?.length) return 'taken'
   await logEvent(supabase, invoiceId, 'deposit_linked', { final_id: finalId })
   return 'ok'
@@ -396,6 +407,6 @@ export async function linkDeposit(supabase: SupabaseClient, finalId: string, inv
 export async function unlinkDeposit(supabase: SupabaseClient, finalId: string, invoiceId: string): Promise<void> {
   const { data, error } = await supabase.from('documents').update({ final_invoice_id: null })
     .eq('id', invoiceId).eq('final_invoice_id', finalId).select('id')
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   if (data?.length) await logEvent(supabase, invoiceId, 'deposit_released', { final_id: finalId, reason: 'removed' })
 }

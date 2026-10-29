@@ -402,7 +402,6 @@ export const de = {
       synced: 'Abzüge an die abgezogenen Rechnungen angepasst.',
       removeAll: 'Abzüge entfernen',
       issuedHint: 'Diese Schlussrechnung ist ausgestellt: ihre Abzüge bleiben so, wie sie ausgestellt wurden.',
-      fullTotal: 'Gesamte Leistung',
       remaining: 'Restbetrag',
     },
     quote: {

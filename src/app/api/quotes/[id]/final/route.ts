@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isUuid, requireUser } from '@/lib/auth'
-import { writeDeductions } from '@/lib/deposits'
+import { depositErrorMessage, writeDeductions } from '@/lib/deposits'
 import { logEvent } from '@/lib/events'
 import { getT } from '@/lib/i18n/server'
 import { lifecycleErrorMessage } from '@/lib/status'
@@ -20,7 +20,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
 
   const { data, error } = await supabase.rpc('convert_quote_to_invoice', { p_quote_id: id, p_final: true })
-  if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI016' ? 409 : 500 })
+  if (error) {
+    const message = error.code?.startsWith('MI02') ? depositErrorMessage(error, t) : lifecycleErrorMessage(error, t)
+    return NextResponse.json({ error: message, code: error.code }, { status: error.code === 'MI016' || error.code?.startsWith('MI02') ? 409 : 500 })
+  }
   const result = data as Converted | null
   if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
   if (result.existing) return NextResponse.json({ invoiceId: result.invoice_id, existing: true })
