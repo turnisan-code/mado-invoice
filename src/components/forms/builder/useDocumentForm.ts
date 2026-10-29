@@ -6,8 +6,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { addDays, today } from '@/lib/utils/document'
 import { FLUSH_EDITS_EVENT, type FlushEditsDetail } from '@/lib/issued-pdf'
-import { requestErrorMessage } from '@/lib/api-errors'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 import { useT } from '@/lib/i18n/client'
 import type { TFn } from '@/lib/i18n'
 import type { Client, DocumentType } from '@/types'
@@ -44,19 +43,19 @@ function removeBackup(key: string) {
 }
 
 // persist() words its own failures: a database error by its code (the deposit guards MI019–MI021
-// included), never by its text. Anything else thrown on the way (offline, a bug) is logged and
-// worded generically.
+// included) or as no connection when offline, never by its text. Anything else thrown on the way
+// is a bug: logged and worded generically.
 class SaveError extends Error {}
 
 function dbSaveError(error: { code?: string; message: string; details?: string | null }, t: TFn): SaveError {
   console.error('[editor] save failed:', error.code, error.message)
-  return new SaveError(lifecycleErrorMessage(error, t))
+  return new SaveError(dbErrorMessage(t, error))
 }
 
 export function errorMessage(e: unknown, t: TFn): string {
   if (e instanceof SaveError) return e.message
   console.error('[editor] save failed:', e)
-  return requestErrorMessage(t, e)
+  return t('messages.generic')
 }
 
 export type PersistMode = 'auto' | 'save' | 'issue'

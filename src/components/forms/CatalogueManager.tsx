@@ -11,7 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { CatalogueItem, CatalogueUsage, Unit, VatRate } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 import { dropIndex, moveItem, type DropEdge } from './builder/model'
 import { useReorder } from './builder/useReorder'
 
@@ -145,7 +145,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   // The database's own text goes to the console; the toast is worded in the UI language.
   function failed(error: PostgrestError) {
     console.error('[catalogue] write failed:', error.code, error.message)
-    toast.error(lifecycleErrorMessage(error, t))
+    toast.error(dbErrorMessage(t, error))
   }
 
   const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))) as string[]

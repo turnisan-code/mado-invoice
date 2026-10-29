@@ -11,7 +11,7 @@ import { countryOptions, isCountryCode, suggestTaxTreatment } from '@/lib/utils/
 import { clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { useT } from '@/lib/i18n/client'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 import type { PublicSettings } from '@/lib/public-settings'
 import type { Client, Language, TaxTreatment } from '@/types'
 import { SELECT_CLS } from './ClientPicker'
@@ -95,7 +95,7 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
     setBusy(false)
     if (error) {
       console.error('[editor] client not created:', error.code, error.message)
-      toast.error(lifecycleErrorMessage(error, t))
+      toast.error(dbErrorMessage(t, error))
       return
     }
     toast.success(t('editor.client.created', { name: clientDisplayName(data) }))

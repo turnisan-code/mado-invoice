@@ -13,8 +13,7 @@ import type { PublicSettings } from '@/lib/public-settings'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { toastApiError } from '@/lib/google/toast'
 import { googleErrorText } from '@/lib/google/reauth'
-import { apiErrorMessage } from '@/lib/api-errors'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { apiErrorMessage, dbErrorMessage } from '@/lib/api-errors'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -440,7 +439,7 @@ export default function SettingsForm({ settings }: Props) {
   // The database's own text goes to the console; the toast is worded in the UI language.
   function saveFailed(error: PostgrestError) {
     console.error('[settings] save failed:', error.code, error.message)
-    toast.error(lifecycleErrorMessage(error, t))
+    toast.error(dbErrorMessage(t, error))
   }
 
   async function saveBiz() {
@@ -2196,7 +2195,7 @@ function EInvoiceCard({ settings }: { settings: PublicSettings | null }) {
     setSaving(false)
     if (saveError) {
       console.error('[settings] Peppol address not saved:', saveError.code, saveError.message)
-      toast.error(lifecycleErrorMessage(saveError, t))
+      toast.error(dbErrorMessage(t, saveError))
       return
     }
     setPeppol({ scheme, id })

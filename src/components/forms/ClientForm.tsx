@@ -23,7 +23,7 @@ import { parseEmailList } from '@/lib/templates'
 import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/types'
 import type { TFn } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 
 interface Props {
   client?: Client
@@ -249,7 +249,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
   // The database's own text goes to the console; the toast is worded in the UI language.
   function failed(error: PostgrestError) {
     console.error('[clients] write failed:', error.code, error.message)
-    toast.error(lifecycleErrorMessage(error, t))
+    toast.error(dbErrorMessage(t, error))
   }
 
   async function save(payload: Payload) {
