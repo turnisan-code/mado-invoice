@@ -18,6 +18,7 @@ import { n } from '@/lib/i18n'
 import { logEvent } from '@/lib/events'
 import { canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
 import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
+import { loadMoneyLock } from '@/lib/deposits'
 
 interface Payment {
   id: string
@@ -98,6 +99,8 @@ export default function PaymentPanel({
   const [bookamatBusy, setBookamatBusy] = useState<'sync' | 'attach' | 'reset' | null>(null)
   // null until loaded from the database.
   const [bookamat, setBookamat] = useState<BookamatInfo | null>(null)
+  // An advance invoice deducted on an issued final invoice: its payments stay (MI022).
+  const [moneyLock, setMoneyLock] = useState<{ id: string; number: string } | null>(null)
   const router = useRouter()
   const supabase = createClient()
   const uid = useId()
@@ -141,6 +144,15 @@ export default function PaymentPanel({
     void fetchBookamatInfo(documentId).then(info => { if (active && info) setBookamat(info) })
     return () => { active = false }
   }, [bookamatConfigured, documentId])
+
+  useEffect(() => {
+    if (!number) return
+    let active = true
+    loadMoneyLock(createClient(), documentId)
+      .then(lock => { if (active) setMoneyLock(lock) })
+      .catch(err => console.error('[PaymentPanel] deduction lock not loaded:', err))
+    return () => { active = false }
+  }, [documentId, number])
 
   async function loadBookamat() {
     const info = await fetchBookamatInfo(documentId)
@@ -369,17 +381,25 @@ export default function PaymentPanel({
               )}
               {p.reference && <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono truncate min-w-0">{t('lifecycle.payments.referenceShort', { reference: p.reference })}</span>}
               {p.note && p.kind !== 'credit' && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
-              <button
-                type="button"
-                onClick={() => setPendingRemove(p)}
-                aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: formatDate(p.date, lang) })}
-                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
+              {!(moneyLock && p.kind === 'payment') && (
+                <button
+                  type="button"
+                  onClick={() => setPendingRemove(p)}
+                  aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: formatDate(p.date, lang) })}
+                  className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           ))}
         </div>
+      )}
+      {moneyLock && payments.some(p => p.kind === 'payment') && (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {t('records.deposits.paymentsLocked', { number: moneyLock.number })}{' '}
+          <Link href={`/invoices/${moneyLock.id}`} className="underline underline-offset-2 hover:text-neutral-800 dark:hover:text-neutral-100">{t('deposits.history.openFinal')}</Link>
+        </p>
       )}
 
       {(offerSkonto || offerWriteoff || offerUncollectible) && (

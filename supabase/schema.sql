@@ -1085,6 +1085,45 @@ begin
 end;
 $$;
 
+-- A final invoice deducts an advance invoice with the money received on it, less what was paid
+-- back on its credit notes (src/lib/deposits.ts). Once the final invoice is issued that amount is
+-- fixed on it, so the money behind it stays as it is: removing a payment of the advance invoice,
+-- or recording or removing a refund on one of its credit notes, is refused (MI022) until the
+-- final invoice is cancelled with its Storno, which frees the advance invoice again.
+create or replace function payments_deposit_guard()
+returns trigger language plpgsql as $$
+declare
+  p   payments%rowtype;
+  adv documents%rowtype;
+  f   documents%rowtype;
+begin
+  if tg_op = 'DELETE' then p := old; else p := new; end if;
+  if p.kind = 'refund' then
+    select a.* into adv
+    from documents c join documents a on a.id = c.converted_from_id
+    where c.id = p.document_id and c.type = 'credit_note';
+  elsif p.kind = 'payment' and tg_op = 'DELETE' then
+    select * into adv from documents where id = p.document_id;
+  end if;
+
+  if adv.id is not null and adv.type = 'invoice' and adv.invoice_kind = 'advance' and adv.final_invoice_id is not null then
+    select * into f from documents where id = adv.final_invoice_id;
+    if f.number is not null and f.status <> 'cancelled' then
+      raise exception using errcode = 'MI022',
+        message = format('%s is deducted on final invoice %s with the money received on it; cancel that invoice with its Storno first.', coalesce(adv.number, 'This invoice'), f.number);
+    end if;
+  end if;
+
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_deposit_guard on payments;
+create trigger payments_deposit_guard
+  before insert or delete on payments
+  for each row execute function payments_deposit_guard();
+
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
@@ -1181,8 +1220,9 @@ $$;
 -- ─── Invoice → credit note / Storno ──────────────────────────────────────────
 -- Copies an issued invoice into a draft credit note. With p_cancel it is a Storno: the credit note is
 -- numbered right here (issue_document) and the invoice cancelled in the same transaction, so a
--- Storno is never a deletable draft and never exists without its cancelled invoice.
--- Null when the invoice does not exist.
+-- Storno is never a deletable draft and never exists without its cancelled invoice. Only a Storno
+-- mirrors a final invoice's deduction lines; a plain credit note starts with the lines that bill
+-- the service. Null when the invoice does not exist.
 create or replace function create_credit_note(p_invoice_id uuid, p_cancel boolean default false)
 returns jsonb language plpgsql as $$
 declare
@@ -1217,7 +1257,7 @@ begin
   from document_items i,
        lateral jsonb_populate_record(null::document_items,
          to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', cn_id)) r
-  where i.document_id = inv.id
+  where i.document_id = inv.id and (p_cancel or i.line_type <> 'deduction')
   order by i.sort_order;
 
   if p_cancel then
