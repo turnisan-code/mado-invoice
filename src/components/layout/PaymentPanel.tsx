@@ -173,7 +173,7 @@ export default function PaymentPanel({
         .from('payments')
         .insert(rows.map(row => ({ document_id: documentId, ...row })))
         .select()
-      if (error) { toast.error(error.message); return false }
+      if (error) { toast.error(lifecycleErrorMessage(error, t)); return false }
 
       const next = [...payments, ...(data ?? [])]
       setPayments(next)

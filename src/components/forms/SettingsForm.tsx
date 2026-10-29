@@ -196,6 +196,8 @@ export default function SettingsForm({ settings }: Props) {
   // ── Brand state ──────────────────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [confirmRemoveLogo, setConfirmRemoveLogo] = useState(false)
+  const [removingLogo, setRemovingLogo] = useState(false)
   const [biz, setBiz] = useState({
     company_name: settings?.company_name ?? '',
     owner_name:   settings?.owner_name ?? '',
@@ -863,20 +865,23 @@ export default function SettingsForm({ settings }: Props) {
     setUploadingLogo(true)
     const path = `logo.${ext}`
     const { error } = await supabase.storage.from('logos').upload(path, file, { upsert: true, contentType: file.type })
-    if (error) { toast.error(error.message); setUploadingLogo(false); return }
+    if (error) { toast.error(t('messages.api.database')); setUploadingLogo(false); return }
     const { data } = supabase.storage.from('logos').getPublicUrl(path)
     const url = `${data.publicUrl}?t=${Date.now()}`
     const { error: saveError } = await supabase.from('settings').update({ logo_url: url }).eq('id', settings.id)
     setUploadingLogo(false)
-    if (saveError) { toast.error(saveError.message); return }
+    if (saveError) { toast.error(t('messages.api.database')); return }
     setLogoUrl(url)
     toast.success(t('settings.company.logoUploaded'))
   }
 
   async function removeLogo() {
-    if (!settings) return
+    if (!settings || removingLogo) return
+    setRemovingLogo(true)
     const { error } = await supabase.from('settings').update({ logo_url: null }).eq('id', settings.id)
-    if (error) { toast.error(t('books.logoRemoveFailed', { error: error.message })); return }
+    setRemovingLogo(false)
+    if (error) { toast.error(t('messages.logo.removeFailed')); return }
+    setConfirmRemoveLogo(false)
     setLogoUrl('')
     toast.success(t('settings.company.logoRemoved'))
   }
@@ -998,12 +1003,22 @@ export default function SettingsForm({ settings }: Props) {
                   </div>
                   <button
                     type="button"
-                    onClick={removeLogo}
+                    onClick={() => setConfirmRemoveLogo(true)}
                     aria-label={t('settings.company.removeLogo')}
                     className="absolute -top-2.5 -right-2.5 h-7 w-7 rounded-full bg-neutral-200 dark:bg-neutral-700 flex items-center justify-center hover:bg-red-100 dark:hover:bg-red-900 transition-colors"
                   >
                     <X size={12} className="text-neutral-600 dark:text-neutral-300" />
                   </button>
+                  <ConfirmDialog
+                    open={confirmRemoveLogo}
+                    title={t('messages.logo.removeTitle')}
+                    description={t('messages.logo.removeDesc')}
+                    confirmLabel={removingLogo ? t('common.removing') : t('settings.company.removeLogo')}
+                    destructive
+                    busy={removingLogo}
+                    onConfirm={() => void removeLogo()}
+                    onCancel={() => setConfirmRemoveLogo(false)}
+                  />
                 </div>
               ) : (
                 <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">

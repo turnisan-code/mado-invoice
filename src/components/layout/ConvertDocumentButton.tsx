@@ -7,6 +7,7 @@ import { ArrowRight, ReceiptText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { flushPendingEdits } from '@/lib/issued-pdf'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { useT } from '@/lib/i18n/client'
 
 // Quote → invoice and invoice → credit note. The server copies the source document from the
@@ -45,17 +46,18 @@ export default function ConvertDocumentButton({ kind, sourceId }: { kind: keyof 
   const Icon = k.icon
 
   async function convert() {
+    if (loading) return
     setLoading(true)
     try {
       await flushPendingEdits(sourceId)
       const res = await fetch(k.url(sourceId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       const data = await res.json().catch(() => ({}))
       const href = res.ok ? k.target(data) : null
-      if (!href) { toast.error(data.error ?? t('common.unknownError')); return }
+      if (!href) { toast.error(apiErrorMessage(t, data)); return }
       toast.success(data.existing ? t('lifecycle.convert.alreadyConverted') : t(k.done))
       router.push(href)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.unknownError'))
+      toast.error(requestErrorMessage(t, err))
     } finally {
       setLoading(false)
       setConfirming(false)

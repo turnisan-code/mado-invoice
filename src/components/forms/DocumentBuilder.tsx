@@ -219,7 +219,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   // Issuing froze the PDF and archived it to Drive on the server; a failure there never undoes
   // the issue, it is only reported (the page then offers to create the archive copy).
   function reportArchive(result: IssueResponse) {
-    if (result.snapshotError) toast.error(t('builder.snapshotFailed', { error: result.snapshotError }))
+    if (result.snapshotError) toast.error(t('messages.archiveLater'))
     if (result.driveError) toastApiError(t, result.driveError, t('builder.driveFailedPrefix'))
     else if (result.drive) notifyDriveUpload(t, result.drive.webViewLink, result.drive.existing)
   }

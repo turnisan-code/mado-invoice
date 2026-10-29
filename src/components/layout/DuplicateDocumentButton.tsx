@@ -61,7 +61,15 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
     })
 
     if (items.length > 0) {
-      await supabase.from('document_items').insert(items)
+      const { error: itemsErr } = await supabase.from('document_items').insert(items)
+      if (itemsErr) {
+        // A copy without its lines is no copy; the empty draft goes again.
+        const { error: cleanupErr } = await supabase.from('documents').delete().eq('id', newDoc.id).is('number', null)
+        if (cleanupErr) console.error('[duplicate] empty draft not removed:', cleanupErr.message)
+        toast.error(t('documents.couldNotDuplicate'))
+        setLoading(false)
+        return
+      }
     }
 
     toast.success(t('documents.duplicated'))

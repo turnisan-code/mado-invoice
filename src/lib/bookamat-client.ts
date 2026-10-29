@@ -1,6 +1,7 @@
 // The browser-safe half of the Bookamat integration: what a document books, its state in lists,
 // error texts and the call to the sync route. The server half (HTTP, sync, cron) is bookamat.ts.
 import { roundCents } from '@/lib/utils/document'
+import { knownApiError } from '@/lib/api-errors'
 import type { DictKey, TFn } from '@/lib/i18n'
 import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/types'
 
@@ -23,12 +24,13 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'unknown_outcome',
 ]
 
-// A route's error payload in the UI language; unknown payloads fall back to their raw message.
+// A route's error payload in the UI language; the general API codes (signed out, bad request) are
+// worded by api-errors, and only a payload without any known code falls back to its message.
 export function bookamatErrorMessage(t: TFn, payload: unknown, fallback = t('common.unknownError')): string {
   const p = (payload && typeof payload === 'object' ? payload : {}) as { error?: unknown; code?: unknown; detail?: unknown }
   const message = typeof p.error === 'string' && p.error ? p.error : fallback
   const code = ERROR_CODES.find(c => c === p.code)
-  if (!code) return message
+  if (!code) return knownApiError(t, p) ?? message
   const detail = p.detail && typeof p.detail === 'object' ? p.detail as ErrorDetail : {}
   return t(`books.errors.${code}` as DictKey, { message, ...detail })
 }

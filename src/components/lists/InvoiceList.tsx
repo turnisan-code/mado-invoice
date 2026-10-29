@@ -14,6 +14,7 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { displayStatus, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import type { BookamatState } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -276,7 +277,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
           const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
           if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
         }
-        toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: data.error ?? t('common.failed') }))
+        toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: apiErrorMessage(t, data) }))
         return
       }
       if (isDelete) {
@@ -295,8 +296,8 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       }
       selection.clear()
       router.refresh()
-    } catch {
-      toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: t('common.failed') }))
+    } catch (err) {
+      toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: requestErrorMessage(t, err) }))
     } finally {
       setBulkLoading(false)
       setBulkConfirm(null)

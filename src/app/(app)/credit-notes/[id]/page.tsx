@@ -76,11 +76,13 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
         <CreditNoteSettlement
           creditNoteId={doc.id}
           issued={!!doc.number}
+          number={doc.number}
           total={settlement.total}
           currency={doc.currency ?? 'EUR'}
           invoice={settlement.invoice}
           applied={settlement.applied}
           refunds={settlement.refunds}
+          bookamatConfigured={publicSettings.bookamat_configured}
         />
       )}
       <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />

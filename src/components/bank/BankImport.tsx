@@ -12,6 +12,7 @@ import type { BankTransaction, CsvMapping, ParsedStatement } from '@/lib/bank/ty
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
+import { apiErrorMessage } from '@/lib/api-errors'
 
 interface Props {
   invoices: OpenInvoice[]
@@ -262,11 +263,12 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     }).catch(() => null)
     setBusy(false)
     if (!res?.ok) {
-      const { error } = res ? await res.json().catch(() => ({ error: t('common.unknownError') })) : { error: t('common.unknownError') }
+      const error = res ? apiErrorMessage(t, await res.json().catch(() => ({}))) : t('messages.network')
       toast.error(t('bankImport.importFailed', { error }))
       return
     }
-    const response: ImportResponse = await res.json()
+    const response: ImportResponse | null = await res.json().catch(() => null)
+    if (!response) { toast.error(t('bankImport.importFailed', { error: t('messages.generic') })); router.refresh(); return }
     setResult({ ...response, invoices: labels })
     router.refresh()
   }
@@ -359,7 +361,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
               return (
                 <li key={i}>
                   {tx ? `${formatDate(tx.date, lang)} · ${money(tx.amount, tx.currency)} · ${tx.counterparty ?? ''}` : e.transaction_id}
-                  {' — '}{e.code ? t(`bankImport.error.${e.code}`) : e.message}
+                  {' — '}{e.code ? t(`bankImport.error.${e.code}`) : t('messages.api.database')}
                 </li>
               )
             })}

@@ -155,6 +155,7 @@ export const en = {
     generic: 'That did not work. Please try again.',
     network: 'The server could not be reached. Check the connection and try again.',
     copyFailed: 'Copying did not work — select the link and copy it by hand.',
+    archiveLater: 'Issued, but no archive copy was stored. The document page offers to create it.',
     api: {
       unauthorized: 'You have been signed out. Sign in again and repeat the step.',
       invalid_json: 'The request could not be read. Reload the page and try again.',

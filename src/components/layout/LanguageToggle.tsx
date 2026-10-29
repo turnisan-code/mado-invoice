@@ -6,6 +6,7 @@ import { Languages } from 'lucide-react'
 import { toast } from 'sonner'
 import { useT } from '@/lib/i18n/client'
 import { UI_LANGS, type UiLang } from '@/lib/i18n'
+import { apiErrorMessage } from '@/lib/api-errors'
 import { cn } from '@/lib/utils'
 
 const LANGUAGE_NAMES: Record<UiLang, string> = { de: 'Deutsch', en: 'English' }
@@ -24,11 +25,10 @@ export default function LanguageToggle({ className, iconSize = 16 }: { className
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lang: next }),
-    })
+    }).catch(() => null)
     setBusy(false)
-    if (!res.ok) {
-      const { error } = await res.json().catch(() => ({ error: t('common.unknownError') }))
-      toast.error(error)
+    if (!res?.ok) {
+      toast.error(res ? apiErrorMessage(t, await res.json().catch(() => ({}))) : t('messages.network'))
       return
     }
     router.refresh()

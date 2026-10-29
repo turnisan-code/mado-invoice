@@ -13,6 +13,7 @@ import { dayOfMonth } from '@/lib/utils/recurring'
 import { ScheduleFormFields, validateSchedule, type ScheduleFormValues } from '@/components/recurring/MakeRecurringDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
+import { apiErrorMessage } from '@/lib/api-errors'
 import type { RecurringSchedule } from '@/types'
 
 export interface ScheduleRow extends RecurringSchedule {
@@ -56,9 +57,10 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
 
   async function generate(s: ScheduleRow) {
     setBusyId(s.id)
-    const res = await fetch(`/api/recurring/${s.id}/generate`, { method: 'POST' })
-    const data = await res.json().catch(() => ({}))
+    const res = await fetch(`/api/recurring/${s.id}/generate`, { method: 'POST' }).catch(() => null)
+    const data = res ? await res.json().catch(() => ({})) : {}
     setBusyId(null)
+    if (!res) { toast.error(`${t('recurring.generateFailed')} ${t('messages.network')}`); return }
     if (!res.ok) {
       if (data.code === 'template_cancelled') {
         // The generator paused the schedule; refresh so the row shows it.
@@ -66,7 +68,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
         router.refresh()
         return
       }
-      toast.error(data.code === 'inactive' ? t('recurring.generateInactive') : (data.error || t('recurring.generateFailed')))
+      toast.error(data.code === 'inactive' ? t('recurring.generateInactive') : apiErrorMessage(t, data, t('recurring.generateFailed')))
       return
     }
     if (!data.documentId) {

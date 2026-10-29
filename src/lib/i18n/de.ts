@@ -157,6 +157,7 @@ export const de = {
     generic: 'Das hat nicht geklappt. Bitte noch einmal versuchen.',
     network: 'Der Server ist nicht erreichbar. Verbindung prüfen und noch einmal versuchen.',
     copyFailed: 'Kopieren hat nicht geklappt — den Link markieren und von Hand kopieren.',
+    archiveLater: 'Ausgestellt, aber es wurde keine Archivkopie gespeichert. Auf der Belegseite lässt sie sich erstellen.',
     api: {
       unauthorized: 'Die Sitzung ist abgelaufen. Neu anmelden und den Schritt wiederholen.',
       invalid_json: 'Die Anfrage konnte nicht gelesen werden. Seite neu laden und noch einmal versuchen.',
