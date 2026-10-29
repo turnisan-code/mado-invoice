@@ -178,8 +178,10 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
   const discountLabel = line.discount_type && summary.discount > 0
     ? (summary.percent != null ? `−${formatLocaleNumber(summary.percent, 2)} % · ` : '') + `−${formatMoney(summary.discount, currency)}`
     : null
-  const open = (kind: 'date' | 'discount', height: number) => (e: React.MouseEvent<HTMLButtonElement>) =>
-    setPopover(p => (p?.kind === kind ? null : { kind, anchor: anchorTo(e.currentTarget, height) }))
+  const open = (kind: 'date' | 'discount', height: number) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    const anchor = anchorTo(e.currentTarget, height)
+    setPopover(p => (p?.kind === kind ? null : { kind, anchor }))
+  }
   const toolBtn = (active: boolean, invalid: boolean) =>
     `h-11 w-11 border sm:h-9 sm:w-6 sm:border-0 ${iconBtn} ${invalid ? `${INVALID_CLS} text-red-500` : active ? 'border-blue-300 dark:border-blue-700 text-blue-500' : `border-neutral-200 dark:border-neutral-700 ${mutedBtn}`}`
 
