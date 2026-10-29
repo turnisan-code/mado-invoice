@@ -68,10 +68,11 @@ export interface EInvoiceSection {
   lines: EInvoiceLine[]
 }
 
-// A document level allowance (discount) or, with charge set, a surcharge; always a positive amount.
+// A document level allowance or, with charge set, a surcharge; always a positive amount.
 export interface EInvoiceAllowance {
   charge: boolean
   reason: string
+  // From a section or document discount; a charge where the discount shrinks a net credit.
   discount: boolean
   amount: number
   base: number
@@ -154,12 +155,13 @@ const UNIT_CODES: Record<Unit, string> = {
   session: 'C62',
 }
 
-// Peppol electronic address schemes (EAS) of VAT numbers, by the number's country prefix.
+// Peppol electronic address schemes (EAS) of VAT numbers, by the number's country prefix. Italy,
+// Denmark and Finland address their participants by other registers, entered on the client.
 const VAT_SCHEMES: Record<string, string> = {
   AT: '9914', BE: '9925', BG: '9926', CH: '9927', CY: '9928', CZ: '9929', DE: '9930', EE: '9931',
   GB: '9932', EL: '9933', GR: '9933', HR: '9934', IE: '9935', LI: '9936', LT: '9937', LU: '9938',
   LV: '9939', MC: '9940', MT: '9943', NL: '9944', PL: '9945', PT: '9946', RO: '9947', SI: '9949',
-  SK: '9950', SM: '9951', FR: '9957', HU: '9910',
+  SK: '9950', SM: '9951', FR: '9957', HU: '9910', ES: '9920', SE: '9955',
 }
 
 // A VAT number used as a Peppol address, e.g. 9914:ATU12345678.
@@ -203,26 +205,31 @@ function periodOf(start: string | null | undefined, end: string | null | undefin
 type Row = { reason: string; target: number; percent: number | null; base: Map<string, number>; ideal: Map<string, number> }
 
 // Splits each VAT category's allowance total (lines minus the taxable amount calcTotals printed)
-// into the discounts it came from, in cents. Category totals are exact, so every VAT breakdown
-// adds up; then cents are moved between discounts within a category until each discount also
-// matches the amount the PDF shows for it, as far as the categories they share allow.
+// into the discounts it came from, in signed cents: a discount on a category whose lines are net
+// negative (credit lines) shrinks that credit, so its share there is negative and becomes a charge.
+// Category totals are exact, so every VAT breakdown adds up; then cents are moved between
+// discounts within a category until each discount also matches the amount the PDF shows for it,
+// as far as the categories they share allow, never flipping a share's sign.
 function allocate(rows: Row[], targets: Map<string, number>, order: string[]): Map<string, number>[] {
   const cents = rows.map(() => new Map<string, number>())
   for (const key of order) {
-    const total = Math.round((targets.get(key) ?? 0) * 100)
-    const cells = rows.map((r, i) => ({ i, x: r.ideal.get(key) ?? 0 })).filter(c => c.x > 0)
-    const sum = cells.reduce((s, c) => s + c.x, 0)
-    if (total <= 0 || !cells.length || sum <= 0) continue
-    const scaled = cells.map(c => ({ i: c.i, v: (c.x / sum) * total }))
-    let left = total
-    for (const c of scaled) { const f = Math.floor(c.v); cents[c.i].set(key, f); left -= f }
-    scaled.sort((a, b) => (b.v - Math.floor(b.v)) - (a.v - Math.floor(a.v)) || a.i - b.i)
-    for (let n = 0; n < left; n++) {
-      const c = scaled[n % scaled.length]
-      cents[c.i].set(key, (cents[c.i].get(key) ?? 0) + 1)
+    const cells = rows.map((r, i) => ({ i, v: (r.ideal.get(key) ?? 0) * 100 })).filter(c => Math.abs(c.v) > 1e-6)
+    if (!cells.length) continue
+    let left = Math.round((targets.get(key) ?? 0) * 100)
+    for (const c of cells) { const f = Math.floor(c.v); cents[c.i].set(key, f); left -= f }
+    // Missing cents go to the largest remainders, surplus ones come off the smallest.
+    const byRemainder = [...cells].sort((a, b) => (b.v - Math.floor(b.v)) - (a.v - Math.floor(a.v)) || a.i - b.i)
+    if (left < 0) byRemainder.reverse()
+    const step = Math.sign(left)
+    for (let n = 0; n < Math.abs(left); n++) {
+      const c = byRemainder[n % byRemainder.length]
+      cents[c.i].set(key, cents[c.i].get(key)! + step)
     }
   }
 
+  const sign = (i: number, key: string) => Math.sign(rows[i].ideal.get(key) ?? 0)
+  const canGive = (i: number, key: string) => sign(i, key) < 0 || (sign(i, key) > 0 && (cents[i].get(key) ?? 0) > 0)
+  const canTake = (i: number, key: string) => sign(i, key) > 0 || (sign(i, key) < 0 && (cents[i].get(key) ?? 0) < 0)
   const rowSum = (i: number) => [...cents[i].values()].reduce((s, v) => s + v, 0)
   for (let guard = 0; guard < 1000; guard++) {
     const diff = rows.map((r, i) => rowSum(i) - Math.round(r.target * 100))
@@ -231,7 +238,7 @@ function allocate(rows: Row[], targets: Map<string, number>, order: string[]): M
       if (diff[from] <= 0) continue
       for (let to = 0; to < rows.length && !moved; to++) {
         if (diff[to] >= 0) continue
-        const key = order.find(k => (cents[from].get(k) ?? 0) > 0 && (rows[to].ideal.get(k) ?? 0) > 0)
+        const key = order.find(k => canGive(from, k) && canTake(to, k))
         if (!key) continue
         cents[from].set(key, cents[from].get(key)! - 1)
         cents[to].set(key, (cents[to].get(key) ?? 0) + 1)
@@ -357,16 +364,17 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
     for (const g of groups) {
       const k = keyId(g.key)
       const value = (allocated[i].get(k) ?? 0) / 100
-      if (value <= 0) continue
+      if (value === 0) continue
       const base = roundCents(row.base.get(k) ?? 0)
-      const exact = row.percent != null && roundCents(base * row.percent / 100) === value
-      allowances.push({ charge: false, discount: true, reason: row.reason, amount: value, base, percent: exact ? row.percent : null, tax: g.key })
+      const charge = value < 0
+      const exact = !charge && row.percent != null && roundCents(base * row.percent / 100) === value
+      allowances.push({ charge, discount: true, reason: row.reason, amount: Math.abs(value), base, percent: exact ? row.percent : null, tax: g.key })
     }
   })
-  // What calcTotals' cent rounding left in a category beyond its discounts.
+  // The cent drift calcTotals pushed into a category that no discount touches.
   for (const g of groups) {
     const k = keyId(g.key)
-    const given = allowances.filter(a => keyId(a.tax) === k).reduce((s, a) => s + a.amount, 0)
+    const given = allowances.filter(a => keyId(a.tax) === k).reduce((s, a) => s + (a.charge ? -a.amount : a.amount), 0)
     const rest = roundCents((targets.get(k) ?? 0) - given)
     if (rest === 0) continue
     allowances.push({
@@ -454,8 +462,11 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
     ? { date: skontoDeadline(doc.date, doc.skonto_days), percent: clampPercent(doc.skonto_percent), base: totals.total, amount: skontoValue }
     : null
 
+  const payable = roundCents(taxInclusive - prepaid)
+  // BR-CO-25: an amount due needs a due date or payment terms; without either it is due on receipt.
   const paymentTerms = kind === 'invoice'
     ? paymentTermsSentence({ type: kind, date: doc.date, due_date: doc.due_date, skonto_percent: doc.skonto_percent, skonto_days: doc.skonto_days, currency: 'EUR' }, totals.total, lang)
+      ?? (payable > 0 ? t('einvoice.xml.payableOnReceipt') : null)
     : reference ? t('einvoice.xml.creditTerms', { number: reference.number }) : t('einvoice.xml.creditTermsPlain')
 
   const footer = carried.length ? carried.join('\n') : null
@@ -489,7 +500,7 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
       taxTotal: totals.total_vat,
       taxInclusive,
       prepaid,
-      payable: roundCents(taxInclusive - prepaid),
+      payable,
     },
     payment,
     paymentTerms,
