@@ -10,7 +10,7 @@ import { useT } from '@/lib/i18n/client'
 import type { Client, DocumentType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import {
-  AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, lineValues, savedKeyOf, storedKeyOf, termDays,
+  AUTOSAVE_DELAY, PATHS, adoptLineIds, contentKeyOf, docFields, initialForm, itemsPayload, lineValues, savedKeyOf, storedKeyOf, termDays,
   type EditorDocument, type FormState, type LineItem,
 } from './model'
 import { BUYER_REFERENCE_EVENT, ISSUE_DATE_EVENT, type BuyerReferenceDetail, type IssueDateDetail } from './events'
@@ -239,7 +239,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   function restoreBackup() {
     if (!restoreOffer) return
     const f: FormState = { ...formRef.current, ...restoreOffer.form, currency: form.currency }
-    setForm({ ...f, lines: f.lines.map(l => ({ ...l, service_date_end: l.service_date_end ?? null })) })
+    const lines = f.lines.map(l => ({ ...l, service_date_end: l.service_date_end ?? null }))
+    setForm({ ...f, lines: adoptLineIds(lines, formRef.current.lines) })
     offerPendingRef.current = false
     setRestoreOffer(null)
     toast.success(t('issueChecks.restored'))

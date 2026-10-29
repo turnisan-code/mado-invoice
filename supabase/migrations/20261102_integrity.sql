@@ -2,6 +2,8 @@
 --   * replace_document_items keeps every line's id across saves (update what comes back, insert
 --     the rest, delete what is gone), so time entries and expenses stay on the line that bills
 --     them. A billed line removed from a draft frees its entries; the draft's history says so.
+--     A save with lines that carry no id (a tab still on the code from before, an old device
+--     backup) frees nothing, so this file can run before or after the app is deployed.
 --   * document_events types 'project_invoiced' (a draft made from a project's unbilled entries,
 --     logged by /api/projects/[id]/invoice) and 'project_released' (entries unbilled again: their
 --     line was removed, the invoice cancelled, or released on the project page).
@@ -50,6 +52,7 @@ end $$;
 -- billed on a deleted line move to a new line with exactly the same content (a device backup
 -- from before ids were kept); otherwise a draft frees them and its history says so, while an
 -- issued document keeps them billed (what it billed stays billed), only without the line.
+-- A save with a line that has no id frees nothing: it may be an edited line, not a removed one.
 create or replace function replace_document_items(p_document_id uuid, p_items jsonb)
 returns void language plpgsql as $$
 declare
@@ -62,10 +65,17 @@ declare
   twins  uuid[] := '{}';
   freed  integer := 0;
   more   integer := 0;
+  legacy boolean;
 begin
   -- Two saves of one document (two tabs) run one after the other.
   select * into d from documents where id = p_document_id for update;
   if d.id is null then raise exception 'document % not found', p_document_id; end if;
+  -- A line sent without an id (a tab still on the code from before ids were kept, or a device
+  -- backup from then) becomes a new row, so an edited line cannot be told from a removed one.
+  legacy := exists (
+    select 1 from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as x(e)
+    where coalesce(x.e->>'id', '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  );
 
   with sent as (
     select x.e || jsonb_build_object('document_id', p_document_id) as e, x.ord,
@@ -135,7 +145,7 @@ begin
     end if;
   end loop;
 
-  if d.number is null then
+  if d.number is null and not legacy then
     update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
     from document_items i
     where i.document_id = p_document_id and not (i.id = any(stays))

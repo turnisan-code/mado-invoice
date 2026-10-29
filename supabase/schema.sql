@@ -753,7 +753,8 @@ $$;
 -- document's lines that did not come back are deleted. Time entries and expenses billed on a
 -- deleted line move to a new line with exactly the same content (a device backup from before ids
 -- were kept); otherwise a draft frees them and its history says so, while an issued document
--- keeps them billed (what it billed stays billed), only without the line.
+-- keeps them billed (what it billed stays billed), only without the line. A save with a line
+-- that has no id frees nothing: it may be an edited line, not a removed one.
 create or replace function replace_document_items(p_document_id uuid, p_items jsonb)
 returns void language plpgsql as $$
 declare
@@ -766,10 +767,17 @@ declare
   twins  uuid[] := '{}';
   freed  integer := 0;
   more   integer := 0;
+  legacy boolean;
 begin
   -- Two saves of one document (two tabs) run one after the other.
   select * into d from documents where id = p_document_id for update;
   if d.id is null then raise exception 'document % not found', p_document_id; end if;
+  -- A line sent without an id (a tab still on the code from before ids were kept, or a device
+  -- backup from then) becomes a new row, so an edited line cannot be told from a removed one.
+  legacy := exists (
+    select 1 from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as x(e)
+    where coalesce(x.e->>'id', '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  );
 
   with sent as (
     select x.e || jsonb_build_object('document_id', p_document_id) as e, x.ord,
@@ -839,7 +847,7 @@ begin
     end if;
   end loop;
 
-  if d.number is null then
+  if d.number is null and not legacy then
     update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
     from document_items i
     where i.document_id = p_document_id and not (i.id = any(stays))

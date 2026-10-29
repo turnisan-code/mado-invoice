@@ -218,9 +218,32 @@ export function lineValues(lines: LineItem[]) {
 
 // What replace_document_items receives: every line with its id, so the row (and the time entries
 // and expenses billed on it) is kept. An id that is no UUID (a device backup from before ids were
-// kept) goes as null and becomes a new row.
+// kept) goes as null and becomes a new row; such a save frees no project entries.
 export function itemsPayload(lines: LineItem[]) {
   return lineValues(lines).map((values, i) => ({ id: UUID.test(lines[i].id) ? lines[i].id : null, ...values }))
+}
+
+// The content replace_document_items compares to move a removed row's entries to a new row.
+function twinKey(l: LineItem): string {
+  const v = lineValues([l])[0]
+  return JSON.stringify([v.line_type, v.description, v.quantity, v.unit, v.unit_price, v.vat_rate, v.service_date, v.service_date_end])
+}
+
+// A device backup from before line ids were kept has ids that are no UUIDs. A restored line with
+// the same content as an open line takes that line's id, so its row and what is billed on it stay.
+// When every open line found its twin, the other restored lines are new and get ids of their own;
+// otherwise they keep theirs and save as new rows without freeing anything, since an open line
+// without a twin may have been edited rather than removed.
+export function adoptLineIds(restored: LineItem[], open: LineItem[]): LineItem[] {
+  if (restored.every(l => UUID.test(l.id))) return restored
+  const used = new Set(restored.filter(l => UUID.test(l.id)).map(l => l.id))
+  const free = open.filter(l => UUID.test(l.id) && !used.has(l.id))
+  const lines = restored.map(l => {
+    if (UUID.test(l.id)) return l
+    const k = free.findIndex(o => twinKey(o) === twinKey(l))
+    return k < 0 ? l : { ...l, id: free.splice(k, 1)[0].id }
+  })
+  return free.length ? lines : lines.map(l => UUID.test(l.id) ? l : { ...l, id: makeId() })
 }
 
 // Exactly what a save writes, so a document reloaded from the database has the key it was saved with.
