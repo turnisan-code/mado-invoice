@@ -343,16 +343,10 @@ export function advanceItems(quote: QuoteForAdvance, gross: number, percent: num
 
 // ─── Loading and linking ─────────────────────────────────────────────────────
 
-// The database guards (20261101_deposits.sql) in the UI language; anything else as it came.
-export function depositErrorMessage(err: unknown, t: TFn): string {
-  const code = err && typeof err === 'object' && 'code' in err ? (err as { code?: unknown }).code : null
-  if (code === 'MI019') return t('deposits.errors.useFinal')
-  if (code === 'MI020') return t('deposits.errors.deducted')
-  if (code === 'MI021') return t('deposits.errors.invalidLink')
-  return err instanceof Error ? err.message : String(err)
-}
-
-const failure = (error: { message: string; code?: string }) => Object.assign(new Error(error.message), { code: error.code })
+// A failed query keeps its code and detail, so the caller can word it (dbErrorMessage: the
+// deposit guards MI019–MI022 of 20261101_deposits.sql, no connection, anything else generically).
+const failure = (error: { message: string; code?: string | null; details?: string | null }) =>
+  Object.assign(new Error(error.message), { code: error.code ?? null, details: error.details ?? null })
 
 const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
 const DEPOSIT_COLS = `id, number, date, status, client_id, invoice_kind, final_invoice_id, converted_from_id, tax_treatment, discount_type, discount_value, ${ITEM_COLS}, payments(amount, kind)`
@@ -372,8 +366,8 @@ async function withCreditsAndFinals(supabase: SupabaseClient, rows: DepositRow[]
       ? supabase.from('documents').select('id, number, status').in('id', finalIds)
       : Promise.resolve({ data: [], error: null }),
   ])
-  if (credits.error) throw new Error(credits.error.message)
-  if (finals.error) throw new Error(finals.error.message)
+  if (credits.error) throw failure(credits.error)
+  if (finals.error) throw failure(finals.error)
   const creditsOf = new Map<string, DepositInvoice['credit_notes']>()
   for (const c of (credits.data ?? []) as unknown as CreditNoteRow[]) {
     creditsOf.set(c.converted_from_id, [...creditsOf.get(c.converted_from_id) ?? [], { totals: depositTotals(c), refunded: sumOf(c.payments, 'refund') }])
@@ -392,7 +386,7 @@ export async function loadClientDeposits(supabase: SupabaseClient, clientId: str
     .eq('type', 'invoice').eq('client_id', clientId).in('invoice_kind', ['advance', 'partial'])
     .not('number', 'is', null).neq('status', 'cancelled')
     .order('date').order('number')
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   return withCreditsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
 }
 
@@ -401,7 +395,7 @@ export async function loadQuoteDeposits(supabase: SupabaseClient, quoteId: strin
   const { data, error } = await supabase.from('documents').select(DEPOSIT_COLS)
     .eq('type', 'invoice').eq('converted_from_id', quoteId).in('invoice_kind', ['advance', 'partial'])
     .order('created_at')
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   return withCreditsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
 }
 
@@ -416,8 +410,8 @@ export async function loadQuoteInvoices(supabase: SupabaseClient, sourceId: stri
     supabase.from('documents').select('id, number, invoice_kind, final_invoice_id')
       .eq('type', 'invoice').eq('converted_from_id', sourceId).neq('status', 'cancelled').neq('id', selfId),
   ])
-  if (source.error) throw new Error(source.error.message)
-  if (siblings.error) throw new Error(siblings.error.message)
+  if (source.error) throw failure(source.error)
+  if (siblings.error) throw failure(siblings.error)
   return source.data?.type === 'quote' ? (siblings.data ?? []) as QuoteInvoice[] : []
 }
 
@@ -449,7 +443,7 @@ export async function writeDeductions(supabase: SupabaseClient, finalId: string)
   const { data: doc, error } = await supabase.from('documents')
     .select('id, number, client_id, language, invoice_kind, document_items(id, line_type, sort_order, description, quantity, unit_price, vat_rate)')
     .eq('id', finalId).maybeSingle()
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   if (!doc || doc.number) return
   const lang: Language = doc.language === 'en' ? 'en' : 'de'
   const linked = doc.invoice_kind === 'final'
@@ -460,12 +454,12 @@ export async function writeDeductions(supabase: SupabaseClient, finalId: string)
   if (sameDeductions(items, expected)) return
 
   const { error: delErr } = await supabase.from('document_items').delete().eq('document_id', finalId).eq('line_type', 'deduction')
-  if (delErr) throw new Error(delErr.message)
+  if (delErr) throw failure(delErr)
   if (!expected.length) return
   const after = Math.max(-1, ...items.filter(i => !isDeductionLine(i)).map(i => i.sort_order ?? 0)) + 1
   const { error: insErr } = await supabase.from('document_items')
     .insert(expected.map((item, i) => ({ ...item, document_id: finalId, sort_order: after + i })))
-  if (insErr) throw new Error(insErr.message)
+  if (insErr) throw failure(insErr)
 }
 
 // What a final invoice deducts for an advance invoice depends on the money received on it and
@@ -482,10 +476,10 @@ export function moneyLocked(
 // The final invoice that fixes the money received on this invoice, or null.
 export async function loadMoneyLock(supabase: SupabaseClient, invoiceId: string): Promise<{ id: string; number: string } | null> {
   const { data, error } = await supabase.from('documents').select('invoice_kind, final_invoice_id').eq('id', invoiceId).maybeSingle()
-  if (error) throw new Error(error.message)
+  if (error) throw failure(error)
   if (!data?.final_invoice_id) return null
   const { data: final, error: finalErr } = await supabase.from('documents').select('id, number, status').eq('id', data.final_invoice_id).maybeSingle()
-  if (finalErr) throw new Error(finalErr.message)
+  if (finalErr) throw failure(finalErr)
   return final && moneyLocked(data, final) ? { id: final.id as string, number: final.number as string } : null
 }
 

@@ -9,7 +9,7 @@ import { Dialog } from '@/components/ui/ConfirmDialog'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { useT } from '@/lib/i18n/client'
-import { knownApiError, requestErrorMessage } from '@/lib/api-errors'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { formatMoney, roundCents } from '@/lib/utils/document'
 
 type Mode = 'percent' | 'amount'
@@ -18,7 +18,7 @@ type Mode = 'percent' | 'amount'
 // It starts at 30 % of the quote, or what is left of it when earlier advance invoices took more.
 export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: { quoteId: string; quoteTotal: number; advanced: number }) {
   const router = useRouter()
-  const { t } = useT()
+  const { t, lang } = useT()
   const uid = useId()
   const left = Math.max(0, roundCents(quoteTotal - advanced))
   const initial = (m: Mode) => m === 'percent'
@@ -32,8 +32,10 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
   const gross = value == null ? 0 : roundCents(mode === 'percent' ? quoteTotal * value / 100 : value)
   const exceeds = roundCents(advanced + gross) > quoteTotal + 0.005
   const badValue = value == null || value <= 0 || (mode === 'percent' && value > 100)
-  const problem = badValue ? t('deposits.errors.badAmount')
-    : exceeds ? t('deposits.errors.exceedsQuote', { amount: formatMoney(roundCents(advanced + gross)), total: formatMoney(quoteTotal) })
+  const money = (amount: number) => formatMoney(amount, 'EUR', lang)
+  // The same sentences as the route's refusals (messages.api.*), so both read alike.
+  const problem = badValue ? t('messages.api.deposit_bad_amount')
+    : exceeds ? t('messages.api.exceeds_quote', { amount: money(roundCents(advanced + gross)), total: money(quoteTotal) })
     : null
 
   async function create() {
@@ -47,8 +49,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
         body: JSON.stringify({ mode, value }),
       })
       const data = await res.json().catch(() => ({}))
-      // Coded answers are worded here; the route words its own validation messages in the UI language.
-      if (!res.ok || typeof data.invoiceId !== 'string') { toast.error(knownApiError(t, data) ?? (typeof data.error === 'string' ? data.error : t('messages.generic'))); return }
+      if (!res.ok || typeof data.invoiceId !== 'string') { toast.error(apiErrorMessage(t, data)); return }
       toast.success(t('deposits.quote.advanceCreated'))
       setOpen(false)
       router.push(`/invoices/${data.invoiceId}`)
@@ -88,8 +89,8 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
             <MoneyInput id={`${uid}-value`} value={value} onValueChange={setValue} aria-invalid={!!problem || undefined}
               aria-describedby={`${uid}-preview`} />
             <p id={`${uid}-preview`} className="text-xs text-neutral-500 dark:text-neutral-400">
-              {t('deposits.quote.preview', { amount: formatMoney(gross), total: formatMoney(quoteTotal) })}
-              {advanced > 0 && <> {t('deposits.quote.alreadyAdvanced', { amount: formatMoney(advanced) })}</>}
+              {t('deposits.quote.preview', { amount: money(gross), total: money(quoteTotal) })}
+              {advanced > 0 && <> {t('deposits.quote.alreadyAdvanced', { amount: money(advanced) })}</>}
               {problem && <span className="block mt-1 text-red-600 dark:text-red-400">{problem}</span>}
             </p>
           </div>
