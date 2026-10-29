@@ -79,6 +79,7 @@ export function toEbInterface(inv: EInvoice): string {
           el('TaxItem', null,
             req('TaxableAmount', amount(line.net)),
             taxPercent(line.tax),
+            (line.tax.category === 'AE' || line.tax.category === 'O') && txt('Comment', inv.taxNote),
           ),
           req('LineItemAmount', amount(line.net)),
         )),
