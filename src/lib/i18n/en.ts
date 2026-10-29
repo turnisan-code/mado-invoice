@@ -234,6 +234,11 @@ export const en = {
     bulkFailed: 'Bulk update failed: {error}',
     deleteFailed: 'Delete failed: {error}',
   },
+  views: {
+    clients: {
+      searchPlaceholder: 'Search name, company, no., email, VAT ID…',
+    },
+  },
   csv: {
     number: 'Number',
     client: 'Client',

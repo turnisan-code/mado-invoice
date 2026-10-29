@@ -6,6 +6,7 @@ import { Plus, Users, ChevronRight, Download, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatMoney, roundCents, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
@@ -13,21 +14,22 @@ import { useListState, useSelection, paginate, compareBy, type ListConfig } from
 import { countryName } from '@/lib/utils/country'
 import {
   SortableTh, PlainTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
 
 const STATUSES = ['active', 'inactive', 'lead'] as const
 
-type SortKey = 'name' | 'company' | 'country' | 'status' | 'balance' | 'last_invoiced'
+type SortKey = 'name' | 'number' | 'country' | 'status' | 'balance' | 'last_invoiced'
 const LIST: ListConfig<'status' | 'q' | 'tag', SortKey> = {
   filters: { status: STATUSES, q: null, tag: null },
-  sortKeys: ['name', 'company', 'country', 'status', 'balance', 'last_invoiced'],
+  sortKeys: ['name', 'number', 'country', 'status', 'balance', 'last_invoiced'],
   defaultSort: { key: 'name', dir: 'asc' },
   firstDir: 'asc',
 }
 
 export interface ClientRow {
   id: string
+  client_number: string | null
   name: string
   company: string | null
   email: string | null
@@ -45,10 +47,21 @@ export interface ClientRow {
   tags: string[] | null
 }
 
-const displayName = (c: ClientRow) => c.name || c.company || ''
+// The contact person, shown under the company when a client has both.
+const contactLine = (c: ClientRow) => c.company && c.name ? c.name : ''
+const compact = (s: string) => s.replace(/\s+/g, '').toLowerCase()
+
+function matches(c: ClientRow, q: string): boolean {
+  const needle = q.trim().toLowerCase()
+  if (!needle) return true
+  const text = [c.client_number, c.name, c.company, c.email, c.city, c.uid_number, ...(c.tags ?? [])].filter(Boolean).join(' ').toLowerCase()
+  // A VAT ID is typed with or without spaces (ATU 123 456 78).
+  return text.includes(needle) || (!!c.uid_number && compact(c.uid_number).includes(compact(needle)))
+}
 
 function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastInvoiced: Record<string, string>, t: TFn, lang: UiLang) {
   const rows = clients.map(c => [
+    c.client_number ?? '',
     c.name,
     c.company ?? '',
     c.email ?? '',
@@ -68,7 +81,7 @@ function exportCSV(clients: ClientRow[], balances: Record<string, number>, lastI
     csvDate(lastInvoiced[c.id]),
   ])
   const header = [
-    t('clients.form.name'), t('clients.form.company'), t('clients.form.email'), t('clients.form.phone'), t('clients.form.address'),
+    t('clientData.clientNumber'), t('clients.form.name'), t('clients.form.company'), t('clients.form.email'), t('clients.form.phone'), t('clients.form.address'),
     t('clients.form.addressLine2'), t('clients.form.zip'), t('clients.form.city'), t('clients.form.country'), t('clients.form.uid'),
     t('clients.form.taxTreatment'), t('clients.form.language'), t('clients.form.paymentDays'), t('clients.form.status'), t('clients.form.tags'),
     t('clients.openBalance'), t('clients.lastInvoice'),
@@ -96,16 +109,11 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
     let rows = clients
     if (status) rows = rows.filter(c => c.status === status)
     if (tag) rows = rows.filter(c => (c.tags ?? []).includes(tag))
-    if (q) {
-      const lq = q.toLowerCase()
-      rows = rows.filter(c =>
-        `${c.name} ${c.company ?? ''} ${c.email ?? ''} ${c.city ?? ''} ${c.uid_number ?? ''} ${(c.tags ?? []).join(' ')}`.toLowerCase().includes(lq)
-      )
-    }
+    if (q) rows = rows.filter(c => matches(c, q))
     const value = (c: ClientRow): string | number => {
       switch (sort.key) {
-        case 'name': return displayName(c)
-        case 'company': return c.company ?? ''
+        case 'name': return clientDisplayName(c)
+        case 'number': return c.client_number ?? ''
         case 'country': return countryName(c.country, lang)
         case 'status': return c.status
         case 'balance': return balanceMap[c.id] ?? 0
@@ -156,7 +164,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
 
       <div className="space-y-3">
         <div className="flex gap-3 flex-wrap">
-          <input type="search" aria-label={t('clients.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('clients.searchPlaceholder')} className={searchClass} />
+          <input type="search" aria-label={t('clients.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('views.clients.searchPlaceholder')} className={searchClass} />
           <select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className={inputClass}>
             <option value="">{t('status.allStatuses')}</option>
             {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
@@ -190,11 +198,13 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
             const selected = selection.isSelected(c.id)
             return (
               <div key={c.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)}`}>
-                <SelectToggle large checked={selected} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: displayName(c) })} />
+                <SelectToggle large checked={selected} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: clientDisplayName(c) })} />
                 <Link href={`/clients/${c.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                   <div className="min-w-0">
-                    <p className="font-medium text-sm truncate">{displayName(c)}</p>
-                    {c.name && c.company && <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{c.company}</p>}
+                    <p className="font-medium text-sm truncate">{clientDisplayName(c)}</p>
+                    {(c.client_number || contactLine(c)) && (
+                      <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{[c.client_number, contactLine(c)].filter(Boolean).join(' · ')}</p>
+                    )}
                     {(c.tags ?? []).length > 0 && <div className="flex items-center gap-2 mt-1">{(c.tags ?? []).slice(0, 2).map(tagChip)}</div>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -217,8 +227,8 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
               <th className="pl-4 py-3 w-8">
                 <SelectToggle checked={selection.allPageSelected} onToggle={selection.toggleAll} label={t('lists.selectAll')} />
               </th>
-              <SortableTh col="name" label={t('clients.name')} sort={sort} onSort={list.toggleSort} />
-              <SortableTh col="company" label={t('clients.company')} sort={sort} onSort={list.toggleSort} />
+              <SortableTh col="name" label={t('common.client')} sort={sort} onSort={list.toggleSort} />
+              <SortableTh col="number" label={t('clientData.clientNumber')} sort={sort} onSort={list.toggleSort} />
               <SortableTh col="country" label={t('clients.country')} sort={sort} onSort={list.toggleSort} />
               <PlainTh>{t('clients.tax')}</PlainTh>
               <SortableTh col="status" label={t('common.status')} sort={sort} onSort={list.toggleSort} />
@@ -232,12 +242,13 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
             {pageItems.map(c => (
               <ClickableRow key={c.id} href={`/clients/${c.id}`} className={rowStateClass(selection.isSelected(c.id))}>
                 <td className="pl-4 py-3 w-8">
-                  <SelectToggle checked={selection.isSelected(c.id)} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: displayName(c) })} />
+                  <SelectToggle checked={selection.isSelected(c.id)} onToggle={() => selection.toggleOne(c.id)} label={t('lists.selectRow', { number: clientDisplayName(c) })} />
                 </td>
                 <td className="px-4 py-3">
-                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{displayName(c)}</Link>
+                  <Link href={`/clients/${c.id}`} className="font-medium hover:underline">{clientDisplayName(c)}</Link>
+                  {contactLine(c) && <p className="text-xs text-neutral-500 dark:text-neutral-400">{contactLine(c)}</p>}
                 </td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{c.company || '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap tabular-nums">{c.client_number || '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{countryName(c.country, lang) || '—'}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{taxLabel(c.tax_treatment)}</td>
                 <td className="px-4 py-3">
@@ -250,7 +261,7 @@ export default function ClientList({ clients, lastInvoicedMap = {}, balanceMap =
                   {balance(c) > 0 ? formatMoney(balance(c)) : '—'}
                 </td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs whitespace-nowrap">
-                  {lastInvoicedMap[c.id] ?? '—'}
+                  {listDate(lastInvoicedMap[c.id], lang)}
                 </td>
               </ClickableRow>
             ))}

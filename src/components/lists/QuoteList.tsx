@@ -7,6 +7,7 @@ import { Plus, MessageSquareQuote, Download, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
@@ -14,7 +15,7 @@ import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
 
 const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
@@ -49,7 +50,8 @@ function isExpired(d: Quote, todayStr: string) {
   return d.status === 'sent' && !!d.due_date && d.due_date < todayStr
 }
 
-const clientLabel = (d: Quote) => d.clients?.company ?? d.clients?.name ?? ''
+const clientLabel = (d: Quote) => clientDisplayName(d.clients)
+const shownStatus = (d: Quote, todayStr: string) => isExpired(d, todayStr) ? 'expired' : d.status
 
 function exportCSV(quotes: Quote[], todayStr: string, t: TFn) {
   const rows = quotes.map(d => [
@@ -60,7 +62,7 @@ function exportCSV(quotes: Quote[], todayStr: string, t: TFn) {
     csvDate(d.due_date),
     docTotal(d),
     d.currency ?? 'EUR',
-    isExpired(d, todayStr) ? 'expired' : d.status,
+    t(`status.${shownStatus(d, todayStr)}` as DictKey),
   ])
   const header = [t('csv.number'), t('csv.client'), t('csv.company'), t('csv.date'), t('csv.validUntil'), t('csv.total'), t('csv.currency'), t('csv.status')]
   downloadCsv(`quotes-${todayStr}.csv`, toCsv(header, rows))
@@ -68,7 +70,7 @@ function exportCSV(quotes: Quote[], todayStr: string, t: TFn) {
 
 export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   const router = useRouter()
-  const { t } = useT()
+  const { t, lang } = useT()
   const list = useListState(LIST)
   const { status, q } = list.filters
   const { sort } = list
@@ -194,7 +196,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
                     <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">
-                      {doc.date ?? '—'}{doc.due_date && <> · {t('quotes.validUntilInline', { date: doc.due_date })}</>}
+                      {listDate(doc.date, lang)}{doc.due_date && <> · {t('quotes.validUntilInline', { date: listDate(doc.due_date, lang) })}</>}
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -235,10 +237,10 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.date, lang)}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">
                   <span className="flex items-center gap-2">
-                    {doc.due_date ?? '—'}
+                    {listDate(doc.due_date, lang)}
                     {isExpired(doc, todayStr) && <StatusBadge status="expired" label={t('status.expired')} />}
                   </span>
                 </td>

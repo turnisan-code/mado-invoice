@@ -7,6 +7,7 @@ import { Plus, FileText, Download, CheckCircle, Send, X, Trash2, Repeat, Landmar
 import { toast } from 'sonner'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n/client'
@@ -18,7 +19,7 @@ import type { BookamatState } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  inputClass, searchClass, headerButtonClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
 
 const STATUSES = ['outstanding', 'draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
@@ -71,9 +72,13 @@ const docTotal = (d: Invoice) => docTotals(d).total
 // Nothing is owed on a draft (not issued yet) or a cancelled invoice (settled by its Storno).
 const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancelled' ? 0 : docTotals(d).balance_due
 const isOpen = (d: Invoice) => d.status === 'sent' || d.status === 'overdue'
-const clientLabel = (d: Invoice) => d.clients?.company ?? d.clients?.name ?? ''
+const clientLabel = (d: Invoice) => clientDisplayName(d.clients)
+// Partly paid and written-off invoices show that instead of their stored status. Dunning fees
+// and interest are paid on top and never change it.
+const shownStatus = (d: Invoice, todayStr: string) =>
+  displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
 
-function exportCSV(invoices: Invoice[], t: TFn) {
+function exportCSV(invoices: Invoice[], t: TFn, todayStr: string) {
   const rows = invoices.map(inv => {
     const tot = docTotals(inv)
     return [
@@ -88,16 +93,16 @@ function exportCSV(invoices: Invoice[], t: TFn) {
       tot.total_paid,
       docBalance(inv),
       inv.currency ?? 'EUR',
-      inv.status,
+      t(statusLabelKey(shownStatus(inv, todayStr))),
     ]
   })
   const header = [t('csv.number'), t('csv.client'), t('csv.company'), t('csv.date'), t('csv.dueDate'), t('csv.net'), t('csv.vat'), t('csv.total'), t('csv.paid'), t('csv.balance'), t('csv.currency'), t('csv.status')]
-  downloadCsv(`invoices-${today()}.csv`, toCsv(header, rows))
+  downloadCsv(`invoices-${todayStr}.csv`, toCsv(header, rows))
 }
 
 export default function InvoiceList({ invoices, recurringSourceIds = [], bookamatConfigured = false }: { invoices: Invoice[]; recurringSourceIds?: string[]; bookamatConfigured?: boolean }) {
   const router = useRouter()
-  const { t } = useT()
+  const { t, lang } = useT()
   const uid = useId()
   const list = useListState(LIST)
   const { status, q, from, to, client, bookamat } = list.filters
@@ -136,7 +141,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const clientOptions = useMemo(() => {
     const names = new Map<string, string>()
     for (const d of invoices) {
-      if (d.client_id && d.clients && !names.has(d.client_id)) names.set(d.client_id, d.clients.company || d.clients.name)
+      if (d.client_id && d.clients && !names.has(d.client_id)) names.set(d.client_id, clientDisplayName(d.clients))
     }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [invoices])
@@ -172,10 +177,8 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const { page, pageCount, pageItems } = paginate(filtered, list.page)
   const selection = useSelection(filtered, pageItems)
 
-  // Partly paid and written-off invoices show that instead of their stored status. Dunning fees
-  // and interest are paid on top and never change it.
   const statusBadge = (d: Invoice) => {
-    const shown = displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
+    const shown = shownStatus(d, todayStr)
     return <StatusBadge status={shown} label={t(statusLabelKey(shown))} />
   }
 
@@ -304,7 +307,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   }
 
   function handleExport(rows: Invoice[], bulk: boolean) {
-    exportCSV(rows, t)
+    exportCSV(rows, t, todayStr)
     const count = rows.length
     toast.success(bulk
       ? n(count, t('invoices.bulkExportedOne', { count }), t('invoices.bulkExportedOther', { count }))
@@ -386,7 +389,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                       {markers(doc)}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
+                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -438,8 +441,8 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                   {markers(doc)}
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.due_date ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.date, lang)}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.due_date, lang)}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className={`px-4 py-3 text-right ${isOpen(doc) && docBalance(doc) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}

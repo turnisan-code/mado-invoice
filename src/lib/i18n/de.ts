@@ -236,6 +236,11 @@ export const de = {
     bulkFailed: 'Mehrfachaktion fehlgeschlagen: {error}',
     deleteFailed: 'Löschen fehlgeschlagen: {error}',
   },
+  views: {
+    clients: {
+      searchPlaceholder: 'Name, Firma, Nr., E-Mail, UID suchen…',
+    },
+  },
   csv: {
     number: 'Nummer',
     client: 'Kunde',
