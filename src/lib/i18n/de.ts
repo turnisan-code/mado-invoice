@@ -427,7 +427,6 @@ export const de = {
       budget: 'Budget',
     },
     hours: '{hours} h',
-    budgetUse: '{percent} von {budget}',
     unbilledLine: '{hours} h · {amount} nicht verrechnet',
     form: {
       createTitle: 'Neues Projekt',

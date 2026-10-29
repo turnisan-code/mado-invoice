@@ -425,7 +425,6 @@ export const en = {
       budget: 'Budget',
     },
     hours: '{hours} h',
-    budgetUse: '{percent} of {budget}',
     unbilledLine: '{hours} h · {amount} unbilled',
     form: {
       createTitle: 'New project',
