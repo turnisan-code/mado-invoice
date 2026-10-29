@@ -30,6 +30,7 @@ import { issueProblems, missingIssuerFields, type IssueCheckInput } from '@/lib/
 import type { Client, CatalogueItem, DocumentType, IssueProblem, Language, TaxTreatment } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { GOOGLE_REAUTH_CODE } from '@/lib/google/reauth'
 import { fetchIssuedPdf, blobToBase64, archiveErrorMessage } from '@/lib/issued-pdf'
 import { logEvent } from '@/lib/events'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -558,7 +559,13 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         const reason = code ? t(`einvoice.errors.${code}`) : apiErrorMessage(t, data)
         setGmailPreview(p => p && { ...p, einvoiceError: reason })
       } else {
-        toastApiError(t, data, '', t('builder.emailFailed'))
+        // Whatever the reason, the toast first says that the email was not sent.
+        const reason = apiErrorMessage(t, data)
+        const reauth = data.code === GOOGLE_REAUTH_CODE
+        toast.error(t('builder.emailFailed'), {
+          description: reauth ? <>{reason}. <Link href="/settings" className="underline">{t('toasts.openSettings')}</Link></> : reason,
+          ...(reauth ? { duration: 8000 } : {}),
+        })
       }
       return
     }
