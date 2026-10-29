@@ -1,5 +1,5 @@
 // The editor's data model: pure functions only, so node can verify them without React.
-import type { Client, Currency, Document, DocumentItem, DocumentType, Language, LineType, Settings, TaxTreatment, Unit, VatRate } from '@/types'
+import type { Client, Currency, Document, DocumentItem, DocumentType, InvoiceKind, Language, LineType, Settings, TaxTreatment, Unit, VatRate } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { addDays, clampPercent, orderItems, today } from '@/lib/utils/document'
 import { formatDocumentNumber, nextCounter } from '@/lib/utils/numbering'
@@ -39,6 +39,8 @@ export interface FormState {
   discountValue: number
   skontoPercent: number | ''
   skontoDays: number | ''
+  // Invoices: standard, advance, partial or final (src/lib/deposits.ts).
+  invoiceKind: InvoiceKind
   lines: LineItem[]
 }
 
@@ -108,6 +110,7 @@ export function initialForm(type: DocumentType, settings: PublicSettings, client
     // Skonto only exists on invoices; new ones start from the settings defaults.
     skontoPercent: doc ? (doc.skonto_percent ?? '') : type === 'invoice' ? (settings.default_skonto_percent ?? '') : '',
     skontoDays: doc ? (doc.skonto_days ?? '') : type === 'invoice' ? (settings.default_skonto_days ?? '') : '',
+    invoiceKind: doc?.invoice_kind ?? 'standard',
     lines: doc?.items?.length ? linesFromItems(doc.items) : [blankLine(settings)],
   }
 }
@@ -125,13 +128,16 @@ export function docFields(type: DocumentType, f: FormState) {
     discount_type: f.discountType, discount_value: f.discountValue || null,
     ...skonto,
     ...(f.currency === 'EUR' ? { exchange_rate: 1 } : {}),
+    ...(type === 'invoice' ? { invoice_kind: f.invoiceKind ?? 'standard' } : {}),
   }
 }
 
-// Item lines carry their own discount, subtotal lines the section's; other lines none.
+// Item lines carry their own discount, subtotal lines the section's; other lines none. A final
+// invoice's deduction lines keep their amount and rate.
 export function itemsPayload(lines: LineItem[]) {
   return lines.map((l, i) => {
     const item = l.line_type === 'item'
+    const amounts = item || l.line_type === 'deduction'
     const discounted = item || l.line_type === 'subtotal'
     return {
       sort_order: i,
@@ -139,10 +145,10 @@ export function itemsPayload(lines: LineItem[]) {
       description: l.description,
       service_date: item ? (l.service_date || null) : null,
       service_date_end: item ? (l.service_date_end || null) : null,
-      quantity: item ? l.quantity : null,
-      unit: item ? l.unit : null,
-      unit_price: item ? l.unit_price : null,
-      vat_rate: item ? l.vat_rate : null,
+      quantity: amounts ? l.quantity : null,
+      unit: amounts ? l.unit : null,
+      unit_price: amounts ? l.unit_price : null,
+      vat_rate: amounts ? l.vat_rate : null,
       catalogue_item_id: item ? l.catalogue_item_id : null,
       discount_type: discounted ? (l.discount_type || null) : null,
       discount_value: discounted ? (l.discount_value || null) : null,

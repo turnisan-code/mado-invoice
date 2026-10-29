@@ -8,6 +8,7 @@ import { logEvent } from '@/lib/events'
 import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 import { applyCreditNote } from '@/lib/credits'
+import { loadDepositCheck } from '@/lib/deposits'
 
 export type IssueOutcome = {
   number: string
@@ -22,7 +23,7 @@ export type IssueOutcome = {
 async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
   const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents')
-      .select('type, currency, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
+      .select('id, type, client_id, language, invoice_kind, converted_from_id, discount_type, discount_value, currency, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
       .eq('id', documentId)
       .maybeSingle(),
     supabase.from('settings').select(`${ISSUER_SETTINGS_COLUMNS}, ui_language`).maybeSingle(),
@@ -41,6 +42,7 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
     client: doc.clients as unknown as IssueCheckInput['client'],
     items: orderItems(doc.document_items ?? []),
     settings,
+    deposit: await loadDepositCheck(supabase, doc),
   })
   if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(settings?.ui_language) ? settings.ui_language : 'en'))
 }

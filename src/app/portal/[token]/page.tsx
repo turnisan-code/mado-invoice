@@ -13,6 +13,7 @@ import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { isShareExpired } from '@/lib/share'
 import { isExpired } from '@/lib/status'
 import { paymentLineLabel, summarizePayments } from '@/lib/payment-summary'
+import { deductionSummary } from '@/lib/deposits'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import {
   docNumberLabel, docTitle, documentKind, documentLanguage, documentT, formatIban, formatPercent, formatQuantity,
@@ -48,7 +49,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   if (isShareExpired(doc.share_expires_at)) return { title: t('pdfPortal.portal.expiredTitle') }
   const kind = documentKind(doc.type, reference?.kind === 'storno')
   return {
-    title: t('pdfPortal.portal.pageTitle', { title: docTitle(t, kind), number: doc.number ?? '', company: settings.company_name || settings.owner_name }),
+    title: t('pdfPortal.portal.pageTitle', { title: docTitle(t, kind, doc.invoice_kind), number: doc.number ?? '', company: settings.company_name || settings.owner_name }),
   }
 }
 
@@ -100,6 +101,12 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const currency = doc.currency ?? 'EUR'
   const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
   const totals = calcTotals(items, doc.payments ?? [], discount, doc.tax_treatment)
+  // A final invoice shows the whole service, then what the earlier invoices carried, as on the PDF.
+  const deduction = deductionSummary(items, discount, doc.tax_treatment)
+  const discountLabel = doc.discount_type === 'percent' && doc.discount_value
+    ? t('pdfPortal.totals.discountPercent', { percent: formatPercent(t, clampPercent(doc.discount_value), lang) })
+    : t('pdfPortal.totals.discount')
+  const advance = doc.type === 'invoice' && doc.invoice_kind === 'advance'
   // Credit notes are stored with positive amounts and show as credits, as on the PDF.
   const sign = doc.type === 'credit_note' ? -1 : 1
   const money = (n: number) => formatSignedMoney(sign * n, currency)
@@ -140,7 +147,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </div>
         </div>
         <div className="sm:text-right space-y-1">
-          <h1 className="text-2xl font-bold text-neutral-900">{docTitle(t, kind)}</h1>
+          <h1 className="text-2xl font-bold text-neutral-900">{docTitle(t, kind, doc.invoice_kind)}</h1>
           <div className="text-sm text-neutral-500">{docNumberLabel(t, kind)}: {doc.number}</div>
           {reference && (
             <div className="text-xs text-neutral-500">
@@ -173,7 +180,11 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           </div>
           {docPeriod && (
             <div className="flex justify-between gap-4">
-              <dt className="text-neutral-500">{docPeriod.isPeriod ? t('pdfPortal.servicePeriod') : t('pdfPortal.serviceDate')}</dt>
+              <dt className="text-neutral-500">
+                {advance
+                  ? t(docPeriod.isPeriod ? 'deposits.doc.expectedServicePeriod' : 'deposits.doc.expectedServiceDate')
+                  : docPeriod.isPeriod ? t('pdfPortal.servicePeriod') : t('pdfPortal.serviceDate')}
+              </dt>
               <dd className="font-medium text-right">{docPeriod.text}</dd>
             </div>
           )}
@@ -202,7 +213,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               const lt = item.line_type ?? 'item'
 
               if (lt === 'separator') return <tr key={i}><td colSpan={columns} className="border-t border-neutral-100 py-0" /></tr>
-              if (lt === 'page_break') return null
+              if (lt === 'page_break' || lt === 'deduction') return null
               if (lt === 'heading') {
                 return (
                   <tr key={i} className="border-b border-neutral-100">
@@ -277,13 +288,70 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
         </table>
       </div>
 
+      {deduction && (
+        <div className="flex justify-end mb-4">
+          <dl className="w-full sm:w-96 space-y-1.5 text-sm">
+            {/* The document discount applies to the whole service, so it is shown here, not below. */}
+            {deduction.full.discount_amount > 0 && (
+              <>
+                <div className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{t('pdfPortal.totals.net')}</dt>
+                  <dd>{money(deduction.full.subtotal)}</dd>
+                </div>
+                <div className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{discountLabel}</dt>
+                  <dd>{money(-deduction.full.discount_amount)}</dd>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between gap-4 text-neutral-500">
+              <dt>{t('deposits.doc.fullNet')}</dt>
+              <dd>{money(deduction.full.subtotal - deduction.full.discount_amount)}</dd>
+            </div>
+            {vatApplies && deduction.full.vat_groups.map(g => (
+              <React.Fragment key={g.rate}>
+                {deduction.full.vat_groups.length > 1 && (
+                  <div className="flex justify-between gap-4 text-neutral-500">
+                    <dt>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</dt>
+                    <dd>{money(g.base)}</dd>
+                  </div>
+                )}
+                <div className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{t('pdfPortal.totals.vatAtRate', { rate: pct(g.rate) })}</dt>
+                  <dd>{money(g.amount)}</dd>
+                </div>
+              </React.Fragment>
+            ))}
+            <div className="border-t border-neutral-200 pt-1.5 flex justify-between gap-4 font-semibold text-neutral-900">
+              <dt>{t('deposits.doc.fullTotal')}</dt>
+              <dd>{money(deduction.full.total)}</dd>
+            </div>
+            {deduction.rows.map((row, i) => (
+              <div key={i} className="flex justify-between gap-4 text-neutral-700">
+                <dt className="min-w-0 break-words">
+                  {row.label}
+                  {row.parts.map(p => (
+                    <span key={p.rate} className="block text-xs text-neutral-500">
+                      {vatApplies
+                        ? t('deposits.doc.lessPart', { net: money(p.net), rate: pct(p.rate), vat: money(p.vat) })
+                        : t('deposits.doc.lessPartNoVat', { net: money(p.net) })}
+                    </span>
+                  ))}
+                </dt>
+                <dd className="whitespace-nowrap">{money(-row.gross)}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+
       <div className="flex justify-end mb-6">
         <dl className="w-full sm:w-72 space-y-1.5 text-sm">
           <div className="flex justify-between gap-4 text-neutral-500">
             <dt>{t('pdfPortal.totals.net')}</dt>
-            <dd>{money(totals.subtotal)}</dd>
+            <dd>{money(deduction ? totals.subtotal - totals.discount_amount : totals.subtotal)}</dd>
           </div>
-          {totals.discount_amount > 0 && (
+          {totals.discount_amount > 0 && !deduction && (
             <div className="flex justify-between gap-4 text-neutral-500">
               <dt>
                 {doc.discount_type === 'percent' && doc.discount_value
@@ -306,7 +374,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
             </React.Fragment>
           ))}
           <div className="border-t border-neutral-200 pt-1.5 flex justify-between gap-4 font-semibold text-neutral-900 text-base">
-            <dt>{doc.type === 'credit_note' ? t('pdfPortal.totals.creditTotal') : t('pdfPortal.totals.total')}</dt>
+            <dt>{doc.type === 'credit_note' ? t('pdfPortal.totals.creditTotal') : deduction ? t('deposits.doc.remaining') : t('pdfPortal.totals.total')}</dt>
             <dd>{money(totals.total)}</dd>
           </div>
           {doc.type === 'invoice' && totals.total_paid > 0 && (

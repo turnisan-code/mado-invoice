@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils/document'
 import { documentVariables, fillSubject, fillTemplate, parseEmailList, portalUrl, resolveTemplate, templateLang, usesVariable } from '@/lib/templates'
+import { invoiceEmailTemplate } from '@/lib/document-labels'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
@@ -31,14 +32,17 @@ import { ActionBar } from './builder/ActionBar'
 import { ClientInfo } from './builder/ClientInfo'
 import { ClientPicker, SELECT_CLS } from './builder/ClientPicker'
 import { DateInput } from './builder/DateInput'
+import { DeductionTotals } from './builder/DeductionTotals'
+import { DepositPanel } from './builder/DepositPanel'
 import { GmailDialog, type GmailPreview } from './builder/GmailDialog'
 import { IssueDialog } from './builder/IssueDialog'
 import { IssueProblemList } from './builder/IssueProblems'
 import { LineEditor } from './builder/LineEditor'
 import type { LineIssues } from './builder/LineRow'
-import { PATHS, docFields, expectedNumber, termDays, type EditorDocument, type FormState } from './builder/model'
+import { PATHS, docFields, expectedNumber, termDays, type EditorDocument, type FormState, type LineItem } from './builder/model'
 import { QuickAddClient } from './builder/QuickAddClient'
 import { TotalsPanel } from './builder/TotalsPanel'
+import { useDeposits } from './builder/useDeposits'
 import { errorMessage, useDocumentForm } from './builder/useDocumentForm'
 
 interface Props {
@@ -108,6 +112,16 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   const client = clients.find(c => c.id === clientId)
   const totals = calcTotals(lines, doc?.payments, documentDiscount(form), taxTreatment)
   const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
+  // A final invoice's deduction lines stay below the lines being edited; the totals panel shows
+  // the whole service, the deduction block what remains.
+  const deposits = useDeposits({ type, doc, docId: editor.docId, form, setLines, setKind: k => editor.applyOverrides({ invoiceKind: k }), flush: editor.flush })
+  // A final invoice and the invoices it deducts belong to one client.
+  const clientLocked = deposits.linked.length > 0 || !!deposits.self?.final_invoice_id
+  const isDeduction = (l: LineItem) => l.line_type === 'deduction'
+  const scopeLines = lines.filter(l => !isDeduction(l))
+  const hasDeductions = scopeLines.length < lines.length
+  const setScopeLines = (fn: (ls: LineItem[]) => LineItem[]) => setLines(ls => [...fn(ls.filter(l => !isDeduction(l))), ...ls.filter(isDeduction)])
+  const scopeTotals = hasDeductions ? calcTotals(scopeLines, [], documentDiscount(form), taxTreatment) : totals
 
   function handleClientChange(id: string, picked?: Client) {
     const c = picked ?? clients.find(cl => cl.id === id)
@@ -141,6 +155,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       client: clients.find(c => c.id === f.clientId) ?? null,
       items: f.lines,
       settings,
+      deposit: deposits.check,
     }
   }
 
@@ -179,7 +194,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     const docData = {
       number: numOverride ?? doc?.number ?? 'DRAFT',
       date: effectiveDate, service_date: f.serviceDate || null, service_date_end: f.serviceDateEnd || null, due_date: f.dueDate || null,
-      type, language: f.language, currency, tax_treatment: f.taxTreatment,
+      type, invoice_kind: f.invoiceKind, language: f.language, currency, tax_treatment: f.taxTreatment,
       notes: f.notes || null, tax_note: getTaxNote(f.taxTreatment, f.language, settings),
       discount_type: f.discountType, discount_value: f.discountValue || null,
       skonto_percent, skonto_days,
@@ -398,7 +413,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   async function buildEmailContent(issued: { id: string; number: string }) {
     if (!client) return null
     const lang = templateLang(language)
-    const tpl = resolveTemplate(settings, type, lang)
+    const tpl = type === 'invoice' ? invoiceEmailTemplate(settings, form.invoiceKind, lang) : resolveTemplate(settings, type, lang)
     let portalLink = ''
     if (usesVariable(tpl.subject, 'portal_link') || usesVariable(tpl.body, 'portal_link')) {
       try {
@@ -583,7 +598,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-client`}>{t('builder.client')}</Label>
           <ClientPicker id={`${uid}-client`} clients={clients} value={clientId} onChange={id => handleClientChange(id)}
-            onCreate={name => setQuickAdd(name)} invalid={shownProblems.some(p => p.code === 'noClient')} />
+            onCreate={name => setQuickAdd(name)} invalid={shownProblems.some(p => p.code === 'noClient')}
+            disabled={clientLocked} describedBy={clientLocked ? `${uid}-client-locked` : undefined} />
+          {clientLocked && <p id={`${uid}-client-locked`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('deposits.builder.clientLocked')}</p>}
           {client && <ClientInfo client={client} settings={settings} />}
         </div>
 
@@ -676,13 +693,16 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
             <span className="font-medium">{t('issueChecks.taxNoteLabel')}</span> {taxNote}
           </div>
         )}
+
+        <DepositPanel deposits={deposits} kind={form.invoiceKind} onKind={k => patch({ invoiceKind: k })}
+          docId={editor.docId} issued={!!doc?.number} currency={currency} />
       </div>
 
       <Separator />
 
       <LineEditor
-        lines={lines}
-        setLines={setLines}
+        lines={scopeLines}
+        setLines={setScopeLines}
         updateLine={updateLine}
         settings={settings}
         currency={currency}
@@ -696,13 +716,18 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       <Separator />
 
       <TotalsPanel
-        totals={totals}
+        totals={scopeTotals}
         currency={currency}
         taxTreatment={taxTreatment}
         discountType={discountType}
         discountValue={discountValue}
         onDiscount={(kind, value) => patch({ discountType: kind, discountValue: value })}
       />
+      {hasDeductions && (
+        <DeductionTotals lines={lines} totals={totals} currency={currency} taxTreatment={taxTreatment}
+          discountType={discountType} discountValue={discountValue} creditNote={type === 'credit_note'}
+          onRemove={type === 'credit_note' && !doc?.number ? () => setLines(ls => ls.filter(l => !isDeduction(l))) : undefined} />
+      )}
 
       {/* Notes */}
       <div>
