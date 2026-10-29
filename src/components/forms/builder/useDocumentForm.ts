@@ -179,10 +179,13 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
         const { error } = await supabase.from('documents').update(update).eq('id', id)
         if (error) {
           // One invoice per period date of a recurring schedule: when another one already has this
-          // date, the form goes back to the stored date instead of holding one that never saves.
-          if (error.code === '23505' && /recurring_period/.test(`${error.message} ${error.details ?? ''}`) && storedDateRef.current) {
+          // date, the form goes back to the stored date and due date (the issue dialog moves both)
+          // instead of holding a date that never saves.
+          if (error.code === '23505' && /recurring_period/.test(`${error.message} ${error.details ?? ''}`)) {
             console.error('[editor] save failed:', error.code, error.message)
-            applyOverrides({ date: storedDateRef.current })
+            const { data: stored } = await supabase.from('documents').select('date, due_date').eq('id', id).maybeSingle()
+            if (stored) applyOverrides({ date: stored.date ?? '', dueDate: stored.due_date ?? '' })
+            else if (storedDateRef.current) applyOverrides({ date: storedDateRef.current })
             throw new SaveError(t('messages.recurringDateTaken'))
           }
           throw dbSaveError(error, t)

@@ -220,7 +220,7 @@ export const en = {
     recurringStopped: 'Generating stopped partway. Check the schedule and its invoices, then try again.',
     portalPdfUnavailable: 'The PDF cannot be downloaded right now. Please try again in a moment. If the problem persists, please contact the sender.',
     unsavedEdits: 'The latest changes could not be saved, so nothing was done. Check the connection and try again.',
-    recurringDateTaken: 'Another invoice of this recurring schedule already has that date. The draft keeps its own date — issue it with that date.',
+    recurringDateTaken: 'Another invoice of this recurring schedule already has that date, so the draft keeps its own date and due date.',
   },
   status: {
     draft: 'Draft',

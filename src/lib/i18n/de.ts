@@ -222,7 +222,7 @@ export const de = {
     recurringStopped: 'Das Erstellen ist mittendrin abgebrochen. Zeitplan und Rechnungen prüfen, dann noch einmal versuchen.',
     portalPdfUnavailable: 'Das PDF kann gerade nicht heruntergeladen werden. Bitte versuchen Sie es in einem Moment erneut. Falls das Problem bestehen bleibt, wenden Sie sich bitte an den Absender.',
     unsavedEdits: 'Die letzten Änderungen konnten nicht gespeichert werden, daher ist nichts passiert. Verbindung prüfen und noch einmal versuchen.',
-    recurringDateTaken: 'Eine andere Rechnung dieses Zeitplans hat bereits dieses Datum. Der Entwurf behält sein eigenes Datum – mit diesem Datum ausstellen.',
+    recurringDateTaken: 'Eine andere Rechnung dieses Zeitplans hat bereits dieses Datum, daher behält der Entwurf sein eigenes Datum und Fälligkeitsdatum.',
   },
   status: {
     draft: 'Entwurf',
