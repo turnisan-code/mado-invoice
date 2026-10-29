@@ -193,7 +193,7 @@ export const en = {
       too_many_files: 'Too many PDFs for one download — choose a shorter period.',
       nothing_to_export: 'There is nothing to export for this period.',
       server_error: 'Something went wrong on the server. Try again in a moment.',
-      mfa_required: 'Confirm the sign-in with the code from your authenticator app, then repeat the step.',
+      mfa_required: 'Sign in again and confirm with the code from your authenticator app, then repeat the step.',
     },
     logo: {
       removeTitle: 'Remove the logo?',
