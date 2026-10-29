@@ -124,7 +124,13 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   async function deleteProject() {
     setBusy(true)
     const { error } = await supabase.from('projects').delete().eq('id', project.id)
-    if (error) { setBusy(false); toast.error(t('projects.form.deleteFailed')); return }
+    if (error) {
+      setBusy(false)
+      // projects_delete_guard: entries were billed since the page loaded.
+      if (error.code === 'MI033') { setDeletingProject(false); toast.info(t('projects.form.deleteBilled')); router.refresh(); return }
+      toast.error(t('projects.form.deleteFailed'))
+      return
+    }
     clearProjectTimer(project.id)
     toast.success(t('projects.form.deleted'))
     router.push('/projects')

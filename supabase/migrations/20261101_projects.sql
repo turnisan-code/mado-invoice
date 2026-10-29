@@ -3,7 +3,8 @@
 -- transaction (invoice_project_entries); a billed entry points at its invoice and line. Deleting
 -- the draft frees its entries again (ON DELETE SET NULL).
 -- Error codes: MI030 = project not found, MI031 = nothing to invoice, MI032 = an entry was
--- billed, deleted or made non-billable in the meantime.
+-- billed, deleted or made non-billable in the meantime, MI033 = a project with billed entries
+-- cannot be deleted.
 -- Idempotent — safe to re-run.
 
 create table if not exists projects (
@@ -65,7 +66,8 @@ create index if not exists project_expenses_document_item_id_idx on project_expe
 -- p_lines is what src/lib/projects.ts buildInvoiceLines computed: one object per line with the
 -- document_items columns plus time_entry_ids / expense_ids, the entries the line bills. One
 -- transaction: the project row is locked, the draft is created for the project's client (its
--- language, tax treatment and payment days; Skonto from the settings), every line inserted and
+-- language, tax treatment and payment days; Skonto from the settings, stored only when above 0
+-- as the builder does), every line inserted and
 -- its entries linked. An entry that is no longer an unbilled billable entry of this project rolls
 -- everything back (MI032), so nothing is ever billed twice.
 create or replace function invoice_project_entries(p_project_id uuid, p_lines jsonb)
@@ -102,7 +104,8 @@ begin
   ) values (
     'invoice', null, 'draft', c.id, today, today + coalesce(c.payment_days, s.default_payment_days, 14),
     c.language, 'EUR', c.tax_treatment, 1,
-    s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end
+    case when s.default_skonto_percent > 0 then s.default_skonto_percent end,
+    case when s.default_skonto_percent > 0 then s.default_skonto_days end
   ) returning id into doc_id;
 
   for l in select value from jsonb_array_elements(p_lines) loop
@@ -164,6 +167,25 @@ begin
   return freed + more;
 end;
 $$;
+
+-- What an invoice billed stays on record: a project with billed entries is archived, never
+-- deleted (the project page checks this too, but a stale tab or a direct call must not cascade
+-- the entries away).
+create or replace function projects_delete_guard()
+returns trigger language plpgsql as $$
+begin
+  if exists (select 1 from time_entries where project_id = old.id and invoiced_document_id is not null)
+     or exists (select 1 from project_expenses where project_id = old.id and invoiced_document_id is not null) then
+    raise exception using errcode = 'MI033', message = 'The project has billed entries; archive it instead.';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists projects_delete_guard on projects;
+create trigger projects_delete_guard
+  before delete on projects
+  for each row execute function projects_delete_guard();
 
 alter table projects enable row level security;
 alter table time_entries enable row level security;
