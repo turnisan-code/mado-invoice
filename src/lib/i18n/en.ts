@@ -1111,9 +1111,6 @@ export const en = {
       closing: 'If your payment has crossed with this letter, please disregard it.',
       closingFinal: 'If no payment is received by then, further steps to collect the debt will follow without further notice; the resulting costs are at your expense.',
       regards: 'Kind regards',
-      contact: 'Contact',
-      payment: 'Payment info',
-      uid: 'VAT Reg.',
     },
   },
   payments: {

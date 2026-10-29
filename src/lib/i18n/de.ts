@@ -1113,9 +1113,6 @@ export const de = {
       closing: 'Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, betrachten Sie es bitte als gegenstandslos.',
       closingFinal: 'Geht bis dahin keine Zahlung ein, folgen ohne weitere Ankündigung weitere Schritte zur Einbringung der Forderung; die dadurch entstehenden Kosten gehen zu Ihren Lasten.',
       regards: 'Mit freundlichen Grüßen',
-      contact: 'Kontakt',
-      payment: 'Zahlungsinformationen',
-      uid: 'UID-Nr.',
     },
   },
   payments: {
