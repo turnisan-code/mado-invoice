@@ -1265,7 +1265,6 @@ export const en = {
       synced: 'In Bookamat',
       unsynced: 'Not in Bookamat',
       failed: 'Bookamat sync failed',
-      none: 'Nothing to book',
     },
     sync: {
       filterLabel: 'Bookamat',

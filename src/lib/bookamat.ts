@@ -155,7 +155,9 @@ async function fetchList(creds: BookamatCredentials, year: number, path: string)
     const data: unknown = await bookamatFetch(creds, year, next)
     out.push(...toAccounts(data))
     const link = data && typeof data === 'object' && !Array.isArray(data) ? (data as { next?: unknown }).next : null
-    next = typeof link === 'string' && link ? link : null
+    // Only a page of the same list is followed (Bookamat may hand it out as http://).
+    const url = typeof link === 'string' ? link.replace(/^http:\/\//, 'https://') : ''
+    next = url.startsWith(yearBase(creds, year)) ? url : null
   }
   return out
 }
@@ -511,12 +513,20 @@ export async function syncBookamatDocument(
 
     const pending: PendingBooking[] = []
     try {
+      // A sync that held the claim until just now may have booked some of these years.
+      const { data: fresh, error: freshErr } = await supabase.from('bookamat_bookings').select(BOOKING_COLUMNS).eq('document_id', doc.id)
+      if (freshErr) throw new Error(freshErr.message)
+      for (const row of (fresh ?? []) as BookingRow[]) {
+        if (!stored.some(s => s.year === row.year && s.kind === row.kind)) stored.push(row)
+      }
+      todo = todo.filter(p => !stored.some(s => s.year === p.year && s.kind === p.kind))
+
       const creds = credentialsOf(settings)
       const configuredYear = settings.bookamat_accounts_year ?? Number(today().slice(0, 4))
       const resolver = opts.resolver ?? new AccountResolver(creds, configuredYear)
 
       const configuredVat = vatAccounts(settings, doc.tax_treatment)
-      const missing = totals.vat_groups.find(g => configuredVat[g.rate] == null)
+      const missing = todo.length ? totals.vat_groups.find(g => configuredVat[g.rate] == null) : undefined
       if (missing) {
         const which = missing.rate !== 0 ? `${missing.rate} %`
           : t(doc.tax_treatment === 'eu_reverse_charge' ? 'books.zero.rc' : doc.tax_treatment === 'non_eu' ? 'books.zero.nonEu' : 'books.zero.domestic')

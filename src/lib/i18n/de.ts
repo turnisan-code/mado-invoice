@@ -1267,7 +1267,6 @@ export const de = {
       synced: 'In Bookamat',
       unsynced: 'Nicht in Bookamat',
       failed: 'Bookamat-Fehler',
-      none: 'Nichts zu buchen',
     },
     sync: {
       filterLabel: 'Bookamat',
@@ -1307,7 +1306,7 @@ export const de = {
       splitTitle: 'Mehr als der offene Betrag',
       splitDesc: '{amount} ist um {excess} mehr als der offene Betrag von {balance}.',
       splitFee: '{balance} als Zahlung und {excess} als Mahnspesen / Zinsen erfassen',
-      splitFeeHint: 'Mahnspesen und Verzugszinsen sind Geldeingang, aber kein Umsatz: Sie zählen nicht in der UVA und werden nicht an Bookamat übertragen.',
+      splitFeeHint: 'Mahnspesen und Verzugszinsen sind Geldeingang, aber kein Umsatz – sie zählen nicht in der UVA und werden nicht an Bookamat übertragen.',
       splitOverpay: 'Alle {amount} als Zahlung erfassen (Überzahlung)',
       record: 'Erfassen',
       recordedSplit: 'Zahlung erfasst, davon {amount} als Mahnspesen / Zinsen',
