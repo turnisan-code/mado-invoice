@@ -4,12 +4,12 @@ import { useId } from 'react'
 import Link from 'next/link'
 import { X } from 'lucide-react'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { useT } from '@/lib/i18n/client'
 import { deductibleAmount, depositOpen, depositTotals, type DepositInvoice } from '@/lib/deposits'
 import { invoiceKindLabel } from '@/lib/document-labels'
 import { formatDate, formatMoney } from '@/lib/utils/document'
 import type { Currency, InvoiceKind } from '@/types'
-import { SELECT_CLS } from './ClientPicker'
 import type { useDeposits } from './useDeposits'
 
 const STANDARD_KINDS: InvoiceKind[] = ['standard', 'advance', 'partial']
@@ -41,10 +41,10 @@ export function DepositPanel({ deposits, kind, onKind, docId, issued, currency }
       <div className="flex flex-col sm:flex-row sm:items-start gap-x-4 gap-y-1.5">
         <div className="space-y-1.5 sm:w-56 shrink-0">
           <Label htmlFor={`${uid}-kind`}>{t('deposits.builder.kindLabel')}</Label>
-          <select id={`${uid}-kind`} value={kind} disabled={locked || busy} aria-describedby={`${uid}-kind-hint`}
-            onChange={e => onKind(e.target.value as InvoiceKind)} className={`${SELECT_CLS} disabled:opacity-60`}>
+          <Select id={`${uid}-kind`} value={kind} disabled={locked || busy} aria-describedby={`${uid}-kind-hint`}
+            onChange={e => onKind(e.target.value as InvoiceKind)}>
             {kinds.map(k => <option key={k} value={k} disabled={k === 'final'}>{invoiceKindLabel(t, k)}</option>)}
-          </select>
+          </Select>
         </div>
         <p id={`${uid}-kind-hint`} className="text-xs text-neutral-500 dark:text-neutral-400 sm:pt-7">
           {locked
@@ -100,11 +100,11 @@ export function DepositPanel({ deposits, kind, onKind, docId, issued, currency }
                 ? (
                   <div className="space-y-1">
                     <label htmlFor={`${uid}-add`} className="sr-only">{t('deposits.builder.add')}</label>
-                    <select id={`${uid}-add`} value="" disabled={busy} className={SELECT_CLS}
+                    <Select id={`${uid}-add`} value="" disabled={busy}
                       onChange={e => { const d = free.find(x => x.id === e.target.value); if (d) void deposits.link(d) }}>
                       <option value="">{t('deposits.builder.add')}</option>
                       {free.map(d => <option key={d.id} value={d.id}>{describe(d)} · {money(depositTotals(d).total)}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 )
                 : <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('deposits.builder.none')}</p>}

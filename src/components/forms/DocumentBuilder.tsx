@@ -12,6 +12,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
+import { CONTROL_HEIGHT, fieldClass } from '@/components/ui/control'
+import { cn } from '@/lib/utils'
 import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils/document'
 import { documentVariables, fillSubject, fillTemplate, parseEmailList, portalUrl, resolveTemplate, templateLang, usesVariable } from '@/lib/templates'
 import { invoiceEmailTemplate } from '@/lib/document-labels'
@@ -34,7 +37,7 @@ import { useT } from '@/lib/i18n/client'
 import type { DictKey, TFn } from '@/lib/i18n'
 import { ActionBar } from './builder/ActionBar'
 import { ClientInfo } from './builder/ClientInfo'
-import { ClientPicker, SELECT_CLS } from './builder/ClientPicker'
+import { ClientPicker } from './builder/ClientPicker'
 import { DateInput } from './builder/DateInput'
 import { DeductionTotals } from './builder/DeductionTotals'
 import { DepositPanel } from './builder/DepositPanel'
@@ -114,6 +117,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   const [serverProblems, setServerProblems] = useState<{ key: string; problems: IssueProblem[] } | null>(null)
   const [revealTick, setRevealTick] = useState(0)
   const problemsRef = useRef<HTMLDivElement>(null)
+  // Preview and email need a client too; they say so next to the picker, not only in a toast.
+  const [clientTried, setClientTried] = useState(false)
 
   if (serverProblems && serverProblems.key !== formKey) setServerProblems(null)
 
@@ -559,6 +564,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   }
 
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
+  const clientMissing = !client && (clientTried || shownProblems.some(p => p.code === 'noClient'))
+  const needsClient = (action: () => void) => () => { if (!client) setClientTried(true); action() }
   const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
   const restoreTime = editor.restoreOffer
     ? new Date(editor.restoreOffer.savedAt).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
@@ -658,8 +665,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-client`}>{t('builder.client')}</Label>
           <ClientPicker id={`${uid}-client`} clients={clients} value={clientId} onChange={id => handleClientChange(id)}
-            onCreate={name => setQuickAdd(name)} invalid={shownProblems.some(p => p.code === 'noClient')}
-            disabled={clientLocked} describedBy={clientLocked ? `${uid}-client-locked` : undefined} />
+            onCreate={name => setQuickAdd(name)} invalid={clientMissing}
+            disabled={clientLocked} describedBy={[clientLocked && `${uid}-client-locked`, clientMissing && `${uid}-client-error`].filter(Boolean).join(' ') || undefined} />
+          {clientMissing && <p id={`${uid}-client-error`} className="text-xs text-red-600 dark:text-red-400">{t('issueChecks.problems.noClient')}</p>}
           {clientLocked && <p id={`${uid}-client-locked`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('deposits.builder.clientLocked')}</p>}
           {client && <ClientInfo client={client} settings={settings} />}
         </div>
@@ -668,7 +676,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
           <div className="flex flex-col sm:flex-row gap-3">
             <div role="group" aria-labelledby={`${uid}-number`} className="flex-1 min-w-0 space-y-1.5">
               <span id={`${uid}-number`} className="block text-sm leading-none font-medium">{t('issueChecks.number')}</span>
-              <p className={`h-10 flex items-center px-3 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
+              <p className={`${CONTROL_HEIGHT} flex items-center px-2.5 rounded-lg border border-dashed border-neutral-200 dark:border-neutral-700 text-sm ${doc?.number ? '' : 'text-neutral-500 dark:text-neutral-400'}`}>
                 <span className="truncate">
                   {doc?.number ?? (nextNumber ? `${t('issueChecks.numberDraft')} · ${t('issueChecks.numberNext', { number: nextNumber })}` : t('issueChecks.numberDraft'))}
                 </span>
@@ -676,11 +684,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
             </div>
             <div className="flex-1 space-y-1.5">
               <Label htmlFor={`${uid}-date`}>{t('builder.date')}</Label>
-              <DateInput id={`${uid}-date`} value={date} onValueChange={v => patch({ date: v })} className="h-10 w-full" />
+              <DateInput id={`${uid}-date`} value={date} onValueChange={v => patch({ date: v })} />
             </div>
             <div className="flex-1 space-y-1.5">
               <Label htmlFor={`${uid}-due`}>{type === 'invoice' ? t('builder.dueDate') : t('builder.validUntil')}</Label>
-              <DateInput id={`${uid}-due`} value={dueDate} onValueChange={v => patch({ dueDate: v })} className="h-10 w-full" />
+              <DateInput id={`${uid}-due`} value={dueDate} onValueChange={v => patch({ dueDate: v })} />
             </div>
           </div>
           {!doc?.number && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.numberHint')}</p>}
@@ -701,25 +709,25 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
           <div className={`grid grid-cols-2 sm:grid-cols-5 gap-3 ${showDetails ? 'block' : 'hidden'} sm:grid`}>
             <div className="space-y-1.5">
               <Label htmlFor={`${uid}-language`}>{t('builder.language')}</Label>
-              <select id={`${uid}-language`} value={language} onChange={e => patch({ language: e.target.value as Language })} className={SELECT_CLS}>
+              <Select id={`${uid}-language`} value={language} onChange={e => patch({ language: e.target.value as Language })}>
                 <option value="de">{t('common.german')}</option>
                 <option value="en">{t('common.english')}</option>
-              </select>
+              </Select>
             </div>
             <div role="group" aria-labelledby={`${uid}-currency`} aria-describedby={currency !== 'EUR' ? `${uid}-currency-note` : undefined} className="space-y-1.5">
               <span id={`${uid}-currency`} className="block text-sm leading-none font-medium">{t('builder.currency')}</span>
-              <p className={`${SELECT_CLS} text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/50`}>
+              <p className={cn(fieldClass, 'flex items-center text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/50')}>
                 {currency}
               </p>
               {currency !== 'EUR' && <p id={`${uid}-currency-note`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.currencyLegacy')}</p>}
             </div>
             <div className="col-span-2 sm:col-span-1 space-y-1.5">
               <Label htmlFor={`${uid}-tax`}>{t('builder.taxTreatment')}</Label>
-              <select id={`${uid}-tax`} value={taxTreatment} onChange={e => patch({ taxTreatment: e.target.value as TaxTreatment })} className={SELECT_CLS}>
+              <Select id={`${uid}-tax`} value={taxTreatment} onChange={e => patch({ taxTreatment: e.target.value as TaxTreatment })}>
                 <option value="at_vat">{t('taxTreatments.at_vat')}</option>
                 <option value="eu_reverse_charge">{t('taxTreatments.eu_reverse_charge')}</option>
                 <option value="non_eu">{t('taxTreatments.non_eu')}</option>
-              </select>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`${uid}-service-from`}>{t('builder.serviceFrom')}</Label>
@@ -789,6 +797,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         language={language}
         vatApplies={taxTreatment === 'at_vat'}
         lineIssues={lineIssues}
+        error={shownProblems.some(p => p.code === 'noItems') ? t('issueChecks.problems.noItems') : undefined}
         catalogue={catalogueItems}
         clientRates={clientRates.rates}
         onCatalogueItemCreated={item => setCatalogueItems(prev => [...prev, item])}
@@ -816,11 +825,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-notes`}>{t('builder.notesOnDocument')}</Label>
-            <Textarea id={`${uid}-notes`} value={notes} onChange={e => patch({ notes: e.target.value })} rows={3} className="resize-none" />
+            <Textarea id={`${uid}-notes`} value={notes} onChange={e => patch({ notes: e.target.value })} rows={3} className="min-h-16 sm:min-h-16 resize-none" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-notes-internal`}>{t('builder.internalNotes')}</Label>
-            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => patch({ notesInternal: e.target.value })} rows={3} className="resize-none" placeholder={t('builder.internalPlaceholder')} />
+            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => patch({ notesInternal: e.target.value })} rows={3} className="min-h-16 sm:min-h-16 resize-none" placeholder={t('builder.internalPlaceholder')} />
           </div>
         </div>
       </div>
@@ -839,10 +848,10 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         saveStatus={editor.saveStatus}
         canSaveDraft={!doc}
         canIssue={!doc || doc.status === 'draft'}
-        onPreview={() => void downloadPdf()}
+        onPreview={needsClient(() => void downloadPdf())}
         onDownload={savePdf}
         onDrive={saveToDrive}
-        onEmail={settings.gmail_connected ? sendViaGmail : openInEmail}
+        onEmail={needsClient(settings.gmail_connected ? sendViaGmail : openInEmail)}
         onSaveDraft={() => void editor.saveDraft()}
         onIssue={requestSent}
       />
