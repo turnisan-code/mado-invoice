@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey, UiLang } from '@/lib/i18n'
 import { toast } from 'sonner'
-import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal, Percent } from 'lucide-react'
 import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/reminder-templates'
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
@@ -85,6 +85,7 @@ const NAV_ITEMS = [
   { id: 'numbering',    labelKey: 'settings.nav.numbering',    Icon: Hash },
   { id: 'defaults',     labelKey: 'settings.nav.defaults',     Icon: SlidersHorizontal },
   { id: 'footer',       labelKey: 'settings.nav.footer',       Icon: FileText },
+  { id: 'tax',          labelKey: 'editor.settingsTaxNav',     Icon: Percent },
   { id: 'templates',    labelKey: 'settings.nav.templates',    Icon: Mail },
   { id: 'integrations', labelKey: 'settings.nav.integrations', Icon: Plug },
 ] as const
@@ -1510,7 +1511,10 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             )}
           </SectionCard>
+        </div>}
 
+        {/* ── Tax notes ── */}
+        {activeSection === 'tax' && <div>
           <SectionCard
             title={t('settings.taxNotes.title')}
             description={t('settings.taxNotes.description')}
@@ -1562,7 +1566,7 @@ export default function SettingsForm({ settings }: Props) {
                     <input id={`${uid}-taxNotes-non_eu_en`}
                       type="text"
                       className={inp}
-                      placeholder="Tax liability shifts to the recipient of the services."
+                      placeholder="Not subject to Austrian VAT (place of supply outside the EU)"
                       value={taxNotes.non_eu_en}
                       onChange={e => { setTaxNotes(n => ({ ...n, non_eu_en: e.target.value })); markDirty('taxnotes') }}
                     />

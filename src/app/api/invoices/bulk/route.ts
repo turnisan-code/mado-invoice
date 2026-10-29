@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
-import { calcTotals, today } from '@/lib/utils/document'
+import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { asDbError, canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage } from '@/lib/status'
+import { IssueCheckError } from '@/lib/utils/issue-checks'
+import { clientDisplayName, type NamedClient } from '@/lib/utils/clients'
 import { logEvent } from '@/lib/events'
 import { getT } from '@/lib/i18n/server'
 import type { DocumentStatus } from '@/types'
@@ -30,7 +32,7 @@ export async function PATCH(req: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { t } = await getT()
+  const { t, lang } = await getT()
 
   const body = await req.json().catch(() => null)
   if (!Array.isArray(body?.ids) || !body.ids.length || typeof body.status !== 'string') {
@@ -46,7 +48,7 @@ export async function PATCH(req: Request) {
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
-    .select(`id, number, status, tax_treatment, discount_type, discount_value, ${ITEM_COLS}, payments(amount)`)
+    .select(`id, number, status, date, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEM_COLS}, payments(amount)`)
     .in('id', body.ids)
     .eq('type', 'invoice')
     .in('status', sourcesFor(target))
@@ -54,12 +56,21 @@ export async function PATCH(req: Request) {
   const invoices = docs ?? []
 
   // Drafts get a number assigned (sequentially) first, plus their archive copy; issuing also sets them to 'sent'.
+  // The first incomplete draft stops the run: 422 says which one and why (problems, see issue-checks.ts).
+  let issued = 0
   for (const d of invoices.filter(d => !d.number || d.status === 'draft')) {
     try {
       await issueDocument(supabase, d.id)
+      issued++
       if (d.status === 'draft') d.status = 'sent'
     } catch (err) {
-      return NextResponse.json({ error: lifecycleErrorMessage(asDbError(err), t) }, { status: 500 })
+      if (err instanceof IssueCheckError) {
+        // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
+        const client = clientDisplayName(d.clients as unknown as NamedClient | null)
+        const document = d.number ?? t('editor.bulk.draft', { client, date: formatDate(d.date, lang) })
+        return NextResponse.json({ error: t('editor.bulk.incomplete', { document }), problems: err.problems, documentId: d.id, issued }, { status: 422 })
+      }
+      return NextResponse.json({ error: lifecycleErrorMessage(asDbError(err), t), issued }, { status: 500 })
     }
   }
 
