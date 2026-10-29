@@ -209,6 +209,7 @@ export const de = {
       errorTitle: 'Diese Seite konnte nicht geladen werden',
       errorBody: 'Bitte versuchen Sie es in einem Moment erneut. Falls das Problem bestehen bleibt, wenden Sie sich bitte an den Absender.',
       retry: 'Erneut versuchen',
+      network: 'Ihre Antwort konnte nicht gesendet werden, weil keine Verbindung besteht. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.',
     },
   },
   status: {

@@ -207,6 +207,7 @@ export const en = {
       errorTitle: 'This page could not be loaded',
       errorBody: 'Please try again in a moment. If the problem persists, please contact the sender.',
       retry: 'Try again',
+      network: 'Your answer could not be sent because there is no connection. Please check your internet connection and try again.',
     },
   },
   status: {
