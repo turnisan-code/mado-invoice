@@ -155,6 +155,12 @@ export function savedKeyOf(type: DocumentType, f: FormState): string {
   return JSON.stringify([docFields(type, f), itemsPayload(f.lines)])
 }
 
+// The key of what the database holds once `f` is autosaved: an empty date leaves the stored one
+// in place, so entering any other date (today's included) is a change.
+export function storedKeyOf(type: DocumentType, f: FormState, storedDate: string | null): string {
+  return savedKeyOf(type, f.date || !storedDate ? f : { ...f, date: storedDate })
+}
+
 // What the user wrote beyond the client and what follows from it (language, tax, due date):
 // a new document is only created once there is something worth keeping.
 export function contentKeyOf(f: FormState): string {

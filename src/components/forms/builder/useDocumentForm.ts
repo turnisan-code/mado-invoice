@@ -10,7 +10,7 @@ import { useT } from '@/lib/i18n/client'
 import type { Client, DocumentType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import {
-  AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, savedKeyOf, termDays,
+  AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, savedKeyOf, storedKeyOf, termDays,
   type EditorDocument, type FormState, type LineItem,
 } from './model'
 import { ISSUE_DATE_EVENT, type IssueDateDetail } from './events'
@@ -77,6 +77,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   const formRef = useRef(form)
   const docIdRef = useRef<string | null>(doc?.id ?? null)
   const savedKeyRef = useRef(initialKeys.saved)
+  // The document date the database holds; an autosave never replaces it with an empty field.
+  const storedDateRef = useRef<string | null>(doc?.date ?? null)
   // False from inserting a new draft until its items are written too.
   const savedOnceRef = useRef(!!doc)
   // Mounted without a document at a document's URL (see the restore effect): never insert one.
@@ -97,7 +99,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
 
   // A new document has unsaved work once something beyond the client was entered.
   function isDirty(f: FormState) {
-    return docIdRef.current ? savedKeyOf(type, f) !== savedKeyRef.current : contentKeyOf(f) !== initialKeys.content
+    return docIdRef.current ? storedKeyOf(type, f, storedDateRef.current) !== savedKeyRef.current : contentKeyOf(f) !== initialKeys.content
   }
 
   function canPersist(f: FormState) {
@@ -151,15 +153,16 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
     }
     const fields = docFields(type, effective)
     const items = itemsPayload(effective.lines)
-    const keepStoredDate = mode === 'auto' && !f.date
     pendingWritesRef.current++
     try {
       let id = docIdRef.current
       if (id) {
+        const keepStoredDate = mode === 'auto' && !f.date
         const update: Partial<typeof fields> = { ...fields }
         if (keepStoredDate) delete update.date
         const { error } = await supabase.from('documents').update(update).eq('id', id)
         if (error) throw new Error(error.message)
+        if (!keepStoredDate) storedDateRef.current = fields.date
       } else {
         if (misplacedRef.current) throw new Error(t('common.unknownError'))
         if (!fields.client_id) throw new Error(t('builder.selectClient'))
@@ -168,13 +171,14 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
           .select('id').single()
         if (error) throw new Error(error.message)
         id = data.id as string
+        storedDateRef.current = fields.date
         adoptId(id)
       }
       const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
       if (itemsErr) throw new Error(t('builder.itemsError', { error: itemsErr.message }))
 
       // A cleared date counts as saved: the stored one stays until a new date is entered.
-      savedKeyRef.current = JSON.stringify([fields, items])
+      savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, items])
       savedOnceRef.current = true
       // Saving or issuing shows the date and due date that were filled in, and keeps the snapshot
       // in step so the next flush does not write the empty values back. An autosave leaves the
@@ -277,7 +281,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
     if (!b) return
     const merged = { ...formRef.current, ...b.form, currency: formRef.current.currency }
     const newer = docIdRef.current
-      ? (b.base === null || b.base === initialKeys.saved) && savedKeyOf(type, merged) !== initialKeys.saved
+      ? (b.base === null || b.base === initialKeys.saved) && storedKeyOf(type, merged, storedDateRef.current) !== initialKeys.saved
       : contentKeyOf(merged) !== initialKeys.content
     if (!newer) { removeBackup(key); return }
     offerPendingRef.current = true
@@ -285,7 +289,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Every edit is backed up on the device at once and written to the server 2 s later.
+  // Every edit is backed up on the device at once and written to the server 2 s later. The date
+  // is watched on its own: an empty one and today's give the same formKey.
   useEffect(() => {
     const f = formRef.current
     if (misplacedRef.current) return
@@ -299,7 +304,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
     autoSaveTimer.current = setTimeout(() => { autoSaveTimer.current = null; void latest.current.flush() }, AUTOSAVE_DELAY)
     return cancelAutoSave
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formKey])
+  }, [formKey, form.date])
 
   // Leaving never drops edits: hiding the tab, closing it and unmounting flush the autosave
   // instead of cancelling it, and closing with unsaved work asks first.
