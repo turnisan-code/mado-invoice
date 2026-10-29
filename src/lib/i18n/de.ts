@@ -238,7 +238,7 @@ export const de = {
   },
   views: {
     clients: {
-      searchPlaceholder: 'Name, Firma, Nr., E-Mail, UID suchen…',
+      searchPlaceholder: 'Name, Nr., UID, E-Mail…',
     },
     chart: {
       month: 'Monat',

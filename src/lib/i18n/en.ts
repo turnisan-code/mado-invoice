@@ -236,7 +236,7 @@ export const en = {
   },
   views: {
     clients: {
-      searchPlaceholder: 'Search name, company, no., email, VAT ID…',
+      searchPlaceholder: 'Name, no., VAT ID, email…',
     },
     chart: {
       month: 'Month',
@@ -245,7 +245,7 @@ export const en = {
     reports: {
       vatAt: 'VAT {rate} %',
       rateBase: '{rate} % — taxable base',
-      exemptBase: 'Tax-exempt turnover 0 %, taxable base',
+      exemptBase: 'Tax-exempt turnover (0 %), base amount',
     },
   },
   csv: {

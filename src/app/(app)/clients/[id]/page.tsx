@@ -9,7 +9,7 @@ import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
 import { StatusBadge } from '@/components/lists/StatusBadge'
-import { displayStatus, statusLabelKey } from '@/lib/status'
+import { creditNoteSettled, displayStatus, statusLabelKey } from '@/lib/status'
 
 const typeRoute: Record<string, string> = {
   invoice: 'invoices',
@@ -61,6 +61,18 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     .filter(d => d.status === 'sent' || d.status === 'overdue')
     .reduce((s, d) => s + docTotals(d).balance_due, 0)
   const invoiceCount = allInvoices.length
+
+  // A credit note is settled by its refunds and by the 'credit' rows that apply it to its invoice.
+  const creditNoteIds = allDocs.filter(d => d.type === 'credit_note' && d.status === 'sent').map(d => d.id)
+  const { data: credits } = creditNoteIds.length
+    ? await supabase.from('payments').select('credit_note_id, amount').eq('kind', 'credit').in('credit_note_id', creditNoteIds)
+    : { data: [] }
+  const applied = new Map<string, number>()
+  for (const c of credits ?? []) applied.set(c.credit_note_id, (applied.get(c.credit_note_id) ?? 0) + Number(c.amount))
+  const settledCredit = (doc: (typeof allDocs)[number], total: number) => {
+    const refunded = (doc.payments ?? []).filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0)
+    return creditNoteSettled(total, applied.get(doc.id) ?? 0, refunded)
+  }
 
   const displayName = clientDisplayName(client)
   const subtitle = [client.client_number, client.company && client.name ? client.name : null].filter(Boolean).join(' · ')
@@ -134,8 +146,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             )}
             {allDocs.map(doc => {
               const totals = docTotals(doc)
-              // As in the lists: partly paid / written off from the payments, expired from the date.
-              const shown = displayStatus({ type: doc.type, status: doc.status, due_date: doc.due_date, total: totals.total, payments: doc.payments ?? [] }, now)
+              // As in the lists: partly paid / written off from the payments, expired from the date,
+              // settled from refunds and applied credits.
+              const shown = displayStatus({
+                type: doc.type, status: doc.status, due_date: doc.due_date, total: totals.total, payments: doc.payments ?? [],
+                creditSettled: doc.type === 'credit_note' && settledCredit(doc, totals.total),
+              }, now)
               return (
                 <Link
                   key={doc.id}
