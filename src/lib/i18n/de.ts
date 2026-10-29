@@ -1501,6 +1501,10 @@ export const de = {
       sendWithout: 'Ohne Häkchen wird die E-Mail ohne E-Rechnung gesendet.',
     },
     copyFailed: 'Das Kopieren hat nicht funktioniert. Der Text ist markiert, bitte kopieren Sie ihn von Hand.',
+    taxNote: {
+      reverseCharge: 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)',
+      nonEu: 'Nicht steuerbar (Leistungsort außerhalb der EU)',
+    },
   },
   reminders: {
     title: 'Mahnungen',

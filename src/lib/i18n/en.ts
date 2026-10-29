@@ -1500,6 +1500,10 @@ export const en = {
       sendWithout: 'Untick it to send the email without the e-invoice.',
     },
     copyFailed: 'Copying did not work. The text is selected; please copy it by hand.',
+    taxNote: {
+      reverseCharge: 'Reverse charge — VAT to be accounted for by the recipient',
+      nonEu: 'Not subject to Austrian VAT (place of supply outside the EU)',
+    },
   },
   reminders: {
     title: 'Reminders',
