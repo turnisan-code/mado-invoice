@@ -53,7 +53,8 @@ export default function InvoiceUnbilledDialog({ project, clientName, entries, ex
     const res = await fetch(`/api/projects/${project.id}/invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ timeEntryIds: [...timeIds], expenseIds: [...expenseIds], grouping }),
+      // Only rows still listed: after a refresh billed ones are gone from the props.
+      body: JSON.stringify({ timeEntryIds: chosenEntries.map(e => e.id), expenseIds: chosenExpenses.map(x => x.id), grouping }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || !data.documentId) {

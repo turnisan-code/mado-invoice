@@ -29,6 +29,11 @@ function writeTimer(projectId: string, startedAt: number | null) {
   window.dispatchEvent(new Event(TIMER_EVENT))
 }
 
+// A deleted project leaves no timer behind.
+export function clearProjectTimer(projectId: string) {
+  writeTimer(projectId, null)
+}
+
 // When the project's timer on this device was started, or null.
 export function useProjectTimer(projectId: string): number | null {
   return useSyncExternalStore(subscribe, () => readTimer(projectId), () => null)

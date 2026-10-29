@@ -71,8 +71,8 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
       client_id: values.client_id,
       name: values.name.trim(),
       status: values.status,
-      // A zero budget means none (the column only takes positive budgets).
       hourly_rate: values.hourly_rate,
+      // A zero budget means none (the columns only take positive budgets).
       budget_hours: values.budget_hours || null,
       budget_amount: values.budget_amount || null,
       notes: values.notes.trim() || null,

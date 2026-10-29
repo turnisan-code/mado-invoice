@@ -568,7 +568,7 @@ export const de = {
       hint: 'Der Timer läuft auf diesem Gerät.',
     },
     invoice: {
-      button: 'Offenes verrechnen',
+      button: 'Verrechnen',
       title: 'Offene Einträge verrechnen',
       desc: 'Erstellt einen Rechnungsentwurf für {client} mit den ausgewählten Einträgen, in Sprache und Zahlungsziel des Kunden. Vor dem Ausstellen lässt er sich noch bearbeiten.',
       grouping: 'Stunden auf der Rechnung',

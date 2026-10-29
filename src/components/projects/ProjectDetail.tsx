@@ -19,7 +19,7 @@ import ProjectDialog, { type ClientOption } from './ProjectDialog'
 import TimeEntryDialog from './TimeEntryDialog'
 import ExpenseDialog from './ExpenseDialog'
 import InvoiceUnbilledDialog from './InvoiceUnbilledDialog'
-import ProjectTimer from './ProjectTimer'
+import ProjectTimer, { clearProjectTimer } from './ProjectTimer'
 import { budgetBarColor, cardClass, iconButtonClass, inputClass, outlineButtonClass, primaryButtonClass, projectStatusColor } from './ui'
 
 export type LinkedInvoice = { id: string; number: string | null; status: string; date: string }
@@ -125,6 +125,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
     setBusy(true)
     const { error } = await supabase.from('projects').delete().eq('id', project.id)
     if (error) { setBusy(false); toast.error(t('projects.form.deleteFailed')); return }
+    clearProjectTimer(project.id)
     toast.success(t('projects.form.deleted'))
     router.push('/projects')
   }
@@ -145,7 +146,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
 
   function rowActions(row: Row, target: Target, edit: () => void) {
     if (row.invoiced_document_id) {
-      if (!releasable(row.invoiced_document_id)) return <span className="sr-only">{t('projects.entries.locked')}</span>
+      if (!releasable(row.invoiced_document_id)) return null
       return (
         <button type="button" onClick={() => setReleasing({ ...target, number: invoiceLabel(row.invoiced_document_id) })} title={t('projects.entries.release')} aria-label={t('projects.entries.release')} className={iconButtonClass}>
           <Undo2 size={15} />
