@@ -57,7 +57,8 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       await flushPendingEdits(documentId)
       const { data: doc, error } = await supabase
         .from('documents')
-        .select('type, status, currency, buyer_reference, cancels_document_id, converted_from_id, issued_total, discount_type, discount_value, tax_treatment, document_items(*), clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
+        // All columns, so the dialog also opens before 20261101_print.sql adds issued_total.
+        .select('*, document_items(*), clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
         .eq('id', documentId)
         .single()
       if (error || !doc) throw new Error(error?.message)
