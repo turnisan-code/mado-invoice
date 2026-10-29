@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
-import ClientEditSection from '@/components/layout/ClientEditSection'
 import ClientRates from '@/components/layout/ClientRates'
+import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatDate, formatMoney, roundCents } from '@/lib/utils/document'
