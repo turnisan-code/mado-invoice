@@ -355,7 +355,6 @@ export const de = {
       lessPart: 'Entgelt {net} zzgl. USt. {rate} {vat}',
       lessPartNoVat: 'Entgelt {net}',
       fullNet: 'Entgelt der gesamten Leistung',
-      fullVat: 'USt. {rate}',
       fullTotal: 'Gesamtbetrag der Leistung',
       remaining: 'Restbetrag',
     },

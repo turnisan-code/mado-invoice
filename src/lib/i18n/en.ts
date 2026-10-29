@@ -354,7 +354,6 @@ export const en = {
       lessPart: 'Net {net} plus VAT {rate} {vat}',
       lessPartNoVat: 'Net {net}',
       fullNet: 'Net amount of the whole service',
-      fullVat: 'VAT {rate}',
       fullTotal: 'Total for the whole service',
       remaining: 'Remaining amount',
     },

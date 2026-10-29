@@ -85,6 +85,7 @@ export async function renderLoadedPdf(
       service_date_end: doc.service_date_end ?? null,
       due_date: doc.due_date,
       type: doc.type,
+      invoice_kind: doc.invoice_kind,
       language: lang,
       currency: doc.currency ?? 'EUR',
       tax_treatment: doc.tax_treatment ?? 'at_vat',

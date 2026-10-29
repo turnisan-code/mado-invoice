@@ -3,14 +3,14 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowRight, ReceiptText } from 'lucide-react'
+import { ArrowRight, FileCheck, ReceiptText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { useT } from '@/lib/i18n/client'
 
-// Quote → invoice and invoice → credit note. The server copies the source document from the
-// database, so the builder's pending autosave on this page is written first.
+// Quote → invoice, quote → final invoice and invoice → credit note. The server copies the source
+// document from the database, so the builder's pending autosave on this page is written first.
 const KINDS = {
   invoice: {
     icon: ArrowRight,
@@ -21,6 +21,17 @@ const KINDS = {
     busy: 'documents.converting',
     done: 'documents.invoiceCreated',
     url: (id: string) => `/quotes/${id}/convert`,
+    target: (data: { invoiceId?: string }) => data.invoiceId ? `/invoices/${data.invoiceId}` : null,
+  },
+  final_invoice: {
+    icon: FileCheck,
+    label: 'deposits.quote.createFinal',
+    title: 'deposits.quote.finalTitle',
+    description: 'deposits.quote.finalDesc',
+    confirm: 'deposits.quote.createFinalConfirm',
+    busy: 'documents.creating',
+    done: 'deposits.quote.finalCreated',
+    url: (id: string) => `/api/quotes/${id}/final`,
     target: (data: { invoiceId?: string }) => data.invoiceId ? `/invoices/${data.invoiceId}` : null,
   },
   credit_note: {
