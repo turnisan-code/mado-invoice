@@ -12,6 +12,7 @@ import { PROJECT_STATUSES } from '@/lib/projects'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { Project, ProjectStatus } from '@/types'
+import { Select } from '@/components/ui/select'
 import { inputClass, labelClass, textareaClass } from './ui'
 
 export type ClientOption = NamedClient & { id: string }
@@ -92,7 +93,7 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
     router.push(`/projects/${data.id}`)
   }
 
-  const optional = <span className="font-normal text-neutral-400 dark:text-neutral-500">({t('projects.form.optional')})</span>
+  const optional = <span className="font-normal text-neutral-500 dark:text-neutral-500">({t('projects.form.optional')})</span>
 
   return (
     <Dialog open onClose={onClose} title={project ? t('projects.form.editTitle') : t('projects.form.createTitle')} busy={saving} panelClassName="max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto">
@@ -100,10 +101,10 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
         <div className="space-y-3">
           <div>
             <label htmlFor={`${id}-client`} className={labelClass}>{t('projects.form.client')}</label>
-            <select id={`${id}-client`} value={values.client_id} onChange={e => set({ client_id: e.target.value })} disabled={saving || lockClient} className={inputClass}>
+            <Select id={`${id}-client`} value={values.client_id} onChange={e => set({ client_id: e.target.value })} disabled={saving || lockClient}>
               <option value="">{t('projects.form.selectClient')}</option>
               {clients.map(c => <option key={c.id} value={c.id}>{clientLabel(c)}</option>)}
-            </select>
+            </Select>
           </div>
           <div>
             <label htmlFor={`${id}-name`} className={labelClass}>{t('projects.form.name')}</label>
@@ -112,16 +113,16 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
           {project && (
             <div>
               <label htmlFor={`${id}-status`} className={labelClass}>{t('projects.form.status')}</label>
-              <select id={`${id}-status`} value={values.status} onChange={e => set({ status: e.target.value as ProjectStatus })} disabled={saving} className={inputClass}>
+              <Select id={`${id}-status`} value={values.status} onChange={e => set({ status: e.target.value as ProjectStatus })} disabled={saving}>
                 {PROJECT_STATUSES.map(s => <option key={s} value={s}>{t(`projects.statuses.${s}`)}</option>)}
-              </select>
+              </Select>
             </div>
           )}
           <div>
             <label htmlFor={`${id}-rate`} className={labelClass}>{t('projects.form.hourlyRate')} {optional}</label>
             <MoneyInput id={`${id}-rate`} value={values.hourly_rate} onValueChange={v => set({ hourly_rate: v })} disabled={saving} className={inputClass} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor={`${id}-bh`} className={labelClass}>{t('projects.form.budgetHours')} {optional}</label>
               <MoneyInput id={`${id}-bh`} value={values.budget_hours} onValueChange={v => set({ budget_hours: v })} disabled={saving} className={inputClass} />

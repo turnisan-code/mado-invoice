@@ -57,7 +57,7 @@ export default function NewPasswordForm({ email, redirectTo }: { email: string; 
           id={`${id}-new`}
           type="password"
           autoComplete="new-password"
-          className="h-10"
+          className="h-10 sm:h-10"
           value={password}
           onChange={e => setPassword(e.target.value)}
           aria-describedby={`${id}-rule`}
@@ -73,14 +73,14 @@ export default function NewPasswordForm({ email, redirectTo }: { email: string; 
           id={`${id}-confirm`}
           type="password"
           autoComplete="new-password"
-          className="h-10"
+          className="h-10 sm:h-10"
           value={confirm}
           onChange={e => setConfirm(e.target.value)}
           required
         />
       </div>
       <FormError message={error} />
-      <Button type="submit" className="h-10 w-full sm:w-auto px-4" disabled={busy}>
+      <Button type="submit" className="h-10 sm:h-10 w-full sm:w-auto px-4" disabled={busy}>
         {busy ? t('common.saving') : t('account.savePassword')}
       </Button>
     </form>

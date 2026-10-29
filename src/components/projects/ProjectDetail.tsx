@@ -20,7 +20,9 @@ import TimeEntryDialog from './TimeEntryDialog'
 import ExpenseDialog from './ExpenseDialog'
 import InvoiceUnbilledDialog from './InvoiceUnbilledDialog'
 import ProjectTimer, { clearProjectTimer } from './ProjectTimer'
-import { budgetBarColor, cardClass, iconButtonClass, inputClass, outlineButtonClass, primaryButtonClass, projectStatusColor } from './ui'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { budgetBarColor, cardClass, iconButtonClass, inputClass, projectStatusColor } from './ui'
 
 export type LinkedInvoice = { id: string; number: string | null; status: string; date: string }
 
@@ -169,7 +171,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
     )
   }
 
-  const description = (text: string) => text || <span className="text-neutral-400 dark:text-neutral-500">{t('projects.entries.noDescription')}</span>
+  const description = (text: string) => text || <span className="text-neutral-500 dark:text-neutral-500">{t('projects.entries.noDescription')}</span>
   const th = 'px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 text-left'
   const thRight = 'px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 text-right'
   const entryCount = (count: number) => n(count, t('projects.entries.entryOne', { count }), t('projects.entries.entryOther', { count }))
@@ -204,7 +206,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   }
 
   const emptyRows = (empty: string) => (
-    <p className="px-4 py-10 text-center text-sm text-neutral-400 dark:text-neutral-500">{filtersActive ? t('projects.entries.noMatch') : empty}</p>
+    <p className="px-4 py-10 text-center text-sm text-neutral-500 dark:text-neutral-500">{filtersActive ? t('projects.entries.noMatch') : empty}</p>
   )
 
   return (
@@ -241,12 +243,12 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
 
       {/* Actions */}
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-        <button type="button" onClick={() => setTimeDialog({})} className={primaryButtonClass}><Plus size={14} /> {t('projects.logTime')}</button>
+        <Button type="button" onClick={() => setTimeDialog({})}><Plus size={14} /> {t('projects.logTime')}</Button>
         <ProjectTimer projectId={project.id} onStopped={entry => setTimeDialog({ entry })} />
-        <button type="button" onClick={() => setExpenseDialog({})} className={outlineButtonClass}><Receipt size={14} /> {t('projects.addExpense')}</button>
-        <button type="button" onClick={() => setInvoicing(true)} disabled={!unbilledEntries.length && !unbilledExpenses.length} title={!unbilledEntries.length && !unbilledExpenses.length ? t('projects.invoice.nothing') : undefined} className={outlineButtonClass}>
+        <Button type="button" variant="outline" onClick={() => setExpenseDialog({})}><Receipt size={14} /> {t('projects.addExpense')}</Button>
+        <Button type="button" variant="outline" onClick={() => setInvoicing(true)} disabled={!unbilledEntries.length && !unbilledExpenses.length} title={!unbilledEntries.length && !unbilledExpenses.length ? t('projects.invoice.nothing') : undefined}>
           <FileText size={14} /> {t('projects.invoice.button')}
-        </button>
+        </Button>
       </div>
 
       {/* Summary */}
@@ -267,7 +269,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
         </div>
         <div className={`${cardClass} p-4 space-y-2`}>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('projects.detail.budget')}</p>
-          {use.hours === null && use.amount === null && <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('projects.detail.noBudget')}</p>}
+          {use.hours === null && use.amount === null && <p className="text-sm text-neutral-500 dark:text-neutral-500">{t('projects.detail.noBudget')}</p>}
           {use.hours !== null && budgetBar(use.hours, t('projects.detail.budgetHours', { used: formatDuration(totals.minutes), budget: formatDuration((project.budget_hours ?? 0) * 60) }))}
           {use.amount !== null && budgetBar(use.amount, t('projects.detail.budgetAmount', { used: formatMoney(totals.value), budget: formatMoney(project.budget_amount ?? 0) }))}
         </div>
@@ -292,16 +294,16 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
               className={`flex-1 sm:flex-none px-5 h-11 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-neutral-900 dark:border-white text-neutral-900 dark:text-white' : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'}`}
             >
               {key === 'time' ? t('projects.detail.time') : t('projects.detail.expenses')}
-              <span className="ml-1.5 text-xs text-neutral-400 dark:text-neutral-500 tabular-nums">{key === 'time' ? entries.length : expenses.length}</span>
+              <span className="ml-1.5 text-xs text-neutral-500 dark:text-neutral-500 tabular-nums">{key === 'time' ? entries.length : expenses.length}</span>
             </button>
           ))}
         </div>
 
         <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${tab}`}>
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 p-3 border-b border-neutral-100 dark:border-neutral-800">
-            <select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className={`${inputClass} sm:w-auto`}>
+            <Select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className="sm:w-auto">
               {(['all', 'unbilled', 'billed', 'nonBillable'] as const).map(b => <option key={b} value={b}>{t(`projects.filters.${b}`)}</option>)}
-            </select>
+            </Select>
             <input type="search" value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder={t('projects.filters.search')} aria-label={t('projects.filters.search')} className={`${inputClass} sm:w-56`} />
             <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
               <span className="shrink-0">{t('projects.filters.from')}</span>
@@ -429,21 +431,21 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
                   {t('projects.entries.totalExpenses', { count: expenseCount(shownExpenses.length), amount: formatMoney(shownExpenseAmount) })}
                 </p>
               )}
-              <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
+              <p className="px-4 pb-3 text-xs text-neutral-500 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
             </>
           )}
-          {hasBilled && <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.entries.locked')}</p>}
+          {hasBilled && <p className="px-4 pb-3 text-xs text-neutral-500 dark:text-neutral-500">{t('projects.entries.locked')}</p>}
         </div>
       </div>
 
       {/* Invoices */}
       <div className={`${cardClass} overflow-hidden`}>
         <p className="px-5 py-4 text-sm font-medium border-b border-neutral-100 dark:border-neutral-800">{t('projects.detail.invoices')}</p>
-        {invoices.length === 0 && <p className="px-5 py-6 text-sm text-neutral-400 dark:text-neutral-500">{t('projects.detail.noInvoices')}</p>}
+        {invoices.length === 0 && <p className="px-5 py-6 text-sm text-neutral-500 dark:text-neutral-500">{t('projects.detail.noInvoices')}</p>}
         <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
           {invoices.map(inv => (
             <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-              <span className="text-sm font-medium flex-1 min-w-0">{inv.number ?? <span className="font-normal text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</span>
+              <span className="text-sm font-medium flex-1 min-w-0">{inv.number ?? <span className="font-normal text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}</span>
               <span className="text-xs text-neutral-500 dark:text-neutral-400">{formatDate(inv.date, lang)}</span>
               <StatusBadge status={inv.status} label={t(statusLabelKey(inv.status))} />
             </Link>

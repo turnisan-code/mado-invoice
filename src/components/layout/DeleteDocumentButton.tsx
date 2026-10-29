@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { lifecycleErrorMessage } from '@/lib/status'
@@ -47,15 +48,16 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setConfirming(true)}
         disabled={loading}
-        className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors ml-auto disabled:opacity-50"
+        className="ml-auto text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
       >
         <Trash2 size={14} />
         <span className="sr-only sm:not-sr-only">{loading ? t('common.deleting') : t('common.delete')}</span>
-      </button>
+      </Button>
       <ConfirmDialog
         open={confirming}
         title={t('documents.deleteDraftTitle')}

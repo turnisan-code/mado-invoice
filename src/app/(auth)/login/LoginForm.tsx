@@ -117,14 +117,14 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
             pattern="[0-9]{6}"
             maxLength={6}
             autoFocus
-            className="h-10 text-center text-lg tracking-[0.4em] font-mono"
+            className="h-10 sm:h-10 text-center text-lg tracking-[0.4em] font-mono"
             value={code}
             onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             required
           />
         </div>
         <FormError message={error} />
-        <Button type="submit" className="h-10 w-full" disabled={busy || code.length !== 6}>
+        <Button type="submit" className="h-10 sm:h-10 w-full" disabled={busy || code.length !== 6}>
           {busy ? t('account.verifying') : t('account.verify')}
         </Button>
         <div className="text-center">
@@ -157,7 +157,7 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
             id="reset-email"
             type="email"
             autoComplete="username"
-            className="h-10"
+            className="h-10 sm:h-10"
             value={email}
             onChange={e => setEmail(e.target.value)}
             placeholder={t('account.emailPlaceholder')}
@@ -165,7 +165,7 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
           />
         </div>
         <FormError message={error} />
-        <Button type="submit" className="h-10 w-full" disabled={busy}>
+        <Button type="submit" className="h-10 sm:h-10 w-full" disabled={busy}>
           {busy ? t('common.sending') : t('account.sendResetLink')}
         </Button>
         <div className="text-center">
@@ -184,7 +184,7 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
           id="email"
           type="email"
           autoComplete="username"
-          className="h-10"
+          className="h-10 sm:h-10"
           value={email}
           onChange={e => setEmail(e.target.value)}
           placeholder={t('account.emailPlaceholder')}
@@ -200,14 +200,14 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
           id="password"
           type="password"
           autoComplete="current-password"
-          className="h-10"
+          className="h-10 sm:h-10"
           value={password}
           onChange={e => setPassword(e.target.value)}
           required
         />
       </div>
       <FormError message={error} />
-      <Button type="submit" className="h-10 w-full" disabled={busy}>
+      <Button type="submit" className="h-10 sm:h-10 w-full" disabled={busy}>
         {busy ? t('account.signingIn') : t('account.signIn')}
       </Button>
     </form>

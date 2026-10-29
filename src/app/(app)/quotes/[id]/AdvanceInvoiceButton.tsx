@@ -67,7 +67,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={busy} className="flex items-center gap-1.5">
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} disabled={busy}>
         <HandCoins size={14} />
         <span className="sr-only sm:not-sr-only">{t('deposits.quote.createAdvance')}</span>
       </Button>
@@ -86,7 +86,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
               {mode === 'percent' ? t('deposits.quote.percentLabel') : t('deposits.quote.amountLabel')}
             </label>
             <MoneyInput id={`${uid}-value`} value={value} onValueChange={setValue} aria-invalid={!!problem || undefined}
-              aria-describedby={`${uid}-preview`} className="h-10" />
+              aria-describedby={`${uid}-preview`} />
             <p id={`${uid}-preview`} className="text-xs text-neutral-500 dark:text-neutral-400">
               {t('deposits.quote.preview', { amount: formatMoney(gross), total: formatMoney(quoteTotal) })}
               {advanced > 0 && <> {t('deposits.quote.alreadyAdvanced', { amount: formatMoney(advanced) })}</>}
