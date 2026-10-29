@@ -166,7 +166,9 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   const thRight = 'px-4 py-3 font-medium text-neutral-500 dark:text-neutral-400 text-right'
   const entryCount = (count: number) => n(count, t('projects.entries.entryOne', { count }), t('projects.entries.entryOther', { count }))
   const expenseCount = (count: number) => n(count, t('projects.entries.expenseOne', { count }), t('projects.entries.expenseOther', { count }))
-  const percent = (share: number) => new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { style: 'percent', maximumFractionDigits: 0 }).format(share)
+  const locale = lang === 'de' ? 'de-AT' : 'en-GB'
+  const percent = (share: number) => new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 0 }).format(share)
+  const num = (value: number) => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)
 
   function budgetBar(share: number, label: string) {
     return (
@@ -244,7 +246,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
         <div className={`${cardClass} p-4 space-y-2`}>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('projects.detail.budget')}</p>
           {use.hours === null && use.amount === null && <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('projects.detail.noBudget')}</p>}
-          {use.hours !== null && budgetBar(use.hours, t('projects.detail.budgetHours', { used: formatDuration(totals.minutes), budget: String(project.budget_hours) }))}
+          {use.hours !== null && budgetBar(use.hours, t('projects.detail.budgetHours', { used: formatDuration(totals.minutes), budget: num(project.budget_hours ?? 0) }))}
           {use.amount !== null && budgetBar(use.amount, t('projects.detail.budgetAmount', { used: formatMoney(totals.value), budget: formatMoney(project.budget_amount ?? 0) }))}
         </div>
       </div>
@@ -357,7 +359,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
                   </div>
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
                     {formatDate(x.date, lang)} · {t('projects.entries.net')} {formatMoney(x.net_amount)} · {x.vat_rate} %
-                    {!!x.markup_percent && <> · +{x.markup_percent} %</>}
+                    {!!x.markup_percent && <> · +{num(x.markup_percent)} %</>}
                   </p>
                   <div className="flex items-center justify-between gap-2 -mb-1">
                     {billingBadge(x)}
@@ -387,7 +389,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
                     <td className="px-4 py-2.5 max-w-xs break-words">{x.description}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(x.net_amount)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.vat_rate} %</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.markup_percent ? `${x.markup_percent} %` : '—'}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.markup_percent ? `${num(x.markup_percent)} %` : '—'}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(expensePrice(x))}</td>
                     <td className="px-4 py-2.5">{billingBadge(x)}</td>
                     <td className="px-2 py-1.5 text-right">{rowActions(x, { kind: 'expense', id: x.id }, () => setExpenseDialog({ expense: x }))}</td>
