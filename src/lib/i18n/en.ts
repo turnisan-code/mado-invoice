@@ -341,6 +341,10 @@ export const en = {
       createAnyway: 'Create anyway',
       selected: '{name} selected.',
     },
+    chartKeyboard: {
+      label: 'Revenue per month: the arrow keys move between the months',
+      value: '{month} {year}: {amount}',
+    },
   },
   csv: {
     number: 'Number',

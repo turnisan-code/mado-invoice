@@ -343,6 +343,10 @@ export const de = {
       createAnyway: 'Trotzdem anlegen',
       selected: '{name} ausgewählt.',
     },
+    chartKeyboard: {
+      label: 'Umsatz pro Monat: mit den Pfeiltasten von Monat zu Monat',
+      value: '{month} {year}: {amount}',
+    },
   },
   csv: {
     number: 'Nummer',
