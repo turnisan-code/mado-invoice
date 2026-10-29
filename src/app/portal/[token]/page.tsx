@@ -103,6 +103,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const totals = calcTotals(items, doc.payments ?? [], discount, doc.tax_treatment)
   // A final invoice shows the whole service, then what the earlier invoices carried, as on the PDF.
   const deduction = deductionSummary(items, discount, doc.tax_treatment)
+  const discountLabel = doc.discount_type === 'percent' && doc.discount_value
+    ? t('pdfPortal.totals.discountPercent', { percent: formatPercent(t, clampPercent(doc.discount_value), lang) })
+    : t('pdfPortal.totals.discount')
   const advance = doc.type === 'invoice' && doc.invoice_kind === 'advance'
   // Credit notes are stored with positive amounts and show as credits, as on the PDF.
   const sign = doc.type === 'credit_note' ? -1 : 1
@@ -288,6 +291,19 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
       {deduction && (
         <div className="flex justify-end mb-4">
           <dl className="w-full sm:w-96 space-y-1.5 text-sm">
+            {/* The document discount applies to the whole service, so it is shown here, not below. */}
+            {deduction.full.discount_amount > 0 && (
+              <>
+                <div className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{t('pdfPortal.totals.net')}</dt>
+                  <dd>{money(deduction.full.subtotal)}</dd>
+                </div>
+                <div className="flex justify-between gap-4 text-neutral-500">
+                  <dt>{discountLabel}</dt>
+                  <dd>{money(-deduction.full.discount_amount)}</dd>
+                </div>
+              </>
+            )}
             <div className="flex justify-between gap-4 text-neutral-500">
               <dt>{t('deposits.doc.fullNet')}</dt>
               <dd>{money(deduction.full.subtotal - deduction.full.discount_amount)}</dd>
@@ -333,9 +349,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
         <dl className="w-full sm:w-72 space-y-1.5 text-sm">
           <div className="flex justify-between gap-4 text-neutral-500">
             <dt>{t('pdfPortal.totals.net')}</dt>
-            <dd>{money(totals.subtotal)}</dd>
+            <dd>{money(deduction ? totals.subtotal - totals.discount_amount : totals.subtotal)}</dd>
           </div>
-          {totals.discount_amount > 0 && (
+          {totals.discount_amount > 0 && !deduction && (
             <div className="flex justify-between gap-4 text-neutral-500">
               <dt>
                 {doc.discount_type === 'percent' && doc.discount_value

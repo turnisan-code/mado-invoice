@@ -190,6 +190,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   // An advance invoice states when the service is expected; a final invoice deducts the earlier ones.
   const advance = doc.type === 'invoice' && doc.invoice_kind === 'advance'
   const deduction = deductionSummary(doc.items, discountOf(doc), doc.tax_treatment)
+  const discountLabel = doc.discount_type === 'percent' && doc.discount_value
+    ? t('pdfPortal.totals.discountPercent', { percent: formatPercent(t, clampPercent(doc.discount_value), lang) })
+    : t('pdfPortal.totals.discount')
   // The builder previews an unnumbered document as 'DRAFT'.
   const draft = !doc.number || doc.number === 'DRAFT'
   const number = draft ? t('pdfPortal.draft') : doc.number
@@ -373,6 +376,19 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         {deduction && (
           <View style={s.deductionBox} wrap={false}>
             <View style={s.deductionBlock}>
+              {/* The document discount applies to the whole service, so it is shown here, not below. */}
+              {deduction.full.discount_amount > 0 && (
+                <>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.net')}</Text>
+                    <Text>{money(deduction.full.subtotal)}</Text>
+                  </View>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{discountLabel}</Text>
+                    <Text>{money(-deduction.full.discount_amount)}</Text>
+                  </View>
+                </>
+              )}
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{t('deposits.doc.fullNet')}</Text>
                 <Text>{money(deduction.full.subtotal - deduction.full.discount_amount)}</Text>
@@ -435,9 +451,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <View style={s.totalsBlock}>
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{t('pdfPortal.totals.net')}</Text>
-                <Text>{money(doc.totals.subtotal)}</Text>
+                <Text>{money(deduction ? doc.totals.subtotal - doc.totals.discount_amount : doc.totals.subtotal)}</Text>
               </View>
-              {doc.totals.discount_amount > 0 && (
+              {doc.totals.discount_amount > 0 && !deduction && (
                 <View style={s.totalsRow}>
                   <Text style={s.totalsLabel}>
                     {doc.discount_type === 'percent' && doc.discount_value
