@@ -979,6 +979,7 @@ export const de = {
     issuedTotal: {
       changed: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert: damals {issued}, jetzt {current}.',
       changedHint: 'Das ausgestellte PDF zeigt weiterhin die ursprünglichen Beträge; Portal und E-Rechnung zeigen die aktuellen.',
+      changedHintQuote: 'Das ausgestellte PDF zeigt weiterhin die ursprünglichen Beträge; das Portal zeigt die aktuellen.',
       stornoHint: 'Eine falsche Rechnung wird mit einer Stornorechnung korrigiert.',
       einvoice: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert (damals {issued}, jetzt {current}). Die E-Rechnung entsteht aus den aktuellen Daten, das ausgestellte PDF zeigt die ursprünglichen Beträge.',
     },

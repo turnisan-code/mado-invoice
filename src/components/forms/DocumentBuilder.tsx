@@ -601,7 +601,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       {issuedTotalChanged && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <strong>{t('print.issuedTotal.changed', { issued: formatMoney(issuedTotal, currency), current: formatMoney(totals.total, currency) })}</strong>{' '}
-          {t('print.issuedTotal.changedHint')}{type === 'invoice' && ` ${t('print.issuedTotal.stornoHint')}`}
+          {t(type === 'quote' ? 'print.issuedTotal.changedHintQuote' : 'print.issuedTotal.changedHint')}{type === 'invoice' && ` ${t('print.issuedTotal.stornoHint')}`}
         </div>
       )}
 

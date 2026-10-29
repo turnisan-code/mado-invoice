@@ -977,6 +977,7 @@ export const en = {
     issuedTotal: {
       changed: 'The total has changed since issuing: {issued} then, {current} now.',
       changedHint: 'The issued PDF still shows the original amounts; the portal and the e-invoice show the current ones.',
+      changedHintQuote: 'The issued PDF still shows the original amounts; the portal shows the current ones.',
       stornoHint: 'A wrong invoice is corrected with a cancellation invoice.',
       einvoice: 'The total has changed since issuing ({issued} then, {current} now). The e-invoice is built from the current data; the issued PDF shows the original amounts.',
     },
