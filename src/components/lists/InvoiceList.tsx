@@ -19,6 +19,8 @@ import { StatusBadge } from './StatusBadge'
 import { displayStatus, isOverdue, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
 import { invoiceKindBadge } from '@/lib/document-labels'
+import { isIssuedNoteList, latestIssued, type IssuedNote } from '@/lib/utils/bulk-issue'
+import { BulkIssueNotice, BulkIssueResult } from './BulkIssue'
 import type { BookamatState, InvoiceKind } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -118,6 +120,9 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
   const [paidDateInvalid, setPaidDateInvalid] = useState(false)
   const [bulkSync, setBulkSync] = useState<BulkSync | null>(null)
+  // Drafts dated before today are issued with today's date unless the confirm says otherwise.
+  const [redate, setRedate] = useState(true)
+  const [issueNotes, setIssueNotes] = useState<IssuedNote[] | null>(null)
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const invoiceCount = (count: number) => n(count, t('invoices.countOne', { count }), t('invoices.countOther', { count }))
@@ -148,6 +153,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   )
 
   const todayStr = today()
+  const latest = useMemo(() => latestIssued(invoices), [invoices])
 
   const clientOptions = useMemo(() => {
     const names = new Map<string, string>()
@@ -259,6 +265,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const currency = filtered[0]?.currency ?? 'EUR'
 
   function askBulk(action: BulkAction) {
+    setRedate(true)
     if (action === 'paid') {
       setPaidDate(todayStr)
       setPaidMethod('bank')
@@ -277,19 +284,24 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     const ids = selection.selectedVisible.map(d => d.id)
     const isDelete = action === 'delete'
     setBulkLoading(true)
+    // Shown once the confirm has closed, so focus moves from one dialog to the next.
+    let notes: IssuedNote[] = []
     try {
       const res = await fetch('/api/invoices/bulk', {
         method: isDelete ? 'DELETE' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isDelete ? { ids } : action === 'paid' ? { ids, status: action, paidDate, method: paidMethod } : { ids, status: action }),
+        body: JSON.stringify(isDelete ? { ids } : action === 'paid' ? { ids, status: action, paidDate, method: paidMethod, redate } : { ids, status: action, redate }),
       })
       const data = await res.json().catch(() => ({}))
+      if (isIssuedNoteList(data.documents)) notes = data.documents
       if (!res.ok) {
         // Drafts before the incomplete one were issued.
         if (res.status === 422) {
           const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
           if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
         }
+        // Drafts before the failed one were issued.
+        if (notes.length) router.refresh()
         toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: apiErrorMessage(t, data) }))
         return
       }
@@ -300,7 +312,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       } else {
         const { updated, skipped } = data
         const vars = { count: updated, status: statusLabel(action) }
-        toast.success(n(updated, t('invoices.markedOne', vars), t('invoices.markedOther', vars)))
+        const redated = notes.filter(note => note.movedFrom).length
+        toast.success(n(updated, t('invoices.markedOne', vars), t('invoices.markedOther', vars)), {
+          description: redated ? n(redated, t('views.bulkIssue.redatedOne', { count: redated }), t('views.bulkIssue.redatedOther', { count: redated })) : undefined,
+        })
         if (skipped) {
           toast.info(action === 'sent'
             ? n(skipped, t('invoices.skippedSentOne', { count: skipped }), t('invoices.skippedSentOther', { count: skipped }))
@@ -314,6 +329,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     } finally {
       setBulkLoading(false)
       setBulkConfirm(null)
+      setIssueNotes(notes)
     }
   }
 
@@ -325,6 +341,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       : n(count, t('invoices.exportedOne', { count }), t('invoices.exportedOther', { count })))
   }
 
+  // The drafts a confirmed "Mark sent" or "Mark paid" issues first.
+  const bulkDrafts = bulkConfirm === 'sent' || bulkConfirm === 'paid'
+    ? selection.selectedVisible.filter(d => d.status === 'draft').map(d => ({ id: d.id, date: d.date, total: docTotal(d) }))
+    : []
   const actionLabel: Record<BulkAction, string> = { sent: t('invoices.actionSent'), paid: t('invoices.actionPaid'), delete: t('invoices.actionDelete') }
   const selectedCount = selection.count
   const empty = (
@@ -532,7 +552,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="sm:col-span-2 text-xs text-red-600 dark:text-red-400">{t('exports.lists.paidDateInvalid')}</p>}
           </div>
         )}
+        <BulkIssueNotice type="invoice" drafts={bulkDrafts} latest={latest} today={todayStr} redate={redate} onRedate={setRedate} />
       </ConfirmDialog>
+
+      <BulkIssueResult notes={issueNotes} path="invoices" onClose={() => setIssueNotes(null)} />
 
       <Dialog
         open={!!bulkSync}

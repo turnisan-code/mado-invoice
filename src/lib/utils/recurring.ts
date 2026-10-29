@@ -90,12 +90,23 @@ type SourceDocument = Record<string, unknown> & {
   clients: { payment_days: number | null } | null
 }
 
+// Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
+function paymentDaysOf(source: SourceDocument, defaultPaymentDays: number | null): number {
+  return source.clients?.payment_days ?? defaultPaymentDays ?? 14
+}
+
 // Copies the template invoice into a new draft dated `date`. Returns null when that period
-// already exists (unique index documents_recurring_period_key), which a retry after a crash hits.
+// already exists, which a retry after a crash hits: by its service period (an issued catch-up
+// period is dated today, see runSchedule), else by the unique index documents_recurring_period_key.
 async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<string | null> {
   const period = servicePeriod(date, schedule.interval, schedule.in_advance, schedule.anchor_day)
-  // Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
-  const paymentDays = source.clients?.payment_days ?? defaultPaymentDays ?? 14
+  const paymentDays = paymentDaysOf(source, defaultPaymentDays)
+
+  const { data: existing, error: lookupErr } = await supabase.from('documents').select('id')
+    .eq('recurring_schedule_id', schedule.id).eq('service_date', period.start).eq('service_date_end', period.end)
+    .limit(1).maybeSingle()
+  if (lookupErr) throw new Error(lookupErr.message)
+  if (existing) return null
 
   const { data: doc, error } = await supabase.from('documents').insert({
     type: 'invoice',
@@ -156,6 +167,7 @@ function issueMessages({ t, describeError, describeDriveError, formatDate }: Wor
       })
       : `${date}: issued, but the Drive archive failed`,
     issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date: day(date), error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
+    dateTaken: (date: string) => t ? t('views.recurring.dateTaken', { date: day(date) }) : `${date}: created as draft, another invoice of this schedule is already dated today`,
   }
 }
 
@@ -199,7 +211,24 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
     const documentId = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
     if (documentId) {
       result.generated.push({ scheduleId: schedule.id, documentId, date: next })
-      if (schedule.mode === 'issue') {
+      // An invoice is dated the day it is issued: a period caught up late is issued with today's
+      // date and the due date from today, and keeps the period as its service period, so it never
+      // gets a number after invoices dated later than it. A draft keeps the period's date; issuing
+      // it by hand offers today's. The period key allows one invoice per schedule and date, so a
+      // second period caught up in the same run stays a draft.
+      let issuable = schedule.mode === 'issue'
+      if (issuable && next < asOf) {
+        const { error: dateErr } = await supabase.from('documents')
+          .update({ date: asOf, due_date: shiftDays(asOf, paymentDaysOf(source as SourceDocument, defaultPaymentDays)) })
+          .eq('id', documentId)
+        if (dateErr?.code === '23505') {
+          result.errors.push({ scheduleId: schedule.id, message: messages.dateTaken(next) })
+          issuable = false
+        } else if (dateErr) {
+          throw new Error(dateErr.message)
+        }
+      }
+      if (issuable) {
         try {
           const { snapshotError, driveError } = await issue(supabase, documentId)
           if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
