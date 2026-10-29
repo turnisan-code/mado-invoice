@@ -9,6 +9,7 @@ import { n, type DictKey } from '@/lib/i18n'
 import { makePeriod, periodParams } from '@/app/(app)/reports/period'
 import { unappliedCreditNotes } from '@/lib/credits'
 import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
+import { clientDisplayName as clientName } from '@/lib/utils/clients'
 
 // Month keys come from the Vienna calendar date and are shifted in UTC, so neither the server's
 // time zone nor a 31st (setMonth overflow) can move a payment into the wrong month.
@@ -34,7 +35,6 @@ type InvoiceRow = {
   payments: { amount: number; kind?: string | null }[]
 }
 
-const clientName = (c: ClientRef) => c ? c.company || c.name : ''
 const card = 'bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700'
 
 export default async function DashboardPage() {

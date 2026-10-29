@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import RecurringList, { type ScheduleRow } from '@/components/recurring/RecurringList'
 import { getT } from '@/lib/i18n/server'
+import { clientDisplayName } from '@/lib/utils/clients'
 import type { RecurringSchedule } from '@/types'
 
 type DocRef = { id: string; number: string | null; clients: { name: string; company: string | null } | null }
@@ -24,7 +25,7 @@ export default async function RecurringPage() {
     const last = s.last_document_id ? byId.get(s.last_document_id) : undefined
     return {
       ...s,
-      source: source ? { id: source.id, number: source.number, client: source.clients?.company || source.clients?.name || '—' } : null,
+      source: source ? { id: source.id, number: source.number, client: clientDisplayName(source.clients) || '—' } : null,
       last: last ? { id: last.id, number: last.number } : null,
     }
   })
