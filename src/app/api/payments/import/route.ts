@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { calcTotals, roundCents } from '@/lib/utils/document'
+import { requireUser } from '@/lib/auth'
+import { calcTotals, roundCents, settlesBalance } from '@/lib/utils/document'
+import { logEvent } from '@/lib/events'
 
 const MAX_ROWS = 500
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -13,7 +14,11 @@ interface ImportRow {
   date: string
   amount: number
   note: string | null
+  reference?: string | null
   skonto_amount?: number
+  // What the part beyond the open balance is: dunning fees and interest (a paid Mahnung), or an
+  // overpayment recorded as payment like before.
+  excess?: 'fee' | 'payment'
 }
 
 interface ImportError {
@@ -43,13 +48,15 @@ function isImportRow(r: unknown): r is ImportRow {
     && typeof o.date === 'string' && ISO_DATE.test(o.date) && !Number.isNaN(Date.parse(o.date))
     && typeof o.amount === 'number' && Number.isFinite(o.amount) && o.amount > 0
     && (o.note == null || typeof o.note === 'string')
+    && (o.reference == null || typeof o.reference === 'string')
     && (o.skonto_amount === undefined || (typeof o.skonto_amount === 'number' && Number.isFinite(o.skonto_amount) && o.skonto_amount >= 0))
+    && (o.excess === undefined || o.excess === 'fee' || o.excess === 'payment')
 }
 
 export async function POST(req: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const body = await req.json().catch(() => null)
   const rows: unknown[] = Array.isArray(body?.rows) ? body.rows : []
@@ -63,11 +70,43 @@ export async function POST(req: Request) {
     .in('id', [...new Set(rows.map(r => r.document_id))])
   if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
   const byId = new Map(((docs ?? []) as DocRow[]).map(d => [d.id, { ...d, payments: d.payments ?? [] }]))
+  const totalOf = (d: DocRow) => calcTotals(
+    d.document_items ?? [],
+    [],
+    d.discount_type && d.discount_value ? { type: d.discount_type, value: d.discount_value } : null,
+    d.tax_treatment,
+  ).total
+  const openOf = (d: DocRow & { payments: { amount: number; kind: string }[] }) =>
+    roundCents(totalOf(d) - d.payments.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
 
   let imported = 0
   let duplicates = 0
+  let fees = 0
   const errors: ImportError[] = []
   const touched = new Set<string>()
+
+  async function insertPayment(row: ImportRow, docId: string, kind: 'payment' | 'skonto' | 'fee', amount: number, importRef: string) {
+    const { error } = await supabase.from('payments').insert({
+      document_id: docId,
+      date: row.date,
+      amount,
+      note: kind === 'skonto' ? 'Skonto' : row.note?.trim().slice(0, 200) || null,
+      reference: row.reference?.trim().slice(0, 140) || null,
+      kind,
+      import_ref: importRef,
+    })
+    if (!error) await logEvent(supabase, docId, 'payment_added', { amount, date: row.date, kind, method: 'bank', imported: true })
+    return error
+  }
+
+  // Transactions an earlier (half-finished) run recorded: their split is kept as it was.
+  const earlier = new Map<string, number>()
+  const txIds = rows.map(r => r.transaction_id)
+  for (let i = 0; i < txIds.length; i += 100) {
+    const { data, error } = await supabase.from('payments').select('import_ref, amount').in('import_ref', txIds.slice(i, i + 100))
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    for (const r of data ?? []) earlier.set(r.import_ref as string, roundCents(Number(r.amount)))
+  }
 
   for (const row of rows) {
     const doc = byId.get(row.document_id)
@@ -76,54 +115,54 @@ export async function POST(req: Request) {
     if (doc.status === 'cancelled') { errors.push({ transaction_id: row.transaction_id, code: 'cancelled', message: 'Invoice is cancelled' }); continue }
 
     const amount = roundCents(row.amount)
-    const { error: payErr } = await supabase.from('payments').insert({
-      document_id: doc.id,
-      date: row.date,
-      amount,
-      note: row.note?.trim().slice(0, 200) || null,
-      kind: 'payment',
-      import_ref: row.transaction_id,
-    })
-    if (payErr && payErr.code !== '23505') { errors.push({ transaction_id: row.transaction_id, message: payErr.message }); continue }
-    // 23505: the unique import_ref index already holds this statement transaction, and the lookup
-    // above already counted that row. A retry after a half-finished run still records the Skonto
-    // below and re-checks the status, so the invoice ends up paid.
-    if (payErr) duplicates++
-    else { doc.payments.push({ amount, kind: 'payment' }); imported++ }
+    const skonto = roundCents(row.skonto_amount ?? 0)
+    // A paid Mahnung brings the open balance plus fees and interest: the invoice takes what is
+    // open, the rest is recorded as 'fee' (not turnover, not part of the balance).
+    const open = Math.max(0, roundCents(openOf(doc) - skonto))
+    const recorded = earlier.get(row.transaction_id)
+    const paid = recorded ?? (row.excess === 'fee' && amount > open + 0.005 ? open : amount)
+
+    // A transaction recorded before keeps its payment; a retry after a half-finished run still
+    // records the Skonto and fee below.
+    if (recorded !== undefined) duplicates++
+    else if (paid > 0) {
+      const payErr = await insertPayment(row, doc.id, 'payment', paid, row.transaction_id)
+      if (payErr && payErr.code !== '23505') { errors.push({ transaction_id: row.transaction_id, message: payErr.message }); continue }
+      if (payErr) duplicates++
+      else {
+        doc.payments.push({ amount: paid, kind: 'payment' })
+        imported++
+      }
+    }
     touched.add(doc.id)
 
-    const skonto = roundCents(row.skonto_amount ?? 0)
     if (skonto > 0) {
-      const { error: skontoErr } = await supabase.from('payments').insert({
-        document_id: doc.id,
-        date: row.date,
-        amount: skonto,
-        note: 'Skonto',
-        kind: 'skonto',
-        import_ref: `${row.transaction_id}:skonto`,
-      })
+      const skontoErr = await insertPayment(row, doc.id, 'skonto', skonto, `${row.transaction_id}:skonto`)
       if (!skontoErr) doc.payments.push({ amount: skonto, kind: 'skonto' })
       else if (skontoErr.code !== '23505') errors.push({ transaction_id: row.transaction_id, message: skontoErr.message })
     }
+
+    const fee = roundCents(amount - paid)
+    if (fee > 0.005) {
+      const feeErr = await insertPayment(row, doc.id, 'fee', fee, `${row.transaction_id}:fee`)
+      if (!feeErr) { doc.payments.push({ amount: fee, kind: 'fee' }); fees = roundCents(fees + fee); if (paid <= 0) imported++ }
+      else if (feeErr.code === '23505') { if (paid <= 0) duplicates++ }
+      else errors.push({ transaction_id: row.transaction_id, message: feeErr.message })
+    }
   }
 
-  // Every payment kind counts towards the balance, exactly like PaymentPanel.
-  const paid: string[] = []
+  // Every kind but 'fee' counts towards the balance, exactly like PaymentPanel.
+  const paidIds: string[] = []
   for (const id of touched) {
     const doc = byId.get(id)!
     if (doc.status !== 'sent' && doc.status !== 'overdue') continue
-    const totals = calcTotals(
-      doc.document_items ?? [],
-      doc.payments,
-      doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null,
-      doc.tax_treatment,
-    )
-    if (totals.total_paid >= totals.total - 0.005) paid.push(id)
+    if (openOf(doc) <= 0.005) paidIds.push(id)
   }
-  if (paid.length) {
-    const { error } = await supabase.from('documents').update({ status: 'paid' }).in('id', paid).in('status', ['sent', 'overdue'])
+  if (paidIds.length) {
+    const { data: updated, error } = await supabase.from('documents').update({ status: 'paid' }).in('id', paidIds).in('status', ['sent', 'overdue']).select('id')
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    for (const { id } of updated ?? []) await logEvent(supabase, id, 'status_changed', { from: byId.get(id)!.status, to: 'paid' })
   }
 
-  return NextResponse.json({ imported, duplicates, paid, errors })
+  return NextResponse.json({ imported, duplicates, paid: paidIds, fees, errors })
 }

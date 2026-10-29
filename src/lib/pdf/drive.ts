@@ -11,6 +11,12 @@ function escapeQuery(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
+// The file id is only a shortcut: Drive finds the document's file by its documentId tag too.
+async function linkDriveFile(supabase: SupabaseClient, documentId: string, fileId: string) {
+  const { error } = await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', documentId)
+  if (error) console.error('[drive] drive_file_id not recorded:', error.message)
+}
+
 function rethrowGoogleAccess(err: unknown) {
   if (isGoogleAuthError(err) || isGoogleScopeError(err)) throw err
 }
@@ -47,7 +53,7 @@ export async function archiveToDrive(
   })
   const own = tagged.files?.[0]
   if (own?.id) {
-    if (own.id !== doc.drive_file_id) await supabase.from('documents').update({ drive_file_id: own.id }).eq('id', doc.id)
+    if (own.id !== doc.drive_file_id) await linkDriveFile(supabase, doc.id, own.id)
     return { fileId: own.id, webViewLink: own.webViewLink ?? null, existing: true }
   }
 
@@ -60,7 +66,7 @@ export async function archiveToDrive(
   })
   const sameName = named.files?.[0]
   if (sameName?.id) {
-    if (sameName.id !== doc.drive_file_id) await supabase.from('documents').update({ drive_file_id: sameName.id }).eq('id', doc.id)
+    if (sameName.id !== doc.drive_file_id) await linkDriveFile(supabase, doc.id, sameName.id)
     return { fileId: sameName.id, webViewLink: sameName.webViewLink ?? null, existing: true }
   }
 
@@ -74,8 +80,7 @@ export async function archiveToDrive(
   })
   const fileId = file.id ?? null
   if (fileId) {
-    const { error } = await supabase.from('documents').update({ drive_file_id: fileId }).eq('id', doc.id)
-    if (error) console.error('[drive] drive_file_id not recorded:', error.message)
+    await linkDriveFile(supabase, doc.id, fileId)
     await logEvent(supabase, doc.id, 'drive_archived', { file_id: fileId, link: file.webViewLink ?? null, name: pdf.filename })
   }
   return { fileId, webViewLink: file.webViewLink ?? null, existing: false }

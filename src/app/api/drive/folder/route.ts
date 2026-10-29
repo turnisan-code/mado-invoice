@@ -1,30 +1,26 @@
 import { google } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { readJsonObject, requireUser } from '@/lib/auth'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected, isGoogleNotFound } from '@/lib/google/client'
 
 const FOLDER_MIME = 'application/vnd.google-apps.folder'
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-  let payload: { folderId?: unknown } | null
-  try {
-    payload = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-  const raw = payload?.folderId
+  const payload = await readJsonObject(req)
+  if (!payload) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  const raw = payload.folderId
   if (raw !== undefined && raw !== null && typeof raw !== 'string') {
     return NextResponse.json({ error: 'Invalid folderId' }, { status: 400 })
   }
 
-  const { data: settings } = await supabase.from('settings').select('*').single()
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
+  const { data: settings, error: settingsErr } = await supabase.from('settings').select('*').single()
+  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
 
-  const input = (raw ?? '').trim()
+  const input = (typeof raw === 'string' ? raw : '').trim()
   if (!input) {
     const { error } = await supabase.from('settings')
       .update({ drive_folder_id: null, drive_folder_name: null })
@@ -33,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ id: null, name: null })
   }
 
-  if (!settings.gmail_refresh_token) return googleNotConnected()
+  if (!settings.gmail_refresh_token) return googleNotConnected(settings)
 
   const folderId = input.match(/[-\w]{25,}/)?.[0] ?? input
   const drive = google.drive({ version: 'v3', auth: getAuthorizedGoogle(settings, supabase) })
