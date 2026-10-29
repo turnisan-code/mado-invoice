@@ -67,7 +67,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={busy} className="flex items-center gap-1.5">
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} disabled={busy}>
         <HandCoins size={14} />
         <span className="sr-only sm:not-sr-only">{t('deposits.quote.createAdvance')}</span>
       </Button>

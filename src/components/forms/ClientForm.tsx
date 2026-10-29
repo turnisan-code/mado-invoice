@@ -499,7 +499,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
 
       <div className="flex flex-wrap items-center gap-2 pt-2">
         {client && (
-          <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDelete(true)} disabled={deleting || busy}>
+          <Button type="button" variant="destructive" onClick={() => setConfirmDelete(true)} disabled={deleting || busy}>
             {deleting ? t('common.deleting') : t('clients.form.deleteClient')}
           </Button>
         )}

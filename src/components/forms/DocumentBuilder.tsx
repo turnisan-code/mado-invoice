@@ -614,8 +614,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 px-4 py-3 text-sm text-blue-800 dark:text-blue-300 flex flex-col sm:flex-row sm:items-center gap-3">
           <p className="flex-1">{t('issueChecks.restoreBody', { time: restoreTime })}</p>
           <div className="flex gap-2 shrink-0">
-            <Button type="button" size="sm" onClick={editor.restoreBackup} className="h-9 sm:h-8">{t('issueChecks.restore')}</Button>
-            <Button type="button" variant="outline" size="sm" onClick={editor.discardBackup} className="h-9 sm:h-8 bg-white dark:bg-neutral-900">{t('issueChecks.discard')}</Button>
+            <Button type="button" onClick={editor.restoreBackup}>{t('issueChecks.restore')}</Button>
+            <Button type="button" variant="outline" onClick={editor.discardBackup} className="bg-white dark:bg-neutral-900">{t('issueChecks.discard')}</Button>
           </div>
         </div>
       )}
@@ -643,7 +643,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       {doc?.number && !doc.pdf_path && (
         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center gap-3">
           <p className="flex-1"><strong>{t('archive.missingTitle')}</strong> {t('archive.missingBody')}</p>
-          <Button type="button" variant="outline" size="sm" onClick={archiveNow} disabled={saving} className="shrink-0 self-start sm:self-auto flex items-center gap-1.5 h-9 sm:h-8 bg-white dark:bg-neutral-900">
+          <Button type="button" variant="outline" onClick={archiveNow} disabled={saving} className="shrink-0 self-start sm:self-auto bg-white dark:bg-neutral-900">
             <Archive size={13} /> {t('archive.create')}
           </Button>
         </div>
@@ -652,7 +652,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       {doc?.number && doc.pdf_path && !doc.drive_file_id && settings.drive_folder_id && settings.gmail_connected && (
         <div role="status" className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 px-4 py-3 text-sm text-neutral-600 dark:text-neutral-300 flex flex-col sm:flex-row sm:items-center gap-3">
           <p className="flex-1"><strong>{t('archive.driveMissingTitle')}</strong> {t('archive.driveMissingBody')}</p>
-          <Button type="button" variant="outline" size="sm" onClick={saveToDrive} disabled={saving} className="shrink-0 self-start sm:self-auto flex items-center gap-1.5 h-9 sm:h-8 bg-white dark:bg-neutral-900">
+          <Button type="button" variant="outline" onClick={saveToDrive} disabled={saving} className="shrink-0 self-start sm:self-auto bg-white dark:bg-neutral-900">
             <HardDrive size={13} /> {t('builder.saveToDrive')}
           </Button>
         </div>

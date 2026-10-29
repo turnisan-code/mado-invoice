@@ -5,6 +5,8 @@ import ClientEditSection from '@/components/layout/ClientEditSection'
 import ClientProjects from '@/components/projects/ClientProjects'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
 import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
@@ -139,11 +141,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
             <span className="text-sm font-medium">{t('clients.documents')}</span>
             <div className="flex gap-2">
-              <Link href={`/quotes/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors dark:text-neutral-300">
-                <Plus size={11} /> {t('clients.quote')}
+              <Link href={`/quotes/new?client=${id}`} className={cn(buttonVariants({ variant: 'outline' }), 'text-xs')}>
+                <Plus size={12} /> {t('clients.quote')}
               </Link>
-              <Link href={`/invoices/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-                <Plus size={11} /> {t('clients.invoice')}
+              <Link href={`/invoices/new?client=${id}`} className={cn(buttonVariants(), 'text-xs')}>
+                <Plus size={12} /> {t('clients.invoice')}
               </Link>
             </div>
           </div>
