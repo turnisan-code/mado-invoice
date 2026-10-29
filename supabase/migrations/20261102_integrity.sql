@@ -8,7 +8,7 @@
 --   * An invoice that is cancelled (its Storno, or a draft cancelled) frees what it billed.
 --   * create_credit_note copies a final invoice's deduction lines only into its Storno: a plain
 --     credit note corrects what was billed, and the deductions would take the advance payments
---     off the credit.
+--     off the credit. An invoice an issued final invoice deducts gets no credit note (MI020).
 --   * payments_deposit_guard: the money received on an advance invoice that an issued final
 --     invoice deducts cannot change any more (MI022): no payment removed, no refund recorded or
 --     removed on its credit notes, until the final invoice is cancelled with its Storno.
@@ -252,6 +252,14 @@ begin
   end if;
   if inv.status = 'cancelled' then
     raise exception using errcode = 'MI017', message = format('%s is already cancelled.', inv.number);
+  end if;
+  -- An issued final invoice keeps the deduction it was issued with: an invoice it deducts is
+  -- corrected there, not with a credit note of its own (MI020, as for its Storno).
+  if inv.final_invoice_id is not null and exists (
+    select 1 from documents f where f.id = inv.final_invoice_id and f.number is not null and f.status <> 'cancelled'
+  ) then
+    raise exception using errcode = 'MI020',
+      message = format('%s is deducted on an issued final invoice; cancel that invoice first.', inv.number);
   end if;
 
   insert into documents (

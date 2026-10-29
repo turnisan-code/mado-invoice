@@ -1241,6 +1241,14 @@ begin
   if inv.status = 'cancelled' then
     raise exception using errcode = 'MI017', message = format('%s is already cancelled.', inv.number);
   end if;
+  -- An issued final invoice keeps the deduction it was issued with: an invoice it deducts is
+  -- corrected there, not with a credit note of its own (MI020, as for its Storno).
+  if inv.final_invoice_id is not null and exists (
+    select 1 from documents f where f.id = inv.final_invoice_id and f.number is not null and f.status <> 'cancelled'
+  ) then
+    raise exception using errcode = 'MI020',
+      message = format('%s is deducted on an issued final invoice; cancel that invoice first.', inv.number);
+  end if;
 
   insert into documents (
     type, number, status, client_id, date, due_date, service_date, service_date_end,
