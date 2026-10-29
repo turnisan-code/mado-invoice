@@ -94,10 +94,11 @@ export default function ExpenseDialog({ projectId, expense, defaultVatRate, onCl
             </div>
             <div>
               <label htmlFor={`${id}-vat`} className={labelClass}>{t('projects.expense.vatRate')}</label>
-              <select id={`${id}-vat`} value={values.vat_rate} onChange={e => set({ vat_rate: Number(e.target.value) as VatRate })} disabled={saving} className={inputClass}>
+              <select id={`${id}-vat`} aria-describedby={`${id}-vat-hint`} value={values.vat_rate} onChange={e => set({ vat_rate: Number(e.target.value) as VatRate })} disabled={saving} className={inputClass}>
                 {VAT_RATES.map(r => <option key={r} value={r}>{r} %</option>)}
               </select>
             </div>
+            <p id={`${id}-vat-hint`} className="col-span-2 -mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('projects.expense.vatHint')}</p>
           </div>
           <div className="grid grid-cols-2 gap-3 items-end">
             <label className="flex items-center gap-2.5 h-10 sm:h-9 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">

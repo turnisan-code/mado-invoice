@@ -150,6 +150,16 @@ const byDate = <T extends { date: string; created_at?: string }>(a: T, b: T) =>
   a.date.localeCompare(b.date) || (a.created_at ?? '').localeCompare(b.created_at ?? '')
 const clean = (s: string) => s.trim().replace(/\s+/g, ' ')
 
+// Non-empty descriptions in order, compared case-insensitively like the description grouping.
+function distinctDescriptions(entries: readonly InvoiceEntry[]): string[] {
+  const byKey = new Map<string, string>()
+  for (const e of entries) {
+    const d = clean(e.description)
+    if (d && !byKey.has(d.toLowerCase())) byKey.set(d.toLowerCase(), d)
+  }
+  return [...byKey.values()]
+}
+
 // The draft's lines: the project name as a heading, the hours (quantity in hours at the entry's
 // rate) one line per entry, per description or per day — entries at different rates never share a
 // line — and every expense on its own line at its VAT rate. Lines follow the first date they bill.
@@ -178,7 +188,7 @@ export function buildInvoiceLines(
   }
 
   const timeLines: InvoiceLine[] = groups.map(({ entries: es }) => {
-    const descriptions = [...new Set(es.map(e => clean(e.description)).filter(Boolean))]
+    const descriptions = distinctDescriptions(es)
     const first = es[0].date
     const last = es.reduce((max, e) => (e.date > max ? e.date : max), first)
     return {
@@ -237,8 +247,8 @@ export function readTimer(projectId: string): number | null {
 }
 
 // The entry a timer stopped at `now` becomes: dated the (Vienna) day it started, at least a minute
-// and at most a day long.
-export function timerEntry(startedAt: number, now: number): { date: string; minutes: number } {
-  const minutes = Math.min(MAX_ENTRY_MINUTES, Math.max(1, Math.round((now - startedAt) / 60000)))
-  return { date: viennaDate(new Date(startedAt)), minutes }
+// and at most a day long; `capped` when it ran longer than that.
+export function timerEntry(startedAt: number, now: number): { date: string; minutes: number; capped: boolean } {
+  const elapsed = Math.max(1, Math.round((now - startedAt) / 60000))
+  return { date: viennaDate(new Date(startedAt)), minutes: Math.min(MAX_ENTRY_MINUTES, elapsed), capped: elapsed > MAX_ENTRY_MINUTES }
 }

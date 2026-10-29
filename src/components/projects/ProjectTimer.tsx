@@ -67,7 +67,7 @@ export default function ProjectTimer({ projectId, onStopped }: { projectId: stri
   async function stop() {
     if (startedAt === null) return
     setSaving(true)
-    const { date, minutes } = timerEntry(startedAt, Date.now())
+    const { date, minutes, capped } = timerEntry(startedAt, Date.now())
     const { data, error } = await supabase
       .from('time_entries')
       .insert({ project_id: projectId, date, minutes, description: '', billable: true })
@@ -76,7 +76,8 @@ export default function ProjectTimer({ projectId, onStopped }: { projectId: stri
     setSaving(false)
     if (error || !data) { toast.error(t('projects.timer.failed')); return }
     writeTimer(projectId, null)
-    toast.success(t('projects.timer.stopped', { duration: formatDuration(minutes) }))
+    if (capped) toast.warning(t('projects.timer.capped'))
+    else toast.success(t('projects.timer.stopped', { duration: formatDuration(minutes) }))
     router.refresh()
     onStopped(data as TimeEntry)
   }
