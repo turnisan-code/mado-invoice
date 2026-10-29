@@ -4,7 +4,7 @@ import { useId, useState } from 'react'
 import { Calendar, ChevronDown, ChevronUp, GripVertical, Percent, Trash2 } from 'lucide-react'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { formatDate, formatMoney, lineSummary, sectionSummary } from '@/lib/utils/document'
-import { catalogueLineText } from '@/lib/utils/catalogue'
+import { catalogueLineText, cataloguePrice, hasClientRate, type RateMap } from '@/lib/utils/catalogue'
 import { formatLocaleNumber } from '@/lib/utils/number'
 import { useT } from '@/lib/i18n/client'
 import type { CatalogueItem, Currency, Language, Unit, VatRate } from '@/types'
@@ -39,6 +39,7 @@ interface Props {
   vatApplies: boolean
   issues: LineIssues
   catalogue: CatalogueItem[]
+  clientRates: RateMap
   onCatalogueItemCreated: (item: CatalogueItem) => void
   update: (patch: Partial<LineItem>) => void
   remove: () => void
@@ -48,7 +49,7 @@ interface Props {
 
 // One line of the document, the same markup on every screen: a card with move buttons on a
 // phone, a grid row with a drag handle (Alt+↑/↓ moves it too) from the sm breakpoint.
-export function LineRow({ line, index, count, lines, currency, language, vatApplies, issues, catalogue, onCatalogueItemCreated, update, remove, move, reorder }: Props) {
+export function LineRow({ line, index, count, lines, currency, language, vatApplies, issues, catalogue, clientRates, onCatalogueItemCreated, update, remove, move, reorder }: Props) {
   const { t, lang } = useT()
   const uid = useId()
   const [popover, setPopover] = useState<{ kind: 'date' | 'discount'; anchor: PopoverAnchor } | null>(null)
@@ -200,18 +201,20 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
             value={line.description}
             language={language}
             items={catalogue}
+            rates={clientRates}
             invalid={issues.description}
             className={DESCRIPTION_CLS}
             onChange={description => update({ description })}
             onPick={item => update({
               description: catalogueLineText(item, language),
-              unit_price: item.default_price,
+              unit_price: cataloguePrice(item, clientRates),
               unit: item.unit as Unit,
               vat_rate: item.vat_rate as VatRate,
               catalogue_item_id: item.id,
             })}
             onItemCreated={onCatalogueItemCreated}
           />
+          {hasClientRate(line, clientRates) && <p className="px-1 text-xs text-neutral-500 dark:text-neutral-400">{t('rates.clientRate')}</p>}
           {discountLabel && <p className="px-1 text-xs text-neutral-500 dark:text-neutral-400">{t('editor.lineDiscountNote', { discount: discountLabel })}</p>}
         </div>
         {deleteBtn('sm:order-last')}
