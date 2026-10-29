@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/ui/ThemeProvider";
 import { LanguageProvider } from "@/lib/i18n/client";
 import { getUiLang } from "@/lib/i18n/server";
 import type { UiLang } from "@/lib/i18n";
-import { PORTAL_TOKEN_HEADER } from "@/app/portal/html-lang";
+import { PORTAL_TOKEN_HEADER, portalTokenHeader } from "@/app/portal/html-lang";
 import { sharedDocumentLanguage } from "@/app/portal/[token]/language";
 
 const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
 // every other page in the UI language, read here (not only in the app layout) so <html lang> and
 // the root error/not-found pages follow it. Both lookups are cached per request.
 async function pageLanguage(): Promise<UiLang> {
-  const token = (await headers()).get(PORTAL_TOKEN_HEADER)
+  const token = portalTokenHeader((await headers()).get(PORTAL_TOKEN_HEADER))
   return (token ? await sharedDocumentLanguage(token) : null) ?? getUiLang()
 }
 
