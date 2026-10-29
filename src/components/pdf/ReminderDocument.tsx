@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/render
 import { makeT, n } from '@/lib/i18n'
 import { templateDate, templateMoney, templatePercent, senderName } from '@/lib/templates'
 import { countryName } from '@/lib/utils/country'
+import { formatSignedMoney } from '@/lib/document-labels'
 import { paymentLineLabel } from '@/lib/payment-summary'
 import type { ReminderFigures } from '@/lib/utils/reminder-templates'
 import type { SecretSettingsKey } from '@/lib/public-settings'
@@ -128,7 +129,7 @@ export default function ReminderDocument({ settings, client, invoice, totals, pa
           {totals.total_paid > 0 && payments.map((line, i) => (
             <View key={i} style={s.row}>
               <Text style={s.rowLabel}>{line.kind === 'paid' ? t('dunning.pdf.paid') : paymentLineLabel(t, line)}</Text>
-              <Text style={s.rowValue}>-{money(line.amount)}</Text>
+              <Text style={s.rowValue}>{formatSignedMoney(-line.amount, invoice.currency || 'EUR', lang)}</Text>
             </View>
           ))}
           {(figures.fee > 0 || figures.interest > 0 || totals.total_paid > 0) && (
