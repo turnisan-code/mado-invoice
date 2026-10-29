@@ -86,7 +86,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
               {mode === 'percent' ? t('deposits.quote.percentLabel') : t('deposits.quote.amountLabel')}
             </label>
             <MoneyInput id={`${uid}-value`} value={value} onValueChange={setValue} aria-invalid={!!problem || undefined}
-              aria-describedby={`${uid}-preview`} className="h-10" />
+              aria-describedby={`${uid}-preview`} />
             <p id={`${uid}-preview`} className="text-xs text-neutral-500 dark:text-neutral-400">
               {t('deposits.quote.preview', { amount: formatMoney(gross), total: formatMoney(quoteTotal) })}
               {advanced > 0 && <> {t('deposits.quote.alreadyAdvanced', { amount: formatMoney(advanced) })}</>}
