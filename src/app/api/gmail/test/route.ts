@@ -2,6 +2,7 @@ import { google } from 'googleapis'
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected, recordGoogleError } from '@/lib/google/client'
+import { GOOGLE_FOLDER_TRASHED_MESSAGE } from '@/lib/google/reauth'
 
 // Settings → Google → Test connection: refreshes the token (an expired grant surfaces here as
 // invalid_grant and clears the connection), reads the account and, when a Drive folder is set,
@@ -25,7 +26,7 @@ export async function POST() {
     if (settings.drive_folder_id) {
       const { data: file } = await google.drive({ version: 'v3', auth: authClient })
         .files.get({ fileId: settings.drive_folder_id, fields: 'id,name,trashed', supportsAllDrives: true })
-      if (file.trashed) throw new Error('The Drive folder is in the trash')
+      if (file.trashed) throw new Error(GOOGLE_FOLDER_TRASHED_MESSAGE)
       folder = file.name ?? file.id ?? null
     }
     await recordGoogleError(supabase, settings.id, null)

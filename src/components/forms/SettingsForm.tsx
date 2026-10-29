@@ -11,6 +11,7 @@ import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/r
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { googleErrorText } from '@/lib/google/reauth'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -183,9 +184,16 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   // ── Sidebar active section (tab-driven, no scroll) ──────────────────────────
-  // Back from the Google consent screen, or sent here by the reconnect banner: the integrations.
-  const [activeSection, setActiveSection] = useState<string>(() =>
-    searchParams.get('gmail') || searchParams.get('google') || searchParams.get('section') === 'integrations' ? 'integrations' : 'company')
+  // Back from the Google consent screen, or sent here by a link such as the reconnect banner
+  // (?section=integrations): that section, also when Settings is already open.
+  const linkedSection = searchParams.get('gmail') || searchParams.get('google') ? 'integrations' : searchParams.get('section')
+  const isSection = (id: string | null): id is string => !!id && NAV_ITEMS.some(item => item.id === id)
+  const [activeSection, setActiveSection] = useState<string>(() => isSection(linkedSection) ? linkedSection : 'company')
+  const [seenLinkedSection, setSeenLinkedSection] = useState(linkedSection)
+  if (linkedSection !== seenLinkedSection) {
+    setSeenLinkedSection(linkedSection)
+    if (isSection(linkedSection)) setActiveSection(linkedSection)
+  }
 
   // ── Brand state ──────────────────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
@@ -409,13 +417,16 @@ export default function SettingsForm({ settings }: Props) {
   // ── URL param handling ───────────────────────────────────────────────────────
   useEffect(() => {
     const status = searchParams.get('gmail') ?? searchParams.get('google')
-    if (!status) return
+    if (!status && !searchParams.has('section')) return
+    forgetFocused()
     if (status === 'connected') toast.success(t('settings.integrations.google.connectedToast'))
     if (status === 'error')     toast.error(t('settings.integrations.google.failedToast'))
-    // Shown once: a reload or Back must not repeat the toast.
+    // Shown once: a reload or Back must not repeat the toast, and the next link to a section
+    // must change the URL again to select it.
     const rest = new URLSearchParams(searchParams.toString())
     rest.delete('gmail')
     rest.delete('google')
+    rest.delete('section')
     router.replace(rest.size ? `/settings?${rest}` : '/settings', { scroll: false })
     // `t` only changes with the UI language, and re-running then would repeat the toast.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -692,7 +703,7 @@ export default function SettingsForm({ settings }: Props) {
       const message = typeof data.error === 'string' && data.error ? data.error : t('common.unknownError')
       setGoogleError({ message, at: new Date().toISOString() })
       if (res?.status === 401) setGoogle(g => ({ ...g, connected: false }))
-      toast.error(t('books.google.testFailed', { error: message }))
+      toast.error(t('books.google.testFailed', { error: googleErrorText(t, message) }))
       return
     }
     setGoogleError(null)
@@ -1754,7 +1765,7 @@ export default function SettingsForm({ settings }: Props) {
                 </button>
                 {googleError && (
                   <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
-                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleError.message })}
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleErrorText(t, googleError.message) })}
                   </p>
                 )}
               </div>
@@ -1781,7 +1792,7 @@ export default function SettingsForm({ settings }: Props) {
                 </a>
                 {googleError && (
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">
-                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleError.message })}
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleErrorText(t, googleError.message) })}
                   </p>
                 )}
               </div>

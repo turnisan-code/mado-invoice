@@ -1335,10 +1335,10 @@ export const de = {
       testOkDrive: 'Google-Verbindung funktioniert ({email}); Drive-Ordner „{folder}“ ist erreichbar.',
       testFailed: 'Google-Test fehlgeschlagen: {error}',
       lastError: 'Letzter Fehler, {date}: {error}',
-      expired: 'Die Google-Verbindung ist abgelaufen — bitte neu verbinden.',
-      missingDrive: 'Der Google-Verbindung fehlt die Drive-Berechtigung — bitte neu verbinden.',
-      notConnected: 'Google ist nicht verbunden.',
-      folderTrashed: 'Der Drive-Ordner liegt im Papierkorb.',
+      expired: 'Die Google-Verbindung ist abgelaufen — in den Einstellungen neu verbinden',
+      missingDrive: 'Der Google-Verbindung fehlt die Drive-Berechtigung — in den Einstellungen neu verbinden',
+      notConnected: 'Google ist nicht verbunden — in den Einstellungen verbinden',
+      folderTrashed: 'Der Drive-Ordner liegt im Papierkorb',
     },
     settings: {
       test: 'Verbindung testen',
@@ -1370,6 +1370,7 @@ export const de = {
       kindFee: 'Mahnspesen / Zinsen',
     },
     logoRemoveFailed: 'Logo nicht entfernt: {error}',
+    invoicesLoadFailed: 'Die Rechnungen konnten nicht geladen werden: {error}',
   },
   builder: {
     driveUploaded: 'In Drive hochgeladen — ',

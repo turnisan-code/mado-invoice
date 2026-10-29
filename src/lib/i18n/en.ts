@@ -1333,10 +1333,10 @@ export const en = {
       testOkDrive: 'Google connection works ({email}); Drive folder “{folder}” is reachable.',
       testFailed: 'Google test failed: {error}',
       lastError: 'Last error, {date}: {error}',
-      expired: 'The Google connection has expired — reconnect.',
-      missingDrive: 'The Google connection is missing the Drive permission — reconnect.',
-      notConnected: 'Google is not connected.',
-      folderTrashed: 'The Drive folder is in the trash.',
+      expired: 'The Google connection has expired — reconnect in Settings',
+      missingDrive: 'The Google connection is missing the Drive permission — reconnect in Settings',
+      notConnected: 'Google is not connected — connect it in Settings',
+      folderTrashed: 'The Drive folder is in the trash',
     },
     settings: {
       test: 'Test connection',
@@ -1368,6 +1368,7 @@ export const en = {
       kindFee: 'Dunning fees / interest',
     },
     logoRemoveFailed: 'Logo not removed: {error}',
+    invoicesLoadFailed: 'The invoices could not be loaded: {error}',
   },
   builder: {
     driveUploaded: 'Uploaded to Drive — ',
