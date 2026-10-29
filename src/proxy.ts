@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { safeNextPath } from '@/app/auth/safe-next'
 import { pendingTotpFactor } from '@/app/auth/mfa'
+import { PORTAL_TOKEN_HEADER, portalPageToken } from '@/app/portal/html-lang'
 
 const PUBLIC_PATHS = ['/login', '/favicon.ico', '/manifest.webmanifest']
 // /auth/callback turns the emailed recovery link into a session, so it runs before anyone is signed in.
@@ -12,6 +13,12 @@ function isPublicPath(pathname: string) {
 }
 
 export async function proxy(request: NextRequest) {
+  // Set here only, never taken from the visitor: the root layout prints a portal page's <html lang>
+  // in the shared document's language.
+  request.headers.delete(PORTAL_TOKEN_HEADER)
+  const portalToken = portalPageToken(request.nextUrl.pathname)
+  if (portalToken) request.headers.set(PORTAL_TOKEN_HEADER, portalToken)
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(

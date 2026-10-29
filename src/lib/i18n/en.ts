@@ -1499,6 +1499,7 @@ export const en = {
       einvoiceFailed: 'Not sent: the e-invoice could not be built. {reason}',
       sendWithout: 'Untick it to send the email without the e-invoice.',
     },
+    copyFailed: 'Copying did not work. The text is selected; please copy it by hand.',
   },
   reminders: {
     title: 'Reminders',

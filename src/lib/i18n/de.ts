@@ -1500,6 +1500,7 @@ export const de = {
       einvoiceFailed: 'Nicht gesendet: Die E-Rechnung konnte nicht erstellt werden. {reason}',
       sendWithout: 'Ohne Häkchen wird die E-Mail ohne E-Rechnung gesendet.',
     },
+    copyFailed: 'Das Kopieren hat nicht funktioniert. Der Text ist markiert, bitte kopieren Sie ihn von Hand.',
   },
   reminders: {
     title: 'Mahnungen',

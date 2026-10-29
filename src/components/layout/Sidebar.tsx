@@ -10,15 +10,17 @@ import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import { useTheme } from 'next-themes'
 import { useT } from '@/lib/i18n/client'
+import { rememberUiLang } from '@/app/auth/ui-lang'
 
 export default function Sidebar() {
   const pathname = usePathname()
   const { resolvedTheme, setTheme } = useTheme()
-  const { t } = useT()
+  const { t, lang } = useT()
   const accountActive = isNavActive(pathname, ACCOUNT_ITEM.href)
 
   // A full load drops the client router cache, so Back cannot show cached app pages after sign-out.
   async function signOut() {
+    rememberUiLang(lang)
     await createClient().auth.signOut()
     window.location.assign('/login')
   }
