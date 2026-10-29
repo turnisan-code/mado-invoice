@@ -9,7 +9,7 @@ import {
   type DepositCheck, type DepositInvoice,
 } from '@/lib/deposits'
 import { lineAmount } from '@/lib/utils/document'
-import type { DocumentType } from '@/types'
+import type { DocumentType, InvoiceKind } from '@/types'
 import { makeId, type EditorDocument, type FormState, type LineItem } from './model'
 
 const amountsKey = (lines: readonly LineItem[]) =>
@@ -17,13 +17,15 @@ const amountsKey = (lines: readonly LineItem[]) =>
 
 // The advance and partial invoices an invoice deducts or could deduct (the client's issued ones).
 // A draft final invoice keeps its deduction lines in step with them; an issued one keeps the
-// deduction it was issued with.
-export function useDeposits({ type, doc, docId, form, setLines, flush }: {
+// deduction it was issued with. `setKind` changes the kind in the form at once (the snapshot the
+// next save writes included).
+export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }: {
   type: DocumentType
   doc?: EditorDocument
   docId: string | null
   form: FormState
   setLines: (fn: (lines: LineItem[]) => LineItem[]) => void
+  setKind: (kind: InvoiceKind) => void
   flush: () => Promise<void>
 }) {
   const supabase = createClient()
@@ -69,29 +71,42 @@ export function useDeposits({ type, doc, docId, form, setLines, flush }: {
     setLines(ls => [...ls.filter(l => l.line_type !== 'deduction'), ...next])
   }, [enabled, issued, invoices, lines, expected, setLines, t])
 
-  async function change(action: () => Promise<void>) {
+  // Writes pending edits, then changes the links. `kind` goes into the form before that write, so
+  // no save can put the old kind back over the one the link sets (the database refuses a final
+  // invoice that deducts something turning into another kind); it is restored when nothing changed.
+  async function change(action: () => Promise<boolean>, kind?: InvoiceKind) {
     if (!docId) return
+    const before = form.invoiceKind
+    let done = false
     setBusy(true)
     try {
+      if (kind) setKind(kind)
       await flush()
-      await action()
+      done = await action()
       setVersion(v => v + 1)
     } catch (e) {
       toast.error(t('deposits.builder.failed', { error: depositErrorMessage(e, t) }))
     } finally {
+      if (kind && !done && before !== kind) setKind(before)
       setBusy(false)
     }
   }
 
+  // Deducting an invoice makes this one the final invoice.
   const link = (d: DepositInvoice) => change(async () => {
     const result = await linkDeposit(supabase, docId!, d.id)
-    if (result === 'taken') toast.error(t('deposits.builder.taken', { number: d.number ?? '' }))
-    else toast.success(t('deposits.builder.linked', { number: d.number ?? '' }))
-  })
+    if (result === 'taken') {
+      toast.error(t('deposits.builder.taken', { number: d.number ?? '' }))
+      return false
+    }
+    toast.success(t('deposits.builder.linked', { number: d.number ?? '' }))
+    return true
+  }, 'final')
 
   const unlink = (d: DepositInvoice) => change(async () => {
     await unlinkDeposit(supabase, docId!, d.id)
     toast.success(t('deposits.builder.removed', { number: d.number ?? '' }))
+    return true
   })
 
   const check: DepositCheck | undefined = enabled

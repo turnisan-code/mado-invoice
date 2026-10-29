@@ -10,14 +10,15 @@ import type { DiscountKind, LineItem } from './model'
 
 // Below the totals of the whole service: each deducted invoice with its Entgelt and VAT per rate,
 // then what remains to be paid. The lines are written from the deducted invoices, never by hand;
-// a credit note copied from a final invoice can drop them.
-export function DeductionTotals({ lines, totals, currency, taxTreatment, discountType, discountValue, onRemove }: {
+// a credit note copied from a final invoice can drop them (only its Storno keeps them).
+export function DeductionTotals({ lines, totals, currency, taxTreatment, discountType, discountValue, creditNote, onRemove }: {
   lines: LineItem[]
   totals: DocumentTotals
   currency: Currency
   taxTreatment: TaxTreatment
   discountType: DiscountKind | null
   discountValue: number
+  creditNote?: boolean
   onRemove?: () => void
 }) {
   const { t, lang } = useT()
@@ -50,7 +51,7 @@ export function DeductionTotals({ lines, totals, currency, taxTreatment, discoun
         )}
         <Separator />
         <div className="flex justify-between font-semibold text-base">
-          <span>{t('deposits.builder.remaining')}</span>
+          <span>{creditNote ? t('pdfPortal.totals.creditTotal') : t('deposits.builder.remaining')}</span>
           <span>{money(totals.total)}</span>
         </div>
         {totals.total_paid > 0 && (

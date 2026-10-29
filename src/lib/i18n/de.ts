@@ -382,6 +382,7 @@ export const de = {
       },
       kindLocked: 'Eine Schlussrechnung zieht sie ab, daher bleibt die Rechnungsart.',
       finalLocked: 'Entferne zuerst die abgezogenen Rechnungen, um die Rechnungsart zu ändern.',
+      clientLocked: 'Der Kunde bleibt: Eine Schlussrechnung und die darin abgezogenen Rechnungen gehören zum selben Kunden.',
       settledBy: 'Abgezogen in Schlussrechnung {number}',
       settledByDraft: 'Abgezogen in einem Schlussrechnungs-Entwurf',
       notSettled: 'Noch in keiner Schlussrechnung abgezogen.',

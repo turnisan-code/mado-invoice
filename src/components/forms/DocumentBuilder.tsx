@@ -114,7 +114,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   // A final invoice's deduction lines stay below the lines being edited; the totals panel shows
   // the whole service, the deduction block what remains.
-  const deposits = useDeposits({ type, doc, docId: editor.docId, form, setLines, flush: editor.flush })
+  const deposits = useDeposits({ type, doc, docId: editor.docId, form, setLines, setKind: k => editor.applyOverrides({ invoiceKind: k }), flush: editor.flush })
+  // A final invoice and the invoices it deducts belong to one client.
+  const clientLocked = deposits.linked.length > 0 || !!deposits.self?.final_invoice_id
   const isDeduction = (l: LineItem) => l.line_type === 'deduction'
   const scopeLines = lines.filter(l => !isDeduction(l))
   const hasDeductions = scopeLines.length < lines.length
@@ -596,7 +598,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-client`}>{t('builder.client')}</Label>
           <ClientPicker id={`${uid}-client`} clients={clients} value={clientId} onChange={id => handleClientChange(id)}
-            onCreate={name => setQuickAdd(name)} invalid={shownProblems.some(p => p.code === 'noClient')} />
+            onCreate={name => setQuickAdd(name)} invalid={shownProblems.some(p => p.code === 'noClient')}
+            disabled={clientLocked} describedBy={clientLocked ? `${uid}-client-locked` : undefined} />
+          {clientLocked && <p id={`${uid}-client-locked`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('deposits.builder.clientLocked')}</p>}
           {client && <ClientInfo client={client} settings={settings} />}
         </div>
 
@@ -721,7 +725,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       />
       {hasDeductions && (
         <DeductionTotals lines={lines} totals={totals} currency={currency} taxTreatment={taxTreatment}
-          discountType={discountType} discountValue={discountValue}
+          discountType={discountType} discountValue={discountValue} creditNote={type === 'credit_note'}
           onRemove={type === 'credit_note' && !doc?.number ? () => setLines(ls => ls.filter(l => !isDeduction(l))) : undefined} />
       )}
 

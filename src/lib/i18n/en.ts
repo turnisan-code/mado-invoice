@@ -381,6 +381,7 @@ export const en = {
       },
       kindLocked: 'A final invoice deducts it, so its type stays.',
       finalLocked: 'Remove the deducted invoices to change the type.',
+      clientLocked: 'The client stays: a final invoice and the invoices it deducts belong to the same client.',
       settledBy: 'Deducted on final invoice {number}',
       settledByDraft: 'Deducted on a draft final invoice',
       notSettled: 'Not deducted on a final invoice yet.',
