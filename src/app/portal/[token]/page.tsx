@@ -8,7 +8,7 @@ import PortalEffects from './PortalEffects'
 import { createServiceClient } from '@/lib/supabase/service'
 import { calcTotals, clampPercent, formatDate, formatMoney, getTaxNote, lineAmount, orderItems, sectionSummary, today } from '@/lib/utils/document'
 import { paymentTermsText } from '@/lib/templates'
-import { fetchCreditReference } from '@/lib/utils/document-reference'
+import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
 import { countryName } from '@/lib/utils/country'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { isShareExpired } from '@/lib/share'
@@ -36,8 +36,8 @@ const loadShared = cache(async (token: string) => {
   if (!doc?.number || !doc.clients) return null
   const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings) return null
-  const reference = await fetchCreditReference(supabase, doc)
-  return { doc, client: doc.clients, settings: settings as Settings, reference }
+  const [reference, buyerReference] = await Promise.all([fetchCreditReference(supabase, doc), fetchBuyerReference(supabase, doc, doc.clients)])
+  return { doc, client: doc.clients, settings: settings as Settings, reference, buyerReference }
 })
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
@@ -77,7 +77,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const shared = await loadShared(token)
   if (!shared) notFound()
 
-  const { doc, client, settings, reference } = shared
+  const { doc, client, settings, reference, buyerReference } = shared
   const lang = documentLanguage(doc.language)
   const t = documentT(lang)
   const company = settings.company_name || settings.owner_name
@@ -184,6 +184,12 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">{dueLabel}</dt>
               <dd className={`font-medium ${doc.status === 'overdue' || expired ? 'text-red-600' : ''}`}>{formatDate(doc.due_date, lang)}</dd>
+            </div>
+          )}
+          {buyerReference && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-neutral-500">{t('print.yourReference')}</dt>
+              <dd className="font-medium text-right break-all">{buyerReference}</dd>
             </div>
           )}
         </dl>

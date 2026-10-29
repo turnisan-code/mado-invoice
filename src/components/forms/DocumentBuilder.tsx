@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { HardDrive, ChevronRight, Archive } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
@@ -105,9 +106,21 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
 
   if (serverProblems && serverProblems.key !== formKey) setServerProblems(null)
 
+  // The e-invoice dialog saves the buyer reference itself; the field takes it over unless it was
+  // edited here since.
+  const storedReference = doc?.buyer_reference ?? null
+  const [seenReference, setSeenReference] = useState(storedReference)
+  if (storedReference !== seenReference) {
+    setSeenReference(storedReference)
+    if (form.buyerReference === seenReference) patch({ buyerReference: storedReference })
+  }
+
   const client = clients.find(c => c.id === clientId)
   const totals = calcTotals(lines, doc?.payments, documentDiscount(form), taxTreatment)
   const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
+  // Issued documents stay editable; a changed amount is pointed out, never blocked.
+  const issuedTotal = doc?.number && doc.issued_total != null ? Number(doc.issued_total) : null
+  const issuedTotalChanged = issuedTotal != null && Math.abs(totals.total - issuedTotal) >= 0.005
 
   function handleClientChange(id: string, picked?: Client) {
     const c = picked ?? clients.find(cl => cl.id === id)
@@ -188,6 +201,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       // Names applied credit notes, Skonto and write-offs in the summary, as the issued PDF does.
       payments: doc?.payments ?? [],
       reference: reference ?? null,
+      // As the server resolves it, without the corrected invoice's (a new credit note copies it).
+      buyer_reference: f.buyerReference != null ? f.buyerReference.trim() || null : client.buyer_reference?.trim() || null,
     }
 
     // Generate EPC QR only for final PDFs (save/send), not preview
@@ -493,6 +508,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   }
 
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
+  // An emptied field falls back to the defaults again, unless the reference was cleared on purpose.
+  const clearedReference = doc?.buyer_reference === '' ? '' : null
   const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
   const restoreTime = editor.restoreOffer
     ? new Date(editor.restoreOffer.savedAt).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
@@ -555,6 +572,13 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       {doc?.number && doc.status !== 'draft' && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <strong>{t('builder.issuedWarning', { number: doc.number })}</strong> {t('builder.issuedWarningBody')}
+        </div>
+      )}
+
+      {issuedTotalChanged && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <strong>{t('print.issuedTotal.changed', { issued: formatMoney(issuedTotal, currency), current: formatMoney(totals.total, currency) })}</strong>{' '}
+          {t('print.issuedTotal.changedHint')}{type === 'invoice' && ` ${t('print.issuedTotal.stornoHint')}`}
         </div>
       )}
 
@@ -653,6 +677,14 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
               <Label htmlFor={`${uid}-service-to`}>{t('builder.serviceTo')}</Label>
               <DateInput id={`${uid}-service-to`} value={form.serviceDateEnd} min={form.serviceDate || undefined} onValueChange={v => patch({ serviceDateEnd: v })}
                 aria-invalid={shownProblems.some(p => p.code === 'periodEndBeforeStart' && p.index == null) || undefined} />
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor={`${uid}-buyer-reference`}>{t('einvoice.buyerReference')}</Label>
+              <Input id={`${uid}-buyer-reference`} value={form.buyerReference ?? ''} autoComplete="off"
+                placeholder={form.buyerReference == null ? client?.buyer_reference?.trim() ?? '' : ''}
+                aria-describedby={`${uid}-buyer-reference-hint`}
+                onChange={e => patch({ buyerReference: e.target.value.trim() ? e.target.value : clearedReference })} />
+              <p id={`${uid}-buyer-reference-hint`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('print.builder.buyerReferenceHint')}</p>
             </div>
             {type === 'invoice' && (
               <>

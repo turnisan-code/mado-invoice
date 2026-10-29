@@ -121,6 +121,8 @@ interface DocData {
   items: DocItem[]
   totals: DocumentTotals
   reference?: DocReference | null
+  // Resolved by the caller (fetchBuyerReference); printed as 'Ihre Referenz'.
+  buyer_reference?: string | null
   // The rows behind totals.total_paid; without them the summary is a single 'Paid' row.
   payments?: SummaryPayment[]
 }
@@ -213,6 +215,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 {t(refKind === 'storno' ? 'pdfPortal.stornoOf' : 'pdfPortal.correctionOf', { number: doc.reference.number, date: formatDate(doc.reference.date, lang) })}
               </Text>
             )}
+            {!!doc.buyer_reference && <Text style={s.metaLine}>{t('print.yourReference')}: {doc.buyer_reference}</Text>}
           </View>
         </View>
 

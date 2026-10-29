@@ -39,6 +39,8 @@ export interface FormState {
   discountValue: number
   skontoPercent: number | ''
   skontoDays: number | ''
+  // null = never set: the PDF and e-invoice use the corrected invoice's or the client's default.
+  buyerReference: string | null
   lines: LineItem[]
 }
 
@@ -108,6 +110,7 @@ export function initialForm(type: DocumentType, settings: PublicSettings, client
     // Skonto only exists on invoices; new ones start from the settings defaults.
     skontoPercent: doc ? (doc.skonto_percent ?? '') : type === 'invoice' ? (settings.default_skonto_percent ?? '') : '',
     skontoDays: doc ? (doc.skonto_days ?? '') : type === 'invoice' ? (settings.default_skonto_days ?? '') : '',
+    buyerReference: doc?.buyer_reference ?? null,
     lines: doc?.items?.length ? linesFromItems(doc.items) : [blankLine(settings)],
   }
 }
@@ -123,6 +126,7 @@ export function docFields(type: DocumentType, f: FormState) {
     due_date: f.dueDate || null, language: f.language, currency: f.currency, tax_treatment: f.taxTreatment,
     notes: f.notes || null, notes_internal: f.notesInternal || null,
     discount_type: f.discountType, discount_value: f.discountValue || null,
+    buyer_reference: f.buyerReference == null ? null : f.buyerReference.trim(),
     ...skonto,
     ...(f.currency === 'EUR' ? { exchange_rate: 1 } : {}),
   }
@@ -164,7 +168,7 @@ export function storedKeyOf(type: DocumentType, f: FormState, storedDate: string
 // What the user wrote beyond the client and what follows from it (language, tax, due date):
 // a new document is only created once there is something worth keeping.
 export function contentKeyOf(f: FormState): string {
-  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.skontoPercent, f.skontoDays, itemsPayload(f.lines)])
+  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.skontoPercent, f.skontoDays, f.buyerReference, itemsPayload(f.lines)])
 }
 
 type NumberingKey<T extends DocumentType> =

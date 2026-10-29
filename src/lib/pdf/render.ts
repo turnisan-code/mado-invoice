@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { preparePdfFonts, registerPdfFonts } from '@/components/pdf/fonts'
 import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
-import { fetchCreditReference } from '@/lib/utils/document-reference'
+import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, Document, DocumentItem, Language, Payment, Settings } from '@/types'
 
@@ -48,8 +48,8 @@ export function pdfFilename(number: string): string {
 }
 
 // The single assembly of everything the PDF prints: ordered lines, totals after payments and
-// section discounts, the tax note with the settings overrides, the Storno or correction reference
-// and, for a EUR invoice with an open balance, the EPC payment QR.
+// section discounts, the tax note with the settings overrides, the Storno or correction reference,
+// the buyer reference and, for a EUR invoice with an open balance, the EPC payment QR.
 export async function renderLoadedPdf(
   supabase: SupabaseClient,
   doc: PdfDocument,
@@ -98,6 +98,7 @@ export async function renderLoadedPdf(
       totals,
       payments: doc.payments ?? [],
       reference: await fetchCreditReference(supabase, doc),
+      buyer_reference: await fetchBuyerReference(supabase, doc, doc.clients),
     },
   }
 

@@ -965,6 +965,24 @@ export const de = {
       saveToDrive: 'In Google Drive speichern',
     },
   },
+  print: {
+    // Gedruckt (PDF, Portal): in der Sprache des Belegs.
+    yourReference: 'Ihre Referenz',
+    builder: {
+      buyerReferenceHint: 'Wird als „Ihre Referenz“ gedruckt und in der E-Rechnung übermittelt.',
+    },
+    issuedTotal: {
+      changed: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert: damals {issued}, jetzt {current}.',
+      changedHint: 'Das ausgestellte PDF behält die ausgestellten Beträge.',
+      stornoHint: 'Eine falsche Rechnung wird mit einer Stornorechnung korrigiert.',
+      einvoice: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert (damals {issued}, jetzt {current}). Die E-Rechnung entsteht aus den aktuellen Daten, das ausgestellte PDF zeigt die ausgestellten Beträge.',
+    },
+    gmail: {
+      attachEInvoice: 'E-Rechnung anhängen ({format})',
+      attachEInvoiceHint: 'Dieser Kunde bevorzugt E-Rechnungen. Das XML entsteht aus dem ausgestellten Beleg.',
+      einvoiceFailed: 'Nicht gesendet: Die E-Rechnung konnte nicht erstellt werden. {reason}',
+    },
+  },
   reminders: {
     title: 'Mahnungen',
     sentShort: 'Gesendet {date}',
