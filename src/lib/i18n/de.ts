@@ -1538,8 +1538,8 @@ export const de = {
     paymentsOther: '{count} Zahlungseingänge',
     onInvoicesOne: 'auf {count} Rechnung',
     onInvoicesOther: 'auf {count} Rechnungen',
-    creditNotesDeductedOne: '{count} Gutschrift abgezogen',
-    creditNotesDeductedOther: '{count} Gutschriften abgezogen',
+    creditNotesDeductedOne: 'Rückzahlungen auf {count} Gutschrift abgezogen',
+    creditNotesDeductedOther: 'Rückzahlungen auf {count} Gutschriften abgezogen',
     summary: 'Zusammenfassung',
     netTotal: 'Nettoumsatz gesamt (inkl. nicht steuerbar)',
     vat: 'Umsatzsteuer',
@@ -1548,7 +1548,6 @@ export const de = {
     exportHint: 'CSV für Excel (de-AT): alle im Zeitraum {period} ausgestellten Rechnungen und Gutschriften bzw. alle Zahlungseingänge im Zeitraum {period}.',
     exportDocuments: 'Belege {period}',
     exportPayments: 'Zahlungen {period}',
-    footnote: 'Teilzahlungen werden anteilig berücksichtigt; Skonto und Abschreibungen sind keine Einnahmen und zählen nicht. Gutschriften und Stornos werden mit ihrem Belegdatum abgezogen, aber nur soweit auf die Ursprungsrechnung tatsächlich Zahlungen eingegangen sind. Vorsteuer aus Eingangsrechnungen ist nicht enthalten — die Zahllast ergibt sich in Bookamat.',
   },
   exports: {
     period: {

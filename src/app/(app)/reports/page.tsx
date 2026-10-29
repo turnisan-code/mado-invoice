@@ -54,7 +54,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const supabase = await createClient()
   const itemCols = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
   const docCols = `id, number, date, type, tax_treatment, discount_type, discount_value, ${itemCols}, clients(name, company)`
-  const [{ data: payments }, { data: credits }, { data: refunds }, { data: openCreditNotes }, zm, { count: issuedCount }, unapplied] = await Promise.all([
+  const [{ data: payments }, { data: credits }, { data: refunds }, { data: openCreditNotes }, zm, { count: issuedCount }, unapplied, { data: feeRows }] = await Promise.all([
     supabase
       .from('payments')
       .select(`id, amount, date, method, document_id, documents!inner(${docCols})`)
@@ -101,7 +101,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       console.error('[reports] unapplied credit notes:', err)
       return []
     }),
+    // Dunning fees and interest received: money, but no turnover; only mentioned.
+    supabase.from('payments').select('amount').eq('kind', 'fee').gte('date', period.start).lte('date', period.end),
   ])
+  const feesReceived = roundCents((feeRows ?? []).reduce((s, r) => s + Number(r.amount), 0))
   type Dated = DocRow & { date: string }
   const creditRows = (credits ?? []) as unknown as { id: string; amount: number; date: string; credit_note_id: string; documents: Dated }[]
   const refundRows = (refunds ?? []) as unknown as { id: string; amount: number; date: string; method: string; documents: Dated }[]
@@ -119,20 +122,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   }
   const inPeriod = (date: string) => date >= period.start && date <= period.end
   const periodCredits = creditRows.filter(r => inPeriod(r.date))
-  // Invoices the period touches (a payment or a credit in it) that have credits up to its end
-  // need their whole history; the others split every payment at the invoice's own rates.
+  // Invoices the period touches (a payment or a credit in it) need their history: credits up to
+  // its end re-split the money, and money received before it caps what still counts (an
+  // overpayment is no turnover).
   const touched = new Set([...invoiceIds, ...periodCredits.map(r => r.documents.id)])
   const historyCredits = creditRows.filter(r => r.date <= period.end && touched.has(r.documents.id))
-  const historyIds = [...new Set(historyCredits.map(r => r.documents.id))]
   // payments.credit_note_id has no embeddable foreign key, so the credit notes are looked up by id.
   const cnIds = [...new Set(historyCredits.map(r => r.credit_note_id))]
-  const [{ data: cnDocs }, { data: earlierPayments }] = await Promise.all([
+  const touchedIds = [...touched]
+  const [{ data: cnDocs }, earlierPayments] = await Promise.all([
     cnIds.length
       ? supabase.from('documents').select(docCols).in('id', cnIds)
       : Promise.resolve({ data: [] as unknown[] }),
-    historyIds.length
-      ? supabase.from('payments').select('document_id, date, amount').eq('kind', 'payment').in('document_id', historyIds).lt('date', period.start)
-      : Promise.resolve({ data: [] as unknown[] }),
+    // .in() filters travel in the URL: a year's invoices are looked up in slices.
+    Promise.all(Array.from({ length: Math.ceil(touchedIds.length / 100) }, (_, i) =>
+      supabase.from('payments').select('document_id, date, amount').eq('kind', 'payment').in('document_id', touchedIds.slice(i * 100, i * 100 + 100)).lt('date', period.start),
+    )).then(results => results.flatMap(r => {
+      if (r.error) console.error('[reports] earlier payments:', r.error.message)
+      return r.data ?? []
+    })),
   ])
   const cnById = new Map(((cnDocs ?? []) as unknown as Dated[]).map(d => [d.id, d]))
 
@@ -150,7 +158,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     historyOf(r.documents).credits.push({ date: r.date, amount: r.amount, creditNote })
     if (inPeriod(r.date)) applied.push({ id: r.id, date: r.date, amount: r.amount, invoice: r.documents, creditNote })
   }
-  for (const p of (earlierPayments ?? []) as { document_id: string; date: string; amount: number }[]) {
+  for (const p of earlierPayments as { document_id: string; date: string; amount: number }[]) {
     histories.get(p.document_id)?.payments.push({ date: p.date, amount: p.amount })
   }
   const refunded = refundRows.map(r => ({ id: r.id, date: r.date, amount: r.amount, creditNote: r.documents }))
@@ -316,6 +324,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <Row label={t('reports.netTotal')} value={formatMoney(netTotal)} />
           <Row label={t('reports.vat')} value={formatMoney(totalVat)} />
           <Row label={t('reports.gross')} value={formatMoney(roundCents(netTotal + totalVat))} bold />
+          {feesReceived > 0 && (
+            <p className="px-5 py-3 text-xs text-neutral-500 dark:text-neutral-400">{t('books.fees.reportsNote', { amount: formatMoney(feesReceived) })}</p>
+          )}
         </div>
       </div>
 

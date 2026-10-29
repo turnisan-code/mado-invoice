@@ -1536,8 +1536,8 @@ export const en = {
     paymentsOther: '{count} payments received',
     onInvoicesOne: 'on {count} invoice',
     onInvoicesOther: 'on {count} invoices',
-    creditNotesDeductedOne: '{count} credit note deducted',
-    creditNotesDeductedOther: '{count} credit notes deducted',
+    creditNotesDeductedOne: 'refunds on {count} credit note deducted',
+    creditNotesDeductedOther: 'refunds on {count} credit notes deducted',
     summary: 'Summary',
     netTotal: 'Net turnover (incl. non-taxable)',
     vat: 'VAT',
@@ -1546,7 +1546,6 @@ export const en = {
     exportHint: 'CSV for Excel (de-AT): all invoices and credit notes issued in {period}, or all payments received in {period}.',
     exportDocuments: 'Documents {period}',
     exportPayments: 'Payments {period}',
-    footnote: 'Partial payments count proportionally; Skonto and write-offs are not income and do not count. Credit notes and Stornos are deducted on their document date, but only as far as payments were actually received on the original invoice. Input VAT from purchase invoices is not included — the amount payable is calculated in Bookamat.',
   },
   exports: {
     period: {
