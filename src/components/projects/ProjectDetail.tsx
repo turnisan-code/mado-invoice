@@ -246,7 +246,7 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
         <div className={`${cardClass} p-4 space-y-2`}>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('projects.detail.budget')}</p>
           {use.hours === null && use.amount === null && <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('projects.detail.noBudget')}</p>}
-          {use.hours !== null && budgetBar(use.hours, t('projects.detail.budgetHours', { used: formatDuration(totals.minutes), budget: num(project.budget_hours ?? 0) }))}
+          {use.hours !== null && budgetBar(use.hours, t('projects.detail.budgetHours', { used: formatDuration(totals.minutes), budget: formatDuration((project.budget_hours ?? 0) * 60) }))}
           {use.amount !== null && budgetBar(use.amount, t('projects.detail.budgetAmount', { used: formatMoney(totals.value), budget: formatMoney(project.budget_amount ?? 0) }))}
         </div>
       </div>
