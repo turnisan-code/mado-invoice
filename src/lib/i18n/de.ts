@@ -1296,6 +1296,8 @@ export const de = {
       pdfLoadFailed: 'Das PDF konnte nicht geladen werden: {error}',
       coveredElsewhere: 'Das {years} eingegangene Geld ist schon in {bookings} enthalten. Um es im eigenen Jahr zu buchen: die Buchung in Bookamat löschen, die Übertragung zurücksetzen und neu übertragen.',
       resetDesc: 'Zuerst {bookings} in Bookamat löschen. Das Zurücksetzen vergisst die Buchung nur hier — die nächste Übertragung bucht das Geld erneut.',
+      resetPendingDesc: 'In Bookamat nach {bookings} suchen: Eine Übertragung hat sie womöglich ohne Bestätigung angelegt. Falls vorhanden, dort löschen.',
+      pendingTitle: '„{title}“ ({year})',
       bulk: 'An Bookamat übertragen',
       bulkTitleOne: '{count} Rechnung an Bookamat übertragen?',
       bulkTitleOther: '{count} Rechnungen an Bookamat übertragen?',

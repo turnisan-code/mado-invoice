@@ -1294,6 +1294,8 @@ export const en = {
       pdfLoadFailed: 'The PDF could not be loaded: {error}',
       coveredElsewhere: 'Money received in {years} is already covered by {bookings}. To book it in its own year, delete that booking in Bookamat, reset the sync and sync again.',
       resetDesc: 'First delete {bookings} in Bookamat. Resetting only forgets the booking here — the next sync books the money again.',
+      resetPendingDesc: 'Check Bookamat for {bookings}: a sync may have made it without confirming. Delete it there if it exists.',
+      pendingTitle: '“{title}” ({year})',
       bulk: 'Sync to Bookamat',
       bulkTitleOne: 'Sync {count} invoice to Bookamat?',
       bulkTitleOther: 'Sync {count} invoices to Bookamat?',
