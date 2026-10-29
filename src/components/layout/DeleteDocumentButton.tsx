@@ -8,7 +8,7 @@ import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
-import { lifecycleErrorMessage } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 
 interface Props {
   id: string
@@ -36,7 +36,7 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate
     setLoading(true)
     const { data, error } = await supabase.from('documents').delete().eq('id', id).is('number', null).select('id')
     if (error || !data?.length) {
-      toast.error(error ? lifecycleErrorMessage(error, t) : t('lifecycle.errors.issuedNoDelete'))
+      toast.error(error ? dbErrorMessage(t, error) : t('lifecycle.errors.issuedNoDelete'))
       setLoading(false)
       setConfirming(false)
       if (!error) router.refresh()

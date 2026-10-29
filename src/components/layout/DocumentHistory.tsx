@@ -70,8 +70,10 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
         : to ? t('archive.events.reminder_sent', { title, to }) : t('archive.events.reminder_sentPlain', { title })
       return { text: d.automatic ? `${text} · ${t('archive.automatic')}` : text, subs: [copies, subject] }
     }
-    case 'status_changed':
-      return { text: t('archive.events.status_changed', { from: statusLabel(d.from), to: statusLabel(d.to) }) }
+    case 'status_changed': {
+      const text = t('archive.events.status_changed', { from: statusLabel(d.from), to: statusLabel(d.to) })
+      return { text: d.automatic ? `${text} · ${t('archive.automatic')}` : text }
+    }
     case 'payment_added':
     case 'payment_removed': {
       const raw = str(d.kind)

@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
 import { flushPendingEdits } from '@/lib/issued-pdf'
-import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
+import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { applyBuyerReferenceInEditor } from '@/components/forms/builder/events'
 import { EINVOICE_ERROR_CODES, vatEndpoint } from '@/lib/einvoice/common'
 import { normalizeVatId } from '@/lib/utils/validation'
+import { fetchBuyerReference } from '@/lib/utils/document-reference'
 import { calcTotals, formatMoney } from '@/lib/utils/document'
 import { useT } from '@/lib/i18n/client'
 import type { EInvoiceFormat } from '@/types'
@@ -55,7 +56,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
     setInfo(null)
     setReferenceError(false)
     try {
-      await flushPendingEdits(documentId)
+      if (!(await flushPendingEdits(documentId))) { toast.error(t('messages.unsavedEdits')); setOpen(false); return }
       const { data: doc, error } = await supabase
         .from('documents')
         // All columns, so the dialog also opens before 20261101_print.sql adds issued_total.
@@ -65,15 +66,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       if (error || !doc) throw new Error(error?.message)
       // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
       const client = doc.clients as unknown as ClientRow | null
-      let fallback: string | null = null
-      if (doc.buyer_reference == null) {
-        const sourceId = doc.type === 'credit_note' ? doc.cancels_document_id ?? doc.converted_from_id : null
-        if (sourceId) {
-          const { data: source } = await supabase.from('documents').select('buyer_reference').eq('id', sourceId).maybeSingle()
-          fallback = source?.buyer_reference?.trim() || null
-        }
-        fallback ??= client?.buyer_reference?.trim() || null
-      }
+      const fallback = doc.buyer_reference == null ? await fetchBuyerReference(supabase, doc, client) : null
       const endpoint = client?.peppol_scheme && client.peppol_id
         ? { scheme: client.peppol_scheme, id: client.peppol_id }
         : vatEndpoint(normalizeVatId(client?.uid_number ?? '') || null)
@@ -92,7 +85,8 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       })
       setFormat(client?.einvoice_format ?? 'ebinterface')
       setReference(prefill)
-    } catch {
+    } catch (err) {
+      console.error('[einvoice] details not loaded:', err)
       toast.error(t('einvoice.loadFailed'))
       setOpen(false)
     } finally {
@@ -113,7 +107,11 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       const stored = value || (info.stored != null || info.prefill ? '' : null)
       if (stored !== info.stored) {
         const { error } = await supabase.from('documents').update({ buyer_reference: stored }).eq('id', documentId)
-        if (error) { toast.error(t('einvoice.saveFailed', { error: t('messages.api.database') })); return }
+        if (error) {
+          console.error('[einvoice] buyer reference not saved:', error.code, error.message)
+          toast.error(t('einvoice.saveFailed', { error: dbErrorMessage(t, error) }))
+          return
+        }
         setInfo({ ...info, stored })
         applyBuyerReferenceInEditor(documentId, stored)
         refresh = true

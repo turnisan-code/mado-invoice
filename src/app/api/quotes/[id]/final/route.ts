@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server'
-import { isUuid, requireUser } from '@/lib/auth'
-import { depositErrorMessage, writeDeductions } from '@/lib/deposits'
+import { apiError, databaseError, isUuid, requireUser } from '@/lib/auth'
+import { writeDeductions } from '@/lib/deposits'
 import { logEvent } from '@/lib/events'
-import { getT } from '@/lib/i18n/server'
-import { lifecycleErrorMessage } from '@/lib/status'
 
 type Converted = { invoice_id: string; existing: boolean; quote_status: string; linked: number }
 
@@ -15,17 +13,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const auth = await requireUser()
   if (!auth.ok) return auth.response
   const { supabase } = auth
-  const { t } = await getT()
   const { id } = await params
-  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Quote not found')
 
+  // The refusals (MI016: not convertible, MI019–MI022: the deposit guards) keep their code; the
+  // browser words them.
   const { data, error } = await supabase.rpc('convert_quote_to_invoice', { p_quote_id: id, p_final: true })
-  if (error) {
-    const message = error.code?.startsWith('MI02') ? depositErrorMessage(error, t) : lifecycleErrorMessage(error, t)
-    return NextResponse.json({ error: message, code: error.code }, { status: error.code === 'MI016' || error.code?.startsWith('MI02') ? 409 : 500 })
-  }
+  if (error) return databaseError(error, error.code === 'MI016' || error.code?.startsWith('MI02') ? 409 : 500)
   const result = data as Converted | null
-  if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
+  if (!result) return apiError(404, 'not_found', 'Quote not found')
   if (result.existing) return NextResponse.json({ invoiceId: result.invoice_id, existing: true })
 
   const { data: quote } = await supabase.from('documents').select('number').eq('id', id).single()

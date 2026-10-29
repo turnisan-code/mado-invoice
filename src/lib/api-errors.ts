@@ -1,6 +1,6 @@
 // The browser half of the API error contract (apiError in src/lib/auth.ts): a route's `error` is
 // English for logs, its `code` is worded here in the UI language. Pure, so node can check it.
-import type { DictKey, TFn } from '@/lib/i18n'
+import type { DictKey, TFn, TranslateVars } from '@/lib/i18n'
 import type { ApiErrorCode, IssueProblem } from '@/types'
 import { lifecycleErrorMessage } from '@/lib/status'
 import { issueProblemMessage } from '@/lib/utils/issue-checks'
@@ -14,12 +14,20 @@ const API_ERROR_CODES: readonly ApiErrorCode[] = [
   'invalid_status', 'payment_date_invalid', 'too_many_rows', 'nothing_to_apply', 'apply_failed',
   'inactive', 'template_cancelled', 'generate_failed', 'link_expired', 'expired', 'answered',
   'too_many_files', 'nothing_to_export', 'server_error', 'mfa_required',
+  'deposit_bad_amount', 'empty_quote', 'quote_converted', 'exceeds_quote',
 ]
 
 type Payload = { error?: unknown; code?: unknown; details?: unknown; problems?: unknown }
 
 function isProblemList(value: unknown): value is IssueProblem[] {
   return Array.isArray(value) && value.length > 0 && value.every(p => !!p && typeof p === 'object' && typeof (p as { code?: unknown }).code === 'string')
+}
+
+// An object `details` carries the values its sentence names (exceeds_quote's amounts, formatted
+// by the route in the UI language).
+function detailVars(details: unknown): TranslateVars | undefined {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return undefined
+  return Object.fromEntries(Object.entries(details).filter(([, v]) => typeof v === 'string' || typeof v === 'number'))
 }
 
 // The answer's wording, or null when it carries no code this module knows.
@@ -39,7 +47,7 @@ export function knownApiError(t: TFn, payload: unknown): string | null {
   }
   if (code === 'stored_unreadable') return t('archive.errors.stored_unreadable')
   const known = API_ERROR_CODES.find(c => c === code)
-  return known ? t(`messages.api.${known}` as DictKey) : null
+  return known ? t(`messages.api.${known}` as DictKey, detailVars(p.details)) : null
 }
 
 // Never the raw server text: an unknown answer gets the caller's fallback (or the generic one).
