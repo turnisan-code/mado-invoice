@@ -12,7 +12,10 @@ import type { ProjectStatus } from '@/types'
 import ProjectDialog, { type ClientOption } from './ProjectDialog'
 import TimeEntryDialog, { type ProjectOption } from './TimeEntryDialog'
 import { TimerDot } from './ProjectTimer'
-import { budgetBarColor, cardClass, inputClass, outlineButtonClass, primaryButtonClass, projectStatusColor } from './ui'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import { budgetBarColor, cardClass, inputClass, projectStatusColor } from './ui'
 
 export interface ProjectRow {
   id: string
@@ -70,17 +73,17 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-semibold">{t('projects.title')}</h1>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setLogging(true)} className={outlineButtonClass}><Timer size={14} /> {t('projects.logTime')}</button>
-          <button type="button" onClick={() => setCreating(true)} className={primaryButtonClass}><Plus size={14} /> {t('projects.new')}</button>
+          <Button type="button" variant="outline" onClick={() => setLogging(true)}><Timer size={14} /> {t('projects.logTime')}</Button>
+          <Button type="button" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.new')}</Button>
         </div>
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={t('projects.searchPlaceholder')} aria-label={t('projects.searchLabel')} className={`${inputClass} flex-1 min-w-48 sm:max-w-sm`} />
-        <select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} aria-label={t('projects.columns.status')} className={`${inputClass} w-auto`}>
+        <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={t('projects.searchPlaceholder')} aria-label={t('projects.searchLabel')} className={cn(inputClass, 'flex-1 min-w-48 sm:max-w-sm')} />
+        <Select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} aria-label={t('projects.columns.status')} className="w-auto">
           {PROJECT_STATUSES.map(s => <option key={s} value={s}>{t(`projects.statuses.${s}`)}</option>)}
           <option value="all">{t('common.all')}</option>
-        </select>
+        </Select>
       </div>
 
       <div className={`${cardClass} overflow-hidden`}>

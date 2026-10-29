@@ -16,8 +16,9 @@ import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
+  searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
+import { Select } from '@/components/ui/select'
 
 const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
 
@@ -175,10 +176,10 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
 
       <div className="flex gap-3 flex-wrap">
         <input type="search" aria-label={t('quotes.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('lists.searchPlaceholder')} className={searchClass} />
-        <select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className={inputClass}>
+        <Select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className="w-auto">
           <option value="">{t('status.allStatuses')}</option>
           {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-        </select>
+        </Select>
       </div>
 
       <div className={listCardClass}>

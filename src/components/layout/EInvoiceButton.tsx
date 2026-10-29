@@ -150,7 +150,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => void openDialog()} title={t('einvoice.buttonTitle')} className="flex items-center gap-1.5">
+      <Button type="button" variant="outline" onClick={() => void openDialog()} title={t('einvoice.buttonTitle')}>
         <FileCode size={14} aria-hidden="true" />
         <span className={compact ? 'sr-only sm:not-sr-only' : undefined}>{t('einvoice.button')}</span>
       </Button>

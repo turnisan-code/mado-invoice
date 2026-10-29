@@ -12,6 +12,8 @@ import { formatDuration, parseDuration } from '@/lib/projects'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { TimeEntry } from '@/types'
+import { Select } from '@/components/ui/select'
+import { CONTROL_HEIGHT } from '@/components/ui/control'
 import { checkboxClass, inputClass, labelClass } from './ui'
 
 export type ProjectOption = { id: string; name: string; client: string; hourly_rate: number | null }
@@ -93,13 +95,13 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
             {!projectId && !entry && (
               <div>
                 <label htmlFor={`${id}-project`} className={labelClass}>{t('projects.time.project')}</label>
-                <select id={`${id}-project`} value={values.project_id} onChange={e => set({ project_id: e.target.value })} disabled={saving} className={inputClass}>
+                <Select id={`${id}-project`} value={values.project_id} onChange={e => set({ project_id: e.target.value })} disabled={saving}>
                   <option value="">{t('projects.time.selectProject')}</option>
                   {projects.map(p => <option key={p.id} value={p.id}>{p.name} · {p.client}</option>)}
-                </select>
+                </Select>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor={`${id}-date`} className={labelClass}>{t('projects.time.date')}</label>
                 <input id={`${id}-date`} type="date" value={values.date} onChange={e => set({ date: e.target.value })} disabled={saving} className={inputClass} />
@@ -116,7 +118,7 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
                   aria-invalid={values.duration.trim() !== '' && minutes === null}
                   aria-describedby={`${id}-duration-hint`}
                   disabled={saving}
-                  className={`${inputClass} aria-invalid:border-red-400`}
+                  className={inputClass}
                 />
               </div>
             </div>
@@ -139,8 +141,8 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
               <label htmlFor={`${id}-description`} className={labelClass}>{t('projects.time.description')}</label>
               <input id={`${id}-description`} type="text" value={values.description} onChange={e => set({ description: e.target.value })} placeholder={t('projects.time.descriptionPlaceholder')} maxLength={500} disabled={saving} className={inputClass} />
             </div>
-            <div className="grid grid-cols-2 gap-3 items-end">
-              <label className="flex items-center gap-2.5 h-10 sm:h-9 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+              <label className={`flex items-center gap-2.5 ${CONTROL_HEIGHT} text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none`}>
                 <input type="checkbox" checked={values.billable} onChange={e => set({ billable: e.target.checked })} disabled={saving} className={checkboxClass} />
                 {t('projects.time.billable')}
               </label>

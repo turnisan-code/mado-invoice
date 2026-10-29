@@ -10,6 +10,7 @@ import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import type { BookamatPending, Currency, PaymentKind, PaymentMethod } from '@/types'
@@ -323,7 +324,6 @@ export default function PaymentPanel({
     toast.success(t('payments.syncReset'))
   }
 
-  const settleBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300'
   const linkBtn = 'text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-800 dark:hover:text-neutral-100 transition-colors disabled:opacity-50'
   const overpayExcess = overpay ? roundCents(overpay.amount - Math.max(0, balanceDue)) : 0
 
@@ -385,19 +385,19 @@ export default function PaymentPanel({
       {(offerSkonto || offerWriteoff || offerUncollectible) && (
         <div className="flex flex-wrap gap-2">
           {offerSkonto && (
-            <button type="button" onClick={() => void settleRemaining('skonto')} disabled={saving} className={settleBtn}>
+            <Button type="button" variant="outline" onClick={() => void settleRemaining('skonto')} disabled={saving} className="text-xs">
               {t('payments.settleSkonto', { amount: formatMoney(balanceDue, currency) })}
-            </button>
+            </Button>
           )}
           {offerWriteoff && (
-            <button type="button" onClick={() => void settleRemaining('writeoff')} disabled={saving} className={settleBtn}>
+            <Button type="button" variant="outline" onClick={() => void settleRemaining('writeoff')} disabled={saving} className="text-xs">
               {t('payments.writeOff', { amount: formatMoney(balanceDue, currency) })}
-            </button>
+            </Button>
           )}
           {offerUncollectible && (
-            <button type="button" onClick={() => { setWriteOffInvalid(false); setWritingOff(true) }} disabled={saving} className={settleBtn}>
+            <Button type="button" variant="outline" onClick={() => { setWriteOffInvalid(false); setWritingOff(true) }} disabled={saving} className="text-xs">
               {t('lifecycle.payments.writeOffOpen')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -427,15 +427,15 @@ export default function PaymentPanel({
             />
           </div>
           <div className="flex gap-2">
-            <select
+            <Select
               aria-label={t('payments.paymentMethod')}
               value={method}
               onChange={e => setMethod(e.target.value as PaymentMethod)}
-              className="shrink-0 h-8 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              className="w-auto shrink-0"
             >
               <option value="bank">{t('payments.methodBank')}</option>
               <option value="cash">{t('payments.methodCash')}</option>
-            </select>
+            </Select>
             <Input
               aria-label={t('lifecycle.payments.reference')}
               placeholder={t('lifecycle.payments.reference')}
@@ -457,8 +457,7 @@ export default function PaymentPanel({
               type="button"
               onClick={() => void addPayment()}
               disabled={saving}
-              size="sm"
-              className="shrink-0 flex items-center gap-1.5 h-8"
+              className="shrink-0"
             >
               <Plus size={13} />
               {saving ? t('common.saving') : t('payments.add')}

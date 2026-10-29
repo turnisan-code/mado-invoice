@@ -3,15 +3,19 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, X, Loader2, Download, type LucideIcon } from 'lucide-react'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { fieldClass } from '@/components/ui/control'
+import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n/client'
 import type { UiLang } from '@/lib/i18n'
 import { formatDate } from '@/lib/utils/document'
 import type { Sort } from './useListState'
 
-export const inputClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
-export const searchClass = `flex-1 min-w-48 max-w-sm px-3 ${inputClass}`
-export const headerButtonClass = 'flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400'
-export const primaryLinkClass = 'flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors'
+// Filter bars: the shared control look at its natural width.
+export const inputClass = cn(fieldClass, 'w-auto')
+export const searchClass = cn(fieldClass, 'flex-1 min-w-48 max-w-sm')
+export const headerButtonClass = buttonVariants({ variant: 'outline' })
+export const primaryLinkClass = buttonVariants()
 export const listCardClass = 'bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden'
 export const theadClass = 'border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800'
 export const rowStateClass = (selected: boolean) => selected ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
@@ -41,10 +45,10 @@ export function SortableTh<K extends string>({ col, label, sort, onSort, align =
 export function ExportButton({ onClick }: { onClick: () => void }) {
   const { t } = useT()
   return (
-    <button type="button" onClick={onClick} title={t('lists.exportCsv')} className={headerButtonClass}>
+    <Button type="button" variant="outline" onClick={onClick} title={t('lists.exportCsv')}>
       <Download size={14} />
       <span className="sr-only sm:not-sr-only">{t('lists.exportCsv')}</span>
-    </button>
+    </Button>
   )
 }
 
@@ -108,12 +112,11 @@ export function EmptyState({ icon: Icon, message, cta }: { icon: LucideIcon; mes
 export function Pagination({ page, pageCount, onPage }: { page: number; pageCount: number; onPage: (page: number) => void }) {
   const { t } = useT()
   if (pageCount <= 1) return null
-  const btn = 'px-2.5 py-1.5 rounded border border-neutral-200 dark:border-neutral-700 disabled:opacity-30 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors'
   return (
     <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-      <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} className={btn}>{t('common.prev')}</button>
+      <Button type="button" variant="outline" onClick={() => onPage(page - 1)} disabled={page <= 1}>{t('common.prev')}</Button>
       <span>{t('common.pageOf', { page, count: pageCount })}</span>
-      <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pageCount} className={btn}>{t('common.next')}</button>
+      <Button type="button" variant="outline" onClick={() => onPage(page + 1)} disabled={page >= pageCount}>{t('common.next')}</Button>
     </div>
   )
 }
@@ -134,9 +137,9 @@ export function BulkButton({ tone = 'neutral', icon: Icon, onClick, disabled, bu
   children: React.ReactNode
 }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled || busy} aria-busy={busy || undefined} className={`flex items-center gap-1.5 text-xs px-3 py-2 sm:py-1.5 rounded-lg transition-colors disabled:opacity-50 ${TONES[tone]}`}>
+    <Button type="button" onClick={onClick} disabled={disabled || busy} aria-busy={busy || undefined} className={cn('text-xs px-3', TONES[tone])}>
       {busy ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />} {children}
-    </button>
+    </Button>
   )
 }
 

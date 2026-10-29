@@ -20,7 +20,9 @@ import TimeEntryDialog from './TimeEntryDialog'
 import ExpenseDialog from './ExpenseDialog'
 import InvoiceUnbilledDialog from './InvoiceUnbilledDialog'
 import ProjectTimer, { clearProjectTimer } from './ProjectTimer'
-import { budgetBarColor, cardClass, iconButtonClass, inputClass, outlineButtonClass, primaryButtonClass, projectStatusColor } from './ui'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { budgetBarColor, cardClass, iconButtonClass, inputClass, projectStatusColor } from './ui'
 
 export type LinkedInvoice = { id: string; number: string | null; status: string; date: string }
 
@@ -241,12 +243,12 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
 
       {/* Actions */}
       <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-        <button type="button" onClick={() => setTimeDialog({})} className={primaryButtonClass}><Plus size={14} /> {t('projects.logTime')}</button>
+        <Button type="button" onClick={() => setTimeDialog({})}><Plus size={14} /> {t('projects.logTime')}</Button>
         <ProjectTimer projectId={project.id} onStopped={entry => setTimeDialog({ entry })} />
-        <button type="button" onClick={() => setExpenseDialog({})} className={outlineButtonClass}><Receipt size={14} /> {t('projects.addExpense')}</button>
-        <button type="button" onClick={() => setInvoicing(true)} disabled={!unbilledEntries.length && !unbilledExpenses.length} title={!unbilledEntries.length && !unbilledExpenses.length ? t('projects.invoice.nothing') : undefined} className={outlineButtonClass}>
+        <Button type="button" variant="outline" onClick={() => setExpenseDialog({})}><Receipt size={14} /> {t('projects.addExpense')}</Button>
+        <Button type="button" variant="outline" onClick={() => setInvoicing(true)} disabled={!unbilledEntries.length && !unbilledExpenses.length} title={!unbilledEntries.length && !unbilledExpenses.length ? t('projects.invoice.nothing') : undefined}>
           <FileText size={14} /> {t('projects.invoice.button')}
-        </button>
+        </Button>
       </div>
 
       {/* Summary */}
@@ -299,9 +301,9 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
 
         <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${tab}`}>
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 p-3 border-b border-neutral-100 dark:border-neutral-800">
-            <select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className={`${inputClass} sm:w-auto`}>
+            <Select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className="sm:w-auto">
               {(['all', 'unbilled', 'billed', 'nonBillable'] as const).map(b => <option key={b} value={b}>{t(`projects.filters.${b}`)}</option>)}
-            </select>
+            </Select>
             <input type="search" value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder={t('projects.filters.search')} aria-label={t('projects.filters.search')} className={`${inputClass} sm:w-56`} />
             <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
               <span className="shrink-0">{t('projects.filters.from')}</span>

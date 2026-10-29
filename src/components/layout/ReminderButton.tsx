@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Bell, BellRing, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { controlClass, fieldClass } from '@/components/ui/control'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { toastApiError } from '@/lib/google/toast'
 import { requestErrorMessage } from '@/lib/api-errors'
@@ -42,7 +43,7 @@ function download(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10000)
 }
 
-const inputCls = 'w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 aria-invalid:border-red-500'
+const inputCls = fieldClass
 const labelCls = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
 
 // Every reminder is reviewed first. With Gmail it is sent from here with the Mahnung and the
@@ -181,15 +182,10 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
       </button>
     </div>
   ) : (
-    <button
-      type="button"
-      onClick={openDialog}
-      disabled={!!busy}
-      className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
-    >
+    <Button type="button" variant="outline" onClick={openDialog} disabled={!!busy}>
       <Bell size={14} aria-hidden="true" />
       <span className="sr-only sm:not-sr-only">{gmailConfigured ? t('reminders.sendNext', { title: nextTitle }) : t('dunning.prepareNext', { title: nextTitle })}</span>
-    </button>
+    </Button>
   )
 
   return (
@@ -241,7 +237,7 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
               <div className="space-y-1">
                 <label htmlFor={`${uid}-body`} className={labelCls}>{t('dunning.body')}</label>
                 <textarea id={`${uid}-body`} value={fields.body} onChange={e => setFields(f => ({ ...f, body: e.target.value }))} rows={10}
-                  className={`${inputCls} py-2 resize-y`} />
+                  className={`${controlClass} py-2 resize-y`} />
               </div>
               <div className="flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
                 <p className="break-words">{t('dunning.attachments', { files: draft.attachments.join(', ') })}</p>
