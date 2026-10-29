@@ -9,12 +9,17 @@ import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
 import { isShareExpired } from '@/lib/share'
 import { docTitle, documentLanguage, documentT } from '@/lib/document-labels'
-import type { DocumentType } from '@/types'
+import type { DocumentKind } from '@/types'
 
 interface Props {
-  document: { id: string; number: string | null; type: DocumentType; language?: string | null; share_token?: string | null }
-  // Read defensively: saving to Drive needs Google connected and a folder chosen.
-  settings: { gmail_connected?: boolean | null; drive_folder_id?: string | null } | null
+  documentId: string
+  number: string
+  // What the portal calls it: a Storno credit note is shared as a Storno.
+  kind: DocumentKind
+  language: string | null | undefined
+  initialToken: string | null
+  // Saving to Drive needs Google connected and a Drive folder chosen.
+  driveReady: boolean
 }
 
 type ShareState = { token: string | null; expiresAt: string | null; viewedAt: string | null }
@@ -22,9 +27,8 @@ type ShareState = { token: string | null; expiresAt: string | null; viewedAt: st
 const smallBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
 const actionBtn = 'inline-flex items-center gap-1.5 text-sm px-3 min-h-11 sm:min-h-9 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
 
-export default function ShareLinkButton({ document: doc, settings }: Props) {
-  const documentId = doc.id
-  const [share, setShare] = useState<ShareState>({ token: doc.share_token ?? null, expiresAt: null, viewedAt: null })
+export default function ShareLinkButton({ documentId, number, kind, language, initialToken, driveReady }: Props) {
+  const [share, setShare] = useState<ShareState>({ token: initialToken, expiresAt: null, viewedAt: null })
   const [details, setDetails] = useState(false)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
@@ -38,11 +42,10 @@ export default function ShareLinkButton({ document: doc, settings }: Props) {
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/portal/${token}`
     : null
   const expired = isShareExpired(share.expiresAt)
-  const driveReady = !!settings?.gmail_connected && !!settings?.drive_folder_id
   // Only rendered inside the open dialog, so server and first client render agree.
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   // The share sheet's title is in the document's language, like the portal page it opens.
-  const shareTitle = `${docTitle(documentT(documentLanguage(doc.language)), doc.type)} ${doc.number ?? ''}`.trim()
+  const shareTitle = `${docTitle(documentT(documentLanguage(language)), kind)} ${number}`
 
   function close() {
     setOpen(false)

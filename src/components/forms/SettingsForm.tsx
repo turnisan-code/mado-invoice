@@ -48,17 +48,13 @@ function parseDays(value: string): number | null {
 }
 
 // ── Variable chip sets ─────────────────────────────────────────────────────────
-// The PDF footer is filled like a document email (fillTemplate), plus {{vat}}.
-const FOOTER_VARS: { name: string; labelKey: DictKey }[] = [
-  { name: 'invoice_number', labelKey: 'dunning.vars.invoice_number' },
-  { name: 'date',           labelKey: 'dunning.vars.date' },
-  { name: 'due_date',       labelKey: 'dunning.vars.due_date' },
-  { name: 'client',         labelKey: 'dunning.vars.client' },
-  { name: 'subtotal',       labelKey: 'dunning.vars.subtotal' },
-  { name: 'vat',            labelKey: 'docs.footer.vat' },
-  { name: 'total',          labelKey: 'dunning.vars.total' },
-  { name: 'balance_due',    labelKey: 'dunning.vars.balance_due' },
-]
+// The PDF footer is filled like the document's email, plus {{vat}}; a PDF has no portal link.
+function footerVars(t: (key: DictKey) => string, kind: EmailTemplateKind): { name: string; label: string }[] {
+  return [
+    ...variablesFor(kind).filter(name => name !== 'portal_link').map(name => ({ name, label: t(`dunning.vars.${name}`) })),
+    { name: 'vat', label: t('docs.footer.vat') },
+  ]
+}
 
 // The preview's portal link; a real one is created per document when an email uses it.
 const SAMPLE_PORTAL_TOKEN = '3f0c9a2e-5b1d-4c7a-9e60-2d8f4b1a7c55'
@@ -1303,17 +1299,17 @@ export default function SettingsForm({ settings }: Props) {
                 </button>
               ))}
             </div>
-            <VarChips vars={FOOTER_VARS.map(v => ({ token: `{{${v.name}}}`, label: t(v.labelKey) }))} onInsert={insertVar} />
+            <VarChips vars={footerVars(t, footerDocTab).map(v => ({ token: `{{${v.name}}}`, label: v.label }))} onInsert={insertVar} />
             <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1">
               {t('settings.footer.insertHint')} {t('docs.footer.emptyLines')}
             </p>
             <details className="text-xs text-neutral-500 dark:text-neutral-400">
               <summary className="cursor-pointer py-1 w-fit hover:text-neutral-700 dark:hover:text-neutral-200">{t('dunning.settings.variables')}</summary>
               <dl className="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                {FOOTER_VARS.map(v => (
+                {footerVars(t, footerDocTab).map(v => (
                   <div key={v.name} className="contents">
                     <dt className="font-mono break-all">{`{{${v.name}}}`}</dt>
-                    <dd className="mb-1 sm:mb-0">{t(v.labelKey)}</dd>
+                    <dd className="mb-1 sm:mb-0">{v.label}</dd>
                   </div>
                 ))}
               </dl>
