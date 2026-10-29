@@ -1,4 +1,5 @@
-import type { ClientDefaults, Settings } from '@/types'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { Client, ClientDefaults, Settings } from '@/types'
 import { toCountryCode } from './country'
 
 // One rule for every place that names a client: the company when there is one, else the
@@ -35,6 +36,45 @@ export function clientMatches(c: SearchableClient, query: string): boolean {
 export function clientLabel(c: NamedClient | null | undefined): string {
   if (c?.company && c.name) return `${c.company} (${c.name})`
   return clientDisplayName(c)
+}
+
+// "K-0007 · Acme GmbH": how a client is told apart from a namesake.
+export function clientWithNumber(c: NamedClient & { client_number?: string | null }): string {
+  return [c.client_number, clientDisplayName(c)].filter(Boolean).join(' · ')
+}
+
+export type DuplicateReason = 'email' | 'uid'
+export interface ClientDuplicate { client: Client; reasons: DuplicateReason[] }
+
+// ilike treats % and _ as wildcards; an email may contain both.
+const escapeLike = (v: string) => v.replace(/[\\%_]/g, ch => `\\${ch}`)
+
+// Clients that already have this email address (in any case) or VAT ID (normalized, as stored),
+// checked before a client is created or changed. Only a warning: a failed lookup finds nothing,
+// so it never blocks saving.
+export async function findDuplicateClients(
+  supabase: SupabaseClient,
+  { email, uid }: { email?: string | null; uid?: string | null },
+  exceptId?: string,
+): Promise<ClientDuplicate[]> {
+  async function lookup(reason: DuplicateReason, value: string) {
+    let q = supabase.from('clients').select('*')
+    q = reason === 'email' ? q.ilike('email', escapeLike(value)) : q.eq('uid_number', value)
+    if (exceptId) q = q.neq('id', exceptId)
+    const { data, error } = await q.limit(5)
+    if (error) console.error('[clients] duplicate check failed:', error.code, error.message)
+    return ((data ?? []) as Client[]).map(client => ({ client, reason }))
+  }
+  const lookups: ReturnType<typeof lookup>[] = []
+  if (email?.trim()) lookups.push(lookup('email', email.trim()))
+  if (uid?.trim()) lookups.push(lookup('uid', uid.trim()))
+  const found = new Map<string, ClientDuplicate>()
+  for (const { client, reason } of (await Promise.all(lookups)).flat()) {
+    const entry = found.get(client.id) ?? { client, reasons: [] }
+    entry.reasons.push(reason)
+    found.set(client.id, entry)
+  }
+  return [...found.values()]
 }
 
 export type ClientDefaultsSource = Pick<Settings, 'country' | 'default_tax_treatment' | 'default_language' | 'default_payment_days'>

@@ -331,6 +331,16 @@ export const en = {
     recurring: {
       dateTaken: '{date}: created as a draft, not issued — another invoice of this schedule is already dated today. Issue it from its page.',
     },
+    clientDelete: {
+      desc: 'This cannot be undone. Clients with documents or projects cannot be deleted — set them to inactive instead.',
+      hasProjects: 'This client still has projects. Delete them first on the project pages, or set the client to inactive.',
+    },
+    quickAdd: {
+      duplicates: 'A client with this email address or UID already exists:',
+      useExisting: 'Use this client',
+      createAnyway: 'Create anyway',
+      selected: '{name} selected.',
+    },
   },
   csv: {
     number: 'Number',

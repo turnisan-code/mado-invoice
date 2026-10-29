@@ -333,6 +333,16 @@ export const de = {
     recurring: {
       dateTaken: '{date}: als Entwurf erstellt, nicht ausgestellt – eine andere Rechnung dieses Zeitplans ist bereits auf heute datiert. Auf der Rechnungsseite lässt sie sich ausstellen.',
     },
+    clientDelete: {
+      desc: 'Das kann nicht rückgängig gemacht werden. Kunden mit Belegen oder Projekten können nicht gelöscht werden — stattdessen auf inaktiv setzen.',
+      hasProjects: 'Dieser Kunde hat noch Projekte. Zuerst die Projekte löschen oder den Kunden auf inaktiv setzen.',
+    },
+    quickAdd: {
+      duplicates: 'Einen Kunden mit dieser E-Mail-Adresse oder UID-Nr. gibt es schon:',
+      useExisting: 'Diesen Kunden nehmen',
+      createAnyway: 'Trotzdem anlegen',
+      selected: '{name} ausgewählt.',
+    },
   },
   csv: {
     number: 'Nummer',
