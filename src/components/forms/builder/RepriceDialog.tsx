@@ -31,9 +31,12 @@ export function RepriceDialog({ offer, currency, onApply, onCancel }: {
           <li key={c.id} className="py-2 flex items-baseline justify-between gap-3">
             <span className="min-w-0 truncate">{c.description}</span>
             <span className="shrink-0 tabular-nums text-xs">
-              <span className="line-through text-neutral-500 dark:text-neutral-400">{formatMoney(c.from, currency)}</span>
-              <span aria-hidden="true"> → </span>
-              <span className="font-medium">{formatMoney(c.to, currency)}</span>
+              <span aria-hidden="true">
+                <span className="line-through text-neutral-500 dark:text-neutral-400">{formatMoney(c.from, currency)}</span>
+                {' → '}
+                <span className="font-medium">{formatMoney(c.to, currency)}</span>
+              </span>
+              <span className="sr-only">{t('rates.repriceChange', { from: formatMoney(c.from, currency), to: formatMoney(c.to, currency) })}</span>
             </span>
           </li>
         ))}

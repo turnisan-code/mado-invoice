@@ -99,7 +99,13 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
             autoFocus
             onChange={e => {
               const item = catalogue.find(i => i.id === e.target.value)
-              setDraft(d => d && { ...d, itemId: e.target.value, price: d.price ?? (item ? Number(item.default_price) : null) })
+              // The price follows the chosen item until it is typed in by hand.
+              setDraft(d => {
+                if (!d) return d
+                const before = catalogue.find(i => i.id === d.itemId)
+                const prefilled = d.price === null || (!!before && d.price === Number(before.default_price))
+                return { ...d, itemId: e.target.value, price: prefilled ? (item ? Number(item.default_price) : null) : d.price }
+              })
             }}
             aria-invalid={(!!error && !draft.itemId) || undefined}
             className={SELECT_CLS}
@@ -173,7 +179,6 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
                 <button
                   type="button"
                   onClick={() => open({ id: rate.id, itemId: item.id, price: rate.price, note: rate.note ?? '' })}
-                  aria-label={t('rates.edit', { name: catalogueName(item, lang) })}
                   className="w-full min-h-11 flex items-center gap-3 px-2 py-2 rounded-lg text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/60 transition-colors"
                 >
                   <span className="flex-1 min-w-0">
@@ -184,7 +189,9 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
                     </span>
                     {rate.note && <span className="block text-xs text-neutral-500 dark:text-neutral-400 truncate">{rate.note}</span>}
                   </span>
-                  <span className="text-sm font-semibold tabular-nums text-neutral-900 dark:text-neutral-100 shrink-0">{perUnit(rate.price, item)}</span>
+                  <span className="text-sm font-semibold tabular-nums text-neutral-900 dark:text-neutral-100 shrink-0">
+                    <span className="sr-only">{t('rates.price')}: </span>{perUnit(rate.price, item)}
+                  </span>
                   <ChevronRight size={14} aria-hidden="true" className="text-neutral-400 dark:text-neutral-600 shrink-0" />
                 </button>
               )}

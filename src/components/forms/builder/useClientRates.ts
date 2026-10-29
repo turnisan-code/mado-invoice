@@ -17,11 +17,13 @@ export interface RepriceOffer { clientName: string; changes: PriceChange[] }
 export function useClientRates(clientId: string, catalogue: CatalogueItem[], setLines: (fn: (lines: LineItem[]) => LineItem[]) => void) {
   const { t } = useT()
   const [loaded, setLoaded] = useState<Record<string, RateMap>>({})
-  const cache = useRef<Record<string, Promise<RateMap>>>({})
+  const cache = useRef<Record<string, Promise<RateMap | null>>>({})
+  // The client the last change went to: an offer computed for an earlier pick is dropped.
+  const target = useRef<string | null>(null)
   const [offer, setOffer] = useState<RepriceOffer | null>(null)
 
-  // A failed load leaves the catalogue prices in place and is tried again on the next pick of that client.
-  const load = useCallback((id: string): Promise<RateMap> => {
+  // null = not loaded. Picking stays at catalogue prices, and the toast offers another try.
+  const load = useCallback(function load(id: string): Promise<RateMap | null> {
     cache.current[id] ??= Promise.resolve(createClient().from('client_rates').select('catalogue_item_id, price').eq('client_id', id))
       .then(({ data, error }) => {
         if (error) throw new Error(error.message)
@@ -32,17 +34,21 @@ export function useClientRates(clientId: string, catalogue: CatalogueItem[], set
       .catch(err => {
         delete cache.current[id]
         console.error('[rates] client rates not loaded:', err)
-        return NO_RATES
+        toast.error(t('rates.loadFailed'), { action: { label: t('common.tryAgain'), onClick: () => void load(id) } })
+        return null
       })
     return cache.current[id]
-  }, [])
+  }, [t])
 
   useEffect(() => { if (clientId) void load(clientId) }, [clientId, load])
 
   async function clientChanged(fromId: string, toId: string, clientName: string, lines: LineItem[]) {
+    target.current = toId
     if (!toId || toId === fromId || !lines.some(l => l.catalogue_item_id)) return
     const [from, to] = await Promise.all([fromId ? load(fromId) : NO_RATES, load(toId)])
-    const changes = repriceLines(lines, catalogue, from, to)
+    // Without the new client's rates every line would look like it should go back to the catalogue price.
+    if (target.current !== toId || !to) return
+    const changes = repriceLines(lines, catalogue, from ?? NO_RATES, to)
     if (changes.length) setOffer({ clientName, changes })
   }
 

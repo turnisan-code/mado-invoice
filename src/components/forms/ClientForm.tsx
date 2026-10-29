@@ -415,6 +415,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
                 onBlur={field.onBlur}
                 placeholder={t('rates.skontoDefault', { value: defaults.skonto_percent ? `${formatLocaleNumber(defaults.skonto_percent, 2)} %` : t('rates.skontoNone') })}
                 aria-invalid={!!errors.skonto_percent || undefined}
+                aria-describedby={`${uid}-skonto-hint`}
               />
             )}
           />
@@ -432,12 +433,13 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
                 onBlur={field.onBlur}
                 placeholder={t('rates.skontoDefault', { value: defaults.skonto_days != null ? String(defaults.skonto_days) : t('rates.skontoNone') })}
                 aria-invalid={!!errors.skonto_days || undefined}
+                aria-describedby={`${uid}-skonto-hint`}
               />
             )}
           />
         </Field>
       </div>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-2">{t('rates.skontoHint')}</p>
+      <p id={`${uid}-skonto-hint`} className="text-xs text-neutral-500 dark:text-neutral-400 -mt-2">{t('rates.skontoHint')}</p>
 
       <Controller control={control} name="tags" render={({ field }) => <TagInput value={field.value} onChange={field.onChange} />} />
 
