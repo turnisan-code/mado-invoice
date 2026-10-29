@@ -1411,7 +1411,7 @@ export const en = {
       copied: '{field} copied',
     },
     portal: {
-      pageTitle: '{title} {number} · {company}',
+      pageTitle: '{title} {number} — {company}',
       downloadPdf: 'Download PDF',
       notes: 'Notes',
       expiredTitle: 'This link has expired',
@@ -1475,6 +1475,31 @@ export const en = {
     },
     share: {
       saveToDrive: 'Save to Google Drive',
+    },
+  },
+  print: {
+    // Printed (PDF, portal): in the document's language.
+    yourReference: 'Your reference',
+    builder: {
+      buyerReferenceHint: 'Printed as “Your reference” and carried by the e-invoice.',
+      buyerReferenceHintQuote: 'Printed as “Your reference”.',
+      referenceDefault: 'Left empty, “{reference}” is printed.',
+      referenceNone: 'No reference is printed.',
+      printNone: 'Print no reference',
+      useDefault: 'Use the default',
+    },
+    issuedTotal: {
+      changed: 'The total has changed since issuing: {issued} then, {current} now.',
+      changedHint: 'The issued PDF still shows the original amounts; the portal and the e-invoice show the current ones.',
+      changedHintQuote: 'The issued PDF still shows the original amounts; the portal shows the current ones.',
+      stornoHint: 'A wrong invoice is corrected with a cancellation invoice.',
+      einvoice: 'The total has changed since issuing ({issued} then, {current} now). The e-invoice is built from the current data; the issued PDF shows the original amounts.',
+    },
+    gmail: {
+      attachEInvoice: 'Attach the e-invoice ({format})',
+      attachEInvoiceHint: 'This client prefers e-invoices. The XML is built from the document’s current data.',
+      einvoiceFailed: 'Not sent: the e-invoice could not be built. {reason}',
+      sendWithout: 'Untick it to send the email without the e-invoice.',
     },
   },
   reminders: {
@@ -1625,9 +1650,6 @@ export const en = {
       closing: 'If your payment has crossed with this letter, please disregard it.',
       closingFinal: 'If no payment is received by then, further steps to collect the debt will follow without further notice; the resulting costs are at your expense.',
       regards: 'Kind regards',
-      contact: 'Contact',
-      payment: 'Payment info',
-      uid: 'VAT Reg.',
     },
   },
   payments: {

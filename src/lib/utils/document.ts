@@ -247,7 +247,7 @@ export function paymentTermsSentence(doc: PaymentTermsDoc, total: number, lang: 
   if (amount > 0 && doc.skonto_days != null) {
     const deadline = formatDate(skontoDeadline(doc.date, doc.skonto_days), lang)
     const pct = new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { maximumFractionDigits: 2 }).format(doc.skonto_percent!)
-    const money = formatMoney(amount, doc.currency ?? 'EUR')
+    const money = formatMoney(amount, doc.currency ?? 'EUR', lang)
     parts.push(lang === 'de'
       ? `Bei Zahlung bis ${deadline} ${pct} % Skonto (${money}).`
       : `${pct} % early payment discount (${money}) if paid by ${deadline}.`)
@@ -255,8 +255,10 @@ export function paymentTermsSentence(doc: PaymentTermsDoc, total: number, lang: 
   return parts.length ? parts.join(' ') : null
 }
 
-export function formatMoney(amount: number, currency = 'EUR'): string {
-  return new Intl.NumberFormat('de-AT', { style: 'currency', currency }).format(amount)
+// The app's own views print '€ 1.234,56' whatever the UI language; what a client receives passes
+// the document's language: German '€ 1.234,56', English '€1,234.56' (en-GB, as its dates).
+export function formatMoney(amount: number, currency = 'EUR', lang: 'de' | 'en' = 'de'): string {
+  return new Intl.NumberFormat(lang === 'en' ? 'en-GB' : 'de-AT', { style: 'currency', currency }).format(amount)
 }
 
 export function formatDate(date: string, lang: 'de' | 'en' = 'de'): string {

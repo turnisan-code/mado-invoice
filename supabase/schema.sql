@@ -318,8 +318,11 @@ create table documents (
   -- own visits are not counted).
   portal_viewed_at    timestamptz,
   drive_file_id       text,
-  -- The buyer's reference (Auftragsreferenz / order number) the document's e-invoices carry.
+  -- The buyer's reference (Auftragsreferenz / order number) the document's PDF and e-invoices carry.
   buyer_reference     text,
+  -- The total (after discounts, before payments) the document was issued with; written with the
+  -- frozen PDF by issueDocument, so a later edit that changes the amount can be flagged.
+  issued_total        numeric(12,2),
   -- Invoices: 'advance' asks for money before the service, 'partial' bills a completed part of
   -- it, 'final' bills the whole service and deducts them (§ 11 Abs 1 UStG). Everything else 'standard'.
   invoice_kind        text not null default 'standard',
@@ -1116,11 +1119,11 @@ begin
   insert into documents (
     type, number, status, client_id, date, due_date, service_date, service_date_end,
     language, currency, tax_treatment, exchange_rate, notes, notes_internal,
-    discount_type, discount_value, converted_from_id, cancels_document_id
+    discount_type, discount_value, converted_from_id, cancels_document_id, buyer_reference
   ) values (
     'credit_note', null, 'draft', inv.client_id, today, null, inv.service_date, inv.service_date_end,
     inv.language, inv.currency, inv.tax_treatment, inv.exchange_rate, inv.notes, inv.notes_internal,
-    inv.discount_type, inv.discount_value, inv.id, case when p_cancel then inv.id end
+    inv.discount_type, inv.discount_value, inv.id, case when p_cancel then inv.id end, inv.buyer_reference
   ) returning id into cn_id;
 
   insert into document_items

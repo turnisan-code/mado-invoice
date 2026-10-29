@@ -1412,7 +1412,7 @@ export const de = {
       copied: '{field} kopiert',
     },
     portal: {
-      pageTitle: '{title} {number} · {company}',
+      pageTitle: '{title} {number} — {company}',
       downloadPdf: 'PDF herunterladen',
       notes: 'Hinweise',
       expiredTitle: 'Dieser Link ist abgelaufen',
@@ -1476,6 +1476,31 @@ export const de = {
     },
     share: {
       saveToDrive: 'In Google Drive speichern',
+    },
+  },
+  print: {
+    // Gedruckt (PDF, Portal): in der Sprache des Belegs.
+    yourReference: 'Ihre Referenz',
+    builder: {
+      buyerReferenceHint: 'Wird als „Ihre Referenz“ gedruckt und in der E-Rechnung übermittelt.',
+      buyerReferenceHintQuote: 'Wird als „Ihre Referenz“ gedruckt.',
+      referenceDefault: 'Ohne Eingabe wird „{reference}“ gedruckt.',
+      referenceNone: 'Es wird keine Referenz gedruckt.',
+      printNone: 'Keine Referenz drucken',
+      useDefault: 'Standard verwenden',
+    },
+    issuedTotal: {
+      changed: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert: damals {issued}, jetzt {current}.',
+      changedHint: 'Das ausgestellte PDF zeigt weiterhin die ursprünglichen Beträge; Portal und E-Rechnung zeigen die aktuellen.',
+      changedHintQuote: 'Das ausgestellte PDF zeigt weiterhin die ursprünglichen Beträge; das Portal zeigt die aktuellen.',
+      stornoHint: 'Eine falsche Rechnung wird mit einer Stornorechnung korrigiert.',
+      einvoice: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert (damals {issued}, jetzt {current}). Die E-Rechnung entsteht aus den aktuellen Daten, das ausgestellte PDF zeigt die ursprünglichen Beträge.',
+    },
+    gmail: {
+      attachEInvoice: 'E-Rechnung anhängen ({format})',
+      attachEInvoiceHint: 'Dieser Kunde bevorzugt E-Rechnungen. Das XML entsteht aus den aktuellen Belegdaten.',
+      einvoiceFailed: 'Nicht gesendet: Die E-Rechnung konnte nicht erstellt werden. {reason}',
+      sendWithout: 'Ohne Häkchen wird die E-Mail ohne E-Rechnung gesendet.',
     },
   },
   reminders: {
@@ -1626,9 +1651,6 @@ export const de = {
       closing: 'Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, betrachten Sie es bitte als gegenstandslos.',
       closingFinal: 'Geht bis dahin keine Zahlung ein, folgen ohne weitere Ankündigung weitere Schritte zur Einbringung der Forderung; die dadurch entstehenden Kosten gehen zu Ihren Lasten.',
       regards: 'Mit freundlichen Grüßen',
-      contact: 'Kontakt',
-      payment: 'Zahlungsinformationen',
-      uid: 'UID-Nr.',
     },
   },
   payments: {
