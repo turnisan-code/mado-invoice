@@ -7,7 +7,8 @@ export type SummaryPayment = { amount: number; kind?: string | null; note?: stri
 // What an invoice, its portal page and a Mahnung list between the total and the balance due.
 // Only money received is "paid"; every applied credit note is its own row (a credit row carries
 // the credit note's number in note, see applyCreditNote), Skonto and write-offs are named. The
-// rows add up to totals.total_paid.
+// rows add up to totals.total_paid, so dunning fees and interest paid on top (kind 'fee') are
+// left out like they are there.
 export function summarizePayments(payments: readonly SummaryPayment[]): PaymentSummaryLine[] {
   const credits: PaymentSummaryLine[] = []
   let paid = 0
@@ -17,6 +18,7 @@ export function summarizePayments(payments: readonly SummaryPayment[]): PaymentS
     if (p.kind === 'credit') credits.push({ kind: 'credit', amount: roundCents(p.amount), creditNoteNumber: p.note?.trim() || null })
     else if (p.kind === 'skonto') skonto += p.amount
     else if (p.kind === 'writeoff') writeoff += p.amount
+    else if (p.kind === 'fee') continue
     else paid += p.amount
   }
   credits.sort((a, b) => (a.creditNoteNumber ?? '').localeCompare(b.creditNoteNumber ?? ''))

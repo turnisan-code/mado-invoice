@@ -24,7 +24,7 @@ function num(value: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-function id(value: unknown): string | null {
+function idText(value: unknown): string | null {
   return str(value) ?? (num(value) != null ? String(value) : null)
 }
 
@@ -116,7 +116,7 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       }
     }
     case 'bookamat_synced': {
-      const booking = id(d.booking_id)
+      const booking = idText(d.booking_id)
       const year = num(d.year)
       const amount = num(d.amount)
       const parts = [

@@ -171,9 +171,6 @@ interface Props {
   qrCodeDataUri?: string | null
 }
 
-// Footers offer {{vat}}, which the email variable registry does not know.
-const VAT_TOKEN = /\{\{\s*vat\s*\}\}/g
-
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
   // The builder renders with pdf().toBlob(), which loads the fonts after this runs; the server
   // awaits preparePdfFonts() in render.ts. A font that fails to load fails the render itself.
@@ -215,14 +212,14 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
     : doc.type === 'credit_note'
     ? (lang === 'de' ? settings.credit_note_footer_de : settings.credit_note_footer_en)
     : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
-  // The same variables (and formatting) as the document's email.
+  // The same variables (and formatting) as the document's email, plus {{vat}}.
   const footerText = rawFooter
-    ? fillTemplate(rawFooter.replace(VAT_TOKEN, templateMoney(doc.totals.total_vat, lang, doc.currency)), documentVariables({
+    ? fillTemplate(rawFooter, documentVariables({
         doc: { ...doc, number, language: lang },
         client,
         issuer: settings,
         totals: doc.totals,
-      }))
+      }), { vat: templateMoney(doc.totals.total_vat, lang, doc.currency) })
     : null
   const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
   const paymentLines = doc.payments
