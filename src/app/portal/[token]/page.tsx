@@ -60,14 +60,14 @@ function PaymentRow({ label, value, mono, copy }: {
   label: string
   value: string
   mono?: boolean
-  copy?: { value: string; label: string; copied: string }
+  copy?: { value: string; label: string; copied: string; failed: string }
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3">
       <dt className="text-xs text-blue-700 sm:w-36 shrink-0">{label}</dt>
       <dd className="flex items-center gap-2 min-w-0">
         <span className={`break-all ${mono ? 'font-mono' : 'font-medium'}`}>{value}</span>
-        {copy && <CopyButton value={copy.value} label={copy.label} copiedLabel={copy.copied} />}
+        {copy && <CopyButton value={copy.value} label={copy.label} copiedLabel={copy.copied} failedLabel={copy.failed} />}
       </dd>
     </div>
   )
@@ -132,7 +132,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
     ? await generateEpcQr({ iban: settings.iban, bic: settings.bic ?? '', name: beneficiary, amountEur: totals.balance_due, reference: doc.number ?? '' })
     : null
   const amountToCopy = new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false }).format(totals.balance_due)
-  const copyOf = (field: string, value: string) => ({ value, label: t('pdfPortal.payment.copy', { field }), copied: t('pdfPortal.payment.copied', { field }) })
+  const copyOf = (field: string, value: string) => ({ value, label: t('pdfPortal.payment.copy', { field }), copied: t('pdfPortal.payment.copied', { field }), failed: t('print.copyFailed') })
 
   return (
     <main lang={lang} className="max-w-3xl mx-auto px-4 py-8 sm:py-12">

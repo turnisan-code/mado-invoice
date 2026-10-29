@@ -6,7 +6,9 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { addDays, today } from '@/lib/utils/document'
 import { FLUSH_EDITS_EVENT, type FlushEditsDetail } from '@/lib/issued-pdf'
+import { dbErrorMessage } from '@/lib/api-errors'
 import { useT } from '@/lib/i18n/client'
+import type { TFn } from '@/lib/i18n'
 import type { Client, DocumentType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import {
@@ -40,8 +42,20 @@ function removeBackup(key: string) {
   try { window.localStorage.removeItem(key) } catch { /* storage blocked */ }
 }
 
-export function errorMessage(e: unknown, fallback: string) {
-  return e instanceof Error ? e.message : fallback
+// persist() words its own failures: a database error by its code (the deposit guards MI019–MI021
+// included) or as no connection when offline, never by its text. Anything else thrown on the way
+// is a bug: logged and worded generically.
+class SaveError extends Error {}
+
+function dbSaveError(error: { code?: string; message: string; details?: string | null }, t: TFn): SaveError {
+  console.error('[editor] save failed:', error.code, error.message)
+  return new SaveError(dbErrorMessage(t, error))
+}
+
+export function errorMessage(e: unknown, t: TFn): string {
+  if (e instanceof SaveError) return e.message
+  console.error('[editor] save failed:', e)
+  return t('messages.generic')
 }
 
 export type PersistMode = 'auto' | 'save' | 'issue'
@@ -161,21 +175,21 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
         const update: Partial<typeof fields> = { ...fields }
         if (keepStoredDate) delete update.date
         const { error } = await supabase.from('documents').update(update).eq('id', id)
-        if (error) throw new Error(error.message)
+        if (error) throw dbSaveError(error, t)
         if (!keepStoredDate) storedDateRef.current = fields.date
       } else {
-        if (misplacedRef.current) throw new Error(t('common.unknownError'))
-        if (!fields.client_id) throw new Error(t('builder.selectClient'))
+        if (misplacedRef.current) throw new SaveError(t('common.unknownError'))
+        if (!fields.client_id) throw new SaveError(t('builder.selectClient'))
         const { data, error } = await supabase.from('documents')
           .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
           .select('id').single()
-        if (error) throw new Error(error.message)
+        if (error) throw dbSaveError(error, t)
         id = data.id as string
         storedDateRef.current = fields.date
         adoptId(id)
       }
       const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
-      if (itemsErr) throw new Error(t('builder.itemsError', { error: itemsErr.message }))
+      if (itemsErr) throw dbSaveError(itemsErr, t)
 
       // A cleared date counts as saved: the stored one stays until a new date is entered.
       savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, items])
@@ -212,7 +226,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       await persist(latest)
     })
       .catch(e => {
-        const msg = errorMessage(e, t('common.unknownError'))
+        const msg = errorMessage(e, t)
         if (!saveErrorRef.current) toast.error(t('builder.notSavedToast', { error: msg }))
         saveErrorRef.current = msg
         setSaveError(msg)
@@ -230,7 +244,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       if (!doc) router.replace(`/${PATHS[type]}/${id}`)
       else router.refresh()
     } catch (e) {
-      toast.error(errorMessage(e, t('common.unknownError')))
+      toast.error(errorMessage(e, t))
     } finally {
       setSaving(false)
     }
