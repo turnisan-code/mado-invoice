@@ -89,6 +89,12 @@ begin
       message = 'A final invoice that deducts other invoices stays a final invoice; remove the deductions first.';
   end if;
 
+  if new.client_id <> old.client_id
+     and (new.final_invoice_id is not null or exists (select 1 from documents where final_invoice_id = new.id)) then
+    raise exception using errcode = 'MI021',
+      message = 'A final invoice and the invoices it deducts belong to one client; remove the deductions first.';
+  end if;
+
   if new.status = 'cancelled' and old.status <> 'cancelled' and new.final_invoice_id is not null then
     select * into f from documents where id = new.final_invoice_id;
     if f.number is not null and f.status <> 'cancelled' then
@@ -105,7 +111,7 @@ $$;
 
 drop trigger if exists documents_deposit_guard on documents;
 create trigger documents_deposit_guard
-  before update of status, final_invoice_id, invoice_kind on documents
+  before update of status, final_invoice_id, invoice_kind, client_id on documents
   for each row execute function documents_deposit_guard();
 
 -- A cancelled final invoice (its Storno, or a draft cancelled from the status menu) deducts
