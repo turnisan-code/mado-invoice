@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { formatDate } from '@/lib/utils/document'
 import { dayOfMonth } from '@/lib/utils/recurring'
 import { ScheduleFormFields, validateSchedule, type ScheduleFormValues } from '@/components/recurring/MakeRecurringDialog'
+import { StatusBadge } from '@/components/lists/StatusBadge'
+import { ClickableRow } from '@/components/lists/ListParts'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
 import type { RecurringSchedule } from '@/types'
@@ -22,12 +24,6 @@ export interface ScheduleRow extends RecurringSchedule {
 
 type ScheduleStatus = 'active' | 'paused' | 'ended'
 
-const statusColor: Record<ScheduleStatus, string> = {
-  active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  paused: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
-  ended: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
-}
-
 // The generator switches a schedule off once its next date passes the end date ("ended");
 // any other inactive schedule was paused by hand.
 function scheduleStatus(s: ScheduleRow): ScheduleStatus {
@@ -37,6 +33,7 @@ function scheduleStatus(s: ScheduleRow): ScheduleStatus {
 
 const actionClass = 'h-11 w-11 sm:h-8 sm:w-8 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:pointer-events-none'
 const linkClass = 'hover:underline underline-offset-2'
+const rowClass = 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
 
 export default function RecurringList({ schedules }: { schedules: ScheduleRow[] }) {
   const router = useRouter()
@@ -184,7 +181,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                     <p className="font-medium text-sm truncate">{s.name}</p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{s.source?.client ?? '—'}</p>
                   </div>
-                  <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[status]}`}>{statusLabel(status)}</span>
+                  <StatusBadge status={status} label={statusLabel(status)} className="shrink-0" />
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
                   {intervalLabel(s)} · {t('recurring.next')} {formatDate(s.next_date, lang)}
@@ -225,8 +222,8 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
             )}
             {schedules.map(s => {
               const status = scheduleStatus(s)
-              return (
-                <tr key={s.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              const cells = (
+                <>
                   <td className="px-4 py-3">
                     <p className="font-medium">{s.name}</p>
                     {s.source && (
@@ -241,14 +238,18 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{s.end_date ? formatDate(s.end_date, lang) : '—'}</td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{modeLabel(s)}</td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[status]}`}>{statusLabel(status)}</span>
+                    <StatusBadge status={status} label={statusLabel(status)} />
                   </td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                     {s.last ? <Link href={`/invoices/${s.last.id}`} className={`font-medium ${linkClass}`}>{docLabel(s.last)}</Link> : <span className="text-neutral-400 dark:text-neutral-500">{t('recurring.noLastInvoice')}</span>}
                   </td>
                   <td className="px-2 py-2 text-right">{renderActions(s)}</td>
-                </tr>
+                </>
               )
+              // The row opens the template invoice; its link in the name cell stays the keyboard target.
+              return s.source
+                ? <ClickableRow key={s.id} href={`/invoices/${s.source.id}`} className={rowClass}>{cells}</ClickableRow>
+                : <tr key={s.id} className={`transition-colors ${rowClass}`}>{cells}</tr>
             })}
           </tbody>
         </table>

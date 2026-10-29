@@ -3,27 +3,13 @@ import { notFound } from 'next/navigation'
 import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
-import { calcTotals, formatDate, formatMoney, roundCents } from '@/lib/utils/document'
+import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
 import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
-
-const statusColor: Record<string, string> = {
-  active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  inactive: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800',
-  lead: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
-}
-
-const docStatusColor: Record<string, string> = {
-  draft: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
-  sent: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
-  paid: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  overdue: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
-  accepted: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
-  rejected: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
-  cancelled: 'text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
-}
+import { StatusBadge } from '@/components/lists/StatusBadge'
+import { displayStatus, statusLabelKey } from '@/lib/status'
 
 const typeRoute: Record<string, string> = {
   invoice: 'invoices',
@@ -36,6 +22,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const supabase = await createClient()
   const { t, lang } = await getT()
   const statusLabel = (status: string) => t(`status.${status}` as DictKey)
+  const now = today()
 
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
   if (!client) notFound()
@@ -44,7 +31,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }] = await Promise.all([
     supabase
       .from('documents')
-      .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
+      .select('id, type, number, date, due_date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
       .eq('client_id', id)
       .order('date', { ascending: false })
       .limit(50),
@@ -94,9 +81,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <h1 className="text-xl font-semibold leading-tight break-words">{displayName}</h1>
             {subtitle && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{subtitle}</p>}
           </div>
-          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ml-auto shrink-0 ${statusColor[client.status] ?? 'text-neutral-500 bg-neutral-100'}`}>
-            {statusLabel(client.status)}
-          </span>
+          <StatusBadge status={client.status} label={statusLabel(client.status)} className="ml-auto shrink-0" />
         </div>
       </div>
 
@@ -149,6 +134,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             )}
             {allDocs.map(doc => {
               const totals = docTotals(doc)
+              // As in the lists: partly paid / written off from the payments, expired from the date.
+              const shown = displayStatus({ type: doc.type, status: doc.status, due_date: doc.due_date, total: totals.total, payments: doc.payments ?? [] }, now)
               return (
                 <Link
                   key={doc.id}
@@ -162,9 +149,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
                   </div>
                   <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${docStatusColor[doc.status] ?? ''}`}>
-                    {statusLabel(doc.status)}
-                  </span>
+                  <StatusBadge status={shown} label={t(statusLabelKey(shown))} className="shrink-0" />
                 </Link>
               )
             })}

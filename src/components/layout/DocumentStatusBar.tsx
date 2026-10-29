@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { StatusBadge } from '@/components/lists/StatusBadge'
+import { StatusBadge, STATUS_TEXT } from '@/components/lists/StatusBadge'
 import { inputClass } from '@/components/lists/ListParts'
 import { toastApiError } from '@/lib/google/toast'
 import { logEvent } from '@/lib/events'
@@ -23,14 +23,6 @@ import { applyIssueDateInEditor } from '@/components/forms/builder/events'
 import { expectedNumber, termDays, type NumberingSettings } from '@/components/forms/builder/model'
 
 const DESTRUCTIVE = new Set(['cancelled', 'rejected'])
-
-const itemColor: Record<string, string> = {
-  paid:      'text-green-700 dark:text-green-400',
-  overdue:   'text-red-600 dark:text-red-400',
-  accepted:  'text-green-700 dark:text-green-400',
-  rejected:  'text-red-600 dark:text-red-400',
-  cancelled: 'text-neutral-500 dark:text-neutral-400',
-}
 
 type CalcItems = Parameters<typeof calcTotals>[0]
 
@@ -366,7 +358,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
               onClick={() => changeStatus(s)}
               className={`w-full text-left px-3 py-2 sm:py-1.5 text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800 flex items-center justify-between gap-2
                 ${s === status ? 'font-medium' : ''}
-                ${itemColor[s] ?? 'text-neutral-700 dark:text-neutral-300'}`}
+                ${STATUS_TEXT[s] ?? 'text-neutral-700 dark:text-neutral-300'}`}
             >
               {statusLabel(s)}
               {s === status && <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />}
