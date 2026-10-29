@@ -37,6 +37,7 @@ const ZM_COLUMNS = 'id, type, number, status, date, service_date, service_date_e
 
 // Documents are dated up to two years before (billed in advance) or after (billed late) the
 // service they report; the window keeps the query bounded, buildZmRows picks the period exactly.
+// `error` is the database's English text, for logs only.
 export async function fetchZmRows(supabase: SupabaseClient, start: string, end: string): Promise<{ rows: ZmRow[]; error: string | null }> {
   const { data, error } = await supabase
     .from('documents')
@@ -46,7 +47,10 @@ export async function fetchZmRows(supabase: SupabaseClient, start: string, end: 
     .not('number', 'is', null)
     .gte('date', addDays(start, -731))
     .lte('date', addDays(end, 731))
-  if (error) return { rows: [], error: error.message }
+  if (error) {
+    console.error('[zm] documents not loaded:', error.code, error.message)
+    return { rows: [], error: error.message }
+  }
   return { rows: buildZmRows((data ?? []) as unknown as ZmDoc[], start, end), error: null }
 }
 

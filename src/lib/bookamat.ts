@@ -7,6 +7,7 @@ import { creditNoteSettled } from '@/lib/status'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import { logEvent } from '@/lib/events'
 import { isUiLang, makeT, type TFn } from '@/lib/i18n'
+import { archiveErrorMessage } from '@/lib/issued-pdf'
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, hasMoneyToBook, planBookings, unbookedPlan,
   type AdoptBooking, type BookamatErrorCode, type BookingRow, type ErrorDetail, type MoneyRow, type PlannedBooking,
@@ -625,7 +626,8 @@ export async function attachPdf(
   try {
     pdf = await loadPdf(documentId)
   } catch (err) {
-    return { attached: 0, attachedIds: [], error: t('books.sync.pdfLoadFailed', { error: err instanceof Error ? err.message : String(err) }) }
+    console.error(`[bookamat] PDF of ${documentId} not loaded:`, err)
+    return { attached: 0, attachedIds: [], error: archiveErrorMessage(t, err, t('books.sync.pdfLoadFailed')) }
   }
   const creds = credentialsOf(settings)
   const name = pdf.filename.replace(/["\\/\r\n]/g, '_').slice(0, 50)

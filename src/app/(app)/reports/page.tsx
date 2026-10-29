@@ -276,7 +276,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           )}
         </div>
         {zm.error ? (
-          <p role="alert" className="px-5 py-4 text-sm text-red-600 dark:text-red-400">{t('exports.zm.loadFailed', { error: zm.error })}</p>
+          <p role="alert" className="px-5 py-4 text-sm text-red-600 dark:text-red-400">{t('exports.zm.loadFailed')}</p>
         ) : zm.rows.length === 0 ? (
           <p className="px-5 py-6 text-sm text-neutral-500 dark:text-neutral-400 text-center">{t('exports.zm.none')}</p>
         ) : (

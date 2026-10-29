@@ -17,13 +17,14 @@ export default async function InvoicesPage() {
     supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id').maybeSingle(),
     getT(),
   ])
+  if (docsError) console.error('[invoices] list not loaded:', docsError.code, docsError.message)
 
   return (
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-4">
-      {/* An empty list would hide the failure, e.g. a deploy ahead of its migration. */}
+      {/* An empty list would hide the failure, e.g. a deploy ahead of its migration (the cause is in the server log). */}
       {docsError && (
         <p role="alert" className="px-4 py-3 rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-sm text-red-700 dark:text-red-300 break-words">
-          {t('books.invoicesLoadFailed', { error: docsError.message })}
+          {t('books.invoicesLoadFailed')}
         </p>
       )}
       <Suspense>
