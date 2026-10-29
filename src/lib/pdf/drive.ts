@@ -23,8 +23,10 @@ function rethrowGoogleAccess(err: unknown) {
 
 // Archives the issued PDF to the configured Drive folder as a new file named after the number.
 // An archived file is never overwritten or renamed: the document's own file (by stored id or
-// by the documentId tag set on upload) is returned as it is, and when a file with the same name
-// already sits in the folder nothing is uploaded: that file is linked as the document's copy.
+// by the documentId tag set on upload) is returned as it is. A file with the same name in the
+// folder is adopted only when nothing marks it as another document's (no documentId tag, e.g.
+// one uploaded before files were tagged); it is tagged then, so it is found by the tag from now
+// on. Otherwise a new file is uploaded next to it.
 export async function archiveToDrive(
   supabase: SupabaseClient,
   settings: Settings,
@@ -59,15 +61,36 @@ export async function archiveToDrive(
 
   const { data: named } = await drive.files.list({
     q: `name='${escapeQuery(pdf.filename)}' and '${escapeQuery(folderId)}' in parents and trashed=false`,
-    fields: 'files(id,webViewLink)',
-    pageSize: 1,
+    fields: 'files(id,webViewLink,appProperties)',
+    pageSize: 10,
     supportsAllDrives: true,
     includeItemsFromAllDrives: true,
   })
-  const sameName = named.files?.[0]
+  const sameName = named.files?.find(f => !!f.id && (f.appProperties?.documentId ?? doc.id) === doc.id)
   if (sameName?.id) {
-    if (sameName.id !== doc.drive_file_id) await linkDriveFile(supabase, doc.id, sameName.id)
-    return { fileId: sameName.id, webViewLink: sameName.webViewLink ?? null, existing: true }
+    let tagged = !!sameName.appProperties?.documentId
+    if (!tagged) {
+      try {
+        await drive.files.update({
+          fileId: sameName.id,
+          requestBody: { appProperties: { documentId: doc.id } },
+          fields: 'id',
+          supportsAllDrives: true,
+        })
+        tagged = true
+      } catch (err) {
+        // A file this account may not change (shared read-only) is not adopted.
+        rethrowGoogleAccess(err)
+        console.warn('[drive] same-named file not adopted, it could not be tagged:', err)
+      }
+    }
+    if (tagged) {
+      if (sameName.id !== doc.drive_file_id) await linkDriveFile(supabase, doc.id, sameName.id)
+      if (!sameName.appProperties?.documentId) {
+        await logEvent(supabase, doc.id, 'drive_archived', { file_id: sameName.id, link: sameName.webViewLink ?? null, name: pdf.filename, adopted: true })
+      }
+      return { fileId: sameName.id, webViewLink: sameName.webViewLink ?? null, existing: true }
+    }
   }
 
   const body = new PassThrough()
