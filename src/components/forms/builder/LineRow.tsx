@@ -3,6 +3,8 @@
 import { useId, useState } from 'react'
 import { Calendar, ChevronDown, ChevronUp, GripVertical, Percent, Trash2 } from 'lucide-react'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
+import { CONTROL_MIN_HEIGHT, controlClass } from '@/components/ui/control'
 import { formatDate, formatMoney, lineSummary, sectionSummary } from '@/lib/utils/document'
 import { catalogueLineText, cataloguePrice, hasClientRate, type RateMap } from '@/lib/utils/catalogue'
 import { formatLocaleNumber } from '@/lib/utils/number'
@@ -17,10 +19,11 @@ import { UNITS, VAT_RATES, clampDiscount, type DiscountKind, type LineItem } fro
 import type { useReorder } from './useReorder'
 
 export const INVALID_CLS = 'border-red-400 dark:border-red-500'
-const LINE_SELECT_CLS = 'h-9 sm:h-8 min-w-0 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
-const DESCRIPTION_CLS = 'w-full min-h-9 sm:min-h-8 rounded-lg border border-input bg-transparent px-2.5 py-1.5 sm:py-1 text-base md:text-sm leading-snug outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-input/30'
+const DESCRIPTION_CLS = `${controlClass} ${CONTROL_MIN_HEIGHT} py-2 sm:py-1 leading-snug`
+// The unit and VAT columns are narrow: less padding, the chevron closer to the edge.
+const NARROW_SELECT = { className: 'pl-1.5 pr-5', style: { backgroundPosition: 'right 0.25rem center' } }
 const iconBtn = 'flex items-center justify-center rounded-md transition-colors shrink-0'
-const mutedBtn = 'text-neutral-400 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'
+const mutedBtn = 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-600 dark:hover:text-neutral-300'
 
 // The desktop grid: handle, description, quantity, unit, price, [VAT], discount, date, delete.
 export function itemColumns(vatApplies: boolean) {
@@ -82,7 +85,7 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
   )
   const deleteBtn = (className = '') => (
     <button type="button" onClick={remove} aria-label={t('builder.removeLine')}
-      className={`h-11 w-11 sm:h-9 sm:w-8 ${iconBtn} text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 ${className}`}>
+      className={`h-11 w-11 sm:h-9 sm:w-8 ${iconBtn} text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 ${className}`}>
       <Trash2 size={14} />
     </button>
   )
@@ -225,10 +228,10 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
           <div className="flex gap-1.5 sm:contents">
             <MoneyInput id={`${uid}-qty`} value={line.quantity} decimals={4} aria-invalid={issues.quantity || undefined}
               onValueChange={n => update({ quantity: n ?? 0 })} className="w-16 shrink-0 sm:w-full" />
-            <select value={line.unit} onChange={e => update({ unit: e.target.value as Unit })} aria-label={t('builder.unit')}
-              className={`${LINE_SELECT_CLS} flex-1`}>
+            <Select value={line.unit} onChange={e => update({ unit: e.target.value as Unit })} aria-label={t('builder.unit')}
+              {...NARROW_SELECT} className={`${NARROW_SELECT.className} flex-1`}>
               {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
-            </select>
+            </Select>
           </div>
         </div>
         <div className="space-y-1 sm:space-y-0 sm:contents">
@@ -241,10 +244,10 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
         {vatApplies ? (
           <div className="space-y-1 sm:space-y-0 flex-1 min-w-0 sm:contents">
             <label htmlFor={`${uid}-vat`} className="block text-xs text-neutral-500 dark:text-neutral-400 sm:sr-only">{t('builder.vatRate')}</label>
-            <select id={`${uid}-vat`} value={line.vat_rate} onChange={e => update({ vat_rate: parseInt(e.target.value) as VatRate })}
-              className={`${LINE_SELECT_CLS} w-full`}>
+            <Select id={`${uid}-vat`} value={line.vat_rate} onChange={e => update({ vat_rate: parseInt(e.target.value) as VatRate })}
+              {...NARROW_SELECT}>
               {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-            </select>
+            </Select>
           </div>
         ) : <div className="flex-1 sm:hidden" />}
         <button type="button" onClick={open('discount', 170)} title={t('editor.lineDiscount')} aria-label={discountLabel ? t('editor.lineDiscountNote', { discount: discountLabel }) : t('editor.lineDiscount')}

@@ -58,7 +58,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
             {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('documents.issued', { date: formatDate(doc.issued_at, lang) })}</p>}
             {schedule && (
               <Link href="/recurring" className="inline-flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">

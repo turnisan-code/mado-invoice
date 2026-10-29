@@ -110,7 +110,7 @@ export default function InvoiceUnbilledDialog({ project, clientName, entries, ex
             <label key={e.id} className={rowClass}>
               <input type="checkbox" checked={timeIds.has(e.id)} onChange={() => setTimeIds(s => toggle(s, e.id))} disabled={creating} className={`${checkboxClass} mt-0.5 shrink-0`} />
               <span className="flex-1 min-w-0">
-                <span className="block text-sm truncate">{e.description || <span className="text-neutral-400 dark:text-neutral-500">{t('projects.entries.noDescription')}</span>}</span>
+                <span className="block text-sm truncate">{e.description || <span className="text-neutral-500 dark:text-neutral-500">{t('projects.entries.noDescription')}</span>}</span>
                 <span className="block text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">{formatDate(e.date, lang)} · {formatDuration(e.minutes)} h × {formatMoney(entryRate(e, project))}</span>
               </span>
               <span className="text-sm tabular-nums shrink-0">{formatMoney(entryAmount(e, project))}</span>

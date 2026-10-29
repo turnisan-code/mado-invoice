@@ -14,6 +14,10 @@ import { toastApiError } from '@/lib/google/toast'
 import { googleErrorText } from '@/lib/google/reauth'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { controlClass, fieldClass } from '@/components/ui/control'
+import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import { formatDate, getTaxNote, viennaDate } from '@/lib/utils/document'
@@ -23,7 +27,8 @@ import type { EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 interface Props { settings: PublicSettings | null }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
-const inp = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
+const inp = fieldClass
+const area = `${controlClass} py-2`
 const lbl = 'text-xs font-medium text-neutral-500 dark:text-neutral-400'
 const err = 'text-xs text-red-600 dark:text-red-400'
 
@@ -115,14 +120,14 @@ function SectionCard({
       </div>
       {dirty && (
         <div className="px-6 py-3 border-t border-neutral-100 dark:border-neutral-800 flex justify-end bg-neutral-50 dark:bg-neutral-800/50">
-          <button
+          <Button
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="h-8 px-4 text-xs font-medium rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50"
+            className="px-4"
           >
             {saving ? t('common.saving') : t('common.saveChanges')}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -1022,11 +1027,11 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
               ) : (
                 <div className="h-16 w-16 rounded-xl border-2 border-dashed border-neutral-200 dark:border-neutral-700 flex items-center justify-center shrink-0">
-                  <span className="text-[10px] text-neutral-400 dark:text-neutral-500 text-center leading-tight px-1">{t('settings.company.noLogo')}</span>
+                  <span className="text-[10px] text-neutral-500 dark:text-neutral-500 text-center leading-tight px-1">{t('settings.company.noLogo')}</span>
                 </div>
               )}
               <div className="space-y-1.5">
-                <label className="cursor-pointer inline-flex items-center text-xs font-medium px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 focus-within:ring-2 focus-within:ring-ring/60 transition-colors text-neutral-700 dark:text-neutral-300">
+                <label className={cn(buttonVariants({ variant: 'outline' }), 'cursor-pointer text-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50')}>
                   {uploadingLogo ? t('settings.company.uploading') : logoUrl ? t('settings.company.replaceLogo') : t('settings.company.uploadLogo')}
                   <input type="file" accept="image/png,image/jpeg" className="sr-only" onChange={handleLogoUpload} disabled={uploadingLogo} aria-label={logoUrl ? t('settings.company.replaceLogo') : t('settings.company.uploadLogo')} />
                 </label>
@@ -1035,7 +1040,7 @@ export default function SettingsForm({ settings }: Props) {
             </div>
 
             {/* Company & owner name */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-biz-company_name`}>{t('settings.company.companyName')}</label>
                 <input id={`${uid}-biz-company_name`}
@@ -1067,7 +1072,7 @@ export default function SettingsForm({ settings }: Props) {
             saving={saving === 'contact'}
             onSave={saveContact}
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-email`}>{t('settings.address.email')}</label>
                 <input id={`${uid}-contact-email`} type="email" inputMode="email" className={inp} value={contact.email} aria-invalid={!!contactErrors.email || undefined}
@@ -1100,21 +1105,21 @@ export default function SettingsForm({ settings }: Props) {
                 onChange={e => { setContact(c => ({ ...c, address_line2: e.target.value })); markDirty('contact') }}
                 placeholder="Top 5" />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-zip`}>{t('settings.address.zip')}</label>
                 <input id={`${uid}-contact-zip`} className={inp} value={contact.zip}
                   onChange={e => { setContact(c => ({ ...c, zip: e.target.value })); markDirty('contact') }}
                   placeholder="1010" />
               </div>
-              <div className="space-y-1.5 col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <label className={lbl} htmlFor={`${uid}-contact-city`}>{t('settings.address.city')}</label>
                 <input id={`${uid}-contact-city`} className={inp} value={contact.city}
                   onChange={e => { setContact(c => ({ ...c, city: e.target.value })); markDirty('contact') }}
                   placeholder={t('settings.address.cityPlaceholder')} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-contact-country`}>{t('settings.address.country')}</label>
                 <input id={`${uid}-contact-country`} className={inp} value={contact.country}
@@ -1156,7 +1161,7 @@ export default function SettingsForm({ settings }: Props) {
                 placeholder="AT12 3456 7890 1234 5678" />
               {bankingErrors.iban && <p className={err}>{bankingErrors.iban}</p>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-banking-bic`}>{t('settings.banking.bic')}</label>
                 <input id={`${uid}-banking-bic`} className={inp} value={banking.bic} aria-invalid={!!bankingErrors.bic || undefined}
@@ -1266,7 +1271,7 @@ export default function SettingsForm({ settings }: Props) {
             saving={saving === 'defaults'}
             onSave={saveDefaults}
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_payment_days`}>{t('settings.defaults.paymentDays')}</label>
                 <input id={`${uid}-defaults-default_payment_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={defaults.default_payment_days} aria-invalid={!!defaultsErrors.default_payment_days || undefined}
@@ -1284,66 +1289,61 @@ export default function SettingsForm({ settings }: Props) {
                   : <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.quoteValidityHint')}</p>}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_language`}>{t('settings.defaults.language')}</label>
-                <select id={`${uid}-defaults-default_language`}
+                <Select id={`${uid}-defaults-default_language`}
                   value={defaults.default_language}
                   onChange={e => { setDefaults(d => ({ ...d, default_language: e.target.value as 'de' | 'en' })); markDirty('defaults') }}
-                  className={inp}
                 >
                   <option value="de">{t('common.german')}</option>
                   <option value="en">{t('common.english')}</option>
-                </select>
+                </Select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.languageHint')}</p>
               </div>
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-ui_language`}>{t('settings.defaults.uiLanguage')}</label>
-                <select id={`${uid}-defaults-ui_language`}
+                <Select id={`${uid}-defaults-ui_language`}
                   value={defaults.ui_language}
                   onChange={e => { setDefaults(d => ({ ...d, ui_language: e.target.value as UiLang })); markDirty('defaults') }}
-                  className={inp}
                 >
                   <option value="de">{t('common.german')}</option>
                   <option value="en">{t('common.english')}</option>
-                </select>
+                </Select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.uiLanguageHint')}</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_tax_treatment`}>{t('settings.defaults.taxTreatment')}</label>
-                <select id={`${uid}-defaults-default_tax_treatment`}
+                <Select id={`${uid}-defaults-default_tax_treatment`}
                   value={defaults.default_tax_treatment}
                   onChange={e => { setDefaults(d => ({ ...d, default_tax_treatment: e.target.value as TaxTreatment })); markDirty('defaults') }}
-                  className={inp}
                 >
                   {TAX_TREATMENTS.map(v => <option key={v} value={v}>{t(`taxTreatments.${v}`)}</option>)}
-                </select>
+                </Select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.taxHint')}</p>
               </div>
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_vat_rate`}>{t('settings.defaults.vatRate')}</label>
-                <select id={`${uid}-defaults-default_vat_rate`}
+                <Select id={`${uid}-defaults-default_vat_rate`}
                   value={defaults.default_vat_rate}
                   onChange={e => { setDefaults(d => ({ ...d, default_vat_rate: e.target.value })); markDirty('defaults') }}
-                  className={inp}
                 >
                   {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                </select>
+                </Select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.vatHint')}</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-defaults-default_unit`}>{t('settings.defaults.unit')}</label>
-                <select id={`${uid}-defaults-default_unit`}
+                <Select id={`${uid}-defaults-default_unit`}
                   value={defaults.default_unit}
                   onChange={e => { setDefaults(d => ({ ...d, default_unit: e.target.value as Unit })); markDirty('defaults') }}
-                  className={inp}
                 >
                   {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
-                </select>
+                </Select>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.defaults.unitHint')}</p>
               </div>
             </div>
@@ -1358,7 +1358,7 @@ export default function SettingsForm({ settings }: Props) {
             saving={saving === 'terms'}
             onSave={saveTerms}
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-terms-default_skonto_percent`}>{t('settings.terms.skontoPercent')}</label>
                 <MoneyInput id={`${uid}-terms-default_skonto_percent`} className={inp} value={terms.default_skonto_percent === '' ? null : Number(terms.default_skonto_percent)} placeholder={t('settings.terms.none')}
@@ -1392,7 +1392,7 @@ export default function SettingsForm({ settings }: Props) {
             {reminders.reminders_enabled && !google.connected && (
               <p className="text-xs text-amber-700 dark:text-amber-400">{t('dunning.settings.noGmail')}</p>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1.5">
                 <label className={lbl} htmlFor={`${uid}-reminders-reminder_grace_days`}>{t('settings.reminders.grace')}</label>
                 <input id={`${uid}-reminders-reminder_grace_days`} type="text" inputMode="numeric" pattern="[0-9]*" className={inp} value={reminders.reminder_grace_days}
@@ -1472,7 +1472,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1482,7 +1482,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
               </div>
@@ -1495,7 +1495,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setQuoteFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1505,7 +1505,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setQuoteFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setQuoteFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
               </div>
@@ -1518,7 +1518,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setCreditNoteFooterDe(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setCreditNoteFooterDe(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1528,7 +1528,7 @@ export default function SettingsForm({ settings }: Props) {
                     onChange={e => { setCreditNoteFooterEn(e.target.value); markDirty('footer') }}
                     onFocus={e => onFieldFocus(e.currentTarget, v => { setCreditNoteFooterEn(v); markDirty('footer') })}
                     rows={4}
-                    className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-none"
+                    className={`${area} resize-none`}
                   />
                 </div>
               </div>
@@ -1548,7 +1548,7 @@ export default function SettingsForm({ settings }: Props) {
             <div className="space-y-4">
               <div>
                 <p className={`${lbl} mb-2`}>{t('settings.taxNotes.reverseCharge')}</p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className={lbl} htmlFor={`${uid}-taxNotes-reverse_charge_de`}>{t('common.german')}</label>
                     <input id={`${uid}-taxNotes-reverse_charge_de`}
@@ -1573,7 +1573,7 @@ export default function SettingsForm({ settings }: Props) {
               </div>
               <div>
                 <p className={`${lbl} mb-2`}>{t('settings.taxNotes.nonEu')}</p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className={lbl} htmlFor={`${uid}-taxNotes-non_eu_de`}>{t('common.german')}</label>
                     <input id={`${uid}-taxNotes-non_eu_de`}
@@ -1726,7 +1726,7 @@ export default function SettingsForm({ settings }: Props) {
                 onFocus={e => onFieldFocus(e.currentTarget, v => setTplField(activeDocTab, bodyKey, v))}
                 rows={activeDocTab === 'reminder' ? 14 : 10}
                 placeholder={builtIn.body}
-                className="w-full rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 resize-y"
+                className={`${area} resize-y`}
               />
               <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('dunning.settings.defaultHint')}</p>
             </div>
@@ -1782,14 +1782,14 @@ export default function SettingsForm({ settings }: Props) {
                     ? t('settings.integrations.google.driveGranted')
                     : <>{t('settings.integrations.google.driveNotConfirmed')}<a href="/api/gmail/auth" className="underline">{t('settings.integrations.google.reconnect')}</a>{t('settings.integrations.google.driveNotConfirmedTail')}</>}
                 </p>
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={() => void testGoogle()}
                   disabled={testing === 'google'}
-                  className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                 >
                   {testing === 'google' ? t('books.google.testing') : t('books.google.test')}
-                </button>
+                </Button>
                 {googleError && (
                   <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
                     {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleErrorText(t, googleError.message) })}
@@ -1813,7 +1813,7 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
                 <a
                   href="/api/gmail/auth"
-                  className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
+                  className={cn(buttonVariants({ variant: 'outline' }), 'gap-2')}
                 >
                   <Mail size={14} /> {t('settings.integrations.google.reconnectGoogle')}
                 </a>
@@ -1826,7 +1826,7 @@ export default function SettingsForm({ settings }: Props) {
             ) : (
               <a
                 href="/api/gmail/auth"
-                className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-700 dark:text-neutral-300"
+                className={cn(buttonVariants({ variant: 'outline' }), 'gap-2')}
               >
                 <Mail size={14} /> {t('settings.integrations.google.connectGoogle')}
               </a>
@@ -1867,14 +1867,14 @@ export default function SettingsForm({ settings }: Props) {
                     </span>
                   )}
                   {driveDirty && (
-                    <button
+                    <Button
                       type="button"
                       onClick={saveDriveFolder}
+                      variant="outline"
                       disabled={savingDrive}
-                      className="inline-flex items-center gap-2 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                     >
                       <HardDrive size={13} /> {savingDrive ? t('settings.integrations.drive.checking') : driveFolder.trim() ? t('settings.integrations.drive.verifySave') : t('settings.integrations.drive.removeFolder')}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1926,14 +1926,14 @@ export default function SettingsForm({ settings }: Props) {
                   <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('books.settings.accountsYear', { year: bookamatAccountsYear })}</p>
                 )}
                 {bookamatKeySaved && (
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => void testBookamat()}
                     disabled={testing === 'bookamat'}
-                    className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                   >
                     {testing === 'bookamat' ? t('books.settings.testing') : t('books.settings.test')}
-                  </button>
+                  </Button>
                 )}
                 {bookamatError && (
                   <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
@@ -1957,7 +1957,7 @@ export default function SettingsForm({ settings }: Props) {
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <label className={lbl} htmlFor={`${uid}-bookamatUsername`}>{t('settings.integrations.bookamat.username')}</label>
                     <input id={`${uid}-bookamatUsername`}
@@ -1991,49 +1991,46 @@ export default function SettingsForm({ settings }: Props) {
                 </div>
 
                 {!bookamatAccounts ? (
-                  <button
+                  <Button
                     type="button"
                     onClick={loadBookamatAccounts}
+                    variant="outline"
                     disabled={loadingAccounts}
-                    className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                   >
                     {loadingAccounts ? t('common.loading') : <><ChevronRight size={14} /> {t('settings.integrations.bookamat.loadAccounts')}</>}
-                  </button>
+                  </Button>
                 ) : (
                   <div className="space-y-4 pt-1 border-t border-neutral-100 dark:border-neutral-800">
                     <div className="space-y-1.5 pt-1">
                       <label className={lbl} htmlFor={`${uid}-bookamatBankId`}>{t('settings.integrations.bookamat.bankAccount')}</label>
-                      <select id={`${uid}-bookamatBankId`}
+                      <Select id={`${uid}-bookamatBankId`}
                         value={bookamatBankId}
                         onChange={e => setBookamatBankId(Number(e.target.value))}
-                        className={inp}
                       >
                         <option value="">{t('common.selectPlaceholder')}</option>
                         {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <label className={lbl} htmlFor={`${uid}-bookamatCashId`}>{t('settings.integrations.bookamat.cashAccount')}</label>
-                      <select id={`${uid}-bookamatCashId`}
+                      <Select id={`${uid}-bookamatCashId`}
                         value={bookamatCashId}
                         onChange={e => setBookamatCashId(e.target.value ? Number(e.target.value) : '')}
-                        className={inp}
                       >
                         <option value="">{t('common.notUsed')}</option>
                         {bookamatAccounts.bankAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                      </select>
+                      </Select>
                       <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.integrations.bookamat.cashAccountHint')}</p>
                     </div>
                     <div className="space-y-1.5">
                       <label className={lbl} htmlFor={`${uid}-bookamatCostId`}>{t('settings.integrations.bookamat.incomeAccount')}</label>
-                      <select id={`${uid}-bookamatCostId`}
+                      <Select id={`${uid}-bookamatCostId`}
                         value={bookamatCostId}
                         onChange={e => setBookamatCostId(Number(e.target.value))}
-                        className={inp}
                       >
                         <option value="">{t('common.selectPlaceholder')}</option>
                         {bookamatAccounts.costAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <p className={lbl}>{t('settings.integrations.bookamat.vatAccounts')}</p>
@@ -2049,40 +2046,39 @@ export default function SettingsForm({ settings }: Props) {
                         <div key={key} className="flex items-start gap-3">
                           <span className="text-xs text-neutral-500 dark:text-neutral-400 w-7 shrink-0 text-right pt-2">{rate}%</span>
                           <div className="flex-1 min-w-0 space-y-1">
-                            <select
+                            <Select
                               aria-label={hint ? `${t('settings.integrations.bookamat.vatAccountFor', { rate })} – ${hint}` : t('settings.integrations.bookamat.vatAccountFor', { rate })}
                               value={val}
                               onChange={e => setter(e.target.value ? Number(e.target.value) : '')}
-                              className={inp}
                             >
                               <option value="">{t('common.notUsed')}</option>
                               {bookamatAccounts.vatAccounts.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                            </select>
+                            </Select>
                             {hint && <p className="text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <button
+                    <Button
                       type="button"
                       onClick={saveBookamat}
+                      className="w-full"
                       disabled={savingBookamat}
-                      className="w-full h-9 text-sm rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors disabled:opacity-50 font-medium"
                     >
                       {savingBookamat ? t('common.saving') : t('settings.integrations.bookamat.save')}
-                    </button>
+                    </Button>
                   </div>
                 )}
                 {savedBookamat.username && (
                   <div className="flex items-center gap-3 flex-wrap">
-                    <button
+                    <Button
                       type="button"
                       onClick={cancelBookamatEdit}
+                      variant="outline"
                       disabled={savingBookamat}
-                      className="text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
                     >
                       {t('books.settings.cancel')}
-                    </button>
+                    </Button>
                     <button
                       type="button"
                       onClick={() => setConfirmBookamatDisconnect(true)}
@@ -2172,14 +2168,14 @@ function EInvoiceCard({ settings }: { settings: PublicSettings | null }) {
 
   return (
     <SectionCard title={t('einvoice.settings.title')} description={t('einvoice.settings.description')} dirty={dirty} saving={saving} onSave={save}>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <label className={lbl} htmlFor={`${uid}-peppol-scheme`}>{t('einvoice.settings.scheme')}</label>
           <input id={`${uid}-peppol-scheme`} className={inp} value={peppol.scheme} inputMode="numeric" autoComplete="off" placeholder="9914"
             aria-invalid={!!error || undefined} aria-describedby={`${uid}-peppol-hint`}
             onChange={e => change('scheme', e.target.value)} />
         </div>
-        <div className="space-y-1.5 col-span-2">
+        <div className="space-y-1.5 sm:col-span-2">
           <label className={lbl} htmlFor={`${uid}-peppol-id`}>{t('einvoice.settings.id')}</label>
           <input id={`${uid}-peppol-id`} className={inp} value={peppol.id} autoComplete="off" autoCapitalize="none" placeholder={ownUid || 'ATU12345678'}
             aria-invalid={!!error || undefined} aria-describedby={`${uid}-peppol-hint`}

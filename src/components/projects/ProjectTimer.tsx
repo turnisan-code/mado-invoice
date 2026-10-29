@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Play, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/button'
 import { formatDuration, readTimer, timerEntry, timerKey } from '@/lib/projects'
 import { useT } from '@/lib/i18n/client'
 import type { TimeEntry } from '@/types'
@@ -84,24 +85,25 @@ export default function ProjectTimer({ projectId, onStopped }: { projectId: stri
 
   if (startedAt === null) {
     return (
-      <button
+      <Button
         type="button"
+        variant="outline"
         onClick={() => writeTimer(projectId, Date.now())}
         title={t('projects.timer.hint')}
-        className="flex items-center justify-center gap-1.5 text-sm px-3 h-10 sm:h-8 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
       >
         <Play size={14} /> {t('projects.timer.start')}
-      </button>
+      </Button>
     )
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="destructive"
       onClick={() => void stop()}
       disabled={saving}
       aria-label={`${t('projects.timer.stop')} (${elapsedLabel(now - startedAt)})`}
-      className="flex items-center justify-center gap-2 text-sm px-3 h-10 sm:h-8 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-950 transition-colors disabled:opacity-50"
+      className="gap-2"
     >
       <span className="relative flex h-2 w-2" aria-hidden>
         <span className="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-60 motion-safe:animate-ping" />
@@ -110,7 +112,7 @@ export default function ProjectTimer({ projectId, onStopped }: { projectId: stri
       <span className="tabular-nums" aria-hidden>{elapsedLabel(now - startedAt)}</span>
       <Square size={13} aria-hidden />
       <span className="sr-only sm:not-sr-only">{t('projects.timer.stop')}</span>
-    </button>
+    </Button>
   )
 }
 

@@ -47,10 +47,10 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
             <ArrowLeft size={16} />
           </Link>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
             {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('documents.issued', { date: formatDate(doc.issued_at, lang) })}</p>}
           </div>
-          {reference && reference.kind !== 'correction' && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
+          {reference && reference.kind !== 'correction' && <span className="text-xs text-neutral-500 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} display={settlement.settled ? 'settled' : undefined} />

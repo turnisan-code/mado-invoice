@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
@@ -33,13 +34,14 @@ export default function ApplyCreditNotesButton() {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={() => void applyAll()}
       disabled={busy}
-      className="shrink-0 text-xs font-medium px-3 py-2 sm:py-1.5 rounded-md border border-amber-300 dark:border-amber-800 bg-white/60 dark:bg-transparent hover:bg-amber-100 dark:hover:bg-amber-950/60 transition-colors disabled:opacity-50"
+      className="shrink-0 text-xs border-amber-300 dark:border-amber-800 bg-white/60 dark:bg-transparent hover:bg-amber-100 dark:hover:bg-amber-950/60"
     >
       {busy ? t('lifecycle.credit.applyingAll') : t('lifecycle.credit.applyAll')}
-    </button>
+    </Button>
   )
 }

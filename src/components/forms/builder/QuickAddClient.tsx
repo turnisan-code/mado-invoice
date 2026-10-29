@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { countryOptions, isCountryCode, suggestTaxTreatment } from '@/lib/utils/country'
 import { clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
@@ -13,7 +14,6 @@ import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validati
 import { useT } from '@/lib/i18n/client'
 import type { PublicSettings } from '@/lib/public-settings'
 import type { Client, Language, TaxTreatment } from '@/types'
-import { SELECT_CLS } from './ClientPicker'
 
 const TAX_OPTIONS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
 
@@ -127,14 +127,14 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-country`}>{t('clients.form.country')}</Label>
-            <select id={`${uid}-country`} value={country} onChange={e => { setCountry(e.target.value); follow(e.target.value, vatId) }} className={SELECT_CLS} {...field('country')}>
+            <Select id={`${uid}-country`} value={country} onChange={e => { setCountry(e.target.value); follow(e.target.value, vatId) }} {...field('country')}>
               <optgroup label={t('clientData.form.countryEu')}>
                 {countries.filter(c => c.eu).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
               </optgroup>
               <optgroup label={t('clientData.form.countryOther')}>
                 {countries.filter(c => !c.eu).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
               </optgroup>
-            </select>
+            </Select>
             {errorText('country')}
           </div>
           <div className="space-y-1.5">
@@ -145,9 +145,9 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-tax`}>{t('clients.form.taxTreatment')}</Label>
-          <select id={`${uid}-tax`} value={tax} onChange={e => { setTax(e.target.value as TaxTreatment); setTaxManual(true) }} className={SELECT_CLS}>
+          <Select id={`${uid}-tax`} value={tax} onChange={e => { setTax(e.target.value as TaxTreatment); setTaxManual(true) }}>
             {TAX_OPTIONS.map(o => <option key={o} value={o}>{t(`taxTreatments.${o}`)}</option>)}
-          </select>
+          </Select>
           {suggestion && suggestion !== tax && (
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
               {t('clientData.form.taxSuggested', { treatment: t(`taxTreatments.${suggestion}`) })}{' '}

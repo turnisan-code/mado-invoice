@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import { formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
@@ -206,7 +207,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
                 type="button"
                 onClick={() => setPendingRemove(r)}
                 aria-label={t('lifecycle.credit.removeRefund', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang) })}
-                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
               </button>
@@ -224,32 +225,34 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
             <span role="alert" className="text-red-600 dark:text-red-400 min-w-0 break-words">{t('books.sync.lastError', { error: bookamat.error })}</span>
           )}
           {(syncState !== 'synced' || unbooked.length > 0) && (
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => void syncToBookamat()}
               disabled={syncing}
-              className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-8 px-2.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300"
+              className="text-xs"
             >
               <RefreshCw size={12} className={syncing ? 'animate-spin' : undefined} aria-hidden="true" />
               {syncing ? t('messages.creditBookamat.syncing')
                 : syncState === 'synced' ? t('messages.creditBookamat.syncNew')
                 : syncState === 'failed' ? t('books.sync.retry')
                 : t('messages.creditBookamat.sync')}
-            </button>
+            </Button>
           )}
           {syncState === 'unsynced' && <span className="text-neutral-500 dark:text-neutral-400">{t('messages.creditBookamat.hint')}</span>}
         </div>
       )}
 
       {canApply && (
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => void apply()}
           disabled={saving}
-          className="text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300"
+          className="text-xs"
         >
           {saving ? t('lifecycle.credit.applying') : t('lifecycle.credit.applyTo', { amount: formatMoney(applyAmount, currency), number: invoiceLabel })}
-        </button>
+        </Button>
       )}
 
       {issued && !settled && (
@@ -274,15 +277,15 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
             />
           </div>
           <div className="flex gap-2">
-            <select
+            <Select
               aria-label={t('payments.paymentMethod')}
               value={method}
               onChange={e => setMethod(e.target.value as PaymentMethod)}
-              className="shrink-0 h-8 text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              className="w-auto shrink-0"
             >
               <option value="bank">{t('payments.methodBank')}</option>
               <option value="cash">{t('payments.methodCash')}</option>
-            </select>
+            </Select>
             <Input
               aria-label={t('lifecycle.payments.reference')}
               placeholder={t('lifecycle.payments.reference')}
@@ -300,7 +303,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
               onChange={e => setNote(e.target.value)}
               className="flex-1 min-w-0"
             />
-            <Button type="button" onClick={() => void addRefund()} disabled={saving} size="sm" className="shrink-0 flex items-center gap-1.5 h-8">
+            <Button type="button" onClick={() => void addRefund()} disabled={saving} className="shrink-0">
               <Plus size={13} />
               {saving ? t('common.saving') : t('lifecycle.credit.recordRefund')}
             </Button>

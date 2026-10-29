@@ -5,6 +5,8 @@ import ClientEditSection from '@/components/layout/ClientEditSection'
 import ClientProjects from '@/components/projects/ClientProjects'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
 import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
@@ -139,18 +141,18 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
             <span className="text-sm font-medium">{t('clients.documents')}</span>
             <div className="flex gap-2">
-              <Link href={`/quotes/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors dark:text-neutral-300">
-                <Plus size={11} /> {t('clients.quote')}
+              <Link href={`/quotes/new?client=${id}`} className={cn(buttonVariants({ variant: 'outline' }), 'text-xs')}>
+                <Plus size={12} /> {t('clients.quote')}
               </Link>
-              <Link href={`/invoices/new?client=${id}`} className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
-                <Plus size={11} /> {t('clients.invoice')}
+              <Link href={`/invoices/new?client=${id}`} className={cn(buttonVariants(), 'text-xs')}>
+                <Plus size={12} /> {t('clients.invoice')}
               </Link>
             </div>
           </div>
           <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {allDocs.length === 0 && (
               <div className="px-5 py-12 text-center">
-                <p className="text-sm text-neutral-400 dark:text-neutral-500">{t('clients.noDocuments')}</p>
+                <p className="text-sm text-neutral-500 dark:text-neutral-500">{t('clients.noDocuments')}</p>
                 <Link href={`/invoices/new?client=${id}`} className="mt-2 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
                   {t('clients.createFirstInvoice')}
                 </Link>
@@ -172,9 +174,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium">
-                      {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
+                      {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
                     </div>
-                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
                   </div>
                   <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
                   <StatusBadge status={shown} label={t(statusLabelKey(shown))} className="shrink-0" />
