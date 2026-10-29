@@ -125,6 +125,9 @@ export interface Settings {
   default_skonto_percent: number | null
   default_skonto_days: number | null
   ui_language: Language
+  // The studio's own Peppol address; empty = 9914 (Austrian VAT number) with uid_number.
+  peppol_scheme?: string | null
+  peppol_id?: string | null
 }
 
 export interface Client {
@@ -152,6 +155,13 @@ export interface Client {
   reminders_opt_out: boolean
   // Further recipients (e.g. an accounting mailbox), prefilled as CC on every email to the client.
   cc_emails: string[]
+  // E-invoicing: the preferred format, the client's Peppol address (empty = derived from its UID),
+  // the buyer reference prefilled on its e-invoices and the supplier number it assigned to the studio.
+  einvoice_format?: EInvoiceFormat | null
+  peppol_scheme?: string | null
+  peppol_id?: string | null
+  buyer_reference?: string | null
+  supplier_number?: string | null
 }
 
 // Settings values a new client starts with.
@@ -167,6 +177,9 @@ export interface CountryOption {
   name: string
   eu: boolean
 }
+
+// Structured e-invoice formats: ebInterface 6.1 (Austrian public sector) and Peppol BIS Billing 3.0 (UBL).
+export type EInvoiceFormat = 'ebinterface' | 'ubl'
 
 export interface CatalogueItem {
   id: string
@@ -221,6 +234,8 @@ export interface Document {
   drive_file_id?: string | null
   issued_at?: string | null
   pdf_path?: string | null
+  // The buyer's reference (Auftragsreferenz / order number) its e-invoices carry.
+  buyer_reference?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }
@@ -305,7 +320,7 @@ export interface ReminderLogEntry {
 export type DocumentEventType =
   | 'issued' | 'emailed' | 'mailto_opened' | 'reminder_sent' | 'status_changed'
   | 'payment_added' | 'payment_removed' | 'storno_created' | 'archived' | 'drive_archived'
-  | 'portal_viewed' | 'portal_responded' | 'bookamat_synced' | 'converted'
+  | 'portal_viewed' | 'portal_responded' | 'bookamat_synced' | 'converted' | 'einvoice_exported'
 
 export interface DocumentEvent {
   id: string

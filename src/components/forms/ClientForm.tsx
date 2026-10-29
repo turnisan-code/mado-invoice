@@ -14,7 +14,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { X } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { isCountryCode, suggestTaxTreatment, toCountryCode } from '@/lib/utils/country'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -62,7 +62,13 @@ function makeSchema(t: TFn) {
       const { invalid } = parseEmailList(v)
       if (invalid.length) ctx.addIssue({ code: 'custom', message: t('dunning.invalidAddresses', { list: invalid.join(', ') }) })
     }),
+    einvoice_format: z.enum(['', 'ebinterface', 'ubl']),
+    peppol_scheme: z.string().refine(v => !v.trim() || /^\d{4}$/.test(v.trim()), t('einvoice.client.schemeInvalid')),
+    peppol_id: z.string(),
+    buyer_reference: z.string(),
+    supplier_number: z.string(),
   }).refine(v => v.name.trim() || v.company.trim(), { path: ['name'], message: t('clients.form.nameRequired') })
+    .refine(v => !v.peppol_scheme.trim() === !v.peppol_id.trim(), { path: ['peppol_id'], message: t('einvoice.client.incomplete') })
 }
 
 type Values = z.infer<ReturnType<typeof makeSchema>>
@@ -88,6 +94,11 @@ function toValues(client: Client | undefined, defaults: ClientDefaults): Values 
     notes: client?.notes ?? '',
     reminders_opt_out: client?.reminders_opt_out ?? false,
     cc_emails: (client?.cc_emails ?? []).join(', '),
+    einvoice_format: client?.einvoice_format ?? '',
+    peppol_scheme: client?.peppol_scheme ?? '',
+    peppol_id: client?.peppol_id ?? '',
+    buyer_reference: client?.buyer_reference ?? '',
+    supplier_number: client?.supplier_number ?? '',
   }
 }
 
@@ -112,6 +123,11 @@ function toPayload(v: Values) {
     notes: v.notes.trim() || null,
     reminders_opt_out: v.reminders_opt_out,
     cc_emails: parseEmailList(v.cc_emails).emails,
+    einvoice_format: v.einvoice_format || null,
+    peppol_scheme: v.peppol_scheme.trim() || null,
+    peppol_id: v.peppol_id.trim() || null,
+    buyer_reference: v.buyer_reference.trim() || null,
+    supplier_number: v.supplier_number.trim() || null,
   }
 }
 
@@ -393,6 +409,43 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           <span className="block text-xs text-neutral-500 dark:text-neutral-400">{t('clients.form.noRemindersHint')}</span>
         </span>
       </label>
+
+      <details
+        open={!!(initial.einvoice_format || initial.peppol_id || initial.buyer_reference || initial.supplier_number) || undefined}
+        className="group rounded-lg border border-neutral-200 dark:border-neutral-700"
+      >
+        <summary className="flex items-center justify-between gap-2 px-3 py-2.5 min-h-11 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+          <span>
+            <span className="block text-sm font-medium text-neutral-800 dark:text-neutral-200">{t('einvoice.client.title')}</span>
+            <span className="block text-xs text-neutral-500 dark:text-neutral-400">{t('einvoice.client.hint')}</span>
+          </span>
+          <ChevronDown size={16} aria-hidden="true" className="shrink-0 text-neutral-500 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="px-3 pb-3 space-y-3">
+          <Field id={id('einvoice_format')} label={t('einvoice.client.format')}>
+            <select id={id('einvoice_format')} {...register('einvoice_format')} className={SELECT_CLS}>
+              <option value="">{t('einvoice.client.formatNone')}</option>
+              <option value="ebinterface">{t('einvoice.formats.ebinterface')}</option>
+              <option value="ubl">{t('einvoice.formats.ubl')}</option>
+            </select>
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            <Field id={id('peppol_scheme')} label={t('einvoice.client.peppolScheme')} error={errorOf('peppol_scheme')}>
+              <Input id={id('peppol_scheme')} inputMode="numeric" autoComplete="off" placeholder="9915" {...register('peppol_scheme')} aria-invalid={!!errors.peppol_scheme || undefined} />
+            </Field>
+            <Field id={id('peppol_id')} label={t('einvoice.client.peppolId')} error={errorOf('peppol_id')} className="col-span-2">
+              <Input id={id('peppol_id')} autoComplete="off" autoCapitalize="none" {...register('peppol_id')} aria-invalid={!!errors.peppol_id || undefined} />
+            </Field>
+          </div>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1.5">{t('einvoice.client.peppolHint')}</p>
+          <Field id={id('buyer_reference')} label={t('einvoice.client.buyerReference')} hint={t('einvoice.client.buyerReferenceHint')}>
+            <Input id={id('buyer_reference')} autoComplete="off" {...register('buyer_reference')} />
+          </Field>
+          <Field id={id('supplier_number')} label={t('einvoice.client.supplierNumber')} hint={t('einvoice.client.supplierNumberHint')}>
+            <Input id={id('supplier_number')} autoComplete="off" {...register('supplier_number')} />
+          </Field>
+        </div>
+      </details>
 
       <div className="flex flex-wrap items-center gap-2 pt-2">
         {client && (
