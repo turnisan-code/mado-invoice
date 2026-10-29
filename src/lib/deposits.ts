@@ -2,7 +2,7 @@
 // An advance invoice asks for money before the service, a partial invoice bills a completed part
 // of it. The final invoice bills the whole service and deducts, per VAT rate, what those invoices
 // carried: an advance invoice only the money actually received on it (net of refunds, at most what
-// it billed), a partial invoice its total (less credit notes applied to it). The deduction is
+// it billed), a partial invoice its total, both less their credit notes. The deduction is
 // stored on the final invoice as 'deduction' lines, one per deducted invoice and rate, so
 // calcTotals and everything built on it (Ist report, Bookamat, lists, reminders, e-invoices) see
 // the remaining amount without special cases. Browser-safe: the builder uses it with its own client.
@@ -47,9 +47,11 @@ export interface DepositInvoice {
   discount_type: string | null
   discount_value: number | null
   document_items: CalcItem[] | null
-  payments: { amount: number; kind: string | null; credit_note_id?: string | null }[] | null
-  // Money paid back on the credit notes applied to it.
-  refunded: number
+  payments: { amount: number; kind: string | null }[] | null
+  // Its issued, uncancelled credit notes: what each takes off and the money paid back on it.
+  // A credit note on a paid invoice is refunded, not applied, so the invoice's 'credit' rows
+  // alone would miss it.
+  credit_notes: { totals: DocumentTotals; refunded: number }[]
   // The final invoice that deducts it.
   final: { id: string; number: string | null; status: string } | null
 }
@@ -61,11 +63,30 @@ export function depositTotals(d: Pick<DepositInvoice, 'document_items' | 'tax_tr
 const sumOf = (payments: DepositInvoice['payments'], kind: string) =>
   roundCents((payments ?? []).filter(p => p.kind === kind).reduce((s, p) => s + p.amount, 0))
 
+type Credited = Pick<DepositInvoice, 'document_items' | 'tax_treatment' | 'credit_notes'> & DiscountFields
+
+// What an invoice bills once its credit notes are taken off, in total and per VAT rate.
+export function billedAmount(d: Credited): number {
+  return roundCents(depositTotals(d).total - d.credit_notes.reduce((s, c) => s + c.totals.total, 0))
+}
+
+export function billedGroups(d: Credited): RateGroup[] {
+  const groups = depositTotals(d).vat_groups.map(g => ({ ...g }))
+  for (const g of d.credit_notes.flatMap(c => c.totals.vat_groups)) {
+    let x = groups.find(y => y.rate === g.rate)
+    if (!x) groups.push(x = { rate: g.rate, base: 0, amount: 0 })
+    x.base = roundCents(x.base - g.base)
+    x.amount = roundCents(x.amount - g.amount)
+  }
+  return groups
+}
+
 // What a final invoice deducts for one invoice, gross.
 export function deductibleAmount(d: DepositInvoice): number {
-  const billed = roundCents(depositTotals(d).total - sumOf(d.payments, 'credit'))
+  const billed = billedAmount(d)
   if (d.invoice_kind === 'partial') return Math.max(0, billed)
-  const received = roundCents(sumOf(d.payments, 'payment') - d.refunded)
+  const refunded = d.credit_notes.reduce((s, c) => s + c.refunded, 0)
+  const received = roundCents(sumOf(d.payments, 'payment') - refunded)
   return Math.max(0, Math.min(received, billed))
 }
 
@@ -77,20 +98,21 @@ export function depositOpen(d: DepositInvoice): number {
 }
 
 export type RatePart = { rate: VatRate; net: number; vat: number }
+type RateGroup = { rate: VatRate; base: number; amount: number }
 
-// The net whose VAT, rounded as calcTotals rounds it, adds up to `gross`, where one exists.
+const grossOf = (net: number, rate: number) => roundCents(net + roundCents(net * (rate / 100)))
+
+// The net whose VAT, rounded as calcTotals rounds it, adds up to `gross`. Not every gross has
+// one (at 20 % one in six cents); then the net just below it, so nothing beyond `gross` is taken.
 function netOf(gross: number, rate: number): number {
   const guess = roundCents(gross / (1 + rate / 100))
-  for (const step of [0, 0.01, -0.01]) {
-    const net = roundCents(guess + step)
-    if (roundCents(net + roundCents(net * (rate / 100))) === gross) return net
-  }
-  return guess
+  const nets = [-0.02, -0.01, 0, 0.01, 0.02].map(step => roundCents(guess + step))
+  return nets.find(net => grossOf(net, rate) === gross) ?? nets.filter(net => grossOf(net, rate) < gross).pop() ?? guess
 }
 
 // `gross` split over VAT groups in proportion to their gross, to the cent (largest remainder).
 // The full amount keeps every group exactly as it was invoiced.
-export function splitGross(groups: readonly { rate: VatRate; base: number; amount: number }[], gross: number): RatePart[] {
+export function splitGross(groups: readonly RateGroup[], gross: number): RatePart[] {
   const parts = groups.map(g => ({ ...g, gross: roundCents(g.base + g.amount) })).filter(p => p.gross > 0)
   const full = roundCents(parts.reduce((s, p) => s + p.gross, 0))
   if (full <= 0 || gross <= 0) return []
@@ -102,11 +124,35 @@ export function splitGross(groups: readonly { rate: VatRate; base: number; amoun
   const order = exact.map((v, i) => ({ i, rest: v - Math.floor(v) })).sort((a, b) => b.rest - a.rest || a.i - b.i)
   for (let left = target - cents.reduce((s, c) => s + c, 0), n = 0; left > 0; left--, n++) cents[order[n % order.length].i]++
 
-  return parts.flatMap((p, i) => {
+  const split = parts.map((p, i) => {
     const net = netOf(cents[i] / 100, p.rate)
-    const vat = roundCents(net * (p.rate / 100))
-    return net || vat ? [{ rate: p.rate, net, vat }] : []
+    return { rate: p.rate, net, vat: roundCents(net * (p.rate / 100)) }
   })
+  // A share no net reaches is taken a cent lower, which leaves the sum short. The rates then trade
+  // cents (the fewest that work) until the sum is exact; a single rate stays a cent short.
+  const short = target - Math.round(split.reduce((s, p) => s + p.net + p.vat, 0) * 100)
+  const shifted = (p: RatePart, cent: number) => {
+    const want = roundCents(p.net + p.vat + cent / 100)
+    const net = netOf(want, p.rate)
+    return want > 0 && grossOf(net, p.rate) === want ? net : null
+  }
+  const cost = (ds: number[]) => ds.reduce((s, d) => s + Math.abs(d), 0)
+  const trade = (i: number, left: number): number[] | null => {
+    if (i === split.length) return left ? null : []
+    let best: number[] | null = null
+    for (const d of [0, 1, -1, 2, -2]) {
+      const rest = !d || shifted(split[i], d) != null ? trade(i + 1, left - d) : null
+      if (rest && (!best || cost([d, ...rest]) < cost(best))) best = [d, ...rest]
+    }
+    return best
+  }
+  const traded = short ? trade(0, short) : null
+  traded?.forEach((d, i) => {
+    if (!d) return
+    const net = shifted(split[i], d)!
+    split[i] = { rate: split[i].rate, net, vat: roundCents(net * (split[i].rate / 100)) }
+  })
+  return split.filter(p => p.net || p.vat)
 }
 
 export interface DeductionPart extends RatePart {
@@ -119,7 +165,7 @@ export interface DeductionPart extends RatePart {
 export function deductionParts(invoices: readonly DepositInvoice[]): DeductionPart[] {
   return invoices.flatMap(d => {
     if (!d.number || !isDepositKind(d.invoice_kind)) return []
-    const parts = splitGross(depositTotals(d).vat_groups, deductibleAmount(d))
+    const parts = splitGross(billedGroups(d), deductibleAmount(d))
     return parts.map(p => ({ ...p, invoiceId: d.id, number: d.number!, date: d.date, kind: d.invoice_kind as DepositKind }))
   })
 }
@@ -293,32 +339,34 @@ export function depositErrorMessage(err: unknown, t: TFn): string {
 
 const failure = (error: { message: string; code?: string }) => Object.assign(new Error(error.message), { code: error.code })
 
-const DEPOSIT_COLS = 'id, number, date, status, client_id, invoice_kind, final_invoice_id, converted_from_id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind, credit_note_id)'
+const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
+const DEPOSIT_COLS = `id, number, date, status, client_id, invoice_kind, final_invoice_id, converted_from_id, tax_treatment, discount_type, discount_value, ${ITEM_COLS}, payments(amount, kind)`
 
-type DepositRow = Omit<DepositInvoice, 'refunded' | 'final'>
+type DepositRow = Omit<DepositInvoice, 'credit_notes' | 'final'>
+type CreditNoteRow = DiscountFields & { converted_from_id: string; tax_treatment: string | null; document_items: CalcItem[] | null; payments: DepositInvoice['payments'] }
 
-async function withRefundsAndFinals(supabase: SupabaseClient, rows: DepositRow[]): Promise<DepositInvoice[]> {
-  const creditNoteIds = [...new Set(rows.flatMap(r => (r.payments ?? []).filter(p => p.kind === 'credit' && p.credit_note_id).map(p => p.credit_note_id!)))]
+async function withCreditsAndFinals(supabase: SupabaseClient, rows: DepositRow[]): Promise<DepositInvoice[]> {
+  const ids = rows.map(r => r.id)
   const finalIds = [...new Set(rows.map(r => r.final_invoice_id).filter((id): id is string => !!id))]
-  const [refunds, finals] = await Promise.all([
-    creditNoteIds.length
-      ? supabase.from('payments').select('document_id, amount').eq('kind', 'refund').in('document_id', creditNoteIds)
+  const [credits, finals] = await Promise.all([
+    ids.length
+      ? supabase.from('documents').select(`converted_from_id, tax_treatment, discount_type, discount_value, ${ITEM_COLS}, payments(amount, kind)`)
+          .eq('type', 'credit_note').in('converted_from_id', ids).not('number', 'is', null).neq('status', 'cancelled')
       : Promise.resolve({ data: [], error: null }),
     finalIds.length
       ? supabase.from('documents').select('id, number, status').in('id', finalIds)
       : Promise.resolve({ data: [], error: null }),
   ])
-  if (refunds.error) throw new Error(refunds.error.message)
+  if (credits.error) throw new Error(credits.error.message)
   if (finals.error) throw new Error(finals.error.message)
-  const refundedBy = new Map<string, number>()
-  for (const r of (refunds.data ?? []) as { document_id: string; amount: number }[]) {
-    refundedBy.set(r.document_id, roundCents((refundedBy.get(r.document_id) ?? 0) + r.amount))
+  const creditsOf = new Map<string, DepositInvoice['credit_notes']>()
+  for (const c of (credits.data ?? []) as unknown as CreditNoteRow[]) {
+    creditsOf.set(c.converted_from_id, [...creditsOf.get(c.converted_from_id) ?? [], { totals: depositTotals(c), refunded: sumOf(c.payments, 'refund') }])
   }
   const finalById = new Map(((finals.data ?? []) as DepositInvoice['final'][]).map(f => [f!.id, f]))
   return rows.map(r => ({
     ...r,
-    refunded: roundCents((r.payments ?? []).filter(p => p.kind === 'credit' && p.credit_note_id)
-      .reduce((s, p) => s + (refundedBy.get(p.credit_note_id!) ?? 0), 0)),
+    credit_notes: creditsOf.get(r.id) ?? [],
     final: (r.final_invoice_id && finalById.get(r.final_invoice_id)) || null,
   }))
 }
@@ -330,7 +378,7 @@ export async function loadClientDeposits(supabase: SupabaseClient, clientId: str
     .not('number', 'is', null).neq('status', 'cancelled')
     .order('date').order('number')
   if (error) throw new Error(error.message)
-  return withRefundsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
+  return withCreditsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
 }
 
 // Every advance and partial invoice made from a quote, drafts and cancelled ones included.
@@ -339,7 +387,7 @@ export async function loadQuoteDeposits(supabase: SupabaseClient, quoteId: strin
     .eq('type', 'invoice').eq('converted_from_id', quoteId).in('invoice_kind', ['advance', 'partial'])
     .order('created_at')
   if (error) throw new Error(error.message)
-  return withRefundsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
+  return withCreditsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
 }
 
 type CheckedDoc = DiscountFields & {
