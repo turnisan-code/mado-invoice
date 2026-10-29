@@ -14,20 +14,23 @@ export type BulkDraftInfo = { id: string; date: string | null; total: number }
 
 // The confirm dialog's part for the drafts a bulk action issues, as the issue dialog asks for one:
 // today's date for drafts dated earlier (on by default), an order the numbers would no longer
-// follow, and zero totals.
-export function BulkIssueNotice({ type, drafts, latest, today, redate, onRedate, currency = 'EUR' }: {
+// follow, zero totals, and for "Mark paid" a payment dated before its invoice.
+export function BulkIssueNotice({ type, drafts, latest, today, redate, onRedate, paidDate, currency = 'EUR' }: {
   type: 'invoice' | 'quote'
   drafts: BulkDraftInfo[]
   latest: LatestIssued | null
   today: string
   redate: boolean
   onRedate: (redate: boolean) => void
+  paidDate?: string
   currency?: string
 }) {
   const { t, lang } = useT()
   if (!drafts.length) return null
   const stale = drafts.filter(d => movesToToday(d.date, today))
-  const earlier = drafts.some(d => beforeLatest(redate && movesToToday(d.date, today) ? today : d.date, latest))
+  const issuedOn = (d: BulkDraftInfo) => redate && movesToToday(d.date, today) ? today : d.date
+  const earlier = drafts.some(d => beforeLatest(issuedOn(d), latest))
+  const paidBefore = !!paidDate && /^\d{4}-\d{2}-\d{2}$/.test(paidDate) && drafts.some(d => (issuedOn(d) ?? '') > paidDate)
   const zero = drafts.filter(d => Math.abs(d.total) <= 0.005).length
   const amount = formatMoney(0, currency, lang)
 
@@ -53,6 +56,11 @@ export function BulkIssueNotice({ type, drafts, latest, today, redate, onRedate,
       {zero > 0 && (
         <p role="alert" className="text-amber-700 dark:text-amber-300">
           {n(zero, t('views.bulkIssue.zeroOne', { count: zero, amount }), t('views.bulkIssue.zeroOther', { count: zero, amount }))}
+        </p>
+      )}
+      {paidBefore && (
+        <p role="alert" className="text-amber-700 dark:text-amber-300">
+          {t('views.bulkIssue.paidBefore', { date: formatDate(paidDate, lang) })}
         </p>
       )}
     </div>

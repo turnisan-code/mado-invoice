@@ -81,10 +81,14 @@ const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancell
 // Outstanding: issued and still owing something; a zero total or a settled balance never is.
 const isOpen = (d: Invoice) => (d.status === 'sent' || d.status === 'overdue') && docTotal(d) > 0.005 && docBalance(d) > 0.005
 const clientLabel = (d: Invoice) => clientDisplayName(d.clients)
+// Between sent and overdue the due date decides, as in the filters and on the dashboard: the daily
+// run only catches the stored status up, e.g. after a due date was extended.
+const listStatus = (d: Invoice, todayStr: string) =>
+  d.status === 'sent' || d.status === 'overdue' ? (isOpen(d) && isOverdue(d, todayStr) ? 'overdue' : 'sent') : d.status
 // Partly paid and written-off invoices show that instead of their stored status. Dunning fees
 // and interest are paid on top and never change it.
 const shownStatus = (d: Invoice, todayStr: string) =>
-  displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
+  displayStatus({ type: 'invoice', status: listStatus(d, todayStr), total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
 
 function exportCSV(invoices: Invoice[], t: TFn, todayStr: string) {
   const rows = invoices.map(inv => {
@@ -167,8 +171,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const filtered = useMemo(() => {
     let rows = invoices
     if (status === 'outstanding') rows = rows.filter(isOpen)
-    else if (status === 'overdue') rows = rows.filter(d => isOpen(d) && isOverdue(d, todayStr))
-    else if (status) rows = rows.filter(d => d.status === status)
+    else if (status) rows = rows.filter(d => listStatus(d, todayStr) === status)
     if (client) rows = rows.filter(d => d.client_id === client)
     if (bookamat && bookamatConfigured) rows = rows.filter(d => bookamatState(d) === bookamat)
     if (from) rows = rows.filter(d => !!d.date && d.date >= from)
@@ -185,7 +188,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
         case 'due_date': return d.due_date ?? ''
         case 'total': return docTotal(d)
         case 'balance': return docBalance(d)
-        case 'status': return d.status
+        case 'status': return listStatus(d, todayStr)
       }
     }
     return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
@@ -412,7 +415,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             const balance = docBalance(doc)
             const selected = selection.isSelected(doc.id)
             return (
-              <div key={doc.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
+              <div key={doc.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)} ${listStatus(doc, todayStr) === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
                 <SelectToggle large checked={selected} onToggle={() => selection.toggleOne(doc.id)} label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} />
                 <Link href={`/invoices/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                   <div className="min-w-0">
@@ -462,7 +465,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {filtered.length === 0 && <tr><td colSpan={8}>{empty}</td></tr>}
             {pageItems.map(doc => (
-              <ClickableRow key={doc.id} href={`/invoices/${doc.id}`} className={`${rowStateClass(selection.isSelected(doc.id))} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
+              <ClickableRow key={doc.id} href={`/invoices/${doc.id}`} className={`${rowStateClass(selection.isSelected(doc.id))} ${listStatus(doc, todayStr) === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
                 <td className="pl-4 py-3 w-8">
                   <SelectToggle checked={selection.isSelected(doc.id)} onToggle={() => selection.toggleOne(doc.id)} label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} />
                 </td>
@@ -552,7 +555,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="sm:col-span-2 text-xs text-red-600 dark:text-red-400">{t('exports.lists.paidDateInvalid')}</p>}
           </div>
         )}
-        <BulkIssueNotice type="invoice" drafts={bulkDrafts} latest={latest} today={todayStr} redate={redate} onRedate={setRedate} />
+        <BulkIssueNotice type="invoice" drafts={bulkDrafts} latest={latest} today={todayStr} redate={redate} onRedate={setRedate} paidDate={bulkConfirm === 'paid' ? paidDate : undefined} />
       </ConfirmDialog>
 
       <BulkIssueResult notes={issueNotes} path="invoices" onClose={() => setIssueNotes(null)} />

@@ -2,11 +2,18 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { addDays } from '@/lib/utils/document'
 import { unlinkedEntries } from '@/lib/utils/issue-checks'
 import { beforeLatest, movesToToday, type IssuedNote, type LatestIssued } from '@/lib/utils/bulk-issue'
+import { isUpcomingPeriodDate, type ScheduleDates } from '@/lib/utils/recurring'
 import { termDays } from '@/components/forms/builder/model'
 import type { DocumentType } from '@/types'
 import { issueDocument, type IssueOutcome } from './issue'
 
-export type BulkDraft = { id: string; date: string; due_date: string | null; clients: { payment_days: number | null } | null }
+export type BulkDraft = {
+  id: string
+  date: string
+  due_date: string | null
+  recurring_schedule_id?: string | null
+  clients: { payment_days: number | null } | null
+}
 
 type DbError = { message: string; code?: string; details?: string | null }
 
@@ -63,6 +70,18 @@ async function lostEntries(supabase: SupabaseClient, documentId: string): Promis
   return lost.time + lost.expenses > 0 ? lost : null
 }
 
+// documents_recurring_period_key allows one invoice per schedule and date: a recurring draft keeps
+// its date when today belongs to a period its schedule has still to generate, or the daily run
+// would find the day taken. When the schedule cannot be read, the date is kept as well.
+async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, today: string): Promise<boolean> {
+  const { data, error } = await supabase.from('recurring_schedules').select('next_date, interval, anchor_day, end_date').eq('id', scheduleId).maybeSingle()
+  if (error) {
+    console.error(`[bulk] recurring schedule ${scheduleId} not read:`, error.message)
+    return true
+  }
+  return !!data && isUpcomingPeriodDate(data as ScheduleDates, today)
+}
+
 // One draft of the batch: moved to today first when the batch says so (the due date follows the
 // client's terms from today, a credit note keeps its own), then issued (number, archive copy,
 // Drive). A failed issue puts the draft's own dates back and throws as issueDocument does; archive
@@ -72,14 +91,18 @@ export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue,
   let movedFrom: string | null = null
   let dateKept = false
   if (batch.redate && movesToToday(d.date, batch.today)) {
-    const dueDate = batch.type === 'credit_note' ? {} : { due_date: addDays(batch.today, termDays(batch.type, batch.terms, d.clients)) }
-    const { error } = await supabase.from('documents').update({ date: batch.today, ...dueDate }).eq('id', d.id).is('number', null)
-    // documents_recurring_period_key: a schedule has one invoice per date.
-    if (error?.code === '23505') dateKept = true
-    else if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
-    else {
-      movedFrom = d.date
-      date = batch.today
+    if (d.recurring_schedule_id && await todayIsPeriodDate(supabase, d.recurring_schedule_id, batch.today)) {
+      dateKept = true
+    } else {
+      const dueDate = batch.type === 'credit_note' ? {} : { due_date: addDays(batch.today, termDays(batch.type, batch.terms, d.clients)) }
+      const { error } = await supabase.from('documents').update({ date: batch.today, ...dueDate }).eq('id', d.id).is('number', null)
+      // Another invoice of the schedule already has today's date.
+      if (error?.code === '23505') dateKept = true
+      else if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
+      else {
+        movedFrom = d.date
+        date = batch.today
+      }
     }
   }
 

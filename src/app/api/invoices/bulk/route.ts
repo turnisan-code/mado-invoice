@@ -53,7 +53,7 @@ export async function PATCH(req: Request) {
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
-    .select(`id, number, status, date, due_date, created_at, tax_treatment, discount_type, discount_value, clients(name, company, payment_days), ${ITEM_COLS}, payments(amount, kind)`)
+    .select(`id, number, status, date, due_date, created_at, recurring_schedule_id, tax_treatment, discount_type, discount_value, clients(name, company, payment_days), ${ITEM_COLS}, payments(amount, kind)`)
     .in('id', ids)
     .eq('type', 'invoice')
     .in('status', sourcesFor(target))
