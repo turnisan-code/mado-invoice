@@ -1,4 +1,5 @@
 import type { DocumentTotals, Settings, VatRate } from '@/types'
+import { makeT } from '@/lib/i18n'
 import { roundCents } from './number'
 
 export { roundCents } from './number'
@@ -174,16 +175,13 @@ export function calcTotals(
 
 type TaxNoteSettings = Pick<Settings, 'tax_note_reverse_charge_de' | 'tax_note_reverse_charge_en' | 'tax_note_non_eu_de' | 'tax_note_non_eu_en'>
 
+// The owner's note in the document's language, else the built-in one (print.taxNote).
 export function getTaxNote(taxTreatment: string, lang: 'de' | 'en', settings?: TaxNoteSettings | null): string | null {
   if (taxTreatment === 'eu_reverse_charge') {
-    return lang === 'de'
-      ? (settings?.tax_note_reverse_charge_de || 'Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)')
-      : (settings?.tax_note_reverse_charge_en || 'Reverse charge — VAT to be accounted for by the recipient')
+    return settings?.[`tax_note_reverse_charge_${lang}`] || makeT(lang)('print.taxNote.reverseCharge')
   }
   if (taxTreatment === 'non_eu') {
-    return lang === 'de'
-      ? (settings?.tax_note_non_eu_de || 'Nicht steuerbar (Leistungsort außerhalb der EU)')
-      : (settings?.tax_note_non_eu_en || 'Not subject to Austrian VAT (place of supply outside the EU)')
+    return settings?.[`tax_note_non_eu_${lang}`] || makeT(lang)('print.taxNote.nonEu')
   }
   return null
 }
@@ -223,36 +221,6 @@ export function skontoAmount(total: number, percent: number | null | undefined):
 
 export function skontoDeadline(date: string, days: number | null | undefined): string {
   return addDays(date, Math.max(0, days ?? 0))
-}
-
-type PaymentTermsDoc = {
-  type: string
-  date: string
-  due_date: string | null
-  skonto_percent?: number | null
-  skonto_days?: number | null
-  currency?: string | null
-}
-
-// Printed under the totals of an invoice:
-// "Zahlbar bis <due>. Bei Zahlung bis <date> <x> % Skonto (<amount>)."
-export function paymentTermsSentence(doc: PaymentTermsDoc, total: number, lang: 'de' | 'en'): string | null {
-  if (doc.type !== 'invoice') return null
-  const parts: string[] = []
-  if (doc.due_date) {
-    const due = formatDate(doc.due_date, lang)
-    parts.push(lang === 'de' ? `Zahlbar bis ${due}.` : `Payable by ${due}.`)
-  }
-  const amount = skontoAmount(total, doc.skonto_percent)
-  if (amount > 0 && doc.skonto_days != null) {
-    const deadline = formatDate(skontoDeadline(doc.date, doc.skonto_days), lang)
-    const pct = new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { maximumFractionDigits: 2 }).format(doc.skonto_percent!)
-    const money = formatMoney(amount, doc.currency ?? 'EUR', lang)
-    parts.push(lang === 'de'
-      ? `Bei Zahlung bis ${deadline} ${pct} % Skonto (${money}).`
-      : `${pct} % early payment discount (${money}) if paid by ${deadline}.`)
-  }
-  return parts.length ? parts.join(' ') : null
 }
 
 // The app's own views print '€ 1.234,56' whatever the UI language; what a client receives passes

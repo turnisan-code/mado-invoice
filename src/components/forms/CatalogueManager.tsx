@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useState, useRef } from 'react'
+import type { PostgrestError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, ChevronUp, ChevronDown, Search } from 'lucide-react'
@@ -14,6 +15,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { CatalogueItem, CatalogueUsage, Unit, VatRate } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
+import { dbErrorMessage } from '@/lib/api-errors'
 import { dropIndex, moveItem, type DropEdge } from './builder/model'
 import { useReorder } from './builder/useReorder'
 
@@ -140,6 +142,12 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   const supabase = createClient()
   const { t, lang } = useT()
 
+  // The database's own text goes to the console; the toast is worded in the UI language.
+  function failed(error: PostgrestError) {
+    console.error('[catalogue] write failed:', error.code, error.message)
+    toast.error(dbErrorMessage(t, error))
+  }
+
   const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))) as string[]
   const allCatNames = Array.from(new Set([...categories, ...pendingCats]))
   const groupKeys: (string | null)[] = [...allCatNames, null]
@@ -180,7 +188,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     ) as Partial<CatalogueItem>
     if (Object.keys(payload).length) {
       const { error } = await supabase.from('catalogue_items').update(payload).eq('id', editingId)
-      if (error) { toast.error(error.message); return }
+      if (error) { failed(error); return }
     }
     setItems(items.map(i => i.id === editingId ? { ...i, ...payload } : i))
     setEditingId(null)
@@ -190,10 +198,10 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   async function deleteItem(id: string) {
     setDeleting(true)
     const { error: unlinkError } = await supabase.from('document_items').update({ catalogue_item_id: null }).eq('catalogue_item_id', id)
-    if (unlinkError) { toast.error(unlinkError.message); setDeleting(false); return }
+    if (unlinkError) { failed(unlinkError); setDeleting(false); return }
     const { error } = await supabase.from('catalogue_items').delete().eq('id', id)
     setDeleting(false)
-    if (error) { toast.error(error.message); return }
+    if (error) { failed(error); return }
     setItems(items.filter(i => i.id !== id))
     setPendingDelete(null)
     toast.success(t('catalogue.deleted'))
@@ -203,7 +211,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     const suffix = t('catalogue.copySuffix')
     const payload = { name_de: item.name_de + suffix, name_en: item.name_en + suffix, description_de: item.description_de, description_en: item.description_en, default_price: item.default_price, unit: item.unit, vat_rate: item.vat_rate, category: item.category, sort_order: items.length * 10, active: item.active }
     const { data, error } = await supabase.from('catalogue_items').insert(payload).select().single()
-    if (error) { toast.error(error.message); return }
+    if (error) { failed(error); return }
     setItems([...items, data])
     startEdit(data)
   }
@@ -213,7 +221,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     if (!names) { setFormError(t('catalogue.nameRequired')); return }
     const payload = { ...editableFields(addDraft, names), sort_order: items.length * 10, active: true }
     const { data, error } = await supabase.from('catalogue_items').insert(payload).select().single()
-    if (error) { toast.error(error.message); return }
+    if (error) { failed(error); return }
     setItems([...items, data])
     cancelAdd()
     toast.success(t('catalogue.added'))
@@ -221,7 +229,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
 
   async function toggleActive(item: CatalogueItem) {
     const { error } = await supabase.from('catalogue_items').update({ active: !item.active }).eq('id', item.id)
-    if (error) { toast.error(error.message); return }
+    if (error) { failed(error); return }
     setItems(items.map(i => i.id === item.id ? { ...i, active: !item.active } : i))
   }
 
@@ -244,7 +252,11 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     setItems(withOrder)
     // One statement that writes only sort_order, so a failure leaves the database as it was.
     const { error } = await supabase.rpc('reorder_catalogue_items', { p_ids: withOrder.map(i => i.id) })
-    if (error) { setItems(previous); toast.error(t('catalogue.orderFailed', { error: error.message })) }
+    if (error) {
+      setItems(previous)
+      console.error('[catalogue] order not saved:', error.code, error.message)
+      toast.error(t('catalogue.orderFailed'))
+    }
   }
 
   function step(id: string, delta: -1 | 1, control: 'handle' | 'up' | 'down') {
@@ -289,7 +301,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     renameInFlight.current = true
     const { error } = await supabase.from('catalogue_items').update({ category: newName }).eq('category', renamingCat)
     renameInFlight.current = false
-    if (error) { toast.error(error.message); return }
+    if (error) { failed(error); return }
     setItems(items.map(i => i.category === renamingCat ? { ...i, category: newName } : i))
     setPendingCats(p => p.map(c => c === renamingCat ? newName : c))
     setRenamingCat(null)
@@ -300,7 +312,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     setDeleting(true)
     if (count > 0) {
       const { error } = await supabase.from('catalogue_items').update({ category: null }).eq('category', cat)
-      if (error) { toast.error(error.message); setDeleting(false); return }
+      if (error) { failed(error); setDeleting(false); return }
       setItems(items.map(i => i.category === cat ? { ...i, category: null } : i))
     }
     setDeleting(false)
