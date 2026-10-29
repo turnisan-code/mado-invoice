@@ -458,6 +458,7 @@ export const de = {
       created: 'Anzahlungsrechnung erstellt ({amount})',
       createdPlain: 'Anzahlungsrechnung erstellt',
       linked: 'In einer Schlussrechnung abgezogen',
+      linkedInvoice: 'Zieht {number} ab',
       releasedStorno: 'Nicht mehr abgezogen: Schlussrechnung {number} wurde storniert',
       releasedCancelled: 'Nicht mehr abgezogen: Der Schlussrechnungs-Entwurf wurde verworfen',
       releasedDeleted: 'Nicht mehr abgezogen: Der Schlussrechnungs-Entwurf wurde gelöscht',

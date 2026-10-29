@@ -457,6 +457,7 @@ export const en = {
       created: 'Advance invoice created ({amount})',
       createdPlain: 'Advance invoice created',
       linked: 'Deducted on a final invoice',
+      linkedInvoice: 'Deducts {number}',
       releasedStorno: 'No longer deducted: final invoice {number} was cancelled with a Storno',
       releasedCancelled: 'No longer deducted: the draft final invoice was cancelled',
       releasedDeleted: 'No longer deducted: the draft final invoice was deleted',

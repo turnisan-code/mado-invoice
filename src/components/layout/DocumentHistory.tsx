@@ -143,8 +143,10 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const finalId = str(d.final_id)
       const invoiceId = str(d.invoice_id)
       const released = { storno: 'releasedStorno', cancelled: 'releasedCancelled', deleted: 'releasedDeleted', self_cancelled: 'releasedSelf' } as const
-      const text = event.type === 'deposit_linked' ? t('deposits.history.linked')
-        : invoiceId ? t('deposits.history.releasedInvoice', { number: str(d.invoice_number) ?? '' })
+      const number = str(d.invoice_number) ?? ''
+      const text = event.type === 'deposit_linked'
+        ? invoiceId ? t('deposits.history.linkedInvoice', { number }) : t('deposits.history.linked')
+        : invoiceId ? t('deposits.history.releasedInvoice', { number })
         : t(`deposits.history.${released[str(d.reason) as keyof typeof released] ?? 'releasedRemoved'}`, { number: str(d.final_number) ?? '' })
       const link = invoiceId ? { href: `/invoices/${invoiceId}`, label: t('deposits.history.openInvoice') }
         : finalId ? { href: `/invoices/${finalId}`, label: t('deposits.history.openFinal') } : undefined

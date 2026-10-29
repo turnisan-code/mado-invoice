@@ -852,8 +852,9 @@ create trigger documents_delete_guard
   for each row execute function documents_delete_guard();
 
 -- ─── Deduction links ─────────────────────────────────────────────────────────
--- Only an issued, uncancelled advance or partial invoice is deducted, by an uncancelled final
--- invoice of the same client. What an issued final invoice deducts stays until that invoice is
+-- Only an issued, uncancelled advance or partial invoice is deducted, by an uncancelled draft
+-- final invoice of the same client (an issued one keeps the deduction it was issued with). What
+-- an issued final invoice deducts stays until that invoice is
 -- cancelled with its Storno: the invoice can neither move to another final invoice nor be
 -- cancelled itself. Cancelling one that a draft final invoice deducts takes it off that draft.
 create or replace function documents_deposit_guard()
@@ -873,9 +874,9 @@ begin
       select * into f from documents where id = new.final_invoice_id;
       if new.type <> 'invoice' or new.invoice_kind not in ('advance', 'partial') or new.number is null
          or new.status = 'cancelled' or f.id is null or f.type <> 'invoice' or f.invoice_kind <> 'final'
-         or f.status = 'cancelled' or f.client_id <> new.client_id then
+         or f.status = 'cancelled' or f.number is not null or f.client_id <> new.client_id then
         raise exception using errcode = 'MI021',
-          message = 'Only an issued advance or partial invoice can be deducted, by a final invoice of the same client.';
+          message = 'Only an issued advance or partial invoice can be deducted, by a draft final invoice of the same client.';
       end if;
     end if;
   end if;
@@ -1053,9 +1054,10 @@ begin
     for adv in update documents set final_invoice_id = inv_id
                where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('advance', 'partial')
                  and number is not null and status <> 'cancelled' and final_invoice_id is null
-               returning id loop
+               returning id, number loop
       insert into document_events (document_id, type, detail)
-      values (adv.id, 'deposit_linked', jsonb_build_object('final_id', inv_id));
+      values (adv.id, 'deposit_linked', jsonb_build_object('final_id', inv_id)),
+             (inv_id, 'deposit_linked', jsonb_build_object('invoice_id', adv.id, 'invoice_number', adv.number));
       linked := linked + 1;
     end loop;
   end if;

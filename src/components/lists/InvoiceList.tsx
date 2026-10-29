@@ -14,6 +14,7 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { displayStatus, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
+import { invoiceKindBadge } from '@/lib/document-labels'
 import type { BookamatState, InvoiceKind } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -129,7 +130,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     <>
       {doc.invoice_kind && doc.invoice_kind !== 'standard' && (
         <span className="ml-1.5 inline-flex align-middle text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
-          {t(`deposits.badge.${doc.invoice_kind}`)}
+          {invoiceKindBadge(t, doc.invoice_kind)}
         </span>
       )}
       {doc.number && !doc.pdf_path && <span className="ml-1.5">{noArchiveMarker}</span>}

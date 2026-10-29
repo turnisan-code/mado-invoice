@@ -25,6 +25,8 @@ export function documentKind(type: DocumentType, isStorno: boolean): DocumentKin
 export const docTitle = (t: TFn, kind: DocumentKind, invoiceKind?: InvoiceKind | null) =>
   kind === 'invoice' && invoiceKind && invoiceKind !== 'standard' ? t(`deposits.title.${invoiceKind}`) : t(`pdfPortal.title.${kind}`)
 export const invoiceKindLabel = (t: TFn, kind: InvoiceKind) => t(`deposits.kinds.${kind}`)
+// The short marker lists show next to the number of an advance, partial or final invoice.
+export const invoiceKindBadge = (t: TFn, kind: Exclude<InvoiceKind, 'standard'>) => t(`deposits.badge.${kind}`)
 export const docNumberLabel = (t: TFn, kind: DocumentKind) => t(`pdfPortal.numberLabel.${kind}`)
 export const recipientLabel = (t: TFn, kind: DocumentKind) => t(`pdfPortal.recipient.${kind}`)
 export const docTypeLabel = (t: TFn, type: DocumentType) => t(`docTypes.${type}`)

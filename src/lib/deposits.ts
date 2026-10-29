@@ -475,16 +475,23 @@ export async function linkDeposit(supabase: SupabaseClient, finalId: string, inv
     .eq('id', finalId).eq('type', 'invoice').is('number', null)
   if (kindErr) throw failure(kindErr)
   const { data, error } = await supabase.from('documents').update({ final_invoice_id: finalId })
-    .eq('id', invoiceId).is('final_invoice_id', null).select('id')
+    .eq('id', invoiceId).is('final_invoice_id', null).select('id, number')
   if (error) throw failure(error)
   if (!data?.length) return 'taken'
-  await logEvent(supabase, invoiceId, 'deposit_linked', { final_id: finalId })
+  await Promise.all([
+    logEvent(supabase, invoiceId, 'deposit_linked', { final_id: finalId }),
+    logEvent(supabase, finalId, 'deposit_linked', { invoice_id: invoiceId, invoice_number: data[0].number }),
+  ])
   return 'ok'
 }
 
 export async function unlinkDeposit(supabase: SupabaseClient, finalId: string, invoiceId: string): Promise<void> {
   const { data, error } = await supabase.from('documents').update({ final_invoice_id: null })
-    .eq('id', invoiceId).eq('final_invoice_id', finalId).select('id')
+    .eq('id', invoiceId).eq('final_invoice_id', finalId).select('id, number')
   if (error) throw failure(error)
-  if (data?.length) await logEvent(supabase, invoiceId, 'deposit_released', { final_id: finalId, reason: 'removed' })
+  if (!data?.length) return
+  await Promise.all([
+    logEvent(supabase, invoiceId, 'deposit_released', { final_id: finalId, reason: 'removed' }),
+    logEvent(supabase, finalId, 'deposit_released', { invoice_id: invoiceId, invoice_number: data[0].number, reason: 'removed' }),
+  ])
 }
