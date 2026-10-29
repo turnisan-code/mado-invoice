@@ -1,6 +1,6 @@
 import { google } from 'googleapis'
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/auth'
+import { requireUser, settingsUnavailable } from '@/lib/auth'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected, recordGoogleError } from '@/lib/google/client'
 import { GOOGLE_FOLDER_TRASHED_MESSAGE } from '@/lib/google/reauth'
 
@@ -16,7 +16,7 @@ export async function POST() {
     .from('settings')
     .select('id, gmail_email, gmail_access_token, gmail_refresh_token, gmail_token_expiry, drive_folder_id')
     .single()
-  if (error || !settings) return NextResponse.json({ error: error?.message ?? 'Settings not found' }, { status: 500 })
+  if (error || !settings) return settingsUnavailable(error)
   if (!settings.gmail_refresh_token) return googleNotConnected(settings)
 
   const authClient = getAuthorizedGoogle(settings, supabase)

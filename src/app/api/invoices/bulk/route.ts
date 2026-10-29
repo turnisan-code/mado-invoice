@@ -1,8 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
 import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
+import { apiError, databaseError, invalidJson, isUuidList, issueFailure, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
-import { asDbError, canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage } from '@/lib/status'
+import { canTransition, DOCUMENT_STATUSES } from '@/lib/status'
 import { IssueCheckError } from '@/lib/utils/issue-checks'
 import { clientDisplayName, type NamedClient } from '@/lib/utils/clients'
 import { logEvent } from '@/lib/events'
@@ -29,30 +29,31 @@ function isPastIsoDate(value: unknown): value is string {
 }
 
 export async function PATCH(req: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { t, lang } = await getT()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-  const body = await req.json().catch(() => null)
-  if (!Array.isArray(body?.ids) || !body.ids.length || typeof body.status !== 'string') {
-    return NextResponse.json({ error: 'ids and status required' }, { status: 400 })
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  if (!isUuidList(body.ids) || typeof body.status !== 'string') {
+    return apiError(400, 'invalid_request', 'ids and status required')
   }
+  const ids = body.ids
   const target = TARGETS.find(s => s === body.status)
-  if (!target) return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+  if (!target) return apiError(400, 'invalid_status', 'Invalid status')
   const paidDate: unknown = body.paidDate ?? today()
   const method: unknown = body.method ?? 'bank'
   if (target === 'paid' && (!isPastIsoDate(paidDate) || (method !== 'bank' && method !== 'cash'))) {
-    return NextResponse.json({ error: t('lifecycle.paymentDateInvalid') }, { status: 400 })
+    return apiError(400, 'payment_date_invalid', 'Invalid payment date or method')
   }
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
     .select(`id, number, status, date, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEM_COLS}, payments(amount, kind)`)
-    .in('id', body.ids)
+    .in('id', ids)
     .eq('type', 'invoice')
     .in('status', sourcesFor(target))
-  if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
+  if (lookupErr) return databaseError(lookupErr)
   const invoices = docs ?? []
 
   // Drafts get a number assigned (sequentially) first, plus their archive copy; issuing also sets them to 'sent'.
@@ -65,12 +66,14 @@ export async function PATCH(req: Request) {
       if (d.status === 'draft') d.status = 'sent'
     } catch (err) {
       if (err instanceof IssueCheckError) {
+        // The toast's title names the draft, so it is worded here in the UI language.
+        const { t, lang } = await getT()
         // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
         const client = clientDisplayName(d.clients as unknown as NamedClient | null)
         const document = d.number ?? t('editor.bulk.draft', { client, date: formatDate(d.date, lang) })
-        return NextResponse.json({ error: t('editor.bulk.incomplete', { document }), problems: err.problems, documentId: d.id, issued }, { status: 422 })
+        return apiError(422, 'incomplete', t('editor.bulk.incomplete', { document }), { problems: err.problems, documentId: d.id, issued })
       }
-      return NextResponse.json({ error: lifecycleErrorMessage(asDbError(err), t), issued }, { status: 500 })
+      return issueFailure(err, 'issue_failed', { issued })
     }
   }
 
@@ -95,7 +98,7 @@ export async function PATCH(req: Request) {
       .filter(r => r.amount > 0)
     if (rows.length) {
       const { error: payErr } = await supabase.from('payments').insert(rows)
-      if (payErr) return NextResponse.json({ error: payErr.message }, { status: 500 })
+      if (payErr) return databaseError(payErr)
       for (const r of rows) {
         await logEvent(supabase, r.document_id, 'payment_added', { amount: r.amount, date: r.date, kind: r.kind, method: r.method })
       }
@@ -106,37 +109,36 @@ export async function PATCH(req: Request) {
       .in('id', invoices.map(d => d.id))
       .in('status', DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid')))
       .select('id')
-    if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t) }, { status: 500 })
+    if (error) return databaseError(error)
     const from = new Map(invoices.map(d => [d.id, d.status]))
     for (const { id } of updated ?? []) {
       await logEvent(supabase, id, 'status_changed', { from: from.get(id), to: 'paid' })
     }
   }
 
-  return NextResponse.json({ updated: invoices.length, skipped: body.ids.length - invoices.length })
+  return NextResponse.json({ updated: invoices.length, skipped: ids.length - invoices.length })
 }
 
 // Only drafts can be deleted; issued invoices must be kept and are skipped (documents_delete_guard
 // rejects them in the database as well).
 export async function DELETE(req: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
 
-  const body = await req.json().catch(() => null)
-  if (!Array.isArray(body?.ids) || !body.ids.length) {
-    return NextResponse.json({ error: 'ids required' }, { status: 400 })
-  }
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  if (!isUuidList(body.ids)) return apiError(400, 'invalid_request', 'ids required')
+  const ids = body.ids
 
-  const { data: deleted, error } = await supabase
+  const { data: deleted, error } = await auth.supabase
     .from('documents')
     .delete()
-    .in('id', body.ids)
+    .in('id', ids)
     .eq('type', 'invoice')
     .is('number', null)
     .select('id')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return databaseError(error)
 
   const count = deleted?.length ?? 0
-  return NextResponse.json({ deleted: count, skipped: body.ids.length - count })
+  return NextResponse.json({ deleted: count, skipped: ids.length - count })
 }

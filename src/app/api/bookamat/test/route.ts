@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireUser } from '@/lib/auth'
+import { requireUser, settingsUnavailable } from '@/lib/auth'
 import { BOOKAMAT_SETTINGS_COLUMNS, BookamatError, credentialsOf, fetchBookamatAccounts, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { today } from '@/lib/utils/document'
@@ -12,7 +12,7 @@ export async function POST() {
   const { supabase } = auth
 
   const { data, error } = await supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single()
-  if (error || !data) return NextResponse.json({ error: error?.message ?? 'Settings not found' }, { status: 500 })
+  if (error || !data) return settingsUnavailable(error)
   const settings = data as unknown as BookamatSettings
   if (!settings.bookamat_username || !settings.bookamat_api_key) {
     return NextResponse.json({ error: 'Bookamat is not configured', code: 'not_configured' }, { status: 400 })

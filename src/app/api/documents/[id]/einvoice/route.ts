@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { apiError, isUuid, requireUser } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
 import { DocumentNotFoundError } from '@/lib/pdf/render'
 import { EInvoiceError } from '@/lib/einvoice/common'
@@ -16,9 +16,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'format must be ebinterface or ubl', code: 'format' }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   try {
     const { xml, filename, number, attached } = await exportEInvoice(supabase, id, format)
@@ -31,9 +32,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     })
   } catch (err) {
-    if (err instanceof DocumentNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 })
+    if (err instanceof DocumentNotFoundError) return apiError(404, 'not_found', err.message)
     if (err instanceof EInvoiceError) return NextResponse.json({ error: err.message, code: err.code }, { status: 422 })
     console.error('[documents/einvoice]', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'E-invoice unavailable' }, { status: 500 })
+    return apiError(500, 'database', err instanceof Error ? err.message : 'E-invoice unavailable')
   }
 }

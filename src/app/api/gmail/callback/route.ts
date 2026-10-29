@@ -13,14 +13,16 @@ export async function GET(req: NextRequest) {
   if (!auth.ok) return auth.response
   const { supabase } = auth
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+  // A browser navigation, so every failure lands back in Settings, which says it in the UI language.
+  const failed = () => clearState(NextResponse.redirect(`${appUrl}/settings?gmail=error`))
+
   const state = req.nextUrl.searchParams.get('state')
   const expectedState = req.cookies.get(OAUTH_STATE_COOKIE.name)?.value
   if (!state || !expectedState || state !== expectedState) {
-    return clearState(NextResponse.json({ error: 'Invalid OAuth state' }, { status: 400 }))
+    console.error('[gmail/callback] OAuth state missing or not matching')
+    return failed()
   }
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL
-  const failed = () => clearState(NextResponse.redirect(`${appUrl}/settings?gmail=error`))
 
   const code = req.nextUrl.searchParams.get('code')
   if (!code) return failed()
