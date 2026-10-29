@@ -8,7 +8,7 @@ import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/type
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
 // Failures the UI words itself (books.errors.<code>, with `detail` as variables). 'bookamat'
-// carries Bookamat's own message.
+// carries Bookamat's own message: why it refused a booking is the most useful thing to show.
 export type BookamatErrorCode =
   | 'not_configured' | 'not_found' | 'not_issued' | 'not_eur' | 'not_settled' | 'nothing_to_book' | 'no_items'
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
@@ -25,14 +25,18 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are
-// worded by api-errors, and only a payload without any known code falls back to its message.
+// worded by api-errors, and a payload without any known code gets `fallback`. Only Bookamat's own
+// answer ('bookamat') is shown as it came; the text of any other failure (the database's, a
+// server's) goes to the console.
 export function bookamatErrorMessage(t: TFn, payload: unknown, fallback = t('common.unknownError')): string {
   const p = (payload && typeof payload === 'object' ? payload : {}) as { error?: unknown; code?: unknown; detail?: unknown }
-  const message = typeof p.error === 'string' && p.error ? p.error : fallback
+  const raw = typeof p.error === 'string' && p.error ? p.error : null
   const code = ERROR_CODES.find(c => c === p.code)
-  if (!code) return knownApiError(t, p) ?? message
   const detail = p.detail && typeof p.detail === 'object' ? p.detail as ErrorDetail : {}
-  return t(`books.errors.${code}` as DictKey, { message, ...detail })
+  if (code === 'bookamat') return t('books.errors.bookamat', { ...detail, message: raw ?? fallback })
+  const known = code ? t(`books.errors.${code}` as DictKey, detail) : knownApiError(t, p)
+  if (raw && (!known || code === 'database')) console.error('[bookamat] failed:', p.code ?? '', raw)
+  return known ?? fallback
 }
 
 // ─── Plan: what a document books ─────────────────────────────────────────────

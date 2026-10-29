@@ -4,6 +4,7 @@ import { useId, useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight, Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import type { PostgrestError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +14,7 @@ import { Select } from '@/components/ui/select'
 import { formatMoney } from '@/lib/utils/document'
 import { catalogueName } from '@/lib/utils/catalogue'
 import { useT } from '@/lib/i18n/client'
+import { dbErrorMessage } from '@/lib/api-errors'
 import type { DictKey } from '@/lib/i18n'
 import type { CatalogueItem, ClientRate } from '@/types'
 
@@ -46,6 +48,12 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
   const draftItem = draft ? catalogue.find(i => i.id === draft.itemId) : undefined
   const perUnit = (price: number, item: CatalogueItem) => `${formatMoney(price)}/${t(`units.${item.unit}` as DictKey)}`
 
+  // The database's own text goes to the console; the toast is worded in the UI language.
+  function failed(err: PostgrestError) {
+    console.error('[rates] write failed:', err.code, err.message)
+    toast.error(dbErrorMessage(t, err))
+  }
+
   function open(next: Draft) { setDraft(next); setError(null) }
   function close() { setDraft(null); setError(null) }
 
@@ -63,7 +71,7 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
     setBusy(false)
     if (err) {
       if (err.code === UNIQUE_VIOLATION) setError(t('rates.exists'))
-      else toast.error(err.message)
+      else failed(err)
       return
     }
     const saved = { ...data, price: Number(data.price) } as ClientRate
@@ -77,7 +85,7 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
     setBusy(true)
     const { error: err } = await createClient().from('client_rates').delete().eq('id', draft.id)
     setBusy(false)
-    if (err) { toast.error(err.message); return }
+    if (err) { failed(err); return }
     setRates(rs => rs.filter(r => r.id !== draft.id))
     close()
     toast.success(t('rates.removed'))

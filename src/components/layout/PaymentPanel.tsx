@@ -17,7 +17,8 @@ import type { BookamatPending, Currency, PaymentKind, PaymentMethod } from '@/ty
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import { logEvent } from '@/lib/events'
-import { canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
+import { canTransition, DOCUMENT_STATUSES, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
+import { dbErrorMessage } from '@/lib/api-errors'
 import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
 import { loadMoneyLock } from '@/lib/deposits'
 
@@ -186,7 +187,7 @@ export default function PaymentPanel({
         .from('payments')
         .insert(rows.map(row => ({ document_id: documentId, ...row })))
         .select()
-      if (error) { toast.error(lifecycleErrorMessage(error, t)); return false }
+      if (error) { toast.error(dbErrorMessage(t, error)); return false }
 
       const next = [...payments, ...(data ?? [])]
       setPayments(next)
@@ -200,7 +201,7 @@ export default function PaymentPanel({
         : kind === 'skonto' ? t('payments.skontoRecorded') : kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
       if (settledSum(next) >= total - 0.005 && PAYABLE.includes(status)) {
         const { data: updated, error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE).select('id')
-        if (statusErr) toast.error(lifecycleErrorMessage(statusErr, t))
+        if (statusErr) toast.error(dbErrorMessage(t, statusErr))
         else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
         toast.success(t('payments.recordedAndPaid', { label }))
         if (!synced && bookamatConfigured) setShowBookamatPrompt(true)
@@ -272,7 +273,7 @@ export default function PaymentPanel({
     // One transaction: the row goes and a paid invoice that is open again reopens (the only way
     // the lifecycle trigger lets paid go back to sent/overdue).
     const { data: reopened, error } = await supabase.rpc('remove_payment', { p_payment_id: id, p_reopen: reopen })
-    if (error) { toast.error(lifecycleErrorMessage(error, t)); setRemoving(false); return }
+    if (error) { toast.error(dbErrorMessage(t, error)); setRemoving(false); return }
     if (removed) await logEvent(supabase, documentId, 'payment_removed', { amount: removed.amount, date: removed.date, kind: removed.kind, method: removed.method })
     if (reopened) await logEvent(supabase, documentId, 'status_changed', { from: 'paid', to: reopened })
     setPayments(next)
