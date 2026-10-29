@@ -17,7 +17,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const { supabase } = auth
   const { t } = await getT()
   const { id } = await params
-  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
 
   const { data, error } = await supabase.rpc('convert_quote_to_invoice', { p_quote_id: id, p_final: true })
   if (error) {
@@ -25,7 +25,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: message, code: error.code }, { status: error.code === 'MI016' || error.code?.startsWith('MI02') ? 409 : 500 })
   }
   const result = data as Converted | null
-  if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
   if (result.existing) return NextResponse.json({ invoiceId: result.invoice_id, existing: true })
 
   const { data: quote } = await supabase.from('documents').select('number').eq('id', id).single()

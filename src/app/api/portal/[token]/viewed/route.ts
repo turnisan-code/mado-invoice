@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { apiError, databaseError } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
 import { isShareExpired } from '@/lib/share'
 
@@ -22,7 +23,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ to
     .select('id, number, share_expires_at')
     .eq('share_token', token)
     .maybeSingle()
-  if (!doc?.number || isShareExpired(doc.share_expires_at)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!doc?.number || isShareExpired(doc.share_expires_at)) return apiError(404, 'not_found', 'Not found')
 
   const { data: first, error } = await supabase
     .from('documents')
@@ -30,7 +31,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ to
     .eq('id', doc.id)
     .is('portal_viewed_at', null)
     .select('id')
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return databaseError(error)
   if (first?.length) {
     await logEvent(supabase, doc.id, 'portal_viewed', { first: true })
     return NextResponse.json({ ok: true, counted: true })
