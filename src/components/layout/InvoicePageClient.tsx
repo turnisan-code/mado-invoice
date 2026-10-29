@@ -3,6 +3,7 @@
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import ReminderButton from '@/components/layout/ReminderButton'
+import EInvoiceButton from '@/components/layout/EInvoiceButton'
 import { formatDate, roundCents, today } from '@/lib/utils/document'
 import { canRemind } from '@/lib/status'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
@@ -60,6 +61,11 @@ export default function InvoicePageClient({
           document={document}
         />
       </div>
+      {document.number && (
+        <div className="flex justify-end -mt-3">
+          <EInvoiceButton documentId={document.id} />
+        </div>
+      )}
       <PaymentPanel
         documentId={document.id}
         number={document.number ?? null}

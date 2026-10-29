@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey, UiLang } from '@/lib/i18n'
 import { toast } from 'sonner'
-import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal } from 'lucide-react'
+import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, CreditCard, Hash, FileText, Plug, SlidersHorizontal, FileCode } from 'lucide-react'
 import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/reminder-templates'
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
@@ -84,6 +84,7 @@ const NAV_ITEMS = [
   { id: 'defaults',     labelKey: 'settings.nav.defaults',     Icon: SlidersHorizontal },
   { id: 'footer',       labelKey: 'settings.nav.footer',       Icon: FileText },
   { id: 'templates',    labelKey: 'settings.nav.templates',    Icon: Mail },
+  { id: 'einvoice',     labelKey: 'einvoice.settings.nav',     Icon: FileCode },
   { id: 'integrations', labelKey: 'settings.nav.integrations', Icon: Plug },
 ] as const
 
@@ -1859,6 +1860,8 @@ export default function SettingsForm({ settings }: Props) {
           </IntegrationCard>
         </div>}
 
+        {activeSection === 'einvoice' && <EInvoiceCard settings={settings} />}
+
       </div>
 
       <ConfirmDialog
@@ -1882,5 +1885,63 @@ export default function SettingsForm({ settings }: Props) {
         onCancel={() => setConfirmRemoveKey(false)}
       />
     </div>
+  )
+}
+
+// ── E-invoice ─────────────────────────────────────────────────────────────────
+// The studio's Peppol address; empty sends 9914 (Austrian VAT number) with the UID.
+function EInvoiceCard({ settings }: { settings: PublicSettings | null }) {
+  const supabase = createClient()
+  const { t } = useT()
+  const uid = useId()
+  const [peppol, setPeppol] = useState({ scheme: settings?.peppol_scheme ?? '', id: settings?.peppol_id ?? '' })
+  const [error, setError] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const ownUid = normalizeVatId(settings?.uid_number ?? '')
+
+  function change(field: 'scheme' | 'id', value: string) {
+    setPeppol(p => ({ ...p, [field]: value }))
+    setError(null)
+    setDirty(true)
+  }
+
+  async function save() {
+    if (!settings) return
+    const scheme = peppol.scheme.trim()
+    const id = peppol.id.trim()
+    if (scheme && !/^\d{4}$/.test(scheme)) { setError(t('einvoice.settings.schemeInvalid')); return }
+    if (!scheme !== !id) { setError(t('einvoice.settings.incomplete')); return }
+    setSaving(true)
+    const { error: saveError } = await supabase.from('settings').update({ peppol_scheme: scheme || null, peppol_id: id || null }).eq('id', settings.id)
+    setSaving(false)
+    if (saveError) { toast.error(saveError.message); return }
+    setPeppol({ scheme, id })
+    setDirty(false)
+    toast.success(t('einvoice.settings.saved'))
+  }
+
+  return (
+    <SectionCard title={t('einvoice.settings.title')} description={t('einvoice.settings.description')} dirty={dirty} saving={saving} onSave={save}>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <label className={lbl} htmlFor={`${uid}-peppol-scheme`}>{t('einvoice.settings.scheme')}</label>
+          <input id={`${uid}-peppol-scheme`} className={inp} value={peppol.scheme} inputMode="numeric" autoComplete="off" placeholder="9914"
+            aria-invalid={!!error || undefined} aria-describedby={`${uid}-peppol-hint`}
+            onChange={e => change('scheme', e.target.value)} />
+        </div>
+        <div className="space-y-1.5 col-span-2">
+          <label className={lbl} htmlFor={`${uid}-peppol-id`}>{t('einvoice.settings.id')}</label>
+          <input id={`${uid}-peppol-id`} className={inp} value={peppol.id} autoComplete="off" autoCapitalize="none" placeholder={ownUid || 'ATU12345678'}
+            aria-invalid={!!error || undefined} aria-describedby={`${uid}-peppol-hint`}
+            onChange={e => change('id', e.target.value)} />
+        </div>
+      </div>
+      {error
+        ? <p id={`${uid}-peppol-hint`} className={err}>{error}</p>
+        : <p id={`${uid}-peppol-hint`} className="text-xs text-neutral-500 dark:text-neutral-400">
+            {ownUid ? t('einvoice.settings.defaultHint', { uid: ownUid }) : t('einvoice.settings.defaultHintNoUid')}
+          </p>}
+    </SectionCard>
   )
 }
