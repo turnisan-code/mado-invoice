@@ -56,7 +56,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
     setInfo(null)
     setReferenceError(false)
     try {
-      await flushPendingEdits(documentId)
+      if (!(await flushPendingEdits(documentId))) { toast.error(t('messages.unsavedEdits')); setOpen(false); return }
       const { data: doc, error } = await supabase
         .from('documents')
         // All columns, so the dialog also opens before 20261101_print.sql adds issued_total.

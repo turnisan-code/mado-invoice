@@ -134,8 +134,10 @@ export function hasMoneyToBook(doc: StateInput): boolean {
 }
 
 export function bookamatState(doc: StateInput): BookamatState {
-  if (doc.bookamat_error) return 'failed'
-  if ((doc.bookamat_bookings?.length ?? 0) > 0 || doc.bookamat_booking_id) return 'synced'
+  const synced = (doc.bookamat_bookings?.length ?? 0) > 0 || !!doc.bookamat_booking_id
+  // An old failure on a document that has nothing to book (e.g. settled only by a credit note) is moot.
+  if (doc.bookamat_error && (synced || hasMoneyToBook(doc))) return 'failed'
+  if (synced) return 'synced'
   return hasMoneyToBook(doc) ? 'unsynced' : 'none'
 }
 

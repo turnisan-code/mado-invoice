@@ -42,7 +42,7 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
     if (problem) return
     setBusy(true)
     try {
-      await flushPendingEdits(quoteId)
+      if (!(await flushPendingEdits(quoteId))) { toast.error(t('messages.unsavedEdits')); return }
       const res = await fetch(`/api/quotes/${quoteId}/advance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
