@@ -875,7 +875,7 @@ export const de = {
       projectInvoiced: 'Aus Projekt {project} erstellt: {entries}',
       projectInvoicedPlain: 'Aus einem Projekt erstellt: {entries}',
       released: {
-        line_removed: 'Wieder offen: {entries} — die Position wurde aus dem Entwurf entfernt',
+        line_removed: 'Wieder offen: {entries} — aus dem Entwurf entfernt',
         storno: 'Wieder offen: {entries} — die Rechnung wurde storniert',
         cancelled: 'Wieder offen: {entries} — der Entwurf wurde verworfen',
         manual: 'Auf der Projektseite wieder als offen markiert: {entries}',
@@ -895,7 +895,7 @@ export const de = {
       removeHint: 'Wird eine Position später aus dem Entwurf entfernt, sind ihre Einträge wieder offen.',
     },
     deposits: {
-      moneyLocked: 'Diese Anzahlungsrechnung wird mit dem erhaltenen Geld in einer ausgestellten Schlussrechnung abgezogen. Vor dem Ändern von Zahlungen oder Rückzahlungen die Schlussrechnung stornieren.',
+      moneyLocked: 'Das auf die Anzahlungsrechnung erhaltene Geld wird in einer ausgestellten Schlussrechnung abgezogen. Zahlungen und Rückzahlungen erst ändern, wenn die Schlussrechnung storniert ist.',
       paymentsLocked: 'Schlussrechnung {number} zieht das hier erhaltene Geld ab. Vor dem Entfernen einer Zahlung die Schlussrechnung stornieren.',
       refundsLocked: 'Schlussrechnung {number} zieht das auf {invoice} erhaltene Geld ab. Vor dem Erfassen oder Entfernen einer Rückzahlung die Schlussrechnung stornieren.',
     },

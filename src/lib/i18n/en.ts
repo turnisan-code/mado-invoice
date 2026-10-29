@@ -874,7 +874,7 @@ export const en = {
       projectInvoiced: 'Created from project {project}: {entries}',
       projectInvoicedPlain: 'Created from a project: {entries}',
       released: {
-        line_removed: 'Unbilled again: {entries} — their line was removed from the draft',
+        line_removed: 'Unbilled again: {entries} — removed from the draft',
         storno: 'Unbilled again: {entries} — the invoice was cancelled',
         cancelled: 'Unbilled again: {entries} — the draft was cancelled',
         manual: 'Marked unbilled on the project page: {entries}',
@@ -894,7 +894,7 @@ export const en = {
       removeHint: 'Removing a line from the draft later makes its entries unbilled again.',
     },
     deposits: {
-      moneyLocked: 'This advance invoice is deducted on an issued final invoice with the money received on it. Cancel the final invoice with a Storno before changing its payments or refunds.',
+      moneyLocked: 'The money received on the advance invoice is deducted on an issued final invoice. Change payments and refunds only once that final invoice is cancelled with a Storno.',
       paymentsLocked: 'Final invoice {number} deducts the money received here. Cancel it with a Storno before removing a payment.',
       refundsLocked: 'Final invoice {number} deducts the money received on {invoice}. Cancel it with a Storno before recording or removing a refund here.',
     },
