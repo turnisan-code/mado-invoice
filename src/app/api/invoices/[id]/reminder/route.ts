@@ -7,7 +7,7 @@ import {
 import { today } from '@/lib/utils/document'
 import { canRemind } from '@/lib/status'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
-import { getReminderPdf } from '@/lib/pdf/snapshot'
+import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { pdfFilename, type PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, reminderFilename, renderReminderPdf } from '@/lib/pdf/reminder'
 import { fillSubject, fillTemplate, isPlainAddress, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
@@ -90,7 +90,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json(draft)
 }
 
-// mode 'gmail' sends the reviewed email with the Mahnung and the invoice copy attached;
+// mode 'gmail' sends the reviewed email with the Mahnung (the open balance as of today) and the
+// invoice as issued (its frozen copy, as every outgoing copy) attached;
 // mode 'manual' only records a reminder the owner sent from their own email app or by post.
 // Either way the reminder is logged and the invoice moves up one level.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -104,7 +105,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const loaded = await loadInvoice(supabase, id)
   if ('response' in loaded) return loaded.response
   const { settings, invoice } = loaded
-  const number = invoice.number as string
   const totals = invoiceTotals(invoice)
 
   const mode: Mode = payload.mode === 'manual' ? 'manual' : 'gmail'
@@ -132,13 +132,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     let files
     try {
-      const mahnung = await renderReminderPdf(invoice, settings, level, totals)
+      const [mahnung, issued] = await Promise.all([
+        renderReminderPdf(invoice, settings, level, totals),
+        getIssuedPdf(supabase, id, 'on_demand'),
+      ])
       files = [
         { filename: mahnung.filename, content: mahnung.buffer },
-        { filename: pdfFilename(number), content: await getReminderPdf(supabase, invoice, settings) },
+        { filename: issued.filename, content: issued.buffer },
       ]
     } catch (err) {
       console.error('[invoices/reminder] PDF failed:', err)
+      if (err instanceof ArchiveError) return NextResponse.json({ error: err.message, code: err.code }, { status: 500 })
       return apiError(500, 'pdf_failed', 'The reminder PDF could not be created')
     }
 
