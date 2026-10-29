@@ -13,10 +13,8 @@ export function archiveErrorMessage(t: TFn, payload: unknown, fallback: string):
   return typeof p.error === 'string' && p.error ? p.error : fallback
 }
 
-// 'reminder' is the dunning attachment: the stored copy while nothing is paid, otherwise a
-// render with the payments and the open balance.
-export async function fetchIssuedPdf(documentId: string, t: TFn, purpose: 'archive' | 'reminder' = 'archive'): Promise<Blob> {
-  const res = await fetch(`/api/documents/${documentId}/pdf${purpose === 'reminder' ? '?for=reminder' : ''}`)
+export async function fetchIssuedPdf(documentId: string, t: TFn): Promise<Blob> {
+  const res = await fetch(`/api/documents/${documentId}/pdf`)
   if (!res.ok) throw new Error(archiveErrorMessage(t, await res.json().catch(() => ({})), res.statusText))
   return res.blob()
 }

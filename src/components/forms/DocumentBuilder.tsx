@@ -502,7 +502,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         preview={gmailPreview}
         setPreview={setGmailPreview}
         sending={gmailSending}
-        driveConfigured={!!settings.drive_folder_id}
+        driveConfigured={settings.drive_configured}
         onClose={closeGmailPreview}
         onSend={() => void confirmSendViaGmail()}
       />
