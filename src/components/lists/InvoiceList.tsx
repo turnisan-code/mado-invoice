@@ -202,6 +202,11 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        // Drafts before the incomplete one were issued.
+        if (res.status === 422) {
+          const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
+          if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
+        }
         toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: data.error ?? t('common.failed') }))
         return
       }
