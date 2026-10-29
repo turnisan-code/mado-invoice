@@ -195,6 +195,7 @@ export const de = {
       too_many_files: 'Zu viele PDFs für einen Download — einen kürzeren Zeitraum wählen.',
       nothing_to_export: 'Für diesen Zeitraum gibt es nichts zu exportieren.',
       server_error: 'Auf dem Server ist etwas schiefgegangen. Gleich noch einmal versuchen.',
+      mfa_required: 'Die Anmeldung mit dem Code aus der Authenticator-App bestätigen, dann den Schritt wiederholen.',
     },
     logo: {
       removeTitle: 'Logo entfernen?',
