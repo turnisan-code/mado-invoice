@@ -60,7 +60,7 @@ export default function ConvertDocumentButton({ kind, sourceId }: { kind: keyof 
     if (loading) return
     setLoading(true)
     try {
-      await flushPendingEdits(sourceId)
+      if (!(await flushPendingEdits(sourceId))) { toast.error(t('messages.unsavedEdits')); return }
       const res = await fetch(k.url(sourceId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       const data = await res.json().catch(() => ({}))
       const href = res.ok ? k.target(data) : null

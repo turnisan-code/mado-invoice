@@ -13,7 +13,7 @@ import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
 import { toPublicSettings } from '@/lib/public-settings'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import Link from 'next/link'
-import { ArrowLeft, Repeat } from 'lucide-react'
+import { ArrowLeft, Info, Repeat } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
 import type { RecurringSchedule } from '@/types'
@@ -34,6 +34,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   if (!doc) notFound()
   if (!settings) return <SettingsMissing />
+
+  // An issued final invoice that deducts this one keeps that deduction: no credit note here
+  // (create_credit_note refuses it, MI020) until the final invoice is cancelled.
+  const { data: finalInvoice } = doc.final_invoice_id
+    ? await supabase.from('documents').select('id, number, status').eq('id', doc.final_invoice_id).maybeSingle()
+    : { data: null }
+  const deductedOn = finalInvoice?.number && finalInvoice.status !== 'cancelled'
+    ? { id: finalInvoice.id as string, number: finalInvoice.number as string }
+    : null
 
   const schedule = (scheduleRow ?? null) as RecurringSchedule | null
   const publicSettings = toPublicSettings(settings)
@@ -75,12 +84,23 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} number={doc.number} kind="invoice" invoiceKind={doc.invoice_kind} language={doc.language} initialToken={doc.share_token ?? null} driveReady={publicSettings.drive_configured} />}
-          {doc.number && doc.status !== 'cancelled' && <ConvertDocumentButton kind="credit_note" sourceId={doc.id} />}
+          {doc.number && doc.status !== 'cancelled' && !deductedOn && <ConvertDocumentButton kind="credit_note" sourceId={doc.id} />}
           {doc.status !== 'cancelled' && !schedule && <MakeRecurringDialog invoiceId={doc.id} defaultName={recurringName} />}
           <DuplicateDocumentButton docId={doc.id} docType="invoice" backTo="/invoices" />
           <DeleteDocumentButton id={doc.id} backTo="/invoices" docNumber={doc.number} docType="invoice" isTemplate={!!schedule} />
         </div>
       </div>
+      {doc.number && doc.status !== 'cancelled' && deductedOn && (
+        <p className="flex items-start gap-2 text-sm text-neutral-500 dark:text-neutral-400">
+          <Info size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>
+            {t('deposits.errors.deducted')}{' '}
+            <Link href={`/invoices/${deductedOn.id}`} className="underline underline-offset-2 hover:text-neutral-700 dark:hover:text-neutral-200">
+              {t('deposits.quote.openFinal', { number: deductedOn.number })}
+            </Link>
+          </span>
+        </p>
+      )}
       <InvoicePageClient
         type="invoice"
         settings={publicSettings}

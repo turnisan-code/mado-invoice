@@ -35,9 +35,12 @@ export type FlushEditsDetail = { documentId: string; waitUntil: (pending: Promis
 
 // The server renders the frozen PDF from the database, so an edit still waiting for the
 // builder's autosave on the same page has to be written before anything issues the document.
-export async function flushPendingEdits(documentId: string): Promise<void> {
+// False when the builder could not write them (it rejects its waitUntil promise): the database
+// copy is stale, so the caller must not act on it.
+export async function flushPendingEdits(documentId: string): Promise<boolean> {
   const pending: Promise<unknown>[] = []
   const detail: FlushEditsDetail = { documentId, waitUntil: p => { pending.push(p) } }
   window.dispatchEvent(new CustomEvent<FlushEditsDetail>(FLUSH_EDITS_EVENT, { detail }))
-  await Promise.allSettled(pending)
+  const results = await Promise.allSettled(pending)
+  return results.every(r => r.status === 'fulfilled')
 }

@@ -193,6 +193,7 @@ export const en = {
       too_many_files: 'Too many PDFs for one download — choose a shorter period.',
       nothing_to_export: 'There is nothing to export for this period.',
       server_error: 'Something went wrong on the server. Try again in a moment.',
+      mfa_required: 'Sign in again and confirm with the code from your authenticator app, then repeat the step.',
     },
     logo: {
       removeTitle: 'Remove the logo?',
@@ -213,6 +214,8 @@ export const en = {
     },
     googleFailed: 'Google reported an error. Try again in a moment; if it keeps happening, reconnect Google.',
     recurringStopped: 'Generating stopped partway. Check the schedule and its invoices, then try again.',
+    portalPdfUnavailable: 'The PDF cannot be downloaded right now. Please try again in a moment. If the problem persists, please contact the sender.',
+    unsavedEdits: 'The latest changes could not be saved, so nothing was done. Check the connection and try again.',
   },
   status: {
     draft: 'Draft',
