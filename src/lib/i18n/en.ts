@@ -1755,6 +1755,7 @@ export const en = {
       buyer_reference: 'Peppol needs a buyer reference or order number.',
       buyer_endpoint: 'This client has no Peppol ID, and none follows from its VAT number — add it on the client.',
       seller_endpoint: 'Your own Peppol ID is missing — enter it under Settings → E-invoice.',
+      line_amount: 'A line amount does not add up (quantity × price less the line discount) — check the lines and save again.',
     },
     history: {
       exported: 'Exported as an e-invoice ({format})',

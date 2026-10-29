@@ -19,12 +19,12 @@ import { decimal } from './xml'
 
 export type EInvoiceErrorCode =
   | 'not_issued' | 'unsupported_type' | 'currency' | 'client_country'
-  | 'buyer_reference' | 'buyer_endpoint' | 'seller_endpoint'
+  | 'buyer_reference' | 'buyer_endpoint' | 'seller_endpoint' | 'line_amount'
 
 // A document that cannot become this e-invoice; the UI words the code (einvoice.errors.*).
-// 'line_amount' is a fault in the line maths, not in the document, so the UI shows its message.
+// 'line_amount' guards the line maths: quantity × price less the line discount must give the printed net.
 export class EInvoiceError extends Error {
-  constructor(readonly code: EInvoiceErrorCode | 'line_amount', message: string) {
+  constructor(readonly code: EInvoiceErrorCode, message: string) {
     super(message)
     this.name = 'EInvoiceError'
   }

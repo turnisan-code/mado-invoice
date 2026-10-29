@@ -1757,6 +1757,7 @@ export const de = {
       buyer_reference: 'Peppol braucht eine Auftragsreferenz oder Bestellnummer.',
       buyer_endpoint: 'Der Kunde hat keine Peppol-ID, und aus seiner UID-Nummer ergibt sich keine — beim Kunden ergänzen.',
       seller_endpoint: 'Die eigene Peppol-ID fehlt — unter Einstellungen → E-Rechnung eintragen.',
+      line_amount: 'Ein Positionsbetrag geht nicht auf (Menge × Preis abzüglich Positionsrabatt) — Positionen prüfen und erneut speichern.',
     },
     history: {
       exported: 'Als E-Rechnung exportiert ({format})',
