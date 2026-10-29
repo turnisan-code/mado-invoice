@@ -96,6 +96,7 @@ export async function renderLoadedPdf(
       skonto_days: doc.skonto_days ?? null,
       items,
       totals,
+      payments: doc.payments ?? [],
       reference: await fetchCreditReference(supabase, doc),
     },
   }

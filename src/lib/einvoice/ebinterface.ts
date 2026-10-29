@@ -75,6 +75,16 @@ export function toEbInterface(inv: EInvoice): string {
           line.descriptionLines.map(d => txt('Description', d)),
           req('Quantity', decimal(line.quantity), { Unit: line.unitCode }),
           req('UnitPrice', decimal(line.unitPrice)),
+          // The line's own discount, so Quantity × UnitPrice less it is the LineItemAmount; a
+          // surcharge where it shrinks a credit line.
+          line.discount !== 0 && el('ReductionAndSurchargeListLineItemDetails', null,
+            el(line.discount > 0 ? 'ReductionListLineItem' : 'SurchargeListLineItem', null,
+              req('BaseAmount', amount(line.gross)),
+              line.discountPercent != null && txt('Percentage', decimal(line.discountPercent, 2)),
+              req('Amount', amount(Math.abs(line.discount))),
+              txt('Comment', line.discountReason),
+            ),
+          ),
           delivery(line.period),
           el('TaxItem', null,
             req('TaxableAmount', amount(line.net)),

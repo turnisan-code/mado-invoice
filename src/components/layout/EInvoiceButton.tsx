@@ -16,7 +16,7 @@ import { useT } from '@/lib/i18n/client'
 import type { EInvoiceFormat } from '@/types'
 
 const FORMATS: EInvoiceFormat[] = ['ebinterface', 'ubl']
-const ERROR_CODES: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint']
+const ERROR_CODES: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint', 'line_amount']
 
 type Info = {
   currency: string

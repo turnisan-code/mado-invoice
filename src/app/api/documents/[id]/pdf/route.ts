@@ -13,8 +13,9 @@ async function reminderPdf(supabase: Awaited<ReturnType<typeof createClient>>, i
 
 // Every outgoing copy of a numbered document (download, email, Drive, Bookamat) is this stored
 // PDF. A document issued before archive copies existed gets one on first request.
-// ?for=reminder serves the dunning attachment instead: the stored copy while nothing is paid,
-// otherwise a render with the payments and the open balance that is not stored.
+// ?for=reminder (ReminderButton, for the email app) serves the invoice copy a reminder attaches:
+// the stored copy while nothing is paid, otherwise a render with the payments and the open
+// balance that is not stored.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()

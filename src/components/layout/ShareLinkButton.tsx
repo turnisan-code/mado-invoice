@@ -1,32 +1,39 @@
 'use client'
 
 import { useState } from 'react'
-import { Link2, Check, Loader2, X, HardDrive, Eye, EyeOff, Clock } from 'lucide-react'
+import { Link2, Check, Loader2, X, HardDrive, Eye, EyeOff, Clock, Share2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastApiError } from '@/lib/google/toast'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
 import { isShareExpired } from '@/lib/share'
+import { docTitle, documentLanguage, documentT } from '@/lib/document-labels'
+import type { DocumentKind } from '@/types'
 
 interface Props {
   documentId: string
+  number: string
+  // What the portal calls it: a Storno credit note is shared as a Storno.
+  kind: DocumentKind
+  language: string | null | undefined
   initialToken: string | null
-  driveConfigured: boolean
+  // Saving to Drive needs Google connected and a Drive folder chosen.
+  driveReady: boolean
 }
 
 type ShareState = { token: string | null; expiresAt: string | null; viewedAt: string | null }
 
 const smallBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
+const actionBtn = 'inline-flex items-center gap-1.5 text-sm px-3 min-h-11 sm:min-h-9 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
 
-export default function ShareLinkButton({ documentId, initialToken, driveConfigured }: Props) {
+export default function ShareLinkButton({ documentId, number, kind, language, initialToken, driveReady }: Props) {
   const [share, setShare] = useState<ShareState>({ token: initialToken, expiresAt: null, viewedAt: null })
   const [details, setDetails] = useState(false)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState<'revoke' | 'rotate' | null>(null)
   const [copied, setCopied] = useState(false)
-  const [saveToDrive, setSaveToDrive] = useState(driveConfigured)
   const [driveUploading, setDriveUploading] = useState(false)
   const { t, lang } = useT()
 
@@ -35,6 +42,10 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
     ? `${typeof window !== 'undefined' ? window.location.origin : ''}/portal/${token}`
     : null
   const expired = isShareExpired(share.expiresAt)
+  // Only rendered inside the open dialog, so server and first client render agree.
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+  // The share sheet's title is in the document's language, like the portal page it opens.
+  const shareTitle = `${docTitle(documentT(documentLanguage(language)), kind)} ${number}`
 
   function close() {
     setOpen(false)
@@ -143,10 +154,14 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
     }
   }
 
-  async function handleCopyWithDrive() {
-    await copyLink()
-    if (saveToDrive && driveConfigured) {
-      await uploadToDrive()
+  async function shareLink() {
+    if (!portalUrl) return
+    try {
+      await navigator.share({ title: shareTitle, url: portalUrl })
+    } catch (e) {
+      // Closing the share sheet is no failure; anything else (no target, not allowed) copies.
+      if (e instanceof DOMException && e.name === 'AbortError') return
+      await copyLink()
     }
   }
 
@@ -209,14 +224,30 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
           />
           <button
             type="button"
-            onClick={handleCopyWithDrive}
-            disabled={driveUploading}
+            onClick={copyLink}
             className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-md hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
           >
-            {driveUploading ? <Loader2 size={12} className="animate-spin" /> : copied ? <Check size={12} /> : null}
-            {driveUploading ? t('common.saving') : copied ? t('common.copied') : t('common.copy')}
+            {copied && <Check size={12} aria-hidden="true" />}
+            {copied ? t('common.copied') : t('common.copy')}
           </button>
         </div>
+
+        {(canShare || driveReady) && (
+          <div className="flex flex-wrap gap-2">
+            {canShare && (
+              <button type="button" onClick={shareLink} disabled={busy} className={actionBtn}>
+                <Share2 size={14} aria-hidden="true" />
+                {t('share.share')}
+              </button>
+            )}
+            {driveReady && (
+              <button type="button" onClick={uploadToDrive} disabled={busy} className={actionBtn}>
+                {driveUploading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <HardDrive size={14} aria-hidden="true" />}
+                {driveUploading ? t('common.saving') : t('docs.share.saveToDrive')}
+              </button>
+            )}
+          </div>
+        )}
 
         {details && (
           <ul className="space-y-1 text-xs" aria-live="polite">
@@ -231,19 +262,6 @@ export default function ShareLinkButton({ documentId, initialToken, driveConfigu
               {share.viewedAt ? t('pdfPortal.share.viewed', { date: formatDate(share.viewedAt, lang) }) : t('pdfPortal.share.notViewed')}
             </li>
           </ul>
-        )}
-
-        {driveConfigured && (
-          <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={saveToDrive}
-              onChange={e => setSaveToDrive(e.target.checked)}
-              className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
-            />
-            <HardDrive size={13} className="text-neutral-500 dark:text-neutral-400" aria-hidden="true" />
-            {t('share.alsoDrive')}
-          </label>
         )}
 
         {confirm ? (

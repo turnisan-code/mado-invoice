@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { calcTotals, roundCents, today } from '@/lib/utils/document'
+import { calcTotals, roundCents, settlesBalance, today } from '@/lib/utils/document'
 import { logEvent } from '@/lib/events'
 import { canTransition, creditNoteOpen, creditNoteSettled, DOCUMENT_STATUSES } from '@/lib/status'
 import type { Payment } from '@/types'
@@ -23,6 +23,8 @@ export function documentTotal(d: TotalsDoc): number {
 }
 
 const sum = (rows: { amount: number }[]) => roundCents(rows.reduce((s, p) => s + p.amount, 0))
+// What has settled an invoice: every payment row except dunning fees paid on top.
+const settledSum = (rows: { amount: number; kind?: string | null }[]) => sum(rows.filter(settlesBalance))
 const PAYABLE: readonly string[] = DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid'))
 
 export type CreditApplication = { applied: number; invoiceId: string | null; invoiceNumber: string | null }
@@ -58,7 +60,7 @@ export async function applyCreditNote(supabase: SupabaseClient, creditNoteId: st
   if (invPayments.some(p => p.kind === 'credit' && p.credit_note_id === cn.id)) return none
 
   const refunded = sum(((cn.payments ?? []) as { amount: number; kind: string }[]).filter(p => p.kind === 'refund'))
-  const invoiceOpen = roundCents(documentTotal(inv) - sum(invPayments))
+  const invoiceOpen = roundCents(documentTotal(inv) - settledSum(invPayments))
   const amount = roundCents(Math.min(creditNoteOpen(documentTotal(cn), 0, refunded), invoiceOpen))
   if (amount <= 0) return none
 
@@ -116,16 +118,16 @@ export async function unappliedCreditNotes(supabase: SupabaseClient): Promise<Un
   const candidates = (cns ?? []).filter(c => !done.has(c.id))
   if (!candidates.length) return []
 
-  type Inv = TotalsDoc & { id: string; number: string; payments: { amount: number }[] | null }
+  type Inv = TotalsDoc & { id: string; number: string; payments: { amount: number; kind: string }[] | null }
   const invoices = await inSlices<Inv>([...new Set(candidates.map(c => c.converted_from_id as string))], slice =>
-    supabase.from('documents').select(`id, number, ${TOTAL_COLS}, payments(amount)`).in('id', slice).eq('type', 'invoice').not('number', 'is', null),
+    supabase.from('documents').select(`id, number, ${TOTAL_COLS}, payments(amount, kind)`).in('id', slice).eq('type', 'invoice').not('number', 'is', null),
   )
   const byId = new Map(invoices.map(i => [i.id, i]))
   return candidates.flatMap(c => {
     const inv = byId.get(c.converted_from_id as string)
     if (!inv) return []
     const refunded = sum(((c.payments ?? []) as { amount: number; kind: string }[]).filter(p => p.kind === 'refund'))
-    const amount = roundCents(Math.min(creditNoteOpen(documentTotal(c), 0, refunded), documentTotal(inv) - sum(inv.payments ?? [])))
+    const amount = roundCents(Math.min(creditNoteOpen(documentTotal(c), 0, refunded), documentTotal(inv) - settledSum(inv.payments ?? [])))
     return amount > 0.005 ? [{ id: c.id as string, number: c.number as string, date: c.date as string, invoiceId: inv.id, invoiceNumber: inv.number, amount }] : []
   })
 }
@@ -146,14 +148,14 @@ export async function loadCreditNoteSettlement(supabase: SupabaseClient, doc: Cr
   const [{ data: appliedRows }, { data: source }] = await Promise.all([
     supabase.from('payments').select('id, date, amount').eq('kind', 'credit').eq('credit_note_id', doc.id),
     doc.converted_from_id
-      ? supabase.from('documents').select(`id, type, number, ${TOTAL_COLS}, payments(amount)`).eq('id', doc.converted_from_id).maybeSingle()
+      ? supabase.from('documents').select(`id, type, number, ${TOTAL_COLS}, payments(amount, kind)`).eq('id', doc.converted_from_id).maybeSingle()
       : Promise.resolve({ data: null }),
   ])
   const total = documentTotal(doc)
   const applied = (appliedRows ?? []) as CreditNoteSettlementData['applied']
   const refunds = (doc.payments ?? []).filter(p => p.kind === 'refund')
   const invoice = source?.type === 'invoice'
-    ? { id: source.id as string, number: source.number as string | null, open: roundCents(documentTotal(source) - sum(source.payments ?? [])) }
+    ? { id: source.id as string, number: source.number as string | null, open: roundCents(documentTotal(source) - settledSum(source.payments ?? [])) }
     : null
   const settled = !!doc.number && doc.status === 'sent' && creditNoteSettled(total, sum(applied), sum(refunds))
   return { total, invoice, applied, refunds, settled }
