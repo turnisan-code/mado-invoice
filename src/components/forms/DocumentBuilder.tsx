@@ -19,6 +19,7 @@ import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { preparePdfFonts } from '@/components/pdf/fonts'
+import ProjectLinkWarning from '@/components/projects/ProjectLinkWarning'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { EINVOICE_ERROR_CODES } from '@/lib/einvoice/common'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
@@ -586,7 +587,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         zeroTotal={pendingIssue?.zeroTotal ?? null}
         onConfirm={confirmIssue}
         onCancel={() => setPendingIssue(null)}
-      />
+      >
+        {pendingIssue && type === 'invoice' && editor.docId && <ProjectLinkWarning documentId={editor.docId} />}
+      </IssueDialog>
 
       <RepriceDialog offer={clientRates.offer} currency={currency} onApply={clientRates.applyOffer} onCancel={clientRates.dismissOffer} />
 

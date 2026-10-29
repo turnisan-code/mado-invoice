@@ -18,6 +18,7 @@ import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { DisplayStatus, DocumentStatus, DocumentType, IssueProblem, PaymentKind, PaymentMethod, Settings } from '@/types'
 import { IssueDialog } from '@/components/forms/builder/IssueDialog'
+import ProjectLinkWarning from '@/components/projects/ProjectLinkWarning'
 import { isIssueProblems } from '@/components/forms/builder/IssueProblems'
 import { applyIssueDateInEditor } from '@/components/forms/builder/events'
 import { expectedNumber, termDays, type NumberingSettings } from '@/components/forms/builder/model'
@@ -415,6 +416,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         onCancel={() => setIssue(null)}
       >
         {issue && recordsPayment(issue.status) && paymentFields}
+        {issue && type === 'invoice' && <ProjectLinkWarning documentId={doc.id} />}
       </IssueDialog>
     </div>
   )

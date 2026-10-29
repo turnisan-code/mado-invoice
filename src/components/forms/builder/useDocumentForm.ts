@@ -10,7 +10,7 @@ import { useT } from '@/lib/i18n/client'
 import type { Client, DocumentType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import {
-  AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, savedKeyOf, storedKeyOf, termDays,
+  AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, lineValues, savedKeyOf, storedKeyOf, termDays,
   type EditorDocument, type FormState, type LineItem,
 } from './model'
 import { BUYER_REFERENCE_EVENT, ISSUE_DATE_EVENT, type BuyerReferenceDetail, type IssueDateDetail } from './events'
@@ -178,7 +178,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       if (itemsErr) throw new Error(t('builder.itemsError', { error: itemsErr.message }))
 
       // A cleared date counts as saved: the stored one stays until a new date is entered.
-      savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, items])
+      savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, lineValues(effective.lines)])
       savedOnceRef.current = true
       // Saving or issuing shows the date and due date that were filled in, and keeps the snapshot
       // in step so the next flush does not write the empty values back. An autosave leaves the

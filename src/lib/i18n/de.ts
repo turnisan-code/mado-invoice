@@ -805,7 +805,6 @@ export const de = {
       lineOne: '{count} Position',
       lineOther: '{count} Positionen',
       noRate: 'Einige Stunden haben keinen Satz — Stundensatz im Projekt oder in den Einträgen festlegen.',
-      removeHint: 'Soll ein Eintrag später doch nicht auf diese Rechnung, ihn zuerst auf der Projektseite wieder als offen markieren und erst dann die Position entfernen — sonst bleibt er verrechnet.',
       nothing: 'Nichts Offenes zu verrechnen.',
       nothingSelected: 'Mindestens einen Eintrag auswählen.',
       create: 'Rechnungsentwurf erstellen',
@@ -869,6 +868,36 @@ export const de = {
         payment: 'Zahlungsinformationen',
         uid: 'UID-Nr.',
       },
+    },
+  },
+  records: {
+    history: {
+      projectInvoiced: 'Aus Projekt {project} erstellt: {entries}',
+      projectInvoicedPlain: 'Aus einem Projekt erstellt: {entries}',
+      released: {
+        line_removed: 'Wieder offen: {entries} — die Position wurde aus dem Entwurf entfernt',
+        storno: 'Wieder offen: {entries} — die Rechnung wurde storniert',
+        cancelled: 'Wieder offen: {entries} — der Entwurf wurde verworfen',
+        manual: 'Auf der Projektseite wieder als offen markiert: {entries}',
+      },
+      timeOne: '{count} Zeiteintrag',
+      timeOther: '{count} Zeiteinträge',
+      expenseOne: '{count} Auslage',
+      expenseOther: '{count} Auslagen',
+      both: '{time} und {expenses}',
+      openProject: 'Projekt öffnen',
+    },
+    issue: {
+      unlinked: 'Auf dieser Rechnung verrechnet, aber auf keiner ihrer Positionen mehr: {entries}. Die Rechnung verrechnet womöglich weniger, als das Projekt als verrechnet zeigt — Positionen prüfen oder diese Einträge auf der Projektseite wieder als offen markieren.',
+      openProject: '{project} öffnen',
+    },
+    projects: {
+      removeHint: 'Wird eine Position später aus dem Entwurf entfernt, sind ihre Einträge wieder offen.',
+    },
+    deposits: {
+      moneyLocked: 'Diese Anzahlungsrechnung wird mit dem erhaltenen Geld in einer ausgestellten Schlussrechnung abgezogen. Vor dem Ändern von Zahlungen oder Rückzahlungen die Schlussrechnung stornieren.',
+      paymentsLocked: 'Schlussrechnung {number} zieht das hier erhaltene Geld ab. Vor dem Entfernen einer Zahlung die Schlussrechnung stornieren.',
+      refundsLocked: 'Schlussrechnung {number} zieht das auf {invoice} erhaltene Geld ab. Vor dem Erfassen oder Entfernen einer Rückzahlung die Schlussrechnung stornieren.',
     },
   },
   clients: {
