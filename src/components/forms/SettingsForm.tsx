@@ -10,8 +10,11 @@ import { CheckCircle, Mail, HardDrive, ChevronRight, X, Building2, MapPin, Credi
 import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/reminder-templates'
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
+import type { PostgrestError } from '@supabase/supabase-js'
 import { toastApiError } from '@/lib/google/toast'
 import { googleErrorText } from '@/lib/google/reauth'
+import { apiErrorMessage } from '@/lib/api-errors'
+import { lifecycleErrorMessage } from '@/lib/status'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -367,8 +370,9 @@ export default function SettingsForm({ settings }: Props) {
   const [bookamatAutoSync, setBookamatAutoSync] = useState(!!settings?.bookamat_auto_sync)
   const [bookamatError, setBookamatError] = useState<{ message: string; at: string | null } | null>(
     settings?.bookamat_last_error ? { message: settings.bookamat_last_error, at: settings.bookamat_last_error_at } : null)
-  const [googleError, setGoogleError] = useState<{ message: string; at: string | null } | null>(
-    settings?.google_last_error ? { message: settings.google_last_error, at: settings.google_last_error_at } : null)
+  // As the server stored or answered it (raw); googleProblem words it for display.
+  const [googleError, setGoogleError] = useState<{ message: string; code: string | null; at: string | null } | null>(
+    settings?.google_last_error ? { message: settings.google_last_error, code: null, at: settings.google_last_error_at } : null)
   const [testing, setTesting] = useState<'google' | 'bookamat' | null>(null)
   const [confirmBookamatDisconnect, setConfirmBookamatDisconnect] = useState(false)
   const bookamatIdSetters = [setBookamatBankId, setBookamatCashId, setBookamatCostId, setBookamatVat0, setBookamatVatRc, setBookamatVatNonEu, setBookamatVat10, setBookamatVat13, setBookamatVat20]
@@ -433,6 +437,12 @@ export default function SettingsForm({ settings }: Props) {
   }, [searchParams])
 
   // ── Save functions ───────────────────────────────────────────────────────────
+  // The database's own text goes to the console; the toast is worded in the UI language.
+  function saveFailed(error: PostgrestError) {
+    console.error('[settings] save failed:', error.code, error.message)
+    toast.error(lifecycleErrorMessage(error, t))
+  }
+
   async function saveBiz() {
     if (!settings) return
     setSaving('brand')
@@ -441,7 +451,7 @@ export default function SettingsForm({ settings }: Props) {
       owner_name:   biz.owner_name,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('brand')
     toast.success(t('settings.company.saved'))
   }
@@ -467,7 +477,7 @@ export default function SettingsForm({ settings }: Props) {
       uid_number:    uid,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setContact(c => ({ ...c, uid_number: uid }))
     clearDirty('contact')
     toast.success(t('settings.address.saved'))
@@ -490,7 +500,7 @@ export default function SettingsForm({ settings }: Props) {
       bank_name: banking.bank_name || null,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setBanking(b => ({ ...b, iban, bic }))
     clearDirty('banking')
     toast.success(t('settings.banking.saved'))
@@ -546,7 +556,7 @@ export default function SettingsForm({ settings }: Props) {
     setSaving('docs')
     const { error } = await supabase.from('settings').update({ ...config, ...counters, ...years }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setDocs(d => ({ ...d, ...config, ...years }))
     setEditedCounters(new Set())
     clearDirty('docs')
@@ -573,7 +583,7 @@ export default function SettingsForm({ settings }: Props) {
       ...(defaults.ui_language !== lang ? { ui_language: defaults.ui_language } : {}),
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('defaults')
     toast.success(t('settings.defaults.saved'))
     // The UI language is rendered server-side; refresh so the whole app switches.
@@ -590,7 +600,7 @@ export default function SettingsForm({ settings }: Props) {
       default_skonto_days:    days >= 0 ? days : null,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('terms')
     toast.success(t('settings.terms.saved'))
   }
@@ -607,7 +617,7 @@ export default function SettingsForm({ settings }: Props) {
       reminder_interest_rate: Math.max(0, parseFloat(reminders.reminder_interest_rate) || 0),
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('reminders')
     toast.success(t('settings.reminders.saved'))
   }
@@ -624,7 +634,7 @@ export default function SettingsForm({ settings }: Props) {
       credit_note_footer_en: creditNoteFooterEn || null,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('footer')
     toast.success(t('settings.footer.saved'))
   }
@@ -639,7 +649,7 @@ export default function SettingsForm({ settings }: Props) {
       tax_note_non_eu_en: taxNotes.non_eu_en || null,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('taxnotes')
     toast.success(t('settings.taxNotes.saved'))
   }
@@ -666,7 +676,7 @@ export default function SettingsForm({ settings }: Props) {
       email_body_reminder_en:       emailTpl.reminder.body_en       || null,
     }).eq('id', settings.id)
     setSaving(null)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     clearDirty('templates')
     toast.success(t('settings.templates.saved'))
   }
@@ -694,16 +704,25 @@ export default function SettingsForm({ settings }: Props) {
     toast.success(t('settings.integrations.google.disconnected'))
   }
 
+  // Google's own text never reaches the screen: the known failures are worded, the rest generically.
+  function googleProblem(e: { message: string; code: string | null }): string {
+    const worded = googleErrorText(t, e.message)
+    if (worded !== e.message) return worded
+    return !e.code || e.code === 'google_failed' ? t('messages.googleFailed') : apiErrorMessage(t, { code: e.code })
+  }
+
   async function testGoogle() {
     setTesting('google')
     const res = await fetch('/api/gmail/test', { method: 'POST' }).catch(() => null)
-    setTesting(null)
     const data = res ? await res.json().catch(() => ({})) : {}
-    if (!res?.ok) {
-      const message = typeof data.error === 'string' && data.error ? data.error : t('common.unknownError')
-      setGoogleError({ message, at: new Date().toISOString() })
-      if (res?.status === 401) setGoogle(g => ({ ...g, connected: false }))
-      toast.error(t('books.google.testFailed', { error: googleErrorText(t, message) }))
+    setTesting(null)
+    if (!res) { toast.error(t('books.google.testFailed', { error: t('messages.network') })); return }
+    if (!res.ok) {
+      const failure = { message: typeof data.error === 'string' ? data.error : '', code: typeof data.code === 'string' ? data.code : null }
+      console.error('[settings] Google test failed:', res.status, data.error)
+      setGoogleError({ ...failure, at: new Date().toISOString() })
+      if (res.status === 401) setGoogle(g => ({ ...g, connected: false }))
+      toast.error(t('books.google.testFailed', { error: googleProblem(failure) }))
       return
     }
     setGoogleError(null)
@@ -718,11 +737,13 @@ export default function SettingsForm({ settings }: Props) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ folderId: driveFolder.trim() || null }),
-    })
-    const data = await res.json().catch(() => ({}))
+    }).catch(() => null)
+    const data = res ? await res.json().catch(() => ({})) : {}
     setSavingDrive(false)
+    if (!res) { setDriveError(t('messages.network')); return }
     if (!res.ok) {
-      setDriveError(typeof data.error === 'string' ? data.error : t('settings.integrations.drive.couldNotVerify'))
+      console.error('[settings] Drive folder not saved:', res.status, data.error)
+      setDriveError(apiErrorMessage(t, data, t('settings.integrations.drive.couldNotVerify')))
       if (res.status === 401 && data.code) setGoogle(g => ({ ...g, connected: false }))
       return
     }
@@ -732,6 +753,13 @@ export default function SettingsForm({ settings }: Props) {
     toast.success(data.id ? t('settings.integrations.drive.folderSaved', { name: data.name ?? data.id }) : t('settings.integrations.drive.folderRemoved'))
   }
 
+  // An answer without a code carries only the server's own text: it gets the fallback instead.
+  function bookamatProblem(data: { code?: unknown; error?: unknown } | null, fallback: string): string {
+    if (data && typeof data.code === 'string') return bookamatErrorMessage(t, data, fallback)
+    console.error('[settings] Bookamat request failed:', data?.error)
+    return fallback
+  }
+
   async function loadBookamatAccounts() {
     if (!bookamatUsername || (!bookamatApiKey && !bookamatKeySaved)) { toast.error(t('settings.integrations.bookamat.enterCredentials')); return }
     setLoadingAccounts(true)
@@ -739,10 +767,11 @@ export default function SettingsForm({ settings }: Props) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: bookamatUsername, apiKey: bookamatApiKey, country: bookamatCountry }),
-    })
+    }).catch(() => null)
+    const data = res ? await res.json().catch(() => null) : null
     setLoadingAccounts(false)
-    if (!res.ok) { const payload = await res.json().catch(() => ({})); toast.error(bookamatErrorMessage(t, payload, t('settings.integrations.bookamat.loadFailed'))); return }
-    const data = await res.json()
+    if (!res) { toast.error(t('messages.network')); return }
+    if (!res.ok || !data) { toast.error(bookamatProblem(data, t('settings.integrations.bookamat.loadFailed'))); return }
     setBookamatAccounts(data)
     setBookamatAccountsYear(typeof data.year === 'number' ? data.year : null)
   }
@@ -766,7 +795,7 @@ export default function SettingsForm({ settings }: Props) {
       bookamat_vat_account_20:  bookamatVat20    || null,
     }).eq('id', settings.id)
     setSavingBookamat(false)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setSavedBookamat({
       username: bookamatUsername,
       country: bookamatCountry,
@@ -786,7 +815,7 @@ export default function SettingsForm({ settings }: Props) {
     const { error } = await supabase.from('settings').update({ bookamat_api_key: null }).eq('id', settings.id)
     setSavingBookamat(false)
     setConfirmRemoveKey(false)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setBookamatKeySaved(false)
     setBookamatApiKey('')
     setBookamatAccounts(null)
@@ -816,7 +845,7 @@ export default function SettingsForm({ settings }: Props) {
       bookamat_auto_sync: false, bookamat_last_error: null, bookamat_last_error_at: null,
     }).eq('id', settings.id)
     setSavingBookamat(false)
-    if (error) { toast.error(error.message); return }
+    if (error) { saveFailed(error); return }
     setConfirmBookamatDisconnect(false)
     setBookamatUsername('')
     setBookamatApiKey('')
@@ -834,10 +863,11 @@ export default function SettingsForm({ settings }: Props) {
   async function testBookamat() {
     setTesting('bookamat')
     const res = await fetch('/api/bookamat/test', { method: 'POST' }).catch(() => null)
-    setTesting(null)
     const data = res ? await res.json().catch(() => ({})) : {}
-    if (!res?.ok) {
-      const message = bookamatErrorMessage(t, data)
+    setTesting(null)
+    if (!res) { toast.error(t('books.settings.testFailed', { error: t('messages.network') })); return }
+    if (!res.ok) {
+      const message = bookamatProblem(data, t('messages.generic'))
       setBookamatError({ message, at: new Date().toISOString() })
       toast.error(t('books.settings.testFailed', { error: message }))
       return
@@ -850,7 +880,7 @@ export default function SettingsForm({ settings }: Props) {
     if (!settings) return
     setBookamatAutoSync(on)
     const { error } = await supabase.from('settings').update({ bookamat_auto_sync: on }).eq('id', settings.id)
-    if (error) { setBookamatAutoSync(!on); toast.error(error.message); return }
+    if (error) { setBookamatAutoSync(!on); saveFailed(error); return }
     toast.success(t(on ? 'books.settings.autoSyncOn' : 'books.settings.autoSyncOff'))
   }
 
@@ -1792,7 +1822,7 @@ export default function SettingsForm({ settings }: Props) {
                 </button>
                 {googleError && (
                   <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
-                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleErrorText(t, googleError.message) })}
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleProblem(googleError) })}
                   </p>
                 )}
               </div>
@@ -1819,7 +1849,7 @@ export default function SettingsForm({ settings }: Props) {
                 </a>
                 {googleError && (
                   <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">
-                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleErrorText(t, googleError.message) })}
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleProblem(googleError) })}
                   </p>
                 )}
               </div>
@@ -2164,7 +2194,11 @@ function EInvoiceCard({ settings }: { settings: PublicSettings | null }) {
     setSaving(true)
     const { error: saveError } = await supabase.from('settings').update({ peppol_scheme: scheme || null, peppol_id: id || null }).eq('id', settings.id)
     setSaving(false)
-    if (saveError) { toast.error(saveError.message); return }
+    if (saveError) {
+      console.error('[settings] Peppol address not saved:', saveError.code, saveError.message)
+      toast.error(lifecycleErrorMessage(saveError, t))
+      return
+    }
     setPeppol({ scheme, id })
     setDirty(false)
     toast.success(t('einvoice.settings.saved'))

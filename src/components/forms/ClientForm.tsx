@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import type { PostgrestError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,7 @@ import { parseEmailList } from '@/lib/templates'
 import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/types'
 import type { TFn } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
+import { lifecycleErrorMessage } from '@/lib/status'
 
 interface Props {
   client?: Client
@@ -244,18 +246,24 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
     return [...found.values()]
   }
 
+  // The database's own text goes to the console; the toast is worded in the UI language.
+  function failed(error: PostgrestError) {
+    console.error('[clients] write failed:', error.code, error.message)
+    toast.error(lifecycleErrorMessage(error, t))
+  }
+
   async function save(payload: Payload) {
     setSaving(true)
     if (client) {
       const { error } = await supabase.from('clients').update(payload).eq('id', client.id)
       setSaving(false)
-      if (error) { toast.error(error.message); return }
+      if (error) { failed(error); return }
       toast.success(t('clients.form.updated'))
       onSaved?.()
       router.refresh()
     } else {
       const { data, error } = await supabase.from('clients').insert(payload).select('id').single()
-      if (error) { setSaving(false); toast.error(error.message); return }
+      if (error) { setSaving(false); failed(error); return }
       toast.success(t('clients.form.created'))
       router.push(`/clients/${data.id}`)
     }
@@ -273,9 +281,8 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
     setDeleting(true)
     const { error } = await supabase.from('clients').delete().eq('id', client.id)
     if (error) {
-      toast.error(error.code === FK_VIOLATION
-        ? t('clients.form.hasDocuments')
-        : error.message)
+      if (error.code === FK_VIOLATION) toast.error(t('clients.form.hasDocuments'))
+      else failed(error)
       setDeleting(false)
       setConfirmDelete(false)
       return
