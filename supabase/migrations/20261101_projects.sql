@@ -36,8 +36,13 @@ create table if not exists time_entries (
   -- Set together when the entry is billed. The line link is cleared whenever the builder rewrites
   -- the invoice's lines; the entry stays billed on the invoice until the invoice is deleted.
   invoiced_document_id uuid references documents(id) on delete set null,
-  document_item_id     uuid references document_items(id) on delete set null
+  document_item_id     uuid references document_items(id) on delete set null,
+  -- The hourly rate the entry was billed at, so a later change of the project's rate does not
+  -- change what it shows as billed. Only meaningful while invoiced_document_id is set.
+  billed_rate          numeric(10,2)
 );
+
+alter table time_entries add column if not exists billed_rate numeric(10,2);
 
 create index if not exists time_entries_project_id_idx on time_entries(project_id, date);
 create index if not exists time_entries_invoiced_document_id_idx on time_entries(invoiced_document_id) where invoiced_document_id is not null;
@@ -121,7 +126,7 @@ begin
 
     ids := array(select jsonb_array_elements_text(coalesce(l->'time_entry_ids', '[]'::jsonb))::uuid);
     if cardinality(ids) > 0 then
-      update time_entries set invoiced_document_id = doc_id, document_item_id = item_id
+      update time_entries set invoiced_document_id = doc_id, document_item_id = item_id, billed_rate = (l->>'unit_price')::numeric
       where id = any(ids) and project_id = p.id and billable and invoiced_document_id is null;
       get diagnostics linked = row_count;
       if linked <> cardinality(ids) then
@@ -152,7 +157,7 @@ declare
   freed integer;
   more  integer;
 begin
-  update time_entries t set invoiced_document_id = null, document_item_id = null
+  update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
   from documents d
   where t.id = any(coalesce(p_time_entry_ids, '{}')) and d.id = t.invoiced_document_id
     and (d.number is null or d.status = 'cancelled');

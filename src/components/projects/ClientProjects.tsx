@@ -5,7 +5,7 @@ import ClientProjectsPanel, { type ClientProjectRow } from './ClientProjectsPane
 import type { ClientOption } from './ProjectDialog'
 
 type ProjectWithRows = Project & {
-  time_entries: Pick<TimeEntry, 'minutes' | 'rate' | 'billable' | 'invoiced_document_id'>[] | null
+  time_entries: Pick<TimeEntry, 'minutes' | 'rate' | 'billed_rate' | 'billable' | 'invoiced_document_id'>[] | null
   project_expenses: Pick<ProjectExpense, 'net_amount' | 'markup_percent' | 'billable' | 'invoiced_document_id'>[] | null
 }
 
@@ -17,7 +17,7 @@ export default async function ClientProjects({ client }: { client: ClientOption 
   const supabase = await createClient()
   const { data } = await supabase
     .from('projects')
-    .select('*, time_entries(minutes, rate, billable, invoiced_document_id), project_expenses(net_amount, markup_percent, billable, invoiced_document_id)')
+    .select('*, time_entries(minutes, rate, billed_rate, billable, invoiced_document_id), project_expenses(net_amount, markup_percent, billable, invoiced_document_id)')
     .eq('client_id', client.id)
     .order('created_at', { ascending: false })
 

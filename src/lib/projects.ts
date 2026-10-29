@@ -7,7 +7,8 @@ export const PROJECT_STATUSES: readonly ProjectStatus[] = ['active', 'done', 'ar
 export const INVOICE_GROUPINGS: readonly InvoiceGrouping[] = ['entry', 'description', 'day']
 export const MAX_ENTRY_MINUTES = 24 * 60
 
-type EntryAmounts = Pick<TimeEntry, 'minutes' | 'rate'>
+type EntryRate = Pick<TimeEntry, 'rate'> & Partial<Pick<TimeEntry, 'billed_rate' | 'invoiced_document_id'>>
+type EntryAmounts = EntryRate & Pick<TimeEntry, 'minutes'>
 type RateSource = Pick<Project, 'hourly_rate'>
 type ExpenseAmounts = Pick<ProjectExpense, 'net_amount' | 'markup_percent'>
 type BillingState = { billable: boolean; invoiced_document_id: string | null }
@@ -47,7 +48,9 @@ export function hoursQuantity(minutes: number): number {
   return Math.round((minutes / 60) * 10000) / 10000
 }
 
-export function entryRate(entry: Pick<TimeEntry, 'rate'>, project: RateSource): number {
+// A billed entry keeps the rate it was billed at; otherwise its own rate or the project's.
+export function entryRate(entry: EntryRate, project: RateSource): number {
+  if (entry.invoiced_document_id && entry.billed_rate != null) return entry.billed_rate
   return entry.rate ?? project.hourly_rate ?? 0
 }
 

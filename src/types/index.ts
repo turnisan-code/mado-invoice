@@ -410,6 +410,8 @@ export interface TimeEntry {
   rate: number | null
   invoiced_document_id: string | null
   document_item_id: string | null
+  // The hourly rate it was billed at; only meaningful while invoiced_document_id is set.
+  billed_rate: number | null
 }
 
 // A cost passed on to the client (input VAT stays in Bookamat), billed at net plus markup.

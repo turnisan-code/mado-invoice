@@ -8,7 +8,7 @@ import type { Project, ProjectExpense, TimeEntry } from '@/types'
 type ProjectWithRows = Project & {
   // Without generated DB types supabase-js types the to-one `clients` embed loosely.
   clients: { name: string; company: string | null } | null
-  time_entries: Pick<TimeEntry, 'minutes' | 'rate' | 'billable' | 'invoiced_document_id'>[] | null
+  time_entries: Pick<TimeEntry, 'minutes' | 'rate' | 'billed_rate' | 'billable' | 'invoiced_document_id'>[] | null
   project_expenses: Pick<ProjectExpense, 'net_amount' | 'markup_percent' | 'billable' | 'invoiced_document_id'>[] | null
 }
 
@@ -17,7 +17,7 @@ export default async function ProjectsPage() {
   const [{ data: projects }, { data: clients }] = await Promise.all([
     supabase
       .from('projects')
-      .select('*, clients(name, company), time_entries(minutes, rate, billable, invoiced_document_id), project_expenses(net_amount, markup_percent, billable, invoiced_document_id)')
+      .select('*, clients(name, company), time_entries(minutes, rate, billed_rate, billable, invoiced_document_id), project_expenses(net_amount, markup_percent, billable, invoiced_document_id)')
       .order('created_at', { ascending: false }),
     supabase.from('clients').select('id, name, company').neq('status', 'inactive').order('name'),
   ])
