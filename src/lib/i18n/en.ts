@@ -220,6 +220,7 @@ export const en = {
     recurringStopped: 'Generating stopped partway. Check the schedule and its invoices, then try again.',
     portalPdfUnavailable: 'The PDF cannot be downloaded right now. Please try again in a moment. If the problem persists, please contact the sender.',
     unsavedEdits: 'The latest changes could not be saved, so nothing was done. Check the connection and try again.',
+    recurringDateTaken: 'Another invoice of this recurring schedule already has that date. The draft keeps its own date — issue it with that date.',
   },
   status: {
     draft: 'Draft',
@@ -337,7 +338,7 @@ export const en = {
       paidBefore: 'The payment date, {date}, is before the invoice date of some of these drafts.',
     },
     recurring: {
-      dateTaken: '{date}: created as a draft, not issued — today’s date is reserved for another invoice of this schedule. Issue it from its page.',
+      dateTaken: '{date}: created as a draft, not issued — today’s date is reserved for another invoice of this schedule. Issue it from its page with its own date.',
       dateHeld: '{date}: another invoice of this schedule already has this date, so the invoice for this period was created as a draft dated {draftDate}. Check it and issue it from its page.',
     },
     clientDelete: {

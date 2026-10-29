@@ -222,6 +222,7 @@ export const de = {
     recurringStopped: 'Das Erstellen ist mittendrin abgebrochen. Zeitplan und Rechnungen prüfen, dann noch einmal versuchen.',
     portalPdfUnavailable: 'Das PDF kann gerade nicht heruntergeladen werden. Bitte versuchen Sie es in einem Moment erneut. Falls das Problem bestehen bleibt, wenden Sie sich bitte an den Absender.',
     unsavedEdits: 'Die letzten Änderungen konnten nicht gespeichert werden, daher ist nichts passiert. Verbindung prüfen und noch einmal versuchen.',
+    recurringDateTaken: 'Eine andere Rechnung dieses Zeitplans hat bereits dieses Datum. Der Entwurf behält sein eigenes Datum – mit diesem Datum ausstellen.',
   },
   status: {
     draft: 'Entwurf',
@@ -339,7 +340,7 @@ export const de = {
       paidBefore: 'Das Zahlungsdatum {date} liegt vor dem Rechnungsdatum mancher dieser Entwürfe.',
     },
     recurring: {
-      dateTaken: '{date}: als Entwurf erstellt, nicht ausgestellt – das heutige Datum ist für eine andere Rechnung dieses Zeitplans vorgesehen. Auf der Rechnungsseite lässt sie sich ausstellen.',
+      dateTaken: '{date}: als Entwurf erstellt, nicht ausgestellt – das heutige Datum ist für eine andere Rechnung dieses Zeitplans vorgesehen. Auf der Rechnungsseite mit ihrem eigenen Datum ausstellen.',
       dateHeld: '{date}: Eine andere Rechnung dieses Zeitplans hat schon dieses Datum. Die Rechnung für diesen Zeitraum wurde deshalb als Entwurf mit Datum {draftDate} erstellt. Bitte prüfen und auf der Rechnungsseite ausstellen.',
     },
     clientDelete: {

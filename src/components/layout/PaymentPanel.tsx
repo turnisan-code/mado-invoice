@@ -204,7 +204,8 @@ export default function PaymentPanel({
         if (statusErr) toast.error(dbErrorMessage(t, statusErr))
         else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
         toast.success(t('payments.recordedAndPaid', { label }))
-        if (!synced && bookamatConfigured) setShowBookamatPrompt(true)
+        // Only money is booked: an invoice closed by a write-off or a credit note has nothing to sync.
+        if (!synced && bookamatConfigured && hasMoneyToBook({ number, status: 'paid', payments: next })) setShowBookamatPrompt(true)
       } else {
         toast.success(t('payments.recorded', { label }))
       }
@@ -528,7 +529,7 @@ export default function PaymentPanel({
               )}
             </div>
           ) : (
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('payments.syncAvailableWhenPaid')}</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">{status === 'paid' ? t('books.errors.nothing_to_book') : t('payments.syncAvailableWhenPaid')}</span>
           )}
           {coveredYears.length > 0 && (
             <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">{t('books.sync.coveredElsewhere', { years: coveredYears.join(', '), bookings: formatBookings(t, bookings) })}</p>
