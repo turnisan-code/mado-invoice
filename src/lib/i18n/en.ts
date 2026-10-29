@@ -215,6 +215,7 @@ export const en = {
     googleFailed: 'Google reported an error. Try again in a moment; if it keeps happening, reconnect Google.',
     recurringStopped: 'Generating stopped partway. Check the schedule and its invoices, then try again.',
     portalPdfUnavailable: 'The PDF cannot be downloaded right now. Please try again in a moment. If the problem persists, please contact the sender.',
+    unsavedEdits: 'The latest changes could not be saved, so nothing was done. Check the connection and try again.',
   },
   status: {
     draft: 'Draft',

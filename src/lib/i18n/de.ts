@@ -217,6 +217,7 @@ export const de = {
     googleFailed: 'Google hat einen Fehler gemeldet. Gleich noch einmal versuchen; wenn es wieder passiert, Google neu verbinden.',
     recurringStopped: 'Das Erstellen ist mittendrin abgebrochen. Zeitplan und Rechnungen prüfen, dann noch einmal versuchen.',
     portalPdfUnavailable: 'Das PDF kann gerade nicht heruntergeladen werden. Bitte versuchen Sie es in einem Moment erneut. Falls das Problem bestehen bleibt, wenden Sie sich bitte an den Absender.',
+    unsavedEdits: 'Die letzten Änderungen konnten nicht gespeichert werden, daher ist nichts passiert. Verbindung prüfen und noch einmal versuchen.',
   },
   status: {
     draft: 'Entwurf',

@@ -26,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const reason = cancel && typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) || undefined : undefined
 
   const { data, error } = await supabase.rpc('create_credit_note', { p_invoice_id: id, p_cancel: cancel })
-  if (error) return databaseError(error, error.code === 'MI017' || error.code === 'MI018' ? 409 : 500)
+  if (error) return databaseError(error, error.code === 'MI017' || error.code === 'MI018' || error.code === 'MI020' ? 409 : 500)
   const created = data as Created | null
   if (!created) return apiError(404, 'not_found', 'Invoice not found')
   const creditNoteId = created.credit_note_id
