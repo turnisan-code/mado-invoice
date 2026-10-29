@@ -109,16 +109,20 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
 
   if (serverProblems && serverProblems.key !== formKey) setServerProblems(null)
 
-  // The e-invoice dialog saves the buyer reference itself; the field takes it over unless it was
-  // edited here since.
-  const storedReference = doc?.buyer_reference ?? null
-  const [seenReference, setSeenReference] = useState(storedReference)
-  if (storedReference !== seenReference) {
-    setSeenReference(storedReference)
-    if (form.buyerReference === seenReference) patch({ buyerReference: storedReference })
-  }
+  // A credit note without a reference of its own prints its invoice's (fetchBuyerReference).
+  const sourceId = type === 'credit_note' ? doc?.cancels_document_id ?? doc?.converted_from_id ?? null : null
+  const [sourceReference, setSourceReference] = useState<string | null>(null)
+  useEffect(() => {
+    if (!sourceId) return
+    let live = true
+    void createClient().from('documents').select('buyer_reference').eq('id', sourceId).maybeSingle()
+      .then(({ data }) => { if (live) setSourceReference(data?.buyer_reference?.trim() || null) })
+    return () => { live = false }
+  }, [sourceId])
 
   const client = clients.find(c => c.id === clientId)
+  // Printed while the field is empty, unless the reference was cleared on purpose ('').
+  const defaultReference = sourceReference ?? (client?.buyer_reference?.trim() || null)
   const totals = calcTotals(lines, doc?.payments, documentDiscount(form), taxTreatment)
   const taxNote = getTaxNote(taxTreatment, language as 'de' | 'en', settings)
   // Issued documents stay editable; a changed amount is pointed out, never blocked.
@@ -204,8 +208,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       // Names applied credit notes, Skonto and write-offs in the summary, as the issued PDF does.
       payments: doc?.payments ?? [],
       reference: reference ?? null,
-      // As the server resolves it, without the corrected invoice's (a new credit note copies it).
-      buyer_reference: f.buyerReference != null ? f.buyerReference.trim() || null : client.buyer_reference?.trim() || null,
+      // As the server resolves it: its own, else the corrected invoice's, else the client's default.
+      buyer_reference: f.buyerReference != null ? f.buyerReference.trim() || null : defaultReference,
     }
 
     // Generate EPC QR only for final PDFs (save/send), not preview
@@ -467,13 +471,18 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
       // Invoices and credit notes in EUR can go out as e-invoices too, to clients who want them.
       const einvoiceFormat = type !== 'quote' && currency === 'EUR' ? client.einvoice_format ?? null : null
+      // The PDF is the frozen one, the XML follows the current data: after a change they differ,
+      // so the XML is only attached when the owner ticks it.
+      const totalChange = einvoiceFormat && issuedTotal != null && issuedTotalChanged
+        ? { issued: formatMoney(issuedTotal, currency), current: formatMoney(totals.total, currency) }
+        : null
       setGmailPreview({
         to: client.email, cc: parseEmailList(client.cc_emails).emails.join(', '), bcc: '',
         subject: content.subject, body: content.body,
         pdfBase64: await blobToBase64(blob), filename: `${issued.number}.pdf`,
         documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
         uploadToDrive: !!settings.drive_folder_id && !driveArchived, driveArchived,
-        einvoiceFormat, attachEInvoice: !!einvoiceFormat,
+        einvoiceFormat, attachEInvoice: !!einvoiceFormat && !totalChange, totalChange, einvoiceError: null,
       })
     })
   }
@@ -493,8 +502,10 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       if (data.einvoice) {
+        // Nothing was sent; the dialog says why next to the checkbox.
         const code = EINVOICE_ERRORS.find(c => c === data.code)
-        toast.error(t('print.gmail.einvoiceFailed', { reason: code ? t(`einvoice.errors.${code}`) : String(data.error ?? '') }))
+        const reason = code ? t(`einvoice.errors.${code}`) : String(data.error ?? '')
+        setGmailPreview(p => p && { ...p, einvoiceError: reason })
       } else {
         toastApiError(t, data, '', t('builder.emailFailed'))
       }
@@ -522,8 +533,6 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   }
 
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
-  // An emptied field falls back to the defaults again, unless the reference was cleared on purpose.
-  const clearedReference = doc?.buyer_reference === '' ? '' : null
   const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
   const restoreTime = editor.restoreOffer
     ? new Date(editor.restoreOffer.savedAt).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' })
@@ -674,7 +683,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
               </p>
               {currency !== 'EUR' && <p id={`${uid}-currency-note`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('issueChecks.currencyLegacy')}</p>}
             </div>
-            <div className="space-y-1.5">
+            <div className="col-span-2 sm:col-span-1 space-y-1.5">
               <Label htmlFor={`${uid}-tax`}>{t('builder.taxTreatment')}</Label>
               <select id={`${uid}-tax`} value={taxTreatment} onChange={e => patch({ taxTreatment: e.target.value as TaxTreatment })} className={SELECT_CLS}>
                 <option value="at_vat">{t('taxTreatments.at_vat')}</option>
@@ -695,10 +704,22 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
             <div className="col-span-2 space-y-1.5">
               <Label htmlFor={`${uid}-buyer-reference`}>{t('einvoice.buyerReference')}</Label>
               <Input id={`${uid}-buyer-reference`} value={form.buyerReference ?? ''} autoComplete="off"
-                placeholder={form.buyerReference == null ? client?.buyer_reference?.trim() ?? '' : ''}
+                placeholder={form.buyerReference == null ? defaultReference ?? '' : ''}
                 aria-describedby={`${uid}-buyer-reference-hint`}
-                onChange={e => patch({ buyerReference: e.target.value.trim() ? e.target.value : clearedReference })} />
-              <p id={`${uid}-buyer-reference-hint`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('print.builder.buyerReferenceHint')}</p>
+                onChange={e => patch({ buyerReference: e.target.value.trim() ? e.target.value : null })} />
+              <p id={`${uid}-buyer-reference-hint`} className="text-xs text-neutral-500 dark:text-neutral-400">
+                {t(type === 'quote' ? 'print.builder.buyerReferenceHintQuote' : 'print.builder.buyerReferenceHint')}
+                {/* null follows the default, '' prints none: both look empty, so the hint says which. */}
+                {defaultReference && !form.buyerReference?.trim() && (
+                  <>
+                    {' '}{form.buyerReference == null ? t('print.builder.referenceDefault', { reference: defaultReference }) : t('print.builder.referenceNone')}{' '}
+                    <button type="button" onClick={() => patch({ buyerReference: form.buyerReference == null ? '' : null })}
+                      className="py-2 -my-2 underline underline-offset-2 text-neutral-700 dark:text-neutral-200 hover:text-neutral-900 dark:hover:text-white">
+                      {form.buyerReference == null ? t('print.builder.printNone') : t('print.builder.useDefault')}
+                    </button>
+                  </>
+                )}
+              </p>
             </div>
             {type === 'invoice' && (
               <>

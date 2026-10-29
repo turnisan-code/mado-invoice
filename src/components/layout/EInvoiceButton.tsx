@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
 import { flushPendingEdits } from '@/lib/issued-pdf'
+import { applyBuyerReferenceInEditor } from '@/components/forms/builder/events'
 import { vatEndpoint, type EInvoiceErrorCode } from '@/lib/einvoice/common'
 import { normalizeVatId } from '@/lib/utils/validation'
 import { calcTotals, formatMoney } from '@/lib/utils/document'
@@ -105,6 +106,8 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
     const value = reference.trim()
     if (format === 'ubl' && !value) { setReferenceError(true); return }
     setBusy(true)
+    // A saved reference reaches the editor and the page even when the export then fails.
+    let refresh = false
     try {
       // '' records a reference cleared on purpose; a document never given one keeps following the fallbacks.
       const stored = value || (info.stored != null || info.prefill ? '' : null)
@@ -112,6 +115,8 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
         const { error } = await supabase.from('documents').update({ buyer_reference: stored }).eq('id', documentId)
         if (error) { toast.error(t('einvoice.saveFailed', { error: error.message })); return }
         setInfo({ ...info, stored })
+        applyBuyerReferenceInEditor(documentId, stored)
+        refresh = true
       }
       const res = await fetch(`/api/documents/${documentId}/einvoice?format=${format}`)
       if (!res.ok) {
@@ -132,11 +137,12 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       setTimeout(() => URL.revokeObjectURL(url), 1000)
       toast.success(t('einvoice.downloaded', { file: filename }))
       setOpen(false)
-      router.refresh()
+      refresh = true
     } catch (err) {
       toast.error(t('einvoice.failed', { error: err instanceof Error ? err.message : t('common.unknownError') }))
     } finally {
       setBusy(false)
+      if (refresh) router.refresh()
     }
   }
 

@@ -23,6 +23,10 @@ export type GmailPreview = {
   // The client's e-invoice format; null when none is set or the document cannot be one.
   einvoiceFormat: EInvoiceFormat | null
   attachEInvoice: boolean
+  // Issued and current total (formatted) when they differ: the PDF is frozen, the XML is not.
+  totalChange: { issued: string; current: string } | null
+  // Why the last attempt could not build the e-invoice; nothing was sent.
+  einvoiceError: string | null
 }
 
 const checkboxCls = 'w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white'
@@ -91,13 +95,21 @@ export function GmailDialog({ preview, setPreview, sending, driveConfigured, onC
                 <input
                   type="checkbox"
                   checked={preview.attachEInvoice}
-                  onChange={e => edit({ attachEInvoice: e.target.checked })}
-                  aria-describedby={`${uid}-einvoice-hint`}
+                  onChange={e => edit({ attachEInvoice: e.target.checked, einvoiceError: null })}
+                  aria-describedby={[`${uid}-einvoice-hint`, preview.totalChange && `${uid}-einvoice-total`, preview.einvoiceError && `${uid}-einvoice-error`].filter(Boolean).join(' ')}
                   className={checkboxCls}
                 />
                 {t('print.gmail.attachEInvoice', { format: t(`einvoice.formats.${preview.einvoiceFormat}`) })}
               </label>
               <p id={`${uid}-einvoice-hint`} className="text-xs text-neutral-500 dark:text-neutral-400 pl-6.5">{t('print.gmail.attachEInvoiceHint')}</p>
+              {preview.totalChange && (
+                <p id={`${uid}-einvoice-total`} className="text-xs text-amber-700 dark:text-amber-400 pl-6.5">{t('print.issuedTotal.einvoice', preview.totalChange)}</p>
+              )}
+              {preview.einvoiceError && (
+                <p id={`${uid}-einvoice-error`} role="alert" className="text-xs text-red-600 dark:text-red-400 pl-6.5">
+                  {t('print.gmail.einvoiceFailed', { reason: preview.einvoiceError })} {t('print.gmail.sendWithout')}
+                </p>
+              )}
             </div>
           )}
           {driveConfigured && (preview.driveArchived ? (

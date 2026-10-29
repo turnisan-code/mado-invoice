@@ -970,17 +970,23 @@ export const de = {
     yourReference: 'Ihre Referenz',
     builder: {
       buyerReferenceHint: 'Wird als „Ihre Referenz“ gedruckt und in der E-Rechnung übermittelt.',
+      buyerReferenceHintQuote: 'Wird als „Ihre Referenz“ gedruckt.',
+      referenceDefault: 'Ohne Eingabe wird „{reference}“ gedruckt.',
+      referenceNone: 'Es wird keine Referenz gedruckt.',
+      printNone: 'Keine Referenz drucken',
+      useDefault: 'Standard verwenden',
     },
     issuedTotal: {
       changed: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert: damals {issued}, jetzt {current}.',
-      changedHint: 'Das ausgestellte PDF behält die ausgestellten Beträge.',
+      changedHint: 'Das ausgestellte PDF zeigt weiterhin die ursprünglichen Beträge; Portal und E-Rechnung zeigen die aktuellen.',
       stornoHint: 'Eine falsche Rechnung wird mit einer Stornorechnung korrigiert.',
-      einvoice: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert (damals {issued}, jetzt {current}). Die E-Rechnung entsteht aus den aktuellen Daten, das ausgestellte PDF zeigt die ausgestellten Beträge.',
+      einvoice: 'Der Gesamtbetrag hat sich seit dem Ausstellen geändert (damals {issued}, jetzt {current}). Die E-Rechnung entsteht aus den aktuellen Daten, das ausgestellte PDF zeigt die ursprünglichen Beträge.',
     },
     gmail: {
       attachEInvoice: 'E-Rechnung anhängen ({format})',
-      attachEInvoiceHint: 'Dieser Kunde bevorzugt E-Rechnungen. Das XML entsteht aus dem ausgestellten Beleg.',
+      attachEInvoiceHint: 'Dieser Kunde bevorzugt E-Rechnungen. Das XML entsteht aus den aktuellen Belegdaten.',
       einvoiceFailed: 'Nicht gesendet: Die E-Rechnung konnte nicht erstellt werden. {reason}',
+      sendWithout: 'Ohne Häkchen wird die E-Mail ohne E-Rechnung gesendet.',
     },
   },
   reminders: {
