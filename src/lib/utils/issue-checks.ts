@@ -1,8 +1,9 @@
-// What a document needs before it may get a number. Pure (only type imports and the totals
-// maths), so the builder runs it on the editor state, the server on the stored document, and node
-// can verify it directly. issue_document (supabase/migrations/20261031_editor.sql) enforces the
+// What a document needs before it may get a number. Pure (type imports, the totals maths and the
+// deposit rules), so the builder runs it on the editor state, the server on the stored document,
+// and node can verify it directly. issue_document (supabase/migrations/20261031_editor.sql) enforces the
 // same rules in SQL.
 import type { TFn } from '@/lib/i18n'
+import { depositProblems, isDeductionLine, type DepositCheck } from '@/lib/deposits'
 import type { DocumentType, IssueProblem, IssuerField } from '@/types'
 import { calcTotals, lineDiscountOutOfRange } from './document'
 
@@ -41,6 +42,8 @@ export interface IssueCheckInput {
   client: { uid_number: string | null; country: string | null } | null
   items: IssueCheckItem[]
   settings: IssuerSettings | null
+  // Invoices: what kind of invoice it is and, for a final invoice, what it deducts.
+  deposit?: DepositCheck
 }
 
 const blank = (s: string | null | undefined) => !s || !s.trim()
@@ -99,12 +102,17 @@ export function issueProblems(input: IssueCheckInput): IssueProblem[] {
   // Money going back is a credit note. A document discount never changes the sign of the
   // total (it is capped at the net), so the lines decide.
   if (input.type !== 'credit_note' && items.length && issueTotal(input) < 0) problems.push({ code: 'negativeTotal' })
+  if (input.type === 'invoice' && input.deposit) problems.push(...depositProblems({ items: input.items, taxTreatment, deposit: input.deposit }))
+  // A credit note made from a final invoice copies its deductions, which only its Storno may keep:
+  // on a partial credit they would take the advance payments off the credit.
+  if (input.type === 'credit_note' && input.items.some(isDeductionLine)) problems.push({ code: 'creditNoteDeductions' })
   return problems
 }
 
-// The document's total before its document-level discount, as calcTotals computes it.
+// The document's total before its document-level discount and a final invoice's deductions
+// (checked on their own), as calcTotals computes it.
 export function issueTotal(input: Pick<IssueCheckInput, 'items' | 'taxTreatment'>): number {
-  const lines = input.items.map(i => ({ ...i, vat_rate: i.vat_rate ?? null }))
+  const lines = input.items.filter(i => !isDeductionLine(i)).map(i => ({ ...i, vat_rate: i.vat_rate ?? null }))
   return calcTotals(lines, [], null, input.taxTreatment).total
 }
 
@@ -123,6 +131,17 @@ export function issueProblemMessage(p: IssueProblem, t: TFn): string {
       return t('editor.problems.badDiscount', { position: p.position })
     case 'negativeTotal':
       return t('editor.problems.negativeTotal')
+    case 'depositZero':
+    case 'deductionExceedsTotal':
+    case 'deductionsOutdated':
+    case 'advanceDraftPending':
+    case 'creditNoteDeductions':
+      return t(`deposits.problems.${p.code}`)
+    case 'advanceOpen':
+    case 'advanceSettledElsewhere':
+    case 'advanceNotDeducted':
+    case 'quoteInvoiced':
+      return t(`deposits.problems.${p.code}`, { number: p.number })
     default:
       return t(`issueChecks.problems.${p.code}`)
   }
