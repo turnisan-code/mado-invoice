@@ -25,6 +25,7 @@ import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { fetchIssuedPdf, blobToBase64, archiveErrorMessage } from '@/lib/issued-pdf'
 import { logEvent } from '@/lib/events'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey, TFn } from '@/lib/i18n'
 import { ActionBar } from './builder/ActionBar'
@@ -36,8 +37,10 @@ import { IssueDialog } from './builder/IssueDialog'
 import { IssueProblemList } from './builder/IssueProblems'
 import { LineEditor } from './builder/LineEditor'
 import type { LineIssues } from './builder/LineRow'
-import { PATHS, docFields, expectedNumber, termDays, type EditorDocument, type FormState } from './builder/model'
+import { PATHS, clientTerms, docFields, expectedNumber, termDays, type EditorDocument, type FormState } from './builder/model'
 import { QuickAddClient } from './builder/QuickAddClient'
+import { RepriceDialog } from './builder/RepriceDialog'
+import { useClientRates } from './builder/useClientRates'
 import { TotalsPanel } from './builder/TotalsPanel'
 import { errorMessage, useDocumentForm } from './builder/useDocumentForm'
 
@@ -91,6 +94,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   const { clientId, date, dueDate, language, currency, taxTreatment, notes, notesInternal, discountType, discountValue, skontoPercent, skontoDays, lines } = form
 
   const [catalogueItems, setCatalogueItems] = useState<CatalogueItem[]>(catalogue)
+  const clientRates = useClientRates(clientId, catalogueItems, setLines)
   const [showDetails, setShowDetails] = useState(false)
   const [quickAdd, setQuickAdd] = useState<string | null>(null)
   const [gmailPreview, setGmailPreview] = useState<GmailPreview | null>(null)
@@ -116,8 +120,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       clientId: id,
       ...(c?.language ? { language: c.language } : {}),
       ...(c ? { taxTreatment: c.tax_treatment as TaxTreatment } : {}),
-      ...(c && !doc?.number ? { dueDate: addDays(date || today(), termDays(type, settings, c)) } : {}),
+      ...(c && !doc?.number ? clientTerms(type, settings, c, date || today()) : {}),
     })
+    if (c && !doc?.number) void clientRates.clientChanged(clientId, id, clientDisplayName(c), lines)
   }
 
   // The actions that run after issuing read the latest render's email content.
@@ -522,6 +527,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         onCancel={() => setPendingIssue(null)}
       />
 
+      <RepriceDialog offer={clientRates.offer} currency={currency} onApply={clientRates.applyOffer} onCancel={clientRates.dismissOffer} />
+
       <QuickAddClient
         open={quickAdd !== null}
         initialName={quickAdd ?? ''}
@@ -690,6 +697,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         vatApplies={taxTreatment === 'at_vat'}
         lineIssues={lineIssues}
         catalogue={catalogueItems}
+        clientRates={clientRates.rates}
         onCatalogueItemCreated={item => setCatalogueItems(prev => [...prev, item])}
       />
 

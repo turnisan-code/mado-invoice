@@ -18,9 +18,9 @@ export function clientLabel(c: NamedClient | null | undefined): string {
   return clientDisplayName(c)
 }
 
-export type ClientDefaultsSource = Pick<Settings, 'country' | 'default_tax_treatment' | 'default_language' | 'default_payment_days'>
+export type ClientDefaultsSource = Pick<Settings, 'country' | 'default_tax_treatment' | 'default_language' | 'default_payment_days' | 'default_skonto_percent' | 'default_skonto_days'>
 
-export const CLIENT_DEFAULTS_COLUMNS = 'country, default_tax_treatment, default_language, default_payment_days'
+export const CLIENT_DEFAULTS_COLUMNS = 'country, default_tax_treatment, default_language, default_payment_days, default_skonto_percent, default_skonto_days'
 
 // A new client starts in the studio's own country with the document defaults from Settings.
 export function toClientDefaults(s: ClientDefaultsSource | null | undefined): ClientDefaults {
@@ -29,5 +29,7 @@ export function toClientDefaults(s: ClientDefaultsSource | null | undefined): Cl
     tax_treatment: s?.default_tax_treatment ?? 'at_vat',
     language: s?.default_language ?? 'de',
     payment_days: s?.default_payment_days ?? 14,
+    skonto_percent: s?.default_skonto_percent ?? null,
+    skonto_days: s?.default_skonto_days ?? null,
   }
 }

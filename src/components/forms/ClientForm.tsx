@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { MoneyInput } from '@/components/ui/MoneyInput'
+import { MoneyInput, formatLocaleNumber } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ChevronDown, X } from 'lucide-react'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
@@ -54,6 +54,8 @@ function makeSchema(t: TFn) {
     tax_treatment: z.enum(['at_vat', 'eu_reverse_charge', 'non_eu']),
     language: z.enum(['de', 'en']),
     payment_days: z.number().int(t('clients.form.paymentDaysInvalid')).min(0, t('clients.form.paymentDaysInvalid')).max(365, t('clients.form.paymentDaysInvalid')).nullable(),
+    skonto_percent: z.number().min(0, t('rates.skontoPercentInvalid')).max(100, t('rates.skontoPercentInvalid')).nullable(),
+    skonto_days: z.number().int(t('rates.skontoDaysInvalid')).min(0, t('rates.skontoDaysInvalid')).max(365, t('rates.skontoDaysInvalid')).nullable(),
     status: z.enum(['active', 'inactive', 'lead']),
     tags: z.array(z.string()),
     notes: z.string(),
@@ -89,6 +91,8 @@ function toValues(client: Client | undefined, defaults: ClientDefaults): Values 
     tax_treatment: client?.tax_treatment ?? defaults.tax_treatment,
     language: client?.language ?? defaults.language,
     payment_days: client ? client.payment_days : null,
+    skonto_percent: client?.skonto_percent ?? null,
+    skonto_days: client?.skonto_days ?? null,
     status: client?.status ?? 'active',
     tags: client?.tags ?? [],
     notes: client?.notes ?? '',
@@ -118,6 +122,8 @@ function toPayload(v: Values) {
     language: v.language,
     currency: 'EUR' as const,
     payment_days: v.payment_days,
+    skonto_percent: v.skonto_percent,
+    skonto_days: v.skonto_days,
     status: v.status,
     tags: v.tags,
     notes: v.notes.trim() || null,
@@ -395,6 +401,43 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           </select>
         </Field>
       </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field id={id('skonto_percent')} label={t('rates.skontoPercent')} error={errorOf('skonto_percent')}>
+          <Controller
+            control={control}
+            name="skonto_percent"
+            render={({ field }) => (
+              <MoneyInput
+                id={id('skonto_percent')}
+                value={field.value}
+                onValueChange={field.onChange}
+                onBlur={field.onBlur}
+                placeholder={t('rates.skontoDefault', { value: defaults.skonto_percent ? `${formatLocaleNumber(defaults.skonto_percent, 2)} %` : t('rates.skontoNone') })}
+                aria-invalid={!!errors.skonto_percent || undefined}
+              />
+            )}
+          />
+        </Field>
+        <Field id={id('skonto_days')} label={t('rates.skontoDays')} error={errorOf('skonto_days')}>
+          <Controller
+            control={control}
+            name="skonto_days"
+            render={({ field }) => (
+              <MoneyInput
+                id={id('skonto_days')}
+                integer
+                value={field.value}
+                onValueChange={field.onChange}
+                onBlur={field.onBlur}
+                placeholder={t('rates.skontoDefault', { value: defaults.skonto_days != null ? String(defaults.skonto_days) : t('rates.skontoNone') })}
+                aria-invalid={!!errors.skonto_days || undefined}
+              />
+            )}
+          />
+        </Field>
+      </div>
+      <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-2">{t('rates.skontoHint')}</p>
 
       <Controller control={control} name="tags" render={({ field }) => <TagInput value={field.value} onChange={field.onChange} />} />
 

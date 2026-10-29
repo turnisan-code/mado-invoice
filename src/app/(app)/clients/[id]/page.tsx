@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import ClientEditSection from '@/components/layout/ClientEditSection'
+import ClientRates from '@/components/layout/ClientRates'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatDate, formatMoney, roundCents } from '@/lib/utils/document'
@@ -41,7 +42,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   if (!client) notFound()
 
   // The history list shows the 50 latest documents; the stats aggregate every invoice.
-  const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }] = await Promise.all([
+  const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }, { data: catalogue }, { data: rates }] = await Promise.all([
     supabase
       .from('documents')
       .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
@@ -56,6 +57,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     supabase.from('settings').select(CLIENT_DEFAULTS_COLUMNS).maybeSingle(),
     // Money paid back to the client on credit notes.
     supabase.from('payments').select('amount, documents!inner(client_id)').eq('kind', 'refund').eq('documents.client_id', id),
+    supabase.from('catalogue_items').select('*').order('sort_order'),
+    supabase.from('client_rates').select('id, client_id, catalogue_item_id, price, note').eq('client_id', id),
   ])
 
   const allDocs = documents ?? []
@@ -120,9 +123,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-        {/* Client details */}
-        <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
-          <ClientEditSection client={client} countryLabel={countryName(client.country, lang)} defaults={toClientDefaults(settings)} countries={countryOptions(lang)} />
+        {/* Client details and rate card */}
+        <div className="space-y-6 min-w-0">
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
+            <ClientEditSection client={client} countryLabel={countryName(client.country, lang)} defaults={toClientDefaults(settings)} countries={countryOptions(lang)} />
+          </div>
+          <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
+            <ClientRates clientId={id} catalogue={catalogue ?? []} initialRates={(rates ?? []).map(r => ({ ...r, price: Number(r.price) }))} />
+          </div>
         </div>
 
         {/* Documents */}
