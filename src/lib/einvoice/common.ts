@@ -1,27 +1,30 @@
 // The format-neutral content of a structured e-invoice, derived from an issued invoice or credit
-// note exactly as the PDF prints it: line nets from lineAmount, totals and VAT per rate from
-// calcTotals, section and document discounts as allowances per VAT category. Pure (no I/O), so
-// ebinterface.ts and ubl.ts only lay this out and node can check it directly.
+// note exactly as the PDF prints it: line nets from lineAmount with each line's own discount as a
+// line allowance, totals and VAT per rate from calcTotals, section and document discounts as
+// allowances per VAT category. Pure (no I/O), so ebinterface.ts and ubl.ts only lay this out and
+// node can check it directly.
 import type { TFn } from '@/lib/i18n'
 import { docTitle, documentKind, documentLanguage } from '@/lib/document-labels'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { countryName, toCountryCode } from '@/lib/utils/country'
 import {
-  calcTotals, clampPercent, discountAmount, formatDate, getTaxNote, lineAmount, orderItems,
+  calcTotals, clampPercent, discountAmount, formatDate, getTaxNote, lineAmount, lineSummary, orderItems,
   paymentTermsSentence, roundCents, skontoAmount, skontoDeadline, viennaDate,
 } from '@/lib/utils/document'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary } from '@/lib/utils/epc-qr'
 import { isValidBic, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import type { Client, Document, DocumentItem, Language, Payment, Settings, Unit } from '@/types'
+import { decimal } from './xml'
 
 export type EInvoiceErrorCode =
   | 'not_issued' | 'unsupported_type' | 'currency' | 'client_country'
   | 'buyer_reference' | 'buyer_endpoint' | 'seller_endpoint'
 
 // A document that cannot become this e-invoice; the UI words the code (einvoice.errors.*).
+// 'line_amount' is a fault in the line maths, not in the document, so the UI shows its message.
 export class EInvoiceError extends Error {
-  constructor(readonly code: EInvoiceErrorCode, message: string) {
+  constructor(readonly code: EInvoiceErrorCode | 'line_amount', message: string) {
     super(message)
     this.name = 'EInvoiceError'
   }
@@ -57,7 +60,18 @@ export interface EInvoiceLine {
   descriptionLines: string[]
   quantity: number
   unitCode: string
+  // The price before the line's own discount, never negative (BR-27).
   unitPrice: number
+  // quantity × unitPrice to the cent: the line before its own discount.
+  gross: number
+  // The line's own discount, gross − net, 0 without one: a line allowance, or a charge where it
+  // is negative (a discount that shrinks a credit line, as with section and document discounts).
+  discount: number
+  // Only when gross × percent / 100 gives exactly the discount at the two decimals written.
+  discountPercent: number | null
+  // In the document's language; null without a discount.
+  discountReason: string | null
+  // What the PDF prints and calcTotals sums (lineAmount).
   net: number
   tax: TaxKey
   period: Period | null
@@ -193,6 +207,14 @@ export function taxKeyFor(treatment: string, rate: number): TaxKey {
 
 const keyId = (k: TaxKey) => `${k.category}:${k.rate}`
 
+// A percentage as both formats write it (two decimals), or null unless base × it / 100 gives
+// exactly the amount, so no reader recomputes another one (PEPPOL-EN16931-R040).
+function exactPercent(base: number, percent: number | null, value: number): number | null {
+  if (percent == null) return null
+  const written = Number(decimal(percent, 2))
+  return roundCents(base * written / 100) === value ? written : null
+}
+
 function textLines(value: string | null | undefined): string[] {
   return (value ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
 }
@@ -285,9 +307,11 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
       if (text) section.texts.push(text)
       if (type === 'heading' && text && !section.heading) section.heading = text
     } else if (type === 'item' && item.quantity != null && item.unit_price != null && item.vat_rate != null) {
-      // Prices are never negative in EN 16931 (BR-27): a credit line carries the sign in its quantity.
+      // Prices are never negative in EN 16931 (BR-27): a credit line carries the sign in its quantity,
+      // so quantity × unitPrice keeps the sign of the line's gross.
       const negative = item.unit_price < 0
       const descriptionLines = textLines(item.description)
+      const { gross, discount: lineDiscount, percent } = lineSummary(item)
       const line: EInvoiceLine = {
         position: lines.length + 1,
         name: descriptionLines[0] ?? '—',
@@ -295,9 +319,21 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
         quantity: negative ? -item.quantity : item.quantity,
         unitCode: UNIT_CODES[item.unit ?? 'flat'] ?? 'C62',
         unitPrice: Math.abs(item.unit_price),
+        gross,
+        discount: lineDiscount,
+        discountPercent: lineDiscount > 0 ? exactPercent(gross, percent, lineDiscount) : null,
+        discountReason: lineDiscount !== 0 ? t('editor.lineDiscount') : null,
         net: lineAmount(item),
         tax: taxKeyFor(treatment, item.vat_rate),
         period: periodOf(item.service_date, item.service_date_end),
+      }
+      // Readers recompute every line (PEPPOL-EN16931-R120, ebInterface LineItemAmount): quantity ×
+      // unit price as written, rounded to the cent like the PDF (at most half a cent off), less the
+      // line allowance must give the net the PDF prints, so a change to lineAmount or lineSummary
+      // cannot make the XML disagree with it unnoticed.
+      const written = Number(decimal(line.quantity)) * Number(decimal(line.unitPrice))
+      if (roundCents(written) !== line.gross || roundCents(line.gross - line.discount) !== line.net) {
+        throw new EInvoiceError('line_amount', `Line ${line.position}: ${decimal(line.quantity)} × ${decimal(line.unitPrice)} less ${line.discount} does not give the printed ${line.net}`)
       }
       lines.push(line)
       section.lines.push(line)
