@@ -1096,7 +1096,7 @@ declare
   s       settings%rowtype;
   doc_id  uuid;
   item_id uuid;
-  line    jsonb;
+  l       jsonb;
   pos     integer := 0;
   ids     uuid[];
   linked  integer;
@@ -1109,7 +1109,7 @@ begin
   if jsonb_typeof(p_lines) is distinct from 'array' then
     raise exception using errcode = 'MI031', message = 'Nothing to invoice.';
   end if;
-  if not exists (select 1 from jsonb_array_elements(p_lines) x where coalesce(x->>'line_type', 'item') = 'item') then
+  if not exists (select 1 from jsonb_array_elements(p_lines) as x(e) where coalesce(e->>'line_type', 'item') = 'item') then
     raise exception using errcode = 'MI031', message = 'Nothing to invoice.';
   end if;
 
@@ -1125,18 +1125,18 @@ begin
     s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end
   ) returning id into doc_id;
 
-  for line in select value from jsonb_array_elements(p_lines) loop
+  for l in select value from jsonb_array_elements(p_lines) loop
     insert into document_items (
       document_id, sort_order, line_type, description, service_date, service_date_end,
       quantity, unit, unit_price, vat_rate
     ) values (
-      doc_id, pos, coalesce(line->>'line_type', 'item'), coalesce(line->>'description', ''),
-      (line->>'service_date')::date, (line->>'service_date_end')::date,
-      (line->>'quantity')::numeric, line->>'unit', (line->>'unit_price')::numeric, (line->>'vat_rate')::integer
+      doc_id, pos, coalesce(l->>'line_type', 'item'), coalesce(l->>'description', ''),
+      (l->>'service_date')::date, (l->>'service_date_end')::date,
+      (l->>'quantity')::numeric, l->>'unit', (l->>'unit_price')::numeric, (l->>'vat_rate')::integer
     ) returning id into item_id;
     pos := pos + 1;
 
-    ids := array(select jsonb_array_elements_text(coalesce(line->'time_entry_ids', '[]'::jsonb))::uuid);
+    ids := array(select jsonb_array_elements_text(coalesce(l->'time_entry_ids', '[]'::jsonb))::uuid);
     if cardinality(ids) > 0 then
       update time_entries set invoiced_document_id = doc_id, document_item_id = item_id
       where id = any(ids) and project_id = p.id and billable and invoiced_document_id is null;
@@ -1146,7 +1146,7 @@ begin
       end if;
     end if;
 
-    ids := array(select jsonb_array_elements_text(coalesce(line->'expense_ids', '[]'::jsonb))::uuid);
+    ids := array(select jsonb_array_elements_text(coalesce(l->'expense_ids', '[]'::jsonb))::uuid);
     if cardinality(ids) > 0 then
       update project_expenses set invoiced_document_id = doc_id, document_item_id = item_id
       where id = any(ids) and project_id = p.id and billable and invoiced_document_id is null;
