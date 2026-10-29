@@ -5,6 +5,7 @@ import { Plus } from 'lucide-react'
 import { useT } from '@/lib/i18n/client'
 import type { PublicSettings } from '@/lib/public-settings'
 import type { CatalogueItem, Currency, Language, LineType } from '@/types'
+import type { RateMap } from '@/lib/utils/catalogue'
 import { LineRow, itemColumns, type LineIssues } from './LineRow'
 import { blankLine, blankSpecial, dropIndex, moveItem, type LineItem } from './model'
 import { useReorder } from './useReorder'
@@ -18,7 +19,7 @@ const SPECIAL_LINES: [LineType, 'builder.heading' | 'builder.note' | 'builder.di
 ]
 
 // The document's lines, reordered by drag and drop, Alt+↑/↓ on a handle or the arrows on a phone.
-export function LineEditor({ lines, setLines, updateLine, settings, currency, language, vatApplies, lineIssues, catalogue, onCatalogueItemCreated }: {
+export function LineEditor({ lines, setLines, updateLine, settings, currency, language, vatApplies, lineIssues, catalogue, clientRates, onCatalogueItemCreated }: {
   lines: LineItem[]
   setLines: (fn: (lines: LineItem[]) => LineItem[]) => void
   updateLine: (id: string, patch: Partial<LineItem>) => void
@@ -28,6 +29,8 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
   vatApplies: boolean
   lineIssues: (index: number) => LineIssues
   catalogue: CatalogueItem[]
+  // The selected client's own prices for catalogue items.
+  clientRates: RateMap
   onCatalogueItemCreated: (item: CatalogueItem) => void
 }) {
   const { t } = useT()
@@ -87,6 +90,7 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
                   vatApplies={vatApplies}
                   issues={lineIssues(idx)}
                   catalogue={catalogue}
+                  clientRates={clientRates}
                   onCatalogueItemCreated={onCatalogueItemCreated}
                   update={patch => updateLine(line.id, patch)}
                   remove={() => setLines(ls => ls.filter(l => l.id !== line.id))}
