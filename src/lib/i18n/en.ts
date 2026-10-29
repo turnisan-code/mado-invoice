@@ -1420,6 +1420,9 @@ export const en = {
       up: 'Move line {position} up',
       down: 'Move line {position} down',
       moved: 'Moved to position {position} of {count}.',
+      itemHandle: '{name}: drag, or press Alt+↑/↓ to move',
+      itemUp: 'Move {name} up',
+      itemDown: 'Move {name} down',
     },
     client: {
       new: 'New client…',

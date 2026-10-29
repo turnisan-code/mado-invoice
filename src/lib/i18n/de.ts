@@ -1422,6 +1422,9 @@ export const de = {
       up: 'Zeile {position} nach oben',
       down: 'Zeile {position} nach unten',
       moved: 'Auf Position {position} von {count} verschoben.',
+      itemHandle: '{name}: ziehen oder mit Alt+↑/↓ verschieben',
+      itemUp: '{name} nach oben',
+      itemDown: '{name} nach unten',
     },
     client: {
       new: 'Neuer Kunde…',
