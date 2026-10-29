@@ -6,6 +6,10 @@ import { toast } from 'sonner'
 import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, ChevronUp, ChevronDown, Search } from 'lucide-react'
 import { formatDate, formatMoney } from '@/lib/utils/document'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { controlClass, fieldClass } from '@/components/ui/control'
+import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { CatalogueItem, CatalogueUsage, Unit, VatRate } from '@/types'
 import { useT } from '@/lib/i18n/client'
@@ -23,8 +27,8 @@ interface AddingState { category: string | null }
 type Draft = Partial<CatalogueItem>
 type PendingDelete = { kind: 'item'; id: string } | { kind: 'category'; cat: string; count: number }
 
-const areaCls = 'w-full min-h-16 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 field-sizing-content resize-none'
-const fieldCls = 'w-full h-9 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-base md:text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500'
+const areaCls = `${controlClass} min-h-16 py-2 field-sizing-content resize-none`
+const fieldCls = fieldClass
 const iconBtn = 'h-10 w-10 sm:h-7 sm:w-7 flex items-center justify-center rounded-md transition-colors'
 
 // Trimmed names, or null when both are empty; a missing translation falls back to the other.
@@ -72,11 +76,11 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
         <div className="space-y-1">
           <label htmlFor={`${id}-de`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.nameDe')}</label>
-          <input id={`${id}-de`} autoFocus={autoFocusName} value={d.name_de ?? ''} onChange={e => setD(p => ({ ...p, name_de: e.target.value }))} placeholder={t('catalogue.nameDePlaceholder')} className={fieldCls} aria-invalid={!!error || undefined} />
+          <input id={`${id}-de`} autoFocus={autoFocusName} value={d.name_de ?? ''} onChange={e => setD(p => ({ ...p, name_de: e.target.value }))} placeholder={t('catalogue.nameDePlaceholder')} className={fieldCls} aria-invalid={!!error || undefined} aria-describedby={error ? `${id}-error` : undefined} />
         </div>
         <div className="space-y-1">
           <label htmlFor={`${id}-en`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.nameEn')}</label>
-          <input id={`${id}-en`} value={d.name_en ?? ''} onChange={e => setD(p => ({ ...p, name_en: e.target.value }))} placeholder={t('catalogue.nameEnPlaceholder')} className={fieldCls} aria-invalid={!!error || undefined} />
+          <input id={`${id}-en`} value={d.name_en ?? ''} onChange={e => setD(p => ({ ...p, name_en: e.target.value }))} placeholder={t('catalogue.nameEnPlaceholder')} className={fieldCls} aria-invalid={!!error || undefined} aria-describedby={error ? `${id}-error` : undefined} />
         </div>
         <div className="space-y-1">
           <label htmlFor={`${id}-price`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.defaultPrice')}</label>
@@ -84,11 +88,11 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
         </div>
         <div className="space-y-1">
           <label htmlFor={`${id}-unit`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.unit')}</label>
-          <select id={`${id}-unit`} value={d.unit ?? 'flat'} onChange={e => setD(p => ({ ...p, unit: e.target.value as Unit }))} className={fieldCls}>{UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}</select>
+          <Select id={`${id}-unit`} value={d.unit ?? 'flat'} onChange={e => setD(p => ({ ...p, unit: e.target.value as Unit }))}>{UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}</Select>
         </div>
         <div className="space-y-1">
           <label htmlFor={`${id}-vat`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.vatRate')}</label>
-          <select id={`${id}-vat`} value={d.vat_rate ?? 20} onChange={e => setD(p => ({ ...p, vat_rate: parseInt(e.target.value) as VatRate }))} className={fieldCls}>{VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}</select>
+          <Select id={`${id}-vat`} value={d.vat_rate ?? 20} onChange={e => setD(p => ({ ...p, vat_rate: parseInt(e.target.value) as VatRate }))}>{VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}</Select>
         </div>
         <div className="space-y-1">
           <label htmlFor={`${id}-section`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.section')}</label>
@@ -105,14 +109,10 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
           <textarea id={`${id}-desc-en`} rows={3} value={d.description_en ?? ''} onChange={e => setD(p => ({ ...p, description_en: e.target.value }))} placeholder={t('clientData.catalogue.descriptionPlaceholder')} className={areaCls} />
         </div>
       </div>
-      {error && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>}
+      {error && <p id={`${id}-error`} className="text-xs text-red-600 dark:text-red-400 mb-3">{error}</p>}
       <div className="flex items-center gap-2">
-        <button type="submit" className="h-8 px-4 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
-          {t('common.save')}
-        </button>
-        <button type="button" onClick={onCancel} className="h-8 px-3 rounded-lg text-sm text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors">
-          {t('common.cancel')}
-        </button>
+        <Button type="submit" className="px-4">{t('common.save')}</Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>{t('common.cancel')}</Button>
       </div>
     </form>
   )
@@ -547,14 +547,10 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
               value={newCatName}
               onChange={e => setNewCatName(e.target.value)}
               placeholder={t('catalogue.newSectionPlaceholder')}
-              className="h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 text-base md:text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:ring-1 focus:ring-neutral-400 w-44"
+              className={cn(fieldClass, 'w-44')}
             />
-            <button type="submit" className="h-8 px-3 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm font-medium hover:bg-neutral-700 dark:hover:bg-neutral-200 transition-colors">
-              {t('common.create')}
-            </button>
-            <button type="button" onClick={() => { setNewCatInput(false); setNewCatName('') }} className="h-8 px-2 text-sm text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors">
-              {t('common.cancel')}
-            </button>
+            <Button type="submit">{t('common.create')}</Button>
+            <Button type="button" variant="ghost" onClick={() => { setNewCatInput(false); setNewCatName('') }}>{t('common.cancel')}</Button>
           </form>
         ) : (
           <button

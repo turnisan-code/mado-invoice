@@ -10,6 +10,8 @@ import { applyMapping, decodeStatement, parseStatement } from '@/lib/bank/parse'
 import { matchTransactions, type MatchRow, type OpenInvoice } from '@/lib/bank/match'
 import type { BankTransaction, CsvMapping, ParsedStatement } from '@/lib/bank/types'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { apiErrorMessage } from '@/lib/api-errors'
@@ -38,10 +40,7 @@ interface ImportResult extends ImportResponse {
   invoices: InvoiceLabel[]
 }
 
-const SELECT_CLS = 'w-full min-w-0 border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
 const CHECKBOX_CLS = 'h-4 w-4 shrink-0 rounded border-neutral-300 dark:border-neutral-600 accent-blue-500 disabled:opacity-40'
-const BTN_SECONDARY = 'inline-flex items-center gap-1.5 text-sm px-3 py-2 sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors text-neutral-600 dark:text-neutral-400'
-const BTN_PRIMARY = 'inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50 disabled:pointer-events-none'
 const PILL: Record<string, string> = {
   high: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
   medium: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
@@ -79,10 +78,10 @@ function MappingEditor({ header, rows, mapping, onChange, t }: { header: string[
   const column = (label: string, key: 'date' | 'amount' | 'credit' | 'debit' | 'counterparty' | 'currency') => (
     <label className="block text-xs text-neutral-500 dark:text-neutral-400 space-y-1">
       <span className="block font-medium">{label}</span>
-      <select value={mapping[key] ?? ''} onChange={e => setColumn(key, e.target.value)} className={SELECT_CLS}>
+      <Select value={mapping[key] ?? ''} onChange={e => setColumn(key, e.target.value)}>
         <option value="">{t('bankImport.colNone')}</option>
         {header.map((_, i) => <option key={i} value={i}>{name(i)}</option>)}
-      </select>
+      </Select>
     </label>
   )
 
@@ -288,14 +287,14 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
 
   function invoiceSelect(r: MatchRow) {
     return (
-      <select value={invoiceFor(r) ?? ''} onChange={e => setInvoice(r, e.target.value)} aria-label={t('bankImport.thInvoice')} className={SELECT_CLS}>
+      <Select value={invoiceFor(r) ?? ''} onChange={e => setInvoice(r, e.target.value)} aria-label={t('bankImport.thInvoice')}>
         <option value="">{t('bankImport.skip')}</option>
         {invoices.map(inv => (
           <option key={inv.id} value={inv.id}>
             {t('bankImport.invoiceOption', { number: inv.number, client: inv.clientCompany || inv.clientName, balance: money(inv.balance, null) })}
           </option>
         ))}
-      </select>
+      </Select>
     )
   }
 
@@ -390,8 +389,8 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
           </div>
         )}
         <div className="flex flex-wrap gap-2 pt-1">
-          <button type="button" onClick={reset} className={BTN_PRIMARY}>{t('bankImport.another')}</button>
-          <Link href="/invoices" className={BTN_SECONDARY}>{t('bankImport.backToInvoices')}</Link>
+          <Button type="button" onClick={reset} className="px-4">{t('bankImport.another')}</Button>
+          <Link href="/invoices" className={buttonVariants({ variant: 'outline' })}>{t('bankImport.backToInvoices')}</Link>
         </div>
       </section>
     )
@@ -411,7 +410,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
             <Upload size={28} className="mx-auto mb-3 text-neutral-300 dark:text-neutral-600" />
             <p className="text-sm font-medium">{t('bankImport.dropzone')}</p>
             <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">{t('bankImport.dropzoneHint')}</p>
-            <button type="button" onClick={() => fileInput.current?.click()} className={`${BTN_PRIMARY} mt-4`}>{t('bankImport.chooseFile')}</button>
+            <Button type="button" onClick={() => fileInput.current?.click()} className="mt-4 px-4">{t('bankImport.chooseFile')}</Button>
           </div>
         ) : (
           <div className="flex items-center gap-3 min-w-0">
@@ -569,9 +568,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
               <span className="text-neutral-500 dark:text-neutral-400"> · {money(chosenTotal, currency)}</span>
               {excessTotal > 0.005 && <span className="text-amber-600 dark:text-amber-400"> · {t('bankImport.overpayHint', { amount: money(excessTotal, currency) })}</span>}
             </p>
-            <button type="button" onClick={() => void doImport()} disabled={!chosen.length || busy} className={BTN_PRIMARY}>
+            <Button type="button" onClick={() => void doImport()} disabled={!chosen.length || busy} className="shrink-0 px-4">
               {busy ? t('bankImport.importing') : t('bankImport.importButton')}
-            </button>
+            </Button>
           </div>
 
           <ConfirmDialog
