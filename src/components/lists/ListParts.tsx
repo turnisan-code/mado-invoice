@@ -70,10 +70,12 @@ export function SelectToggle({ checked, onToggle, label, large = false }: { chec
 
 // A table row that opens the document from anywhere in the row, not only the number link.
 // Clicks on controls inside the row, text selections and modifier clicks keep their own meaning.
+// A cell marked data-row-ignore never opens the row: a click on a disabled button lands on
+// the cell around it, not on the button.
 export function ClickableRow({ href, className = '', children }: { href: string; className?: string; children: React.ReactNode }) {
   const router = useRouter()
   function open(e: React.MouseEvent<HTMLTableRowElement>, newTab: boolean) {
-    if ((e.target as HTMLElement).closest('a, button, input, select, textarea, label')) return
+    if ((e.target as HTMLElement).closest('a, button, input, select, textarea, label, [data-row-ignore]')) return
     if (window.getSelection()?.toString()) return
     if (newTab) window.open(href, '_blank', 'noopener')
     else router.push(href)

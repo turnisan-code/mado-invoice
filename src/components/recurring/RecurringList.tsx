@@ -243,7 +243,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
                     {s.last ? <Link href={`/invoices/${s.last.id}`} className={`font-medium ${linkClass}`}>{docLabel(s.last)}</Link> : <span className="text-neutral-400 dark:text-neutral-500">{t('recurring.noLastInvoice')}</span>}
                   </td>
-                  <td className="px-2 py-2 text-right">{renderActions(s)}</td>
+                  <td data-row-ignore className="px-2 py-2 text-right">{renderActions(s)}</td>
                 </>
               )
               // The row opens the template invoice; its link in the name cell stays the keyboard target.
