@@ -1,18 +1,18 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
 import { makeT, n } from '@/lib/i18n'
-import { templateDate, templateMoney, templatePercent, senderName, formatIban } from '@/lib/templates'
+import { templateDate, templateMoney, templatePercent, senderName } from '@/lib/templates'
 import { countryName } from '@/lib/utils/country'
+import { formatSignedMoney } from '@/lib/document-labels'
 import { paymentLineLabel } from '@/lib/payment-summary'
 import type { ReminderFigures } from '@/lib/utils/reminder-templates'
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import type { Client, Language, PaymentSummaryLine, Settings } from '@/types'
 import { PDF_FONT_FAMILY } from './fonts'
-import { epcBeneficiary } from '@/lib/utils/epc-qr'
+import { IssuerFooter, PDF_PAGE_X, footerPaddingBottom, issuerFooterColumns } from './IssuerFooter'
 
-// Same page frame as InvoiceDocument, so a Mahnung reads as part of the same correspondence.
+// Same page frame and footer as InvoiceDocument, so a Mahnung reads as part of the same correspondence.
 const s = StyleSheet.create({
-  // The bottom padding keeps text clear of the fixed footer (up to five contact lines).
-  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 44, paddingBottom: 150, backgroundColor: '#ffffff' },
+  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: PDF_PAGE_X, paddingTop: 44, backgroundColor: '#ffffff' },
 
   topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
   logo: { width: 130, height: 52, objectFit: 'contain', objectPositionX: 0 },
@@ -21,6 +21,7 @@ const s = StyleSheet.create({
   metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
 
   billedSection: { marginBottom: 22 },
+  senderLine: { fontSize: 6.5, color: '#9b9b9b', marginBottom: 6, alignSelf: 'flex-start', borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4', paddingBottom: 1 },
   billedLabel: { fontSize: 8, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', marginBottom: 5 },
   billedText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.6 },
 
@@ -44,11 +45,6 @@ const s = StyleSheet.create({
 
   regards: { marginTop: 12, fontSize: 9 },
   signature: { marginTop: 4, fontSize: 9, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold' },
-
-  footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  footerTitle: { fontSize: 10, fontFamily: PDF_FONT_FAMILY, fontWeight: 'bold', marginBottom: 5 },
-  footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
-  footerPage: { fontSize: 8, color: '#9b9b9b' },
 })
 
 export interface ReminderInvoice {
@@ -78,10 +74,14 @@ export default function ReminderDocument({ settings, client, invoice, totals, pa
   const days = (count: number) => n(count, t('dunning.pdf.dayOne', { days: count }), t('dunning.pdf.dayOther', { days: count }))
   const intro = figures.level <= 1 ? t('dunning.pdf.intro1') : figures.level === 2 ? t('dunning.pdf.intro2') : t('dunning.pdf.intro3')
   const sender = senderName(settings)
+  const footerColumns = issuerFooterColumns(settings, t, lang, { bank: true })
+  // DIN 5008: the sender in one line above the recipient's address.
+  const senderLine = [sender, settings.address_line1, [settings.zip, settings.city].filter(Boolean).join(' ')]
+    .map(v => v?.trim()).filter(Boolean).join(' · ')
 
   return (
     <Document title={`${figures.title} ${invoice.number}`} author={sender} language={lang}>
-      <Page size="A4" style={s.page}>
+      <Page size="A4" style={[s.page, { paddingBottom: footerPaddingBottom(footerColumns) }]}>
         <View style={s.topRow}>
           <View>
             {settings.logo_url
@@ -98,13 +98,17 @@ export default function ReminderDocument({ settings, client, invoice, totals, pa
         </View>
 
         <View style={s.billedSection}>
+          {!!senderLine && <Text style={s.senderLine}>{senderLine}</Text>}
           <Text style={s.billedLabel}>{t('dunning.pdf.recipient')}</Text>
           <Text style={s.billedText}>
-            {client.company ? `${client.company}\n` : ''}{client.name ? `${client.name}\n` : ''}
-            {client.address_line1}{'\n'}
-            {client.address_line2 ? `${client.address_line2}\n` : ''}
-            {client.zip} {client.city}{'\n'}
-            {countryName(client.country, lang)}
+            {[
+              client.company,
+              client.name,
+              client.address_line1,
+              client.address_line2,
+              [client.zip, client.city].filter(Boolean).join(' '),
+              countryName(client.country, lang),
+            ].map(v => v?.trim()).filter(Boolean).join('\n')}
           </Text>
         </View>
 
@@ -125,7 +129,7 @@ export default function ReminderDocument({ settings, client, invoice, totals, pa
           {totals.total_paid > 0 && payments.map((line, i) => (
             <View key={i} style={s.row}>
               <Text style={s.rowLabel}>{line.kind === 'paid' ? t('dunning.pdf.paid') : paymentLineLabel(t, line)}</Text>
-              <Text style={s.rowValue}>-{money(line.amount)}</Text>
+              <Text style={s.rowValue}>{formatSignedMoney(-line.amount, invoice.currency || 'EUR', lang)}</Text>
             </View>
           ))}
           {(figures.fee > 0 || figures.interest > 0 || totals.total_paid > 0) && (
@@ -176,34 +180,7 @@ export default function ReminderDocument({ settings, client, invoice, totals, pa
           <Text style={s.signature}>{settings.owner_name || sender}</Text>
         </View>
 
-        <View style={s.footer} fixed>
-          <View>
-            <Text style={s.footerTitle}>{t('dunning.pdf.contact')}</Text>
-            <Text style={s.footerText}>
-              {[
-                settings.company_name,
-                `${settings.address_line1}, ${settings.zip} ${settings.city}`,
-                settings.phone,
-                settings.email,
-                settings.uid_number ? `${t('dunning.pdf.uid')} ${settings.uid_number}` : null,
-              ].filter(Boolean).join('\n')}
-            </Text>
-          </View>
-          <View>
-            <Text style={s.footerTitle}>{t('dunning.pdf.payment')}</Text>
-            <Text style={s.footerText}>
-              {[
-                epcBeneficiary(settings),
-                settings.bank_name,
-                settings.iban ? `IBAN: ${formatIban(settings.iban)}` : null,
-                settings.bic ? `BIC: ${settings.bic}` : null,
-              ].filter(Boolean).join('\n')}
-            </Text>
-          </View>
-          <View style={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
-            <Text style={s.footerPage} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
-          </View>
-        </View>
+        <IssuerFooter columns={footerColumns} t={t} />
       </Page>
     </Document>
   )

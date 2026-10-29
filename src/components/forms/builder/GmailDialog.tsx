@@ -6,6 +6,7 @@ import { Dialog } from '@/components/ui/ConfirmDialog'
 import { parseEmailList } from '@/lib/templates'
 import { useT } from '@/lib/i18n/client'
 import { cn } from '@/lib/utils'
+import type { EInvoiceFormat } from '@/types'
 
 export type GmailPreview = {
   to: string
@@ -19,11 +20,20 @@ export type GmailPreview = {
   newDocId?: string
   uploadToDrive: boolean
   driveArchived: boolean
+  // The client's e-invoice format; null when none is set or the document cannot be one.
+  einvoiceFormat: EInvoiceFormat | null
+  attachEInvoice: boolean
+  // Issued and current total (formatted) when they differ: the PDF is frozen, the XML is not.
+  totalChange: { issued: string; current: string } | null
+  // Why the last attempt could not build the e-invoice; nothing was sent.
+  einvoiceError: string | null
 }
+
+const checkboxCls = 'w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white'
 
 const fieldCls = 'w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
 
-// The email as it will be sent, editable, with the issued PDF attached.
+// The email as it will be sent, editable, with the issued PDF (and the client's e-invoice) attached.
 export function GmailDialog({ preview, setPreview, sending, driveConfigured, onClose, onSend }: {
   preview: GmailPreview | null
   setPreview: (fn: (p: GmailPreview | null) => GmailPreview | null) => void
@@ -79,6 +89,29 @@ export function GmailDialog({ preview, setPreview, sending, driveConfigured, onC
             </div>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('builder.pdfAttached', { filename: preview.filename })}</p>
           </div>
+          {preview.einvoiceFormat && (
+            <div className="space-y-1">
+              <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={preview.attachEInvoice}
+                  onChange={e => edit({ attachEInvoice: e.target.checked, einvoiceError: null })}
+                  aria-describedby={[`${uid}-einvoice-hint`, preview.totalChange && `${uid}-einvoice-total`, preview.einvoiceError && `${uid}-einvoice-error`].filter(Boolean).join(' ')}
+                  className={checkboxCls}
+                />
+                {t('print.gmail.attachEInvoice', { format: t(`einvoice.formats.${preview.einvoiceFormat}`) })}
+              </label>
+              <p id={`${uid}-einvoice-hint`} className="text-xs text-neutral-500 dark:text-neutral-400 pl-6.5">{t('print.gmail.attachEInvoiceHint')}</p>
+              {preview.totalChange && (
+                <p id={`${uid}-einvoice-total`} className="text-xs text-amber-700 dark:text-amber-400 pl-6.5">{t('print.issuedTotal.einvoice', preview.totalChange)}</p>
+              )}
+              {preview.einvoiceError && (
+                <p id={`${uid}-einvoice-error`} role="alert" className="text-xs text-red-600 dark:text-red-400 pl-6.5">
+                  {t('print.gmail.einvoiceFailed', { reason: preview.einvoiceError })} {t('print.gmail.sendWithout')}
+                </p>
+              )}
+            </div>
+          )}
           {driveConfigured && (preview.driveArchived ? (
             <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('builder.archivedToDrive')}</p>
           ) : (
@@ -87,7 +120,7 @@ export function GmailDialog({ preview, setPreview, sending, driveConfigured, onC
                 type="checkbox"
                 checked={preview.uploadToDrive}
                 onChange={e => edit({ uploadToDrive: e.target.checked })}
-                className="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
+                className={checkboxCls}
               />
               {t('builder.alsoDrive')}
             </label>

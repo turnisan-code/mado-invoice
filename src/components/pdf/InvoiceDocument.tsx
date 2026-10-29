@@ -1,54 +1,21 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import { clampPercent, formatDate, lineAmount, orderItems, paymentTermsSentence, sectionSummary } from '@/lib/utils/document'
-import { documentVariables, fillTemplate, templateMoney } from '@/lib/templates'
+import { clampPercent, formatDate, lineAmount, orderItems, sectionSummary } from '@/lib/utils/document'
+import { documentVariables, fillTemplate, paymentTermsText, templateMoney } from '@/lib/templates'
 import { paymentLineLabel, summarizePayments, type SummaryPayment } from '@/lib/payment-summary'
 import { countryName } from '@/lib/utils/country'
 import {
   docNumberLabel, docTitle, documentKind, documentT, formatPercent, formatQuantity, formatSignedMoney,
-  issuerBlocks, recipientLabel, servicePeriod, unitLabel,
+  recipientLabel, servicePeriod, unitLabel,
 } from '@/lib/document-labels'
 import { deductionSummary, discountOf } from '@/lib/deposits'
 import type { Settings, Client, DocumentType, InvoiceKind, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { PDF_FONT_FAMILY, preparePdfFonts, registerPdfFonts } from './fonts'
+import { IssuerFooter, PDF_PAGE_X, footerPaddingBottom, issuerFooterColumns } from './IssuerFooter'
 
 const inBrowser = typeof window !== 'undefined'
 if (inBrowser) registerPdfFonts('/fonts')
-
-const PAGE_X = 52
-// The footer is fixed to every page, so the body's bottom padding is derived from its height:
-// border gap + title + the longest column, each line at FOOTER_LINE, plus air above it.
-const FOOTER_BOTTOM = 26
-const FOOTER_PAD_TOP = 8
-const FOOTER_FONT = 7.5
-const FOOTER_LINE = FOOTER_FONT * 1.4
-const FOOTER_TITLE_GAP = 2
-const FOOTER_AIR = 18
-// A long bank name or street takes a second line (then an ellipsis). A column is about 127pt on
-// invoices, which holds a little over 30 characters; counting from 30 errs towards more room.
-const FOOTER_MAX_LINES = 2
-const FOOTER_LINE_CHARS = 30
-
-function bodyPaddingBottom(footerLines: number) {
-  return FOOTER_BOTTOM + FOOTER_PAD_TOP + FOOTER_LINE + FOOTER_TITLE_GAP + footerLines * FOOTER_LINE + FOOTER_AIR
-}
-
-// Footer entries wrap at spaces and are never hyphenated: an inserted hyphen would change an
-// e-mail address or IBAN. A long entry without spaces (e-mail, web address) breaks after @ or /
-// or before a dot instead.
-function footerEntry(line: string): string[] {
-  if (line.length <= FOOTER_LINE_CHARS || /\s/.test(line)) return [line]
-  const head = line.slice(0, FOOTER_LINE_CHARS)
-  const cut = Math.max(head.lastIndexOf('@') + 1, head.lastIndexOf('/') + 1, head.lastIndexOf('.'))
-  return cut > 0 ? [line.slice(0, cut), line.slice(cut)] : [line]
-}
-
-function footerLineCount(lines: string[]) {
-  return lines.flatMap(footerEntry).reduce((sum, line) => sum + Math.min(FOOTER_MAX_LINES, Math.ceil(line.length / FOOTER_LINE_CHARS)), 0)
-}
-
-const noHyphenation = (word: string) => [word]
 
 // An item row moves to the next page as a whole when it fits on one; a row taller than a page has
 // to wrap, or react-pdf draws it past the page bottom. A page holds about 50 lines, the narrowest
@@ -67,8 +34,8 @@ const LIGHT = '#9b9b9b'
 const RULE = '#d4d4d4'
 
 const s = StyleSheet.create({
-  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: PAGE_X, paddingTop: 48, backgroundColor: '#ffffff' },
-  runningHeader: { position: 'absolute', top: 24, left: PAGE_X, right: PAGE_X, fontSize: 7.5, color: LIGHT },
+  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: PDF_PAGE_X, paddingTop: 48, backgroundColor: '#ffffff' },
+  runningHeader: { position: 'absolute', top: 24, left: PDF_PAGE_X, right: PDF_PAGE_X, fontSize: 7.5, color: LIGHT },
   draftStamp: { position: 'absolute', top: 340, left: 0, right: 0, textAlign: 'center', fontSize: 96, fontWeight: 'bold', color: '#efefef', transform: 'rotate(-30deg)' },
 
   topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
@@ -124,12 +91,6 @@ const s = StyleSheet.create({
   paymentTerms: { marginTop: 14, fontSize: 8.5, color: '#4b4b4b' },
   taxNote: { marginTop: 14, fontSize: 8, color: GREY, fontStyle: 'italic' },
   notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.5 },
-
-  footer: { position: 'absolute', bottom: FOOTER_BOTTOM, left: PAGE_X, right: PAGE_X, borderTopWidth: 0.5, borderTopColor: RULE, paddingTop: FOOTER_PAD_TOP, flexDirection: 'row' },
-  footerCol: { flex: 1, paddingRight: 10 },
-  footerTitle: { fontSize: FOOTER_FONT, lineHeight: 1.4, fontWeight: 'bold', marginBottom: FOOTER_TITLE_GAP },
-  footerText: { fontSize: FOOTER_FONT, lineHeight: 1.4, color: '#4b4b4b', maxLines: FOOTER_MAX_LINES, textOverflow: 'ellipsis' },
-  footerPage: { width: 80, fontSize: FOOTER_FONT, color: LIGHT, textAlign: 'right' },
 })
 
 interface DocItem {
@@ -167,6 +128,8 @@ interface DocData {
   items: DocItem[]
   totals: DocumentTotals
   reference?: DocReference | null
+  // Resolved by the caller (fetchBuyerReference); printed as 'Ihre Referenz'.
+  buyer_reference?: string | null
   // The rows behind totals.total_paid; without them the summary is a single 'Paid' row.
   payments?: SummaryPayment[]
 }
@@ -198,22 +161,21 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const number = draft ? t('pdfPortal.draft') : doc.number
   // Credit notes are stored with positive amounts and print as credits.
   const sign = doc.type === 'credit_note' ? -1 : 1
-  const money = (n: number) => formatSignedMoney(sign * n, doc.currency)
+  const money = (n: number) => formatSignedMoney(sign * n, doc.currency, lang)
   const pct = (n: number) => formatPercent(t, n, lang)
 
   const items = orderItems(doc.items)
   const vatApplies = doc.tax_treatment === 'at_vat'
   const lineRates = new Set(items.filter(i => (i.line_type ?? 'item') === 'item' && i.vat_rate != null).map(i => i.vat_rate))
   const showVatColumn = vatApplies && lineRates.size > 1
+  // The Entgelt per rate differs from the net amount only after a document discount or with
+  // several rates; otherwise it would repeat it. A final invoice's Netto already includes its
+  // discount (shown in the full-service block).
+  const netPerRate = (!deduction && doc.totals.discount_amount > 0) || doc.totals.vat_groups.length > 1
 
-  const issuer = issuerBlocks(settings, t, lang)
-  const bankLines = doc.type === 'invoice' ? issuer.bank : []
-  const footerColumns = [
-    { title: t('pdfPortal.issuer.address'), lines: issuer.address },
-    { title: t('pdfPortal.issuer.contact'), lines: issuer.contact },
-    { title: t('pdfPortal.issuer.bank'), lines: bankLines },
-  ].filter(c => c.lines.length)
-  const paddingBottom = bodyPaddingBottom(Math.max(1, ...footerColumns.map(c => footerLineCount(c.lines))))
+  // Bank details only where money is asked for.
+  const footerColumns = issuerFooterColumns(settings, t, lang, { bank: doc.type === 'invoice' })
+  const paddingBottom = footerPaddingBottom(footerColumns)
 
   const senderLine = [settings.company_name || settings.owner_name, settings.address_line1, [settings.zip, settings.city].filter(Boolean).join(' ')]
     .map(v => v?.trim()).filter(Boolean).join(' · ')
@@ -234,7 +196,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         totals: doc.totals,
       }), { vat: templateMoney(doc.totals.total_vat, lang, doc.currency) })
     : null
-  const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
+  // The sentence the email's {{payment_terms}} prints.
+  const paymentTerms = paymentTermsText({ ...doc, language: lang }, doc.totals.total)
   const paymentLines = doc.payments
     ? summarizePayments(doc.payments)
     : [{ kind: 'paid' as const, amount: doc.totals.total_paid, creditNoteNumber: null }]
@@ -268,6 +231,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 {t(refKind === 'storno' ? 'pdfPortal.stornoOf' : 'pdfPortal.correctionOf', { number: doc.reference.number, date: formatDate(doc.reference.date, lang) })}
               </Text>
             )}
+            {!!doc.buyer_reference && <Text style={s.metaLine}>{t('print.yourReference')}: {doc.buyer_reference}</Text>}
           </View>
         </View>
 
@@ -365,7 +329,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 <Text style={s.colQty}>
                   {formatQuantity(item.quantity, lang)}{item.unit ? ` ${unitLabel(t, item.unit, item.quantity)}` : ''}
                 </Text>
-                <Text style={s.colPrice}>{formatSignedMoney(item.unit_price, doc.currency)}</Text>
+                <Text style={s.colPrice}>{formatSignedMoney(item.unit_price, doc.currency, lang)}</Text>
                 {showVatColumn && <Text style={s.colVat}>{item.vat_rate != null ? pct(item.vat_rate) : ''}</Text>}
                 <Text style={s.colAmount}>{money(lineAmount(item))}</Text>
               </View>
@@ -466,10 +430,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               {/* § 11 UStG: the net amount (Entgelt) per rate, then the tax on it */}
               {vatApplies && doc.totals.vat_groups.map(g => (
                 <View key={g.rate}>
-                  <View style={s.totalsRow}>
-                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
-                    <Text>{money(g.base)}</Text>
-                  </View>
+                  {netPerRate && (
+                    <View style={s.totalsRow}>
+                      <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
+                      <Text>{money(g.base)}</Text>
+                    </View>
+                  )}
                   <View style={s.totalsRow}>
                     <Text style={s.totalsLabel}>{t('pdfPortal.totals.vatAtRate', { rate: pct(g.rate) })}</Text>
                     <Text>{money(g.amount)}</Text>
@@ -504,17 +470,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         {!!doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
         {!!footerText && <Text style={s.notes}>{footerText}</Text>}
 
-        <View style={s.footer} fixed>
-          {footerColumns.map(col => (
-            <View key={col.title} style={s.footerCol}>
-              <Text style={s.footerTitle}>{col.title}</Text>
-              {col.lines.flatMap(footerEntry).map((line, i) => (
-                <Text key={i} style={s.footerText} hyphenationCallback={noHyphenation}>{line}</Text>
-              ))}
-            </View>
-          ))}
-          <Text style={s.footerPage} render={({ pageNumber, totalPages }) => t('pdfPortal.page', { page: pageNumber, pages: totalPages })} />
-        </View>
+        <IssuerFooter columns={footerColumns} t={t} />
       </Page>
     </Document>
   )

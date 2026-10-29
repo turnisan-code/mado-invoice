@@ -53,9 +53,12 @@ Run SQL in the Supabase SQL editor (the storage policies need the `postgres` rol
   filename order (they are dated, e.g. `20261030_lifecycle.sql` before `20261031_editor.sql`).
   A database from before October 2026 starts at the four `20261019_*` files: they create
   `app_users`, `is_app_user()` and `replace_document_items`, which everything after relies on.
-  Then `20261020_schema_alignment.sql` and the rest in filename order. From `20261019_*` on the
-  migrations are re-runnable (`create table if not exists`, `create or replace`,
-  `drop policy if exists`). `supabase/add_reminders.sql` and
+  Then `20261020_schema_alignment.sql` and the rest in filename order. From `20261019_*` on each
+  file can be run again (`create table if not exists`, `create or replace`,
+  `drop policy if exists`), but only together with every later file, in order: later files change
+  some function signatures and return types (e.g. `convert_quote_to_invoice`, `catalogue_usage`),
+  so re-running an older file on its own can fail or leave an old overload behind until the later
+  files run again. `supabase/add_reminders.sql` and
   `BOOKAMAT_MIGRATION.sql` are history and are never run on their own.
 - A new migration also updates `supabase/schema.sql`, so both stay in step. A function that is
   redefined starts from its latest definition (later files win).
