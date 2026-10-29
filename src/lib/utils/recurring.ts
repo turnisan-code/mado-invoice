@@ -108,8 +108,12 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
     service_date_end: period.end,
     recurring_schedule_id: schedule.id,
     converted_from_id: source.id,
+    // A period bills the service anew, in EUR: a template that was a final invoice deducts
+    // nothing here, and an advance or partial one is not repeated as such.
+    invoice_kind: 'standard',
     language: source.language,
-    currency: source.currency,
+    currency: 'EUR',
+    exchange_rate: 1,
     tax_treatment: source.tax_treatment,
     notes: source.notes ?? null,
     notes_internal: null,
@@ -124,7 +128,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
     throw new Error(error.message)
   }
 
-  const items = (source.document_items ?? []).map(item => {
+  const items = (source.document_items ?? []).filter(item => item.line_type !== 'deduction').map(item => {
     const copy: Record<string, unknown> = { ...item, document_id: doc.id }
     delete copy.id
     delete copy.created_at

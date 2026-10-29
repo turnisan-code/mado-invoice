@@ -424,7 +424,7 @@ create table document_events (
                 'issued','emailed','mailto_opened','reminder_sent','status_changed',
                 'payment_added','payment_removed','storno_created','archived','drive_archived',
                 'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported',
-                'deposit_created','deposit_linked','deposit_released')),
+                'deposit_created','deposit_linked','deposit_released','project_invoiced','project_released')),
   detail      jsonb not null default '{}',
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz
@@ -747,34 +747,124 @@ begin
 end;
 $$;
 
--- Replaces a document's line items atomically (delete + insert in one transaction), so a
--- failed or interrupted save can no longer leave the document without items.
+-- Writes a document's lines in one transaction and keeps their ids (20261102_integrity.sql): a
+-- line whose id belongs to this document is updated, every other line inserted (under the id the
+-- editor sent while no row has it, so the editor and the database share the ids) and the
+-- document's lines that did not come back are deleted. Time entries and expenses billed on a
+-- deleted line move to a new line with exactly the same content (a device backup from before ids
+-- were kept); otherwise a draft frees them and its history says so, while an issued document
+-- keeps them billed (what it billed stays billed), only without the line. A save with a line
+-- that has no id frees nothing: it may be an edited line, not a removed one.
 create or replace function replace_document_items(p_document_id uuid, p_items jsonb)
 returns void language plpgsql as $$
+declare
+  d      documents%rowtype;
+  kept   jsonb;
+  added  jsonb;
+  stays  uuid[];
+  gone   record;
+  twin   uuid;
+  twins  uuid[] := '{}';
+  freed  integer := 0;
+  more   integer := 0;
+  legacy boolean;
 begin
-  delete from document_items where document_id = p_document_id;
+  -- Two saves of one document (two tabs) run one after the other.
+  select * into d from documents where id = p_document_id for update;
+  if d.id is null then raise exception 'document % not found', p_document_id; end if;
+  -- A line sent without an id (a tab still on the code from before ids were kept, or a device
+  -- backup from then) becomes a new row, so an edited line cannot be told from a removed one.
+  legacy := exists (
+    select 1 from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as x(e)
+    where coalesce(x.e->>'id', '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  );
+
+  with sent as (
+    select x.e || jsonb_build_object('document_id', p_document_id) as e, x.ord,
+           case when x.e->>'id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                then (x.e->>'id')::uuid end as uid
+    from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) with ordinality as x(e, ord)
+  ), marked as (
+    select s.*,
+           s.uid is not null and row_number() over (partition by s.uid order by s.ord) = 1 as is_first,
+           exists (select 1 from document_items i where i.id = s.uid and i.document_id = p_document_id) as is_mine,
+           exists (select 1 from document_items i where i.id = s.uid) as is_taken
+    from sent s
+  )
+  select
+    coalesce(jsonb_agg(m.e || jsonb_build_object('id', m.uid) order by m.ord)
+             filter (where m.is_first and m.is_mine), '[]'::jsonb),
+    coalesce(jsonb_agg(m.e || jsonb_build_object('id', case when m.is_first and not m.is_taken then m.uid else uuid_generate_v4() end) order by m.ord)
+             filter (where not (m.is_first and m.is_mine)), '[]'::jsonb)
+  into kept, added
+  from marked m;
+
+  stays := array(select (k->>'id')::uuid from jsonb_array_elements(kept) k)
+        || array(select (a->>'id')::uuid from jsonb_array_elements(added) a);
+
   insert into document_items (
-    document_id, sort_order, line_type, description, service_date, service_date_end,
+    id, document_id, sort_order, line_type, description, service_date, service_date_end,
     quantity, unit, unit_price, vat_rate, catalogue_item_id, discount_type, discount_value
   )
   select
-    p_document_id, x.sort_order, x.line_type, x.description, x.service_date, x.service_date_end,
-    x.quantity, x.unit, x.unit_price, x.vat_rate, x.catalogue_item_id, x.discount_type, x.discount_value
-  from jsonb_to_recordset(coalesce(p_items, '[]'::jsonb)) as x(
-    sort_order        integer,
-    line_type         text,
-    description       text,
-    service_date      date,
-    service_date_end  date,
-    quantity          numeric,
-    unit              text,
-    unit_price        numeric,
-    vat_rate          integer,
-    catalogue_item_id uuid,
-    discount_type     text,
-    discount_value    numeric
-  )
-  order by x.sort_order;
+    r.id, p_document_id, r.sort_order, r.line_type, r.description, r.service_date, r.service_date_end,
+    r.quantity, r.unit, r.unit_price, r.vat_rate, r.catalogue_item_id, r.discount_type, r.discount_value
+  from jsonb_populate_recordset(null::document_items, added) r
+  order by r.sort_order;
+
+  update document_items i set
+    sort_order = r.sort_order, line_type = r.line_type, description = r.description,
+    service_date = r.service_date, service_date_end = r.service_date_end, quantity = r.quantity,
+    unit = r.unit, unit_price = r.unit_price, vat_rate = r.vat_rate, catalogue_item_id = r.catalogue_item_id,
+    discount_type = r.discount_type, discount_value = r.discount_value
+  from jsonb_populate_recordset(null::document_items, kept) r
+  where i.id = r.id and i.document_id = p_document_id;
+
+  for gone in
+    select i.* from document_items i
+    where i.document_id = p_document_id and not (i.id = any(stays))
+      and (exists (select 1 from time_entries t where t.document_item_id = i.id)
+           or exists (select 1 from project_expenses x where x.document_item_id = i.id))
+    order by i.sort_order
+  loop
+    select r.id into twin
+    from jsonb_populate_recordset(null::document_items, added) r
+    where r.line_type = gone.line_type
+      and r.description is not distinct from gone.description
+      and r.quantity is not distinct from gone.quantity
+      and r.unit is not distinct from gone.unit
+      and r.unit_price is not distinct from gone.unit_price
+      and r.vat_rate is not distinct from gone.vat_rate
+      and r.service_date is not distinct from gone.service_date
+      and r.service_date_end is not distinct from gone.service_date_end
+      and not (r.id = any(twins))
+    order by r.sort_order
+    limit 1;
+    if twin is not null then
+      twins := twins || twin;
+      update time_entries set document_item_id = twin where document_item_id = gone.id;
+      update project_expenses set document_item_id = twin where document_item_id = gone.id;
+    end if;
+  end loop;
+
+  if d.number is null and not legacy then
+    update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
+    from document_items i
+    where i.document_id = p_document_id and not (i.id = any(stays))
+      and t.document_item_id = i.id and t.invoiced_document_id = p_document_id;
+    get diagnostics freed = row_count;
+    update project_expenses x set invoiced_document_id = null, document_item_id = null
+    from document_items i
+    where i.document_id = p_document_id and not (i.id = any(stays))
+      and x.document_item_id = i.id and x.invoiced_document_id = p_document_id;
+    get diagnostics more = row_count;
+    if freed + more > 0 then
+      insert into document_events (document_id, type, detail)
+      values (p_document_id, 'project_released', jsonb_build_object('reason', 'line_removed', 'time_entries', freed, 'expenses', more));
+    end if;
+  end if;
+
+  delete from document_items where document_id = p_document_id and not (id = any(stays));
 end;
 $$;
 
@@ -1003,6 +1093,45 @@ begin
 end;
 $$;
 
+-- A final invoice deducts an advance invoice with the money received on it, less what was paid
+-- back on its credit notes (src/lib/deposits.ts). Once the final invoice is issued that amount is
+-- fixed on it, so the money behind it stays as it is: removing a payment of the advance invoice,
+-- or recording or removing a refund on one of its credit notes, is refused (MI022) until the
+-- final invoice is cancelled with its Storno, which frees the advance invoice again.
+create or replace function payments_deposit_guard()
+returns trigger language plpgsql as $$
+declare
+  p   payments%rowtype;
+  adv documents%rowtype;
+  f   documents%rowtype;
+begin
+  if tg_op = 'DELETE' then p := old; else p := new; end if;
+  if p.kind = 'refund' then
+    select a.* into adv
+    from documents c join documents a on a.id = c.converted_from_id
+    where c.id = p.document_id and c.type = 'credit_note';
+  elsif p.kind = 'payment' and tg_op = 'DELETE' then
+    select * into adv from documents where id = p.document_id;
+  end if;
+
+  if adv.id is not null and adv.type = 'invoice' and adv.invoice_kind = 'advance' and adv.final_invoice_id is not null then
+    select * into f from documents where id = adv.final_invoice_id;
+    if f.number is not null and f.status <> 'cancelled' then
+      raise exception using errcode = 'MI022',
+        message = format('%s is deducted on final invoice %s with the money received on it; cancel that invoice with its Storno first.', coalesce(adv.number, 'This invoice'), f.number);
+    end if;
+  end if;
+
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_deposit_guard on payments;
+create trigger payments_deposit_guard
+  before insert or delete on payments
+  for each row execute function payments_deposit_guard();
+
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
@@ -1099,8 +1228,9 @@ $$;
 -- ─── Invoice → credit note / Storno ──────────────────────────────────────────
 -- Copies an issued invoice into a draft credit note. With p_cancel it is a Storno: the credit note is
 -- numbered right here (issue_document) and the invoice cancelled in the same transaction, so a
--- Storno is never a deletable draft and never exists without its cancelled invoice.
--- Null when the invoice does not exist.
+-- Storno is never a deletable draft and never exists without its cancelled invoice. Only a Storno
+-- mirrors a final invoice's deduction lines; a plain credit note starts with the lines that bill
+-- the service. Null when the invoice does not exist.
 create or replace function create_credit_note(p_invoice_id uuid, p_cancel boolean default false)
 returns jsonb language plpgsql as $$
 declare
@@ -1119,6 +1249,14 @@ begin
   if inv.status = 'cancelled' then
     raise exception using errcode = 'MI017', message = format('%s is already cancelled.', inv.number);
   end if;
+  -- An issued final invoice keeps the deduction it was issued with: an invoice it deducts is
+  -- corrected there, not with a credit note of its own (MI020, as for its Storno).
+  if inv.final_invoice_id is not null and exists (
+    select 1 from documents f where f.id = inv.final_invoice_id and f.number is not null and f.status <> 'cancelled'
+  ) then
+    raise exception using errcode = 'MI020',
+      message = format('%s is deducted on an issued final invoice; cancel that invoice first.', inv.number);
+  end if;
 
   insert into documents (
     type, number, status, client_id, date, due_date, service_date, service_date_end,
@@ -1135,7 +1273,7 @@ begin
   from document_items i,
        lateral jsonb_populate_record(null::document_items,
          to_jsonb(i) || jsonb_build_object('id', uuid_generate_v4(), 'document_id', cn_id)) r
-  where i.document_id = inv.id
+  where i.document_id = inv.id and (p_cancel or i.line_type <> 'deduction')
   order by i.sort_order;
 
   if p_cancel then
@@ -1198,7 +1336,8 @@ create policy "owner" on client_rates    for all to authenticated using (is_app_
 -- ─── Projects, time tracking and billable expenses ───────────────────────────
 -- (20261101_projects.sql; after is_app_user(), which its policies need.) Expenses are costs
 -- passed on to a client; input VAT stays in Bookamat. Unbilled billable entries become the lines
--- of one draft invoice in one transaction; deleting that draft frees them (ON DELETE SET NULL).
+-- of one draft invoice in one transaction; deleting that draft frees them (ON DELETE SET NULL),
+-- and so does cancelling the invoice or removing their line from the draft.
 -- Error codes: MI030 = project not found, MI031 = nothing to invoice, MI032 = an entry was
 -- billed, deleted or made non-billable in the meantime, MI033 = a project with billed entries
 -- cannot be deleted.
@@ -1228,8 +1367,9 @@ create table time_entries (
   billable             boolean not null default true,
   -- Net hourly rate for this entry; null = the project's rate.
   rate                 numeric(10,2) constraint time_entries_rate_check check (rate is null or rate >= 0),
-  -- Set together when the entry is billed. The line link is cleared whenever the builder rewrites
-  -- the invoice's lines; the entry stays billed on the invoice until the invoice is deleted.
+  -- Set together when the entry is billed; the line keeps its id across edits of the invoice
+  -- (replace_document_items). Removing the line from a draft, cancelling the invoice or deleting
+  -- the draft makes the entry unbilled again.
   invoiced_document_id uuid references documents(id) on delete set null,
   document_item_id     uuid references document_items(id) on delete set null,
   -- The hourly rate the entry was billed at, so a later change of the project's rate does not
@@ -1342,27 +1482,74 @@ begin
 end;
 $$;
 
--- Makes billed entries unbilled again, but only while their invoice is a draft or cancelled
--- (a Storno reversed it): what an issued invoice billed stays billed. Returns how many were freed.
+-- A cancelled invoice bills nothing: when an invoice is cancelled with its Storno
+-- (create_credit_note with p_cancel) or a draft is cancelled, the time entries and expenses it
+-- billed are unbilled again, ready for the corrected invoice, and its history says so.
+create or replace function documents_project_release()
+returns trigger language plpgsql as $$
+declare
+  n      integer;
+  m      integer;
+  storno documents%rowtype;
+begin
+  update time_entries set invoiced_document_id = null, document_item_id = null, billed_rate = null
+  where invoiced_document_id = new.id;
+  get diagnostics n = row_count;
+  update project_expenses set invoiced_document_id = null, document_item_id = null
+  where invoiced_document_id = new.id;
+  get diagnostics m = row_count;
+  if n + m > 0 then
+    select * into storno from documents
+    where cancels_document_id = new.id and type = 'credit_note' and number is not null
+    order by created_at desc limit 1;
+    insert into document_events (document_id, type, detail)
+    values (new.id, 'project_released', jsonb_strip_nulls(jsonb_build_object(
+      'reason', case when storno.id is null then 'cancelled' else 'storno' end,
+      'time_entries', n, 'expenses', m,
+      'credit_note_id', storno.id, 'credit_note_number', storno.number)));
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists documents_project_release on documents;
+create trigger documents_project_release
+  after update of status on documents
+  for each row
+  when (new.type = 'invoice' and new.status = 'cancelled' and old.status is distinct from 'cancelled')
+  execute function documents_project_release();
+
+-- Makes billed entries unbilled again, but only while their invoice is a draft or cancelled:
+-- what an issued invoice billed stays billed. Each invoice's history notes what was released
+-- from it. Returns how many were freed.
 create or replace function release_project_entries(p_time_entry_ids uuid[], p_expense_ids uuid[])
 returns integer language plpgsql as $$
 declare
   freed integer;
-  more  integer;
 begin
-  update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
-  from documents d
-  where t.id = any(coalesce(p_time_entry_ids, '{}')) and d.id = t.invoiced_document_id
-    and (d.number is null or d.status = 'cancelled');
-  get diagnostics freed = row_count;
-
-  update project_expenses e set invoiced_document_id = null, document_item_id = null
-  from documents d
-  where e.id = any(coalesce(p_expense_ids, '{}')) and d.id = e.invoiced_document_id
-    and (d.number is null or d.status = 'cancelled');
-  get diagnostics more = row_count;
-
-  return freed + more;
+  with te as (
+    update time_entries t set invoiced_document_id = null, document_item_id = null, billed_rate = null
+    from documents d
+    where t.id = any(coalesce(p_time_entry_ids, '{}')) and d.id = t.invoiced_document_id
+      and (d.number is null or d.status = 'cancelled')
+    returning d.id as document_id, 1 as n, 0 as m
+  ), ex as (
+    update project_expenses e set invoiced_document_id = null, document_item_id = null
+    from documents d
+    where e.id = any(coalesce(p_expense_ids, '{}')) and d.id = e.invoiced_document_id
+      and (d.number is null or d.status = 'cancelled')
+    returning d.id as document_id, 0 as n, 1 as m
+  ), per_document as (
+    select r.document_id, sum(r.n)::integer as n, sum(r.m)::integer as m
+    from (select * from te union all select * from ex) r
+    group by r.document_id
+  ), logged as (
+    insert into document_events (document_id, type, detail)
+    select p.document_id, 'project_released', jsonb_build_object('reason', 'manual', 'time_entries', p.n, 'expenses', p.m)
+    from per_document p
+  )
+  select coalesce(sum(p.n + p.m), 0)::integer into freed from per_document p;
+  return freed;
 end;
 $$;
 

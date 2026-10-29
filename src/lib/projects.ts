@@ -1,5 +1,6 @@
 // Projects, time entries and billable expenses: pure functions shared by the pages, the timer
 // and the "Invoice unbilled" route, so the amounts shown are the amounts invoiced.
+import { n, type TFn } from '@/lib/i18n'
 import { lineAmount, roundCents, viennaDate } from '@/lib/utils/document'
 import type { InvoiceGrouping, Project, ProjectExpense, ProjectStatus, TimeEntry, Unit, VatRate } from '@/types'
 
@@ -233,6 +234,15 @@ export function buildInvoiceLines(
 // Net total of the lines, summed as the invoice prints them.
 export function linesNet(lines: readonly InvoiceLine[]): number {
   return roundCents(lines.reduce((s, l) => s + (l.line_type === 'item' ? lineAmount(l) : 0), 0))
+}
+
+// "2 time entries and 1 expense", leaving out a kind with none.
+export function entriesLabel(t: TFn, time: number, expenses: number): string {
+  const parts = [
+    time > 0 ? n(time, t('records.history.timeOne', { count: time }), t('records.history.timeOther', { count: time })) : null,
+    expenses > 0 ? n(expenses, t('records.history.expenseOne', { count: expenses }), t('records.history.expenseOther', { count: expenses })) : null,
+  ].filter((p): p is string => !!p)
+  return parts.length === 2 ? t('records.history.both', { time: parts[0], expenses: parts[1] }) : parts[0] ?? ''
 }
 
 // ── Running timer ──────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import {
   BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, formatBookings, planBookings, requestBookamatSync, unbookedPlan, type BookingRow,
 } from '@/lib/bookamat-client'
 import { logEvent } from '@/lib/events'
+import { loadMoneyLock } from '@/lib/deposits'
 import { useT } from '@/lib/i18n/client'
 import type { Currency, PaymentMethod } from '@/types'
 
@@ -64,6 +65,20 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
   const canApply = issued && !applied.length && !!invoice && invoice.open > 0.005 && open > 0.005
   const applyAmount = invoice ? roundCents(Math.min(open, invoice.open)) : 0
   const invoiceLabel = invoice?.number ?? t('common.draft')
+
+  // The corrected invoice is an advance invoice an issued final invoice deducts with the money
+  // received on it: refunds would change that money, so none is recorded or removed (MI022).
+  const [moneyLock, setMoneyLock] = useState<{ invoiceId: string; id: string; number: string } | null>(null)
+  const invoiceId = invoice?.id ?? null
+  useEffect(() => {
+    if (!issued || !invoiceId) return
+    let current = true
+    loadMoneyLock(createClient(), invoiceId)
+      .then(lock => { if (current) setMoneyLock(lock && { invoiceId, ...lock }) })
+      .catch(err => console.error('[CreditNoteSettlement] deduction lock not loaded:', err))
+    return () => { current = false }
+  }, [issued, invoiceId])
+  const locked = moneyLock && moneyLock.invoiceId === invoiceId ? moneyLock : null
 
   // Bookamat books a credit note's refunds once it is settled (the sync route refuses earlier).
   const [bookamat, setBookamat] = useState<{ error: string | null; bookings: BookingRow[] } | null>(null)
@@ -203,17 +218,26 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
               {r.method === 'cash' && <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 shrink-0">{t('payments.cashBadge')}</span>}
               {r.reference && <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono truncate min-w-0">{t('lifecycle.payments.referenceShort', { reference: r.reference })}</span>}
               {r.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{r.note}</span>}
-              <button
-                type="button"
-                onClick={() => setPendingRemove(r)}
-                aria-label={t('lifecycle.credit.removeRefund', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang) })}
-                className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
+              {!locked && (
+                <button
+                  type="button"
+                  onClick={() => setPendingRemove(r)}
+                  aria-label={t('lifecycle.credit.removeRefund', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang) })}
+                  className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
             </div>
           ))}
         </div>
+      )}
+
+      {locked && (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {t('records.deposits.refundsLocked', { number: locked.number, invoice: invoiceLabel })}{' '}
+          <Link href={`/invoices/${locked.id}`} className="underline underline-offset-2 hover:text-neutral-800 dark:hover:text-neutral-100">{t('deposits.history.openFinal')}</Link>
+        </p>
       )}
 
       {syncable && bookamat && syncState && (
@@ -255,7 +279,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         </Button>
       )}
 
-      {issued && !settled && (
+      {issued && !settled && !locked && (
         <div className="space-y-2 pt-1">
           <div className="flex gap-2">
             <Input

@@ -58,16 +58,24 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
         skonto_days: terms.skontoDays === '' ? null : terms.skontoDays,
         status: 'draft',
         number: null,
+        // A copy bills the service anew: a copied final invoice deducts nothing (and an advance or
+        // partial invoice is no longer one), so it starts as a standard invoice.
+        ...(type === 'invoice' ? { invoice_kind: 'standard' } : {}),
       })
       .select()
       .single()
 
     if (insertErr || !newDoc) { toast.error(t('documents.couldNotDuplicate')); setLoading(false); return }
 
-    const items = (doc.document_items ?? []).map((item: Record<string, unknown>) => {
-      const { id: _id, document_id: _did, created_at: _ca, ...rest } = item
-      return { ...rest, document_id: newDoc.id }
-    })
+    // Deduction lines belong to the invoices the original deducts; the copy gets new line ids.
+    const items = (doc.document_items ?? [])
+      .filter((item: Record<string, unknown>) => item.line_type !== 'deduction')
+      .map((item: Record<string, unknown>) => {
+        const rest = { ...item }
+        delete rest.id
+        delete rest.created_at
+        return { ...rest, document_id: newDoc.id }
+      })
 
     if (items.length > 0) {
       const { error: itemsErr } = await supabase.from('document_items').insert(items)
