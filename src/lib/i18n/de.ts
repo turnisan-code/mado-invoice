@@ -1411,7 +1411,7 @@ export const de = {
   },
   editor: {
     settingsTaxNav: 'Steuer',
-    zeroTotal: 'Der Beleg ergibt {amount}. Trotzdem ausstellen?',
+    zeroTotal: 'Der Gesamtbetrag ist {amount}. Trotzdem ausstellen?',
     lineDiscount: 'Positionsrabatt',
     lineDiscountValue: 'Wert des Positionsrabatts',
     lineDiscountNote: 'Rabatt {discount}',

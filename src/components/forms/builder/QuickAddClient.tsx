@@ -34,7 +34,7 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
   const { t, lang } = useT()
   const uid = useId()
   const defaults = toClientDefaults(settings)
-  const countries = useMemo(() => countryOptions(lang), [lang])
+  const countries = useMemo(() => (open ? countryOptions(lang) : []), [open, lang])
   const [company, setCompany] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
