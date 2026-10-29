@@ -899,7 +899,7 @@ export const de = {
       copied: '{field} kopiert',
     },
     portal: {
-      pageTitle: '{title} {number} · {company}',
+      pageTitle: '{title} {number} — {company}',
       downloadPdf: 'PDF herunterladen',
       notes: 'Hinweise',
       expiredTitle: 'Dieser Link ist abgelaufen',

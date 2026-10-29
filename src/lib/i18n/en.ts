@@ -897,7 +897,7 @@ export const en = {
       copied: '{field} copied',
     },
     portal: {
-      pageTitle: '{title} {number} · {company}',
+      pageTitle: '{title} {number} — {company}',
       downloadPdf: 'Download PDF',
       notes: 'Notes',
       expiredTitle: 'This link has expired',

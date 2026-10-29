@@ -1,6 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import { clampPercent, formatDate, lineAmount, orderItems, paymentTermsSentence, sectionSummary } from '@/lib/utils/document'
-import { documentVariables, fillTemplate, templateMoney } from '@/lib/templates'
+import { clampPercent, formatDate, lineAmount, orderItems, sectionSummary } from '@/lib/utils/document'
+import { documentVariables, fillTemplate, paymentTermsText, templateMoney } from '@/lib/templates'
 import { paymentLineLabel, summarizePayments, type SummaryPayment } from '@/lib/payment-summary'
 import { countryName } from '@/lib/utils/country'
 import {
@@ -185,13 +185,16 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const number = draft ? t('pdfPortal.draft') : doc.number
   // Credit notes are stored with positive amounts and print as credits.
   const sign = doc.type === 'credit_note' ? -1 : 1
-  const money = (n: number) => formatSignedMoney(sign * n, doc.currency)
+  const money = (n: number) => formatSignedMoney(sign * n, doc.currency, lang)
   const pct = (n: number) => formatPercent(t, n, lang)
 
   const items = orderItems(doc.items)
   const vatApplies = doc.tax_treatment === 'at_vat'
   const lineRates = new Set(items.filter(i => (i.line_type ?? 'item') === 'item' && i.vat_rate != null).map(i => i.vat_rate))
   const showVatColumn = vatApplies && lineRates.size > 1
+  // The Entgelt per rate differs from the net amount only after a document discount or with
+  // several rates; otherwise it would repeat it.
+  const netPerRate = doc.totals.discount_amount > 0 || doc.totals.vat_groups.length > 1
 
   const issuer = issuerBlocks(settings, t, lang)
   const bankLines = doc.type === 'invoice' ? issuer.bank : []
@@ -221,7 +224,8 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
         totals: doc.totals,
       }), { vat: templateMoney(doc.totals.total_vat, lang, doc.currency) })
     : null
-  const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
+  // The sentence the email's {{payment_terms}} prints.
+  const paymentTerms = paymentTermsText({ ...doc, language: lang }, doc.totals.total)
   const paymentLines = doc.payments
     ? summarizePayments(doc.payments)
     : [{ kind: 'paid' as const, amount: doc.totals.total_paid, creditNoteNumber: null }]
@@ -349,7 +353,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
                 <Text style={s.colQty}>
                   {formatQuantity(item.quantity, lang)}{item.unit ? ` ${unitLabel(t, item.unit, item.quantity)}` : ''}
                 </Text>
-                <Text style={s.colPrice}>{formatSignedMoney(item.unit_price, doc.currency)}</Text>
+                <Text style={s.colPrice}>{formatSignedMoney(item.unit_price, doc.currency, lang)}</Text>
                 {showVatColumn && <Text style={s.colVat}>{item.vat_rate != null ? pct(item.vat_rate) : ''}</Text>}
                 <Text style={s.colAmount}>{money(lineAmount(item))}</Text>
               </View>
@@ -393,10 +397,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               {/* § 11 UStG: the net amount (Entgelt) per rate, then the tax on it */}
               {vatApplies && doc.totals.vat_groups.map(g => (
                 <View key={g.rate}>
-                  <View style={s.totalsRow}>
-                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
-                    <Text>{money(g.base)}</Text>
-                  </View>
+                  {netPerRate && (
+                    <View style={s.totalsRow}>
+                      <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
+                      <Text>{money(g.base)}</Text>
+                    </View>
+                  )}
                   <View style={s.totalsRow}>
                     <Text style={s.totalsLabel}>{t('pdfPortal.totals.vatAtRate', { rate: pct(g.rate) })}</Text>
                     <Text>{money(g.amount)}</Text>
