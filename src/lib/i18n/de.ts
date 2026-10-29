@@ -240,6 +240,15 @@ export const de = {
     clients: {
       searchPlaceholder: 'Name, Firma, Nr., E-Mail, UID suchen…',
     },
+    chart: {
+      month: 'Monat',
+      revenue: 'Umsatz',
+    },
+    reports: {
+      vatAt: 'USt {rate} %',
+      rateBase: '{rate} % — Bemessungsgrundlage',
+      exemptBase: 'Steuerfreie Umsätze 0 %, Bemessungsgrundlage',
+    },
   },
   csv: {
     number: 'Nummer',

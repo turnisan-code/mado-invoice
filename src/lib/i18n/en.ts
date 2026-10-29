@@ -238,6 +238,15 @@ export const en = {
     clients: {
       searchPlaceholder: 'Search name, company, no., email, VAT ID…',
     },
+    chart: {
+      month: 'Month',
+      revenue: 'Revenue',
+    },
+    reports: {
+      vatAt: 'VAT {rate} %',
+      rateBase: '{rate} % — taxable base',
+      exemptBase: 'Tax-exempt turnover 0 %, taxable base',
+    },
   },
   csv: {
     number: 'Number',
