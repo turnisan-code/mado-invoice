@@ -348,7 +348,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
 
   // The server uploads the stored copy and never overwrites: an archived file comes back as is.
   async function saveIssuedToDrive(documentId: string) {
-    const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' })
+    const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' }).catch(() => null)
+    if (!res) { toast.error(`${t('builder.driveFailedPrefix')}${t('messages.network')}`); return }
     const data = await res.json().catch(() => ({}))
     if (res.ok) notifyDriveUpload(t, data.webViewLink, data.existing)
     else toastApiError(t, { ...data, error: archiveErrorMessage(t, data, t('common.unknownError')) }, t('builder.driveFailedPrefix'))
@@ -464,11 +465,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(gmailPreview),
-    })
+    }).catch(() => null)
     setGmailSending(false)
 
-    if (!res.ok) {
-      toastApiError(t, await res.json().catch(() => ({})), '', t('builder.emailFailed'))
+    if (!res?.ok) {
+      toastApiError(t, res ? await res.json().catch(() => ({})) : {}, '', res ? t('builder.emailFailed') : t('messages.network'))
       return
     }
 

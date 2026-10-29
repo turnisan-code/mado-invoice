@@ -677,10 +677,10 @@ export default function SettingsForm({ settings }: Props) {
 
   async function disconnectGoogle() {
     setDisconnecting(true)
-    const res = await fetch('/api/gmail/auth', { method: 'DELETE' })
+    const res = await fetch('/api/gmail/auth', { method: 'DELETE' }).catch(() => null)
     setDisconnecting(false)
-    if (!res.ok) {
-      toastApiError(t, await res.json().catch(() => ({})), '', t('settings.integrations.google.couldNotDisconnect'))
+    if (!res?.ok) {
+      toastApiError(t, res ? await res.json().catch(() => ({})) : {}, '', res ? t('settings.integrations.google.couldNotDisconnect') : t('messages.network'))
       setConfirmDisconnect(false)
       return
     }
