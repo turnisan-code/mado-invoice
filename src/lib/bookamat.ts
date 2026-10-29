@@ -7,6 +7,7 @@ import { creditNoteSettled } from '@/lib/status'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import { logEvent } from '@/lib/events'
 import { isUiLang, makeT, type TFn } from '@/lib/i18n'
+import { clientDisplayName } from '@/lib/utils/clients'
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, hasMoneyToBook, planBookings, unbookedPlan,
   type AdoptBooking, type BookamatErrorCode, type BookingRow, type ErrorDetail, type MoneyRow, type PlannedBooking,
@@ -519,7 +520,7 @@ export async function syncBookamatDocument(
       // Every year's accounts are resolved before anything is posted, so a missing account never
       // leaves a document half booked.
       const client = doc.clients
-      const clientName = client?.company || client?.name || ''
+      const clientName = clientDisplayName(client)
       const payloads = await Promise.all(todo.map(async p => {
         const vat: Partial<Record<VatRate, number>> = {}
         for (const g of totals.vat_groups) vat[g.rate] = await resolver.resolve(p.year, 'vatAccounts', configuredVat[g.rate]!)

@@ -11,6 +11,7 @@ import { makePeriod, periodParams } from '@/app/(app)/reports/period'
 import { unappliedCreditNotes } from '@/lib/credits'
 import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
 import { clientDisplayName as clientName } from '@/lib/utils/clients'
+import { isOverdue } from '@/lib/status'
 
 // Month keys come from the Vienna calendar date and are shifted in UTC, so neither the server's
 // time zone nor a 31st (setMonth overflow) can move a payment into the wrong month.
@@ -109,8 +110,14 @@ export default async function DashboardPage() {
     doc.tax_treatment,
   )
 
-  const open = active.filter(i => i.status === 'sent' && (i.due_date ?? '9999') >= now)
-  const overdue = active.filter(i => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date < now))
+  // Only what is still owed counts: an invoice with a zero total or a settled balance is neither
+  // outstanding nor overdue, and the due date decides which of the two (isOverdue).
+  const owing = active.filter(i => {
+    const totals = docTotals(i)
+    return totals.total > 0.005 && totals.balance_due > 0.005
+  })
+  const overdue = owing.filter(i => isOverdue(i, now))
+  const open = owing.filter(i => !isOverdue(i, now))
 
   // Outstanding money is what is still unpaid, not the invoice totals
   const overdueTotal = roundCents(overdue.reduce((s, d) => s + docTotals(d).balance_due, 0))

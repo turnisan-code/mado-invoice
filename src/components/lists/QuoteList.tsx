@@ -19,6 +19,8 @@ import {
   searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
 import { Select } from '@/components/ui/select'
+import { isIssuedNoteList, latestIssued, type IssuedNote } from '@/lib/utils/bulk-issue'
+import { BulkIssueNotice, BulkIssueResult } from './BulkIssue'
 
 const STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'cancelled'] as const
 
@@ -78,10 +80,14 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
   const { sort } = list
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  // Drafts dated before today are issued with today's date unless the confirm says otherwise.
+  const [redate, setRedate] = useState(true)
+  const [issueNotes, setIssueNotes] = useState<IssuedNote[] | null>(null)
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const quoteCount = (count: number) => n(count, t('quotes.countOne', { count }), t('quotes.countOther', { count }))
   const todayStr = today()
+  const latest = useMemo(() => latestIssued(quotes), [quotes])
 
   const filtered = useMemo(() => {
     let rows = quotes
@@ -114,24 +120,32 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
 
   async function bulkMarkSent() {
     setBulkLoading(true)
+    // Shown once the confirm has closed, so focus moves from one dialog to the next.
+    let notes: IssuedNote[] = []
     try {
       const res = await fetch('/api/quotes/bulk', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selection.selectedVisible.map(d => d.id), status: 'sent' }),
+        body: JSON.stringify({ ids: selection.selectedVisible.map(d => d.id), status: 'sent', redate }),
       })
       const data = await res.json().catch(() => ({}))
+      if (isIssuedNoteList(data.documents)) notes = data.documents
       if (!res.ok) {
         // Drafts before the incomplete one were issued.
         if (res.status === 422) {
           const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
           if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
         }
+        // Drafts before the failed one were issued.
+        if (notes.length) router.refresh()
         toast.error(t('lists.bulkFailed', { error: apiErrorMessage(t, data) }))
         return
       }
       const { updated, skipped } = data
-      toast.success(n(updated, t('quotes.markedSentOne', { count: updated }), t('quotes.markedSentOther', { count: updated })))
+      const redated = notes.filter(note => note.movedFrom).length
+      toast.success(n(updated, t('quotes.markedSentOne', { count: updated }), t('quotes.markedSentOther', { count: updated })), {
+        description: redated ? n(redated, t('views.bulkIssue.redatedOne', { count: redated }), t('views.bulkIssue.redatedOther', { count: redated })) : undefined,
+      })
       if (skipped) toast.info(n(skipped, t('quotes.skippedOne', { count: skipped }), t('quotes.skippedOther', { count: skipped })))
       selection.clear()
       router.refresh()
@@ -140,6 +154,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
     } finally {
       setBulkLoading(false)
       setBulkConfirm(false)
+      setIssueNotes(notes)
     }
   }
 
@@ -262,7 +277,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       </div>
 
       <BulkBar count={selectedCount} onClear={selection.clear}>
-        <BulkButton tone="blue" icon={Send} onClick={() => setBulkConfirm(true)} busy={bulkLoading}>{t('lists.markSent')}</BulkButton>
+        <BulkButton tone="blue" icon={Send} onClick={() => { setRedate(true); setBulkConfirm(true) }} busy={bulkLoading}>{t('lists.markSent')}</BulkButton>
         <BulkButton icon={Download} onClick={() => handleExport(selection.selectedVisible, true)} disabled={bulkLoading}>{t('lists.exportCsv')}</BulkButton>
       </BulkBar>
 
@@ -274,7 +289,18 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
         busy={bulkLoading}
         onConfirm={() => void bulkMarkSent()}
         onCancel={() => setBulkConfirm(false)}
-      />
+      >
+        <BulkIssueNotice
+          type="quote"
+          drafts={bulkConfirm ? selection.selectedVisible.filter(d => d.status === 'draft').map(d => ({ id: d.id, date: d.date, total: docTotal(d) })) : []}
+          latest={latest}
+          today={todayStr}
+          redate={redate}
+          onRedate={setRedate}
+        />
+      </ConfirmDialog>
+
+      <BulkIssueResult notes={issueNotes} path="quotes" onClose={() => setIssueNotes(null)} />
     </div>
   )
 }
