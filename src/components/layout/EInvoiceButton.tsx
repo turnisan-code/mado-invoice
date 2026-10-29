@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { vatEndpoint, type EInvoiceErrorCode } from '@/lib/einvoice/common'
 import { normalizeVatId } from '@/lib/utils/validation'
+import { calcTotals, formatMoney } from '@/lib/utils/document'
 import { useT } from '@/lib/i18n/client'
 import type { EInvoiceFormat } from '@/types'
 
@@ -25,6 +26,8 @@ type Info = {
   prefill: string
   supplierNumber: string | null
   endpoint: string | null
+  // Set when the current total differs from the one the document was issued with.
+  totalChange: { issued: number; current: number } | null
 }
 
 type ClientRow = { einvoice_format: EInvoiceFormat | null; buyer_reference: string | null; supplier_number: string | null; peppol_scheme: string | null; peppol_id: string | null; uid_number: string | null }
@@ -54,7 +57,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       await flushPendingEdits(documentId)
       const { data: doc, error } = await supabase
         .from('documents')
-        .select('type, status, currency, buyer_reference, cancels_document_id, converted_from_id, clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
+        .select('type, status, currency, buyer_reference, cancels_document_id, converted_from_id, issued_total, discount_type, discount_value, tax_treatment, document_items(*), clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
         .eq('id', documentId)
         .single()
       if (error || !doc) throw new Error(error?.message)
@@ -73,6 +76,9 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
         ? { scheme: client.peppol_scheme, id: client.peppol_id }
         : vatEndpoint(normalizeVatId(client?.uid_number ?? '') || null)
       const prefill = doc.buyer_reference ?? fallback ?? ''
+      const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
+      const current = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
+      const issued = doc.issued_total == null ? null : Number(doc.issued_total)
       setInfo({
         currency: doc.currency ?? 'EUR',
         cancelled: doc.status === 'cancelled',
@@ -80,6 +86,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
         prefill,
         supplierNumber: client?.supplier_number?.trim() || null,
         endpoint: endpoint ? `${endpoint.scheme}:${endpoint.id}` : null,
+        totalChange: issued != null && Math.abs(current - issued) >= 0.005 ? { issued, current } : null,
       })
       setFormat(client?.einvoice_format ?? 'ebinterface')
       setReference(prefill)
@@ -154,6 +161,11 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
         ) : (
           <form onSubmit={e => void download(e)} noValidate className="space-y-4">
             {info.cancelled && <p className="text-xs text-amber-700 dark:text-amber-400">{t('einvoice.cancelledHint')}</p>}
+            {info.totalChange && (
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                {t('print.issuedTotal.einvoice', { issued: formatMoney(info.totalChange.issued, info.currency), current: formatMoney(info.totalChange.current, info.currency) })}
+              </p>
+            )}
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium mb-1.5">{t('einvoice.format')}</legend>
               {FORMATS.map(f => (
