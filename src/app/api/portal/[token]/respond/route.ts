@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
-import { apiError, databaseError, invalidJson, readJsonObject } from '@/lib/auth'
+import { apiError, databaseError, invalidJson, isUuid, readJsonObject } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
 import { formatDate, today } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -46,6 +46,8 @@ async function notifyOwner(supabase: SupabaseClient, quote: QuoteRow, action: Ac
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  // share_token is a uuid column: anything else would fail the query instead of finding nothing.
+  if (!isUuid(token)) return apiError(404, 'not_found', 'Not found')
 
   const body = await readJsonObject(req)
   if (!body) return invalidJson()

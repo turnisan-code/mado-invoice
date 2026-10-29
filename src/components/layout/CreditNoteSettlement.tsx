@@ -232,7 +232,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
             >
               <RefreshCw size={12} className={syncing ? 'animate-spin' : undefined} aria-hidden="true" />
               {syncing ? t('messages.creditBookamat.syncing')
-                : syncState === 'synced' ? t('books.sync.newMoney')
+                : syncState === 'synced' ? t('messages.creditBookamat.syncNew')
                 : syncState === 'failed' ? t('books.sync.retry')
                 : t('messages.creditBookamat.sync')}
             </button>

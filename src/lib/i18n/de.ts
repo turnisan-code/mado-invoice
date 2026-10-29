@@ -156,7 +156,7 @@ export const de = {
   messages: {
     generic: 'Das hat nicht geklappt. Bitte noch einmal versuchen.',
     network: 'Der Server ist nicht erreichbar. Verbindung prüfen und noch einmal versuchen.',
-    copyFailed: 'Kopieren hat nicht geklappt — den Link markieren und von Hand kopieren.',
+    copyFailed: 'Kopieren hat nicht geklappt — der Link ist markiert, bitte von Hand kopieren.',
     archiveLater: 'Ausgestellt, aber es wurde keine Archivkopie gespeichert. Auf der Belegseite lässt sie sich erstellen.',
     api: {
       unauthorized: 'Die Sitzung ist abgelaufen. Neu anmelden und den Schritt wiederholen.',
@@ -194,14 +194,16 @@ export const de = {
       answered: 'Dieses Angebot wurde bereits beantwortet.',
       too_many_files: 'Zu viele PDFs für einen Download — einen kürzeren Zeitraum wählen.',
       nothing_to_export: 'Für diesen Zeitraum gibt es nichts zu exportieren.',
+      server_error: 'Auf dem Server ist etwas schiefgegangen. Gleich noch einmal versuchen.',
     },
     logo: {
       removeTitle: 'Logo entfernen?',
-      removeDesc: 'Neue PDFs entstehen dann ohne Logo; bereits ausgestellte Belege behalten ihres. Ein Logo lässt sich jederzeit wieder hochladen.',
+      removeDesc: 'Neue PDFs entstehen dann ohne Logo; bereits ausgestellte Belege behalten ihr Logo. Ein Logo lässt sich jederzeit wieder hochladen.',
       removeFailed: 'Das Logo konnte nicht entfernt werden. Noch einmal versuchen.',
     },
     creditBookamat: {
       sync: 'Rückzahlung an Bookamat übertragen',
+      syncNew: 'Neue Rückzahlungen übertragen',
       syncing: 'Wird übertragen…',
       hint: 'Die Rückzahlung wird in Bookamat als negative Einnahme gebucht, mit der Gutschrift als Beleg.',
     },

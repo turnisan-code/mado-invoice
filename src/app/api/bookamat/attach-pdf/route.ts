@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!result.attached) {
     const error = result.error ?? settingsT(settings)('books.sync.attachNone')
     await recordBookamatError(supabase, settings.id, null, error)
-    return NextResponse.json({ error }, { status: 502 })
+    return NextResponse.json({ error, code: 'bookamat' }, { status: 502 })
   }
   return NextResponse.json({ ok: true, attached: result.attached, failed: targets.length - result.attached, error: result.error })
 }

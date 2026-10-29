@@ -465,11 +465,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(gmailPreview),
-    }).catch(() => null)
+    })
     setGmailSending(false)
 
-    if (!res?.ok) {
-      toastApiError(t, res ? await res.json().catch(() => ({})) : {}, '', res ? t('builder.emailFailed') : t('messages.network'))
+    if (!res.ok) {
+      toastApiError(t, await res.json().catch(() => ({})), '', t('builder.emailFailed'))
       return
     }
 

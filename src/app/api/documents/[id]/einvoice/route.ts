@@ -35,6 +35,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (err instanceof DocumentNotFoundError) return apiError(404, 'not_found', err.message)
     if (err instanceof EInvoiceError) return NextResponse.json({ error: err.message, code: err.code }, { status: 422 })
     console.error('[documents/einvoice]', err)
-    return apiError(500, 'database', err instanceof Error ? err.message : 'E-invoice unavailable')
+    return apiError(500, 'server_error', err instanceof Error ? err.message : 'E-invoice unavailable')
   }
 }

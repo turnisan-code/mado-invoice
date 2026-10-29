@@ -26,7 +26,7 @@ export type ApiErrorCode =
   | 'invalid_address' | 'no_email' | 'nothing_outstanding' | 'not_remindable' | 'no_share_link'
   | 'invalid_status' | 'payment_date_invalid' | 'too_many_rows' | 'nothing_to_apply' | 'apply_failed'
   | 'inactive' | 'template_cancelled' | 'generate_failed' | 'link_expired' | 'expired' | 'answered'
-  | 'too_many_files' | 'nothing_to_export'
+  | 'too_many_files' | 'nothing_to_export' | 'server_error'
 export type LifecycleErrorCode = `MI0${number}`
 // Why a document cannot be issued yet (src/lib/utils/issue-checks.ts). Line problems carry the
 // index in the item list and the 1-based position among item lines.

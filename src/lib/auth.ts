@@ -27,9 +27,10 @@ export function databaseError(error: { message: string; code?: string | null; de
   return apiError(status, 'database', error.message)
 }
 
-// The settings row could not be read: a failed query, or no row at all.
+// The settings row could not be read: a failed query, or no row at all (null from .maybeSingle(),
+// PGRST116 from .single()).
 export function settingsUnavailable(error: { message: string; code?: string | null } | null): NextResponse {
-  return error ? databaseError(error) : apiError(500, 'settings_missing', 'Settings not found')
+  return error && error.code !== 'PGRST116' ? databaseError(error) : apiError(500, 'settings_missing', 'Settings not found')
 }
 
 // First call of every route handler that acts for the signed-in owner. RLS would hide the data

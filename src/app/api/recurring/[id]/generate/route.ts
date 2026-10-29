@@ -5,6 +5,7 @@ import { today } from '@/lib/utils/document'
 import { issueDocument } from '@/lib/pdf/issue'
 import { getT } from '@/lib/i18n/server'
 import { asDbError, lifecycleErrorMessage } from '@/lib/status'
+import { IssueCheckError, issueProblemMessage } from '@/lib/utils/issue-checks'
 
 export const maxDuration = 60
 
@@ -25,7 +26,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const { t } = await getT()
   const { generated, errors } = await generateDueSchedules(supabase, today(), {
-    scheduleId: id, force: true, issue: issueDocument, t, describeError: err => lifecycleErrorMessage(asDbError(err), t),
+    scheduleId: id, force: true, issue: issueDocument, t,
+    describeError: err => {
+      if (err instanceof IssueCheckError) return err.problems.map(p => issueProblemMessage(p, t)).join(' ')
+      console.error('[recurring/generate] issue failed:', err)
+      return lifecycleErrorMessage(asDbError(err), t)
+    },
   })
   if (!generated.length) {
     // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.

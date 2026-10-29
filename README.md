@@ -51,8 +51,11 @@ Run SQL in the Supabase SQL editor (the storage policies need the `postgres` rol
   The settings table holds exactly one row (`settings_singleton`).
 - **Existing database:** run the files in `supabase/migrations/` that are not applied yet, in
   filename order (they are dated, e.g. `20261030_lifecycle.sql` before `20261031_editor.sql`).
-  A database from before October 2026 starts at `20261020_schema_alignment.sql`; from there on
-  the migrations are written to be re-runnable. `supabase/add_reminders.sql` and
+  A database from before October 2026 starts at the four `20261019_*` files: they create
+  `app_users`, `is_app_user()` and `replace_document_items`, which everything after relies on.
+  Then `20261020_schema_alignment.sql` and the rest in filename order. From `20261019_*` on the
+  migrations are re-runnable (`create table if not exists`, `create or replace`,
+  `drop policy if exists`). `supabase/add_reminders.sql` and
   `BOOKAMAT_MIGRATION.sql` are history and are never run on their own.
 - A new migration also updates `supabase/schema.sql`, so both stay in step. A function that is
   redefined starts from its latest definition (later files win).

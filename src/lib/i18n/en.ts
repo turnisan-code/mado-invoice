@@ -154,7 +154,7 @@ export const en = {
   messages: {
     generic: 'That did not work. Please try again.',
     network: 'The server could not be reached. Check the connection and try again.',
-    copyFailed: 'Copying did not work — select the link and copy it by hand.',
+    copyFailed: 'Copying did not work — the link is selected, copy it by hand.',
     archiveLater: 'Issued, but no archive copy was stored. The document page offers to create it.',
     api: {
       unauthorized: 'You have been signed out. Sign in again and repeat the step.',
@@ -192,14 +192,16 @@ export const en = {
       answered: 'This quote has already been answered.',
       too_many_files: 'Too many PDFs for one download — choose a shorter period.',
       nothing_to_export: 'There is nothing to export for this period.',
+      server_error: 'Something went wrong on the server. Try again in a moment.',
     },
     logo: {
       removeTitle: 'Remove the logo?',
-      removeDesc: 'New PDFs are created without a logo; documents issued so far keep theirs. You can upload a logo again at any time.',
+      removeDesc: 'New PDFs are created without a logo; documents issued so far keep their logo. You can upload a logo again at any time.',
       removeFailed: 'The logo could not be removed. Try again.',
     },
     creditBookamat: {
       sync: 'Sync refund to Bookamat',
+      syncNew: 'Sync new refunds',
       syncing: 'Syncing…',
       hint: 'The refund is booked in Bookamat as negative income, with the credit note attached.',
     },

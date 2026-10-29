@@ -89,7 +89,7 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
       outcome.driveError = { error: GOOGLE_SCOPE_MESSAGE, code: GOOGLE_REAUTH_CODE }
     } else {
       console.error(`[issue] Drive archive failed for ${number}:`, err)
-      outcome.driveError = { error: googleErrorMessage(err) }
+      outcome.driveError = { error: googleErrorMessage(err), code: 'google_failed' }
     }
   }
   return outcome
