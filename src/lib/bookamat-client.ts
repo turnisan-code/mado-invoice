@@ -119,13 +119,14 @@ export type StateInput = {
   payments?: { kind?: string | null; amount: number }[] | null
 }
 
-// Something to book: a paid invoice, or a cancelled one that had received money (its Storno books
-// the refund); a credit note once money was paid back.
+// Something to book: money received on a paid invoice, or on a cancelled one (its Storno books
+// the refund); a credit note once money was paid back. An invoice closed without money (a zero
+// total, an applied credit note) books nothing, so it is neither offered nor synced automatically.
 export function hasMoneyToBook(doc: StateInput): boolean {
   if (!doc.number) return false
   const payments = doc.payments ?? []
   if ((doc.type ?? 'invoice') === 'credit_note') return doc.status === 'sent' && payments.some(p => p.kind === 'refund' && p.amount > 0)
-  return doc.status === 'paid' || (doc.status === 'cancelled' && payments.some(p => (p.kind ?? 'payment') === 'payment' && p.amount > 0))
+  return (doc.status === 'paid' || doc.status === 'cancelled') && payments.some(p => (p.kind ?? 'payment') === 'payment' && p.amount > 0)
 }
 
 export function bookamatState(doc: StateInput): BookamatState {

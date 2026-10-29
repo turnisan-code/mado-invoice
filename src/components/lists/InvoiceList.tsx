@@ -16,7 +16,7 @@ import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { StatusBadge } from './StatusBadge'
-import { displayStatus, statusLabelKey } from '@/lib/status'
+import { displayStatus, isOverdue, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
 import { invoiceKindBadge } from '@/lib/document-labels'
 import type { BookamatState, InvoiceKind } from '@/types'
@@ -76,7 +76,8 @@ function docTotals(d: Invoice) {
 const docTotal = (d: Invoice) => docTotals(d).total
 // Nothing is owed on a draft (not issued yet) or a cancelled invoice (settled by its Storno).
 const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancelled' ? 0 : docTotals(d).balance_due
-const isOpen = (d: Invoice) => d.status === 'sent' || d.status === 'overdue'
+// Outstanding: issued and still owing something; a zero total or a settled balance never is.
+const isOpen = (d: Invoice) => (d.status === 'sent' || d.status === 'overdue') && docTotal(d) > 0.005 && docBalance(d) > 0.005
 const clientLabel = (d: Invoice) => clientDisplayName(d.clients)
 // Partly paid and written-off invoices show that instead of their stored status. Dunning fees
 // and interest are paid on top and never change it.
@@ -160,7 +161,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const filtered = useMemo(() => {
     let rows = invoices
     if (status === 'outstanding') rows = rows.filter(isOpen)
-    else if (status === 'overdue') rows = rows.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < todayStr))
+    else if (status === 'overdue') rows = rows.filter(d => isOpen(d) && isOverdue(d, todayStr))
     else if (status) rows = rows.filter(d => d.status === status)
     if (client) rows = rows.filter(d => d.client_id === client)
     if (bookamat && bookamatConfigured) rows = rows.filter(d => bookamatState(d) === bookamat)
