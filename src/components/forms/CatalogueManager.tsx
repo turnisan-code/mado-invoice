@@ -414,9 +414,11 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                       ${editingId === item.id ? 'bg-neutral-50 dark:bg-neutral-800/60' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/40'}
                       ${!item.active ? 'opacity-50' : ''}`}
                   >
-                    {/* Drag handle; Alt+↑/↓ moves the item too. On phones the arrows below do. */}
-                    <button
-                      type="button"
+                    {/* Drag handle; Alt+↑/↓ moves the item too. On phones the arrows below do.
+                        Not a <button>: Firefox does not start a drag from one. */}
+                    <span
+                      role="button"
+                      tabIndex={0}
                       {...reorder.handleProps(item.id)}
                       onClick={e => e.stopPropagation()}
                       aria-label={t('editor.reorder.itemHandle', { name: item.name_de })}
@@ -424,7 +426,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                       className="hidden sm:flex h-7 w-4 -mx-0.5 shrink-0 items-center justify-center rounded text-neutral-300 dark:text-neutral-600 group-hover/row:text-neutral-500 dark:group-hover/row:text-neutral-400 cursor-grab active:cursor-grabbing transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
                     >
                       <GripVertical size={15} aria-hidden="true" />
-                    </button>
+                    </span>
 
                     {/* Name: a line of its own on phones */}
                     <div className="w-full sm:w-auto sm:flex-1 min-w-0">

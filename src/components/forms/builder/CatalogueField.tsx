@@ -23,7 +23,8 @@ export function catalogueName(item: CatalogueItem, language: Language): string {
 }
 
 // A line's description: free text over several lines, and while it is a single line a search of
-// the catalogue (arrow keys pick, Escape closes, Enter on a highlighted entry takes it).
+// the catalogue (arrow keys pick, Escape closes, Enter on a highlighted entry takes it). It stays
+// a textbox, the one role a textarea may have; aria-controls and aria-activedescendant tie the list to it.
 export function CatalogueField({ value, language, items, invalid, className, onChange, onPick, onItemCreated }: {
   value: string
   language: Language
@@ -118,8 +119,6 @@ export function CatalogueField({ value, language, items, invalid, className, onC
         placeholder={t('builder.descriptionPlaceholder')}
         aria-label={t('builder.description')}
         aria-invalid={invalid || undefined}
-        role="combobox"
-        aria-expanded={shown}
         aria-controls={shown ? listId : undefined}
         aria-autocomplete="list"
         aria-activedescendant={shown && highlight >= 0 && highlight < matches.length ? `${listId}-${highlight}` : undefined}

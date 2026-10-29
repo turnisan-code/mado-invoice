@@ -301,7 +301,7 @@ create table document_items (
   unit_price        numeric(10,2) default 0,
   vat_rate          integer default 20,
   catalogue_item_id uuid references catalogue_items(id),
-  -- Only 'subtotal' lines carry a section discount.
+  -- Item lines: their own discount (lineAmount); subtotal lines: the section's discount.
   discount_type     text check (discount_type in ('percent','fixed')),
   discount_value    numeric
 );

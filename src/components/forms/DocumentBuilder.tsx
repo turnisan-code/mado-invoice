@@ -325,10 +325,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     void loadLatestIssued()
   }
 
-  // A stale draft is issued with today's date by default, its due date following the client's terms.
-  function staleOverrides(): { date: string; dueDate: string } {
+  // A stale draft is issued with today's date by default; an invoice's or quote's due date follows
+  // the client's terms, a credit note keeps its own.
+  function staleOverrides(): { date: string; dueDate?: string } {
     const d = today()
-    return { date: d, dueDate: addDays(d, termDays(type, settings, client)) }
+    return type === 'credit_note' ? { date: d } : { date: d, dueDate: addDays(d, termDays(type, settings, client)) }
   }
 
   function confirmIssue(useToday: boolean) {
@@ -511,7 +512,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         type={type}
         staleDate={pendingIssue?.staleDate ?? null}
         draftDate={date || today()}
-        todayDue={type === 'invoice' && pendingIssue?.staleDate ? staleOverrides().dueDate : null}
+        todayDue={type === 'invoice' && pendingIssue?.staleDate ? staleOverrides().dueDate ?? null : null}
         latestIssued={latestIssued}
         numberFor={d => expectedNumber(settings, type, d)}
         zeroTotal={pendingIssue?.zeroTotal ?? null}

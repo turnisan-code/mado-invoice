@@ -54,16 +54,18 @@ export function LineRow({ line, index, count, lines, currency, language, vatAppl
   const [popover, setPopover] = useState<{ kind: 'date' | 'discount'; anchor: PopoverAnchor } | null>(null)
   const position = index + 1
 
+  // Not a <button>: Firefox does not start a drag from one.
   const handle = (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       {...reorder.handleProps(line.id)}
       aria-label={t('editor.reorder.handle', { position, count })}
       title={t('editor.reorder.hint')}
       className={`hidden sm:flex h-9 w-4 ${iconBtn} cursor-grab active:cursor-grabbing text-neutral-300 dark:text-neutral-600 hover:text-neutral-500 dark:hover:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400`}
     >
       <GripVertical size={14} aria-hidden="true" />
-    </button>
+    </span>
   )
   const moveButtons = (
     <div className="flex sm:hidden shrink-0">

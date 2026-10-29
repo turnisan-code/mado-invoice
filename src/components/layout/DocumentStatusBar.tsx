@@ -39,7 +39,7 @@ type IssuePrep = {
   status: string
   draftDate: string
   staleDate: string | null
-  // The due date a stale draft gets when it is issued with today's date (as in the editor).
+  // The due date a stale invoice or quote gets when it is issued with today's date (as in the editor).
   todayDue: string
   latestIssued: { number: string; date: string } | null
   numbering: Partial<NumberingSettings>
@@ -197,13 +197,16 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
       // A stale draft moves to today; the editor on this page writes the new dates itself, so it
       // never writes the old ones back.
       if (prep.staleDate && useToday) {
-        const handled = await applyIssueDateInEditor(doc.id, todayStr, prep.todayDue).catch((err: unknown) => {
+        // Credit notes have no payment term to follow the new date.
+        const todayDue = type === 'credit_note' ? undefined : prep.todayDue
+        const handled = await applyIssueDateInEditor(doc.id, todayStr, todayDue).catch((err: unknown) => {
           toast.error(t('builder.notSavedToast', { error: err instanceof Error ? err.message : t('common.unknownError') }))
           return null
         })
         if (handled === null) return
         if (!handled) {
-          const { error } = await supabase.from('documents').update({ date: todayStr, due_date: prep.todayDue }).eq('id', doc.id)
+          const { error } = await supabase.from('documents')
+            .update({ date: todayStr, ...(todayDue === undefined ? {} : { due_date: todayDue }) }).eq('id', doc.id)
           if (error) { toast.error(error.message); return }
         }
       }
