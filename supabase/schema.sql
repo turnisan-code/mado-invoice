@@ -303,12 +303,23 @@ create table documents (
   portal_viewed_at    timestamptz,
   drive_file_id       text,
   -- The buyer's reference (Auftragsreferenz / order number) the document's e-invoices carry.
-  buyer_reference     text
+  buyer_reference     text,
+  -- Invoices: 'advance' asks for money before the service, 'partial' bills a completed part of
+  -- it, 'final' bills the whole service and deducts them (§ 11 Abs 1 UStG). Everything else 'standard'.
+  invoice_kind        text not null default 'standard',
+  -- On an advance or partial invoice: the final invoice that deducts it (at most one). Deleting a
+  -- draft final invoice frees it, so does a Storno of the final invoice (documents_deposit_release).
+  final_invoice_id    uuid references documents(id) on delete set null,
+  constraint documents_invoice_kind_check
+    check (invoice_kind in ('standard', 'advance', 'partial', 'final') and (type = 'invoice' or invoice_kind = 'standard')),
+  constraint documents_final_invoice_check
+    check (final_invoice_id is null or invoice_kind in ('advance', 'partial'))
 );
 
 create index on documents(client_id);
 create index on documents(type, status);
 create index on documents(date);
+create index documents_final_invoice_id_idx on documents(final_invoice_id) where final_invoice_id is not null;
 
 -- ─── Document items ──────────────────────────────────────────────────────────
 create table document_items (
@@ -317,12 +328,14 @@ create table document_items (
   sort_order        integer not null default 0,
   line_type         text not null default 'item'
                     constraint document_items_line_type_check
-                    check (line_type in ('item','heading','text','separator','subtotal','page_break')),
+                    check (line_type in ('item','heading','text','separator','subtotal','page_break','deduction')),
   description       text not null,
   service_date      date,
   -- End of the line's service period; null = a single day (service_date).
   service_date_end  date,
-  -- Null on every line that is not an 'item' (heading, text, separator, subtotal, page_break).
+  -- Null on heading, text, separator, subtotal and page_break lines. A 'deduction' line (a final
+  -- invoice's deduction of an advance or partial invoice at one VAT rate, src/lib/deposits.ts) is
+  -- quantity 1 at a negative price.
   quantity          numeric(10,4) default 1,
   unit              text default 'flat',
   unit_price        numeric(10,2) default 0,
@@ -391,7 +404,8 @@ create table document_events (
   type        text not null check (type in (
                 'issued','emailed','mailto_opened','reminder_sent','status_changed',
                 'payment_added','payment_removed','storno_created','archived','drive_archived',
-                'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported')),
+                'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported',
+                'deposit_created','deposit_linked','deposit_released')),
   detail      jsonb not null default '{}',
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz
@@ -837,6 +851,103 @@ create trigger documents_delete_guard
   before delete on documents
   for each row execute function documents_delete_guard();
 
+-- ─── Deduction links ─────────────────────────────────────────────────────────
+-- Only an issued, uncancelled advance or partial invoice is deducted, by an uncancelled final
+-- invoice of the same client. What an issued final invoice deducts stays until that invoice is
+-- cancelled with its Storno: the invoice can neither move to another final invoice nor be
+-- cancelled itself. Cancelling one that a draft final invoice deducts takes it off that draft.
+create or replace function documents_deposit_guard()
+returns trigger language plpgsql as $$
+declare
+  f documents%rowtype;
+begin
+  if new.final_invoice_id is distinct from old.final_invoice_id then
+    if old.final_invoice_id is not null then
+      select * into f from documents where id = old.final_invoice_id;
+      if f.number is not null and f.status <> 'cancelled' then
+        raise exception using errcode = 'MI020',
+          message = format('%s is deducted on final invoice %s; cancel that invoice first.', coalesce(old.number, 'This invoice'), f.number);
+      end if;
+    end if;
+    if new.final_invoice_id is not null then
+      select * into f from documents where id = new.final_invoice_id;
+      if new.type <> 'invoice' or new.invoice_kind not in ('advance', 'partial') or new.number is null
+         or new.status = 'cancelled' or f.id is null or f.type <> 'invoice' or f.invoice_kind <> 'final'
+         or f.status = 'cancelled' or f.client_id <> new.client_id then
+        raise exception using errcode = 'MI021',
+          message = 'Only an issued advance or partial invoice can be deducted, by a final invoice of the same client.';
+      end if;
+    end if;
+  end if;
+
+  if old.invoice_kind = 'final' and new.invoice_kind <> 'final'
+     and exists (select 1 from documents where final_invoice_id = new.id) then
+    raise exception using errcode = 'MI021',
+      message = 'A final invoice that deducts other invoices stays a final invoice; remove the deductions first.';
+  end if;
+
+  if new.status = 'cancelled' and old.status <> 'cancelled' and new.final_invoice_id is not null then
+    select * into f from documents where id = new.final_invoice_id;
+    if f.number is not null and f.status <> 'cancelled' then
+      raise exception using errcode = 'MI020',
+        message = format('%s is deducted on final invoice %s; cancel that invoice first.', coalesce(new.number, 'This invoice'), f.number);
+    end if;
+    insert into document_events (document_id, type, detail)
+    values (new.id, 'deposit_released', jsonb_build_object('final_id', f.id, 'final_number', f.number, 'reason', 'self_cancelled'));
+    new.final_invoice_id := null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_deposit_guard on documents;
+create trigger documents_deposit_guard
+  before update of status, final_invoice_id, invoice_kind on documents
+  for each row execute function documents_deposit_guard();
+
+-- A cancelled final invoice (its Storno, or a draft cancelled from the status menu) deducts
+-- nothing any more: its invoices are free for the next final invoice, as both histories say.
+create or replace function documents_deposit_release()
+returns trigger language plpgsql as $$
+declare
+  r record;
+  why text := case when new.number is null then 'cancelled' else 'storno' end;
+begin
+  if new.status = 'cancelled' and old.status is distinct from 'cancelled' and new.invoice_kind = 'final' then
+    for r in update documents set final_invoice_id = null where final_invoice_id = new.id returning id, number loop
+      insert into document_events (document_id, type, detail)
+      values (r.id, 'deposit_released', jsonb_build_object('final_id', new.id, 'final_number', new.number, 'reason', why)),
+             (new.id, 'deposit_released', jsonb_build_object('invoice_id', r.id, 'invoice_number', r.number, 'reason', why));
+    end loop;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists documents_deposit_release on documents;
+create trigger documents_deposit_release
+  after update of status on documents
+  for each row execute function documents_deposit_release();
+
+-- Deleting a draft final invoice frees its invoices (the foreign key sets the link to null);
+-- their histories say so.
+create or replace function documents_deposit_delete()
+returns trigger language plpgsql as $$
+begin
+  if old.invoice_kind = 'final' then
+    insert into document_events (document_id, type, detail)
+    select id, 'deposit_released', jsonb_build_object('reason', 'deleted')
+    from documents where final_invoice_id = old.id;
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists documents_deposit_delete on documents;
+create trigger documents_deposit_delete
+  before delete on documents
+  for each row execute function documents_deposit_delete();
+
 -- ─── Removing a payment ──────────────────────────────────────────────────────
 -- Deletes one payment row. With p_reopen (the app computed that the balance is open again) a
 -- paid invoice goes back to 'overdue' when its due date has passed, otherwise to 'sent'.
@@ -867,8 +978,11 @@ $$;
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
 -- unnumbered draft dated today, due after the client's payment days (settings default), with
--- every line copied as it is; a sent quote becomes accepted. Null when the quote does not exist.
-create or replace function convert_quote_to_invoice(p_quote_id uuid)
+-- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
+-- and partial invoices made from the quote are never its conversion. Once issued ones exist, a
+-- plain invoice would bill them twice (MI019): p_final creates the final invoice instead and
+-- links them to it (the app then writes the deduction lines). Null when the quote does not exist.
+create or replace function convert_quote_to_invoice(p_quote_id uuid, p_final boolean default false)
 returns jsonb language plpgsql as $$
 declare
   q      documents%rowtype;
@@ -876,15 +990,17 @@ declare
   inv_id uuid;
   today  date := (now() at time zone 'Europe/Vienna')::date;
   days   integer;
+  linked integer := 0;
+  r      record;
 begin
   select * into q from documents where id = p_quote_id and type = 'quote' for update;
   if q.id is null then return null; end if;
 
   select id into inv_id from documents
-  where converted_from_id = q.id and type = 'invoice'
+  where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('standard', 'final')
   order by created_at limit 1;
   if inv_id is not null then
-    return jsonb_build_object('invoice_id', inv_id, 'existing', true, 'quote_status', q.status);
+    return jsonb_build_object('invoice_id', inv_id, 'existing', true, 'quote_status', q.status, 'linked', 0);
   end if;
 
   if q.status not in ('sent', 'accepted') then
@@ -892,18 +1008,29 @@ begin
       message = format('Only sent or accepted quotes can be converted (this one is %s).', q.status);
   end if;
 
+  if not p_final and exists (
+    select 1 from documents
+    where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('advance', 'partial')
+      and number is not null and status <> 'cancelled'
+  ) then
+    raise exception using errcode = 'MI019',
+      message = 'This quote has advance invoices: create the final invoice, which deducts them.';
+  end if;
+
   select * into s from settings limit 1;
   select payment_days into days from clients where id = q.client_id;
 
   insert into documents (
-    type, number, status, client_id, date, due_date, service_date, service_date_end,
+    type, invoice_kind, number, status, client_id, date, due_date, service_date, service_date_end,
     language, currency, tax_treatment, exchange_rate, notes, notes_internal,
-    discount_type, discount_value, skonto_percent, skonto_days, converted_from_id
+    discount_type, discount_value, skonto_percent, skonto_days, converted_from_id, buyer_reference
   ) values (
-    'invoice', null, 'draft', q.client_id, today, today + coalesce(days, s.default_payment_days, 14),
+    'invoice', case when p_final then 'final' else 'standard' end, null, 'draft', q.client_id, today,
+    today + coalesce(days, s.default_payment_days, 14),
     q.service_date, q.service_date_end, q.language, q.currency, q.tax_treatment, q.exchange_rate,
     q.notes, q.notes_internal, q.discount_type, q.discount_value,
-    s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end, q.id
+    s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end, q.id,
+    q.buyer_reference
   ) returning id into inv_id;
 
   -- Whole rows, so columns added to document_items later are copied too.
@@ -915,11 +1042,22 @@ begin
   where i.document_id = q.id
   order by i.sort_order;
 
+  if p_final then
+    for r in update documents set final_invoice_id = inv_id
+             where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('advance', 'partial')
+               and number is not null and status <> 'cancelled' and final_invoice_id is null
+             returning id loop
+      insert into document_events (document_id, type, detail)
+      values (r.id, 'deposit_linked', jsonb_build_object('final_id', inv_id));
+      linked := linked + 1;
+    end loop;
+  end if;
+
   if q.status = 'sent' then
     update documents set status = 'accepted' where id = q.id;
   end if;
 
-  return jsonb_build_object('invoice_id', inv_id, 'existing', false, 'quote_status', q.status);
+  return jsonb_build_object('invoice_id', inv_id, 'existing', false, 'quote_status', q.status, 'linked', linked);
 end;
 $$;
 

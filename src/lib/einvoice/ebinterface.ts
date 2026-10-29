@@ -26,6 +26,16 @@ function delivery(period: Period | null) {
   )
 }
 
+// What the document is (ebInterface DocumentTypeType): an advance invoice is an
+// InvoiceForAdvancePayment, a partial one an InvoiceForPartialDelivery, a final one the
+// FinalSettlement that lists them as RelatedDocument.
+const DEPOSIT_TYPES = { advance: 'InvoiceForAdvancePayment', partial: 'InvoiceForPartialDelivery', final: 'FinalSettlement' } as const
+
+function documentType(inv: EInvoice): string {
+  if (inv.kind === 'credit_note') return 'CreditMemo'
+  return inv.invoiceKind === 'standard' ? 'Invoice' : DEPOSIT_TYPES[inv.invoiceKind]
+}
+
 function address(p: EInvoiceParty) {
   return el('Address', null,
     req('Name', p.name),
@@ -45,7 +55,7 @@ export function toEbInterface(inv: EInvoice): string {
   const root = el('Invoice', {
     xmlns: NS,
     GeneratingSystem: 'Mado Invoice',
-    DocumentType: inv.kind === 'credit_note' ? 'CreditMemo' : 'Invoice',
+    DocumentType: documentType(inv),
     InvoiceCurrency: inv.currency,
     DocumentTitle: inv.title,
     Language: inv.language,
@@ -54,6 +64,8 @@ export function toEbInterface(inv: EInvoice): string {
     txt('InvoiceDate', inv.issueDate),
     ref?.kind === 'storno' && el('CancelledOriginalDocument', null, refBody),
     ref?.kind === 'correction' && el('RelatedDocument', null, refBody),
+    inv.preceding.map(p => el('RelatedDocument', null,
+      txt('InvoiceNumber', p.number), txt('InvoiceDate', p.date), txt('DocumentType', DEPOSIT_TYPES[p.kind]), txt('Comment', p.text))),
     delivery(inv.delivery),
     el('Biller', null,
       req('VATIdentificationNumber', inv.seller.vatId ?? NO_VAT_ID),
