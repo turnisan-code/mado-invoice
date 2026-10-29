@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowUpDown, ArrowUp, ArrowDown, CheckSquare, Square, X, Loader2, Download, type LucideIcon } from 'lucide-react'
 import { useT } from '@/lib/i18n/client'
+import type { UiLang } from '@/lib/i18n'
+import { formatDate } from '@/lib/utils/document'
 import type { Sort } from './useListState'
 
 export const inputClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
@@ -13,6 +15,9 @@ export const primaryLinkClass = 'flex items-center gap-1.5 text-sm px-3 py-1.5 r
 export const listCardClass = 'bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden'
 export const theadClass = 'border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800'
 export const rowStateClass = (selected: boolean) => selected ? 'bg-blue-50 dark:bg-blue-950/30' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'
+
+// A list date in the UI language (29.10.2026 / 29/10/2026), never the stored ISO string.
+export const listDate = (date: string | null | undefined, lang: UiLang) => date ? formatDate(date, lang) : '—'
 
 export function SortableTh<K extends string>({ col, label, sort, onSort, align = 'left' }: {
   col: K
@@ -65,10 +70,12 @@ export function SelectToggle({ checked, onToggle, label, large = false }: { chec
 
 // A table row that opens the document from anywhere in the row, not only the number link.
 // Clicks on controls inside the row, text selections and modifier clicks keep their own meaning.
+// A cell marked data-row-ignore never opens the row: a click on a disabled button lands on
+// the cell around it, not on the button.
 export function ClickableRow({ href, className = '', children }: { href: string; className?: string; children: React.ReactNode }) {
   const router = useRouter()
   function open(e: React.MouseEvent<HTMLTableRowElement>, newTab: boolean) {
-    if ((e.target as HTMLElement).closest('a, button, input, select, textarea, label')) return
+    if ((e.target as HTMLElement).closest('a, button, input, select, textarea, label, [data-row-ignore]')) return
     if (window.getSelection()?.toString()) return
     if (newTab) window.open(href, '_blank', 'noopener')
     else router.push(href)

@@ -1,5 +1,5 @@
-// One colour per status for every list and the dashboard (documents and clients). No hooks, so
-// server and client components can both render it.
+// One colour per status for every list, the dashboard, the portal and the recurring schedules
+// (documents, clients, schedules). No hooks, so server and client components can both render it.
 export const STATUS_BADGE: Record<string, string> = {
   draft: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
   sent: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
@@ -16,6 +16,18 @@ export const STATUS_BADGE: Record<string, string> = {
   active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
   inactive: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
   lead: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
+  // Recurring schedules.
+  paused: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
+  ended: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
+}
+
+// The same colours as plain text, where a status is a word rather than a badge (the status menu).
+export const STATUS_TEXT: Record<string, string> = {
+  paid: 'text-green-700 dark:text-green-400',
+  overdue: 'text-red-600 dark:text-red-400',
+  accepted: 'text-green-700 dark:text-green-400',
+  rejected: 'text-red-600 dark:text-red-400',
+  cancelled: 'text-neutral-500 dark:text-neutral-400',
 }
 
 export function StatusBadge({ status, label, className = '' }: { status: string; label: string; className?: string }) {

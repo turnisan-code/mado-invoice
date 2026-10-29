@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { addDays, calcTotals, roundCents } from '@/lib/utils/document'
 import { normalizeVatId } from '@/lib/utils/validation'
+import { clientDisplayName } from '@/lib/utils/clients'
 
 // Zusammenfassende Meldung: reverse-charge services to EU businesses are reported per recipient
 // UID in the period the service was performed (§ 21 Abs 3 UStG), not when the money arrived.
@@ -76,7 +77,7 @@ export function buildZmRows(docs: ZmDoc[], start: string, end: string): ZmRow[] 
       key,
       country: uid ? uid.slice(0, 2) : '',
       uid,
-      client: d.clients ? d.clients.company || d.clients.name : '',
+      client: clientDisplayName(d.clients),
       net: 0,
       documents: [],
     }
