@@ -12,14 +12,13 @@ import { createClient } from '@/lib/supabase/client'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { applyBuyerReferenceInEditor } from '@/components/forms/builder/events'
-import { vatEndpoint, type EInvoiceErrorCode } from '@/lib/einvoice/common'
+import { EINVOICE_ERROR_CODES, vatEndpoint } from '@/lib/einvoice/common'
 import { normalizeVatId } from '@/lib/utils/validation'
 import { calcTotals, formatMoney } from '@/lib/utils/document'
 import { useT } from '@/lib/i18n/client'
 import type { EInvoiceFormat } from '@/types'
 
 const FORMATS: EInvoiceFormat[] = ['ebinterface', 'ubl']
-const ERROR_CODES: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint', 'line_amount']
 
 type Info = {
   currency: string
@@ -122,7 +121,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       const res = await fetch(`/api/documents/${documentId}/einvoice?format=${format}`)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        const code = ERROR_CODES.find(c => c === data.code)
+        const code = EINVOICE_ERROR_CODES.find(c => c === data.code)
         toast.error(code ? t(`einvoice.errors.${code}`) : t('einvoice.failed', { error: apiErrorMessage(t, data) }))
         return
       }

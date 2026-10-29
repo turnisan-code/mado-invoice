@@ -1006,7 +1006,8 @@ $$;
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
--- unnumbered draft dated today, due after the client's payment days (settings default), with
+-- unnumbered draft dated today, due after the client's payment days and with the client's Skonto
+-- (each falling back to the settings default; stored only above 0 %, as the builder does), with
 -- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
 -- and partial invoices made from the quote are never its conversion, nor is an invoice cancelled
 -- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
@@ -1020,6 +1021,8 @@ declare
   inv_id uuid;
   today  date := (now() at time zone 'Europe/Vienna')::date;
   days   integer;
+  pct    numeric;
+  sdays  integer;
   linked integer := 0;
   adv    record;
 begin
@@ -1048,7 +1051,8 @@ begin
   end if;
 
   select * into s from settings limit 1;
-  select payment_days into days from clients where id = q.client_id;
+  select payment_days, skonto_percent, skonto_days into days, pct, sdays from clients where id = q.client_id;
+  pct := coalesce(pct, s.default_skonto_percent);
 
   insert into documents (
     type, invoice_kind, number, status, client_id, date, due_date, service_date, service_date_end,
@@ -1059,7 +1063,7 @@ begin
     today + coalesce(days, s.default_payment_days, 14),
     q.service_date, q.service_date_end, q.language, q.currency, q.tax_treatment, q.exchange_rate,
     q.notes, q.notes_internal, q.discount_type, q.discount_value,
-    s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end, q.id,
+    case when pct > 0 then pct end, case when pct > 0 then coalesce(sdays, s.default_skonto_days) end, q.id,
     q.buyer_reference
   ) returning id into inv_id;
 
@@ -1260,8 +1264,8 @@ create index project_expenses_document_item_id_idx on project_expenses(document_
 -- p_lines is what src/lib/projects.ts buildInvoiceLines computed: one object per line with the
 -- document_items columns plus time_entry_ids / expense_ids, the entries the line bills. One
 -- transaction: the project row is locked, the draft is created for the project's client (its
--- language, tax treatment and payment days; Skonto from the settings, stored only when above 0
--- as the builder does), every line inserted and
+-- language, tax treatment, payment days and Skonto, each falling back to the settings default;
+-- Skonto is stored only when above 0, as the builder does), every line inserted and
 -- its entries linked. An entry that is no longer an unbilled billable entry of this project rolls
 -- everything back (MI032), so nothing is ever billed twice.
 create or replace function invoice_project_entries(p_project_id uuid, p_lines jsonb)
@@ -1298,8 +1302,8 @@ begin
   ) values (
     'invoice', null, 'draft', c.id, today, today + coalesce(c.payment_days, s.default_payment_days, 14),
     c.language, 'EUR', c.tax_treatment, 1,
-    case when s.default_skonto_percent > 0 then s.default_skonto_percent end,
-    case when s.default_skonto_percent > 0 then s.default_skonto_days end
+    case when coalesce(c.skonto_percent, s.default_skonto_percent) > 0 then coalesce(c.skonto_percent, s.default_skonto_percent) end,
+    case when coalesce(c.skonto_percent, s.default_skonto_percent) > 0 then coalesce(c.skonto_days, s.default_skonto_days) end
   ) returning id into doc_id;
 
   for l in select value from jsonb_array_elements(p_lines) loop

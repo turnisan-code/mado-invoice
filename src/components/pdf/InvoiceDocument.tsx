@@ -169,8 +169,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const lineRates = new Set(items.filter(i => (i.line_type ?? 'item') === 'item' && i.vat_rate != null).map(i => i.vat_rate))
   const showVatColumn = vatApplies && lineRates.size > 1
   // The Entgelt per rate differs from the net amount only after a document discount or with
-  // several rates; otherwise it would repeat it.
-  const netPerRate = doc.totals.discount_amount > 0 || doc.totals.vat_groups.length > 1
+  // several rates; otherwise it would repeat it. A final invoice's Netto already includes its
+  // discount (shown in the full-service block).
+  const netPerRate = (!deduction && doc.totals.discount_amount > 0) || doc.totals.vat_groups.length > 1
 
   // Bank details only where money is asked for.
   const footerColumns = issuerFooterColumns(settings, t, lang, { bank: doc.type === 'invoice' })

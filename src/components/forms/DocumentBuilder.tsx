@@ -20,7 +20,8 @@ import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { preparePdfFonts } from '@/components/pdf/fonts'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
-import type { EInvoiceErrorCode } from '@/lib/einvoice/common'
+import { EINVOICE_ERROR_CODES } from '@/lib/einvoice/common'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { numberingErrorMessage } from '@/lib/utils/numbering'
 import { issueProblems, missingIssuerFields, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import type { Client, CatalogueItem, DocumentType, IssueProblem, Language, TaxTreatment } from '@/types'
@@ -60,7 +61,6 @@ interface Props {
   reference?: DocReference | null
 }
 
-const EINVOICE_ERRORS: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint']
 
 async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
   const res = await fetch(url, {
@@ -518,15 +518,19 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...gmailPreview, einvoice: gmailPreview.attachEInvoice ? gmailPreview.einvoiceFormat : null }),
-    })
+    }).catch((err: unknown) => err)
     setGmailSending(false)
+    if (!(res instanceof Response)) {
+      toast.error(t('builder.emailFailed'), { description: requestErrorMessage(t, res) })
+      return
+    }
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       if (data.einvoice) {
         // Nothing was sent; the dialog says why next to the checkbox.
-        const code = EINVOICE_ERRORS.find(c => c === data.code)
-        const reason = code ? t(`einvoice.errors.${code}`) : String(data.error ?? '')
+        const code = EINVOICE_ERROR_CODES.find(c => c === data.code)
+        const reason = code ? t(`einvoice.errors.${code}`) : apiErrorMessage(t, data)
         setGmailPreview(p => p && { ...p, einvoiceError: reason })
       } else {
         toastApiError(t, data, '', t('builder.emailFailed'))

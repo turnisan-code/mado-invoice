@@ -115,7 +115,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const vatApplies = doc.tax_treatment === 'at_vat'
   const showVatColumn = vatApplies && new Set(items.filter(i => (i.line_type ?? 'item') === 'item' && i.vat_rate != null).map(i => i.vat_rate)).size > 1
   // As on the PDF: the net per rate only where it differs from the net amount.
-  const netPerRate = totals.discount_amount > 0 || totals.vat_groups.length > 1
+  const netPerRate = (!deduction && totals.discount_amount > 0) || totals.vat_groups.length > 1
   const columns = showVatColumn ? 5 : 4
 
   const issuer = issuerBlocks(settings, t, lang)
