@@ -7,10 +7,10 @@
 --   * document_items.line_type 'deduction': the final invoice's deduction, one negative line per
 --     deducted invoice and VAT rate, written by the app (src/lib/deposits.ts) and summed by
 --     calcTotals after every discount.
---   * convert_quote_to_invoice (from 20261030_lifecycle.sql) skips advance and partial invoices
---     when it looks for the quote's conversion, refuses a plain conversion once the quote has
---     issued advance or partial invoices (MI019), creates the final invoice with p_final (linking
---     them in the same transaction) and copies the buyer reference.
+--   * convert_quote_to_invoice (from 20261030_lifecycle.sql) skips advance, partial and cancelled
+--     invoices when it looks for the quote's conversion, refuses a plain conversion once the quote
+--     has issued advance or partial invoices (MI019), creates the final invoice with p_final
+--     (linking them in the same transaction) and copies the buyer reference.
 -- Error codes: MI019 = the quote has advance invoices, create the final invoice; MI020 = the
 -- invoice is deducted on an issued final invoice; MI021 = not a valid deduction link.
 -- Every statement is a no-op when already applied, so the file can be run any number of times.
@@ -119,14 +119,14 @@ create trigger documents_deposit_guard
 create or replace function documents_deposit_release()
 returns trigger language plpgsql as $$
 declare
-  r record;
+  adv record;
   why text := case when new.number is null then 'cancelled' else 'storno' end;
 begin
   if new.status = 'cancelled' and old.status is distinct from 'cancelled' and new.invoice_kind = 'final' then
-    for r in update documents set final_invoice_id = null where final_invoice_id = new.id returning id, number loop
+    for adv in update documents set final_invoice_id = null where final_invoice_id = new.id returning id, number loop
       insert into document_events (document_id, type, detail)
-      values (r.id, 'deposit_released', jsonb_build_object('final_id', new.id, 'final_number', new.number, 'reason', why)),
-             (new.id, 'deposit_released', jsonb_build_object('invoice_id', r.id, 'invoice_number', r.number, 'reason', why));
+      values (adv.id, 'deposit_released', jsonb_build_object('final_id', new.id, 'final_number', new.number, 'reason', why)),
+             (new.id, 'deposit_released', jsonb_build_object('invoice_id', adv.id, 'invoice_number', adv.number, 'reason', why));
     end loop;
   end if;
   return null;
@@ -162,7 +162,8 @@ create trigger documents_deposit_delete
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
 -- unnumbered draft dated today, due after the client's payment days (settings default), with
 -- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
--- and partial invoices made from the quote are never its conversion. Once issued ones exist, a
+-- and partial invoices made from the quote are never its conversion, nor is an invoice cancelled
+-- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
 -- plain invoice would bill them twice (MI019): p_final creates the final invoice instead and
 -- links them to it (the app then writes the deduction lines). Null when the quote does not exist.
 drop function if exists convert_quote_to_invoice(uuid);
@@ -175,13 +176,13 @@ declare
   today  date := (now() at time zone 'Europe/Vienna')::date;
   days   integer;
   linked integer := 0;
-  r      record;
+  adv    record;
 begin
   select * into q from documents where id = p_quote_id and type = 'quote' for update;
   if q.id is null then return null; end if;
 
   select id into inv_id from documents
-  where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('standard', 'final')
+  where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('standard', 'final') and status <> 'cancelled'
   order by created_at limit 1;
   if inv_id is not null then
     return jsonb_build_object('invoice_id', inv_id, 'existing', true, 'quote_status', q.status, 'linked', 0);
@@ -227,12 +228,12 @@ begin
   order by i.sort_order;
 
   if p_final then
-    for r in update documents set final_invoice_id = inv_id
-             where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('advance', 'partial')
-               and number is not null and status <> 'cancelled' and final_invoice_id is null
-             returning id loop
+    for adv in update documents set final_invoice_id = inv_id
+               where converted_from_id = q.id and type = 'invoice' and invoice_kind in ('advance', 'partial')
+                 and number is not null and status <> 'cancelled' and final_invoice_id is null
+               returning id loop
       insert into document_events (document_id, type, detail)
-      values (r.id, 'deposit_linked', jsonb_build_object('final_id', inv_id));
+      values (adv.id, 'deposit_linked', jsonb_build_object('final_id', inv_id));
       linked := linked + 1;
     end loop;
   end if;

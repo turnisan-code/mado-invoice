@@ -19,7 +19,7 @@ const loadQuoteInvoicing = cache(async (quoteId: string) => {
   const supabase = await createClient()
   const [{ data: conversion }, deposits] = await Promise.all([
     supabase.from('documents').select('id, number, invoice_kind')
-      .eq('converted_from_id', quoteId).eq('type', 'invoice').in('invoice_kind', ['standard', 'final'])
+      .eq('converted_from_id', quoteId).eq('type', 'invoice').in('invoice_kind', ['standard', 'final']).neq('status', 'cancelled')
       .order('created_at').limit(1).maybeSingle(),
     loadQuoteDeposits(supabase, quoteId),
   ])
