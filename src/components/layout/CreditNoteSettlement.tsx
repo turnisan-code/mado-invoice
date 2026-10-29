@@ -228,7 +228,6 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
               type="button"
               onClick={() => void syncToBookamat()}
               disabled={syncing}
-              title={t('messages.creditBookamat.hint')}
               className="inline-flex items-center gap-1.5 min-h-11 sm:min-h-8 px-2.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-600 dark:text-neutral-300"
             >
               <RefreshCw size={12} className={syncing ? 'animate-spin' : undefined} aria-hidden="true" />
@@ -238,6 +237,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
                 : t('messages.creditBookamat.sync')}
             </button>
           )}
+          {syncState === 'unsynced' && <span className="text-neutral-500 dark:text-neutral-400">{t('messages.creditBookamat.hint')}</span>}
         </div>
       )}
 
