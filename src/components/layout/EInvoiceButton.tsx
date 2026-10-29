@@ -20,6 +20,7 @@ const ERROR_CODES: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_ty
 
 type Info = {
   currency: string
+  cancelled: boolean
   stored: string | null
   prefill: string
   supplierNumber: string | null
@@ -53,7 +54,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       await flushPendingEdits(documentId)
       const { data: doc, error } = await supabase
         .from('documents')
-        .select('type, currency, buyer_reference, cancels_document_id, converted_from_id, clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
+        .select('type, status, currency, buyer_reference, cancels_document_id, converted_from_id, clients(einvoice_format, buyer_reference, supplier_number, peppol_scheme, peppol_id, uid_number)')
         .eq('id', documentId)
         .single()
       if (error || !doc) throw new Error(error?.message)
@@ -74,6 +75,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       const prefill = doc.buyer_reference ?? fallback ?? ''
       setInfo({
         currency: doc.currency ?? 'EUR',
+        cancelled: doc.status === 'cancelled',
         stored: doc.buyer_reference,
         prefill,
         supplierNumber: client?.supplier_number?.trim() || null,
@@ -151,6 +153,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
           </>
         ) : (
           <form onSubmit={e => void download(e)} noValidate className="space-y-4">
+            {info.cancelled && <p className="text-xs text-amber-700 dark:text-amber-400">{t('einvoice.cancelledHint')}</p>}
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium mb-1.5">{t('einvoice.format')}</legend>
               {FORMATS.map(f => (

@@ -1860,7 +1860,8 @@ export default function SettingsForm({ settings }: Props) {
           </IntegrationCard>
         </div>}
 
-        {activeSection === 'einvoice' && <EInvoiceCard settings={settings} />}
+        {/* Kept mounted, so saved and unsaved values survive switching sections like the others' state. */}
+        <div hidden={activeSection !== 'einvoice'}><EInvoiceCard settings={settings} /></div>
 
       </div>
 
