@@ -37,7 +37,7 @@ import { IssueDialog } from './builder/IssueDialog'
 import { IssueProblemList } from './builder/IssueProblems'
 import { LineEditor } from './builder/LineEditor'
 import type { LineIssues } from './builder/LineRow'
-import { PATHS, clientTerms, docFields, expectedNumber, termDays, type EditorDocument, type FormState } from './builder/model'
+import { PATHS, clientChangeTerms, docFields, expectedNumber, termDays, type EditorDocument, type FormState } from './builder/model'
 import { QuickAddClient } from './builder/QuickAddClient'
 import { RepriceDialog } from './builder/RepriceDialog'
 import { useClientRates } from './builder/useClientRates'
@@ -120,9 +120,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       clientId: id,
       ...(c?.language ? { language: c.language } : {}),
       ...(c ? { taxTreatment: c.tax_treatment as TaxTreatment } : {}),
-      ...(c && !doc?.number ? clientTerms(type, settings, c, date || today()) : {}),
+      ...(c && !doc?.number ? clientChangeTerms(type, settings, form, client, c) : {}),
     })
-    if (c && !doc?.number) void clientRates.clientChanged(clientId, id, clientDisplayName(c), lines)
+    if (!doc?.number) void clientRates.clientChanged(clientId, id, clientDisplayName(c), lines)
   }
 
   // The actions that run after issuing read the latest render's email content.

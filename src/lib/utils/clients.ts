@@ -18,12 +18,12 @@ export function clientLabel(c: NamedClient | null | undefined): string {
   return clientDisplayName(c)
 }
 
-export type ClientDefaultsSource = Pick<Settings, 'country' | 'default_tax_treatment' | 'default_language' | 'default_payment_days' | 'default_skonto_percent' | 'default_skonto_days'>
+export type ClientDefaultsSource = Pick<Settings, 'country' | 'default_tax_treatment' | 'default_language' | 'default_payment_days'>
 
 export const CLIENT_DEFAULTS_COLUMNS = 'country, default_tax_treatment, default_language, default_payment_days, default_skonto_percent, default_skonto_days'
 
 // A new client starts in the studio's own country with the document defaults from Settings.
-export function toClientDefaults(s: ClientDefaultsSource | null | undefined): ClientDefaults {
+export function toClientDefaults(s: (ClientDefaultsSource & Partial<Pick<Settings, 'default_skonto_percent' | 'default_skonto_days'>>) | null | undefined): ClientDefaults {
   return {
     country: toCountryCode(s?.country) ?? 'AT',
     tax_treatment: s?.default_tax_treatment ?? 'at_vat',

@@ -69,8 +69,7 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
     })
 
     if (items.length > 0) {
-      const { error: itemsErr } = await supabase.from('document_items').insert(items)
-      if (itemsErr) toast.error(itemsErr.message)
+      await supabase.from('document_items').insert(items)
     }
 
     toast.success(t('documents.duplicated'))

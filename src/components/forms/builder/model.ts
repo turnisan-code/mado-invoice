@@ -77,16 +77,32 @@ export function skontoTerms(
   return { percent, days: client?.skonto_days ?? settings.default_skonto_days ?? null }
 }
 
-// What choosing a client sets on an unissued document: the due date from its terms and, on an
+type TermsSettings = Pick<Settings, 'default_quote_validity_days' | 'default_payment_days' | 'default_skonto_percent' | 'default_skonto_days'>
+type TermsClient = Pick<Client, 'payment_days' | 'skonto_percent' | 'skonto_days'>
+
+// What a new document for this client starts with: the due date from its terms and, on an
 // invoice, its Skonto.
-export function clientTerms(
-  type: DocumentType,
-  settings: Pick<Settings, 'default_quote_validity_days' | 'default_payment_days' | 'default_skonto_percent' | 'default_skonto_days'>,
-  client: Pick<Client, 'payment_days' | 'skonto_percent' | 'skonto_days'>,
-  date: string,
-): Pick<FormState, 'dueDate' | 'skontoPercent' | 'skontoDays'> {
+export function clientTerms(type: DocumentType, settings: TermsSettings, client: TermsClient, date: string): Pick<FormState, 'dueDate' | 'skontoPercent' | 'skontoDays'> {
   const skonto = skontoTerms(type, settings, client)
   return { dueDate: addDays(date, termDays(type, settings, client)), skontoPercent: skonto.percent ?? '', skontoDays: skonto.days ?? '' }
+}
+
+const sameSkonto = (value: number | '', term: number | null) =>
+  value === '' ? term === null : term !== null && Number(value) === Number(term)
+
+// What changing the client sets on an unissued document: the due date from the new client's terms
+// and, only while the form still holds the previous client's Skonto, the new client's. A Skonto
+// set or cleared by hand stays.
+export function clientChangeTerms(
+  type: DocumentType,
+  settings: TermsSettings,
+  f: Pick<FormState, 'date' | 'skontoPercent' | 'skontoDays'>,
+  previous: Pick<Client, 'skonto_percent' | 'skonto_days'> | null | undefined,
+  next: TermsClient,
+): Partial<Pick<FormState, 'dueDate' | 'skontoPercent' | 'skontoDays'>> {
+  const terms = clientTerms(type, settings, next, f.date || today())
+  const prev = skontoTerms(type, settings, previous)
+  return sameSkonto(f.skontoPercent, prev.percent) && sameSkonto(f.skontoDays, prev.days) ? terms : { dueDate: terms.dueDate }
 }
 
 export function linesFromItems(items: DocumentItem[]): LineItem[] {
