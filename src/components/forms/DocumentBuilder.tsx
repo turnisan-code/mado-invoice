@@ -19,6 +19,7 @@ import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { preparePdfFonts } from '@/components/pdf/fonts'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
+import type { EInvoiceErrorCode } from '@/lib/einvoice/common'
 import { numberingErrorMessage } from '@/lib/utils/numbering'
 import { issueProblems, missingIssuerFields, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import type { Client, CatalogueItem, DocumentType, IssueProblem, Language, TaxTreatment } from '@/types'
@@ -51,6 +52,8 @@ interface Props {
   defaultClientId?: string
   reference?: DocReference | null
 }
+
+const EINVOICE_ERRORS: readonly EInvoiceErrorCode[] = ['not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint']
 
 async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
   const res = await fetch(url, {
@@ -462,12 +465,15 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
+      // Invoices and credit notes in EUR can go out as e-invoices too, to clients who want them.
+      const einvoiceFormat = type !== 'quote' && currency === 'EUR' ? client.einvoice_format ?? null : null
       setGmailPreview({
         to: client.email, cc: parseEmailList(client.cc_emails).emails.join(', '), bcc: '',
         subject: content.subject, body: content.body,
         pdfBase64: await blobToBase64(blob), filename: `${issued.number}.pdf`,
         documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
         uploadToDrive: !!settings.drive_folder_id && !driveArchived, driveArchived,
+        einvoiceFormat, attachEInvoice: !!einvoiceFormat,
       })
     })
   }
@@ -475,15 +481,23 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   async function confirmSendViaGmail() {
     if (!gmailPreview) return
     setGmailSending(true)
+    // The e-invoice is built from the stored document: edits still waiting for the autosave first.
+    if (gmailPreview.attachEInvoice) await editor.flush()
     const res = await fetch('/api/gmail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(gmailPreview),
+      body: JSON.stringify({ ...gmailPreview, einvoice: gmailPreview.attachEInvoice ? gmailPreview.einvoiceFormat : null }),
     })
     setGmailSending(false)
 
     if (!res.ok) {
-      toastApiError(t, await res.json().catch(() => ({})), '', t('builder.emailFailed'))
+      const data = await res.json().catch(() => ({}))
+      if (data.einvoice) {
+        const code = EINVOICE_ERRORS.find(c => c === data.code)
+        toast.error(t('print.gmail.einvoiceFailed', { reason: code ? t(`einvoice.errors.${code}`) : String(data.error ?? '') }))
+      } else {
+        toastApiError(t, data, '', t('builder.emailFailed'))
+      }
       return
     }
 
