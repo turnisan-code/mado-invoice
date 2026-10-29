@@ -11,11 +11,16 @@ import { inputClass } from '@/components/lists/ListParts'
 import { toastApiError } from '@/lib/google/toast'
 import { logEvent } from '@/lib/events'
 import { flushPendingEdits } from '@/lib/issued-pdf'
-import { calcTotals, today } from '@/lib/utils/document'
+import { addDays, calcTotals, formatMoney, today } from '@/lib/utils/document'
+import { numberingErrorMessage } from '@/lib/utils/numbering'
 import { displayStatus, lifecycleErrorMessage, statusLabelKey, statusMenuTargets } from '@/lib/status'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
-import type { DisplayStatus, DocumentStatus, DocumentType, PaymentKind, PaymentMethod } from '@/types'
+import type { DisplayStatus, DocumentStatus, DocumentType, IssueProblem, PaymentKind, PaymentMethod, Settings } from '@/types'
+import { IssueDialog } from '@/components/forms/builder/IssueDialog'
+import { isIssueProblems } from '@/components/forms/builder/IssueProblems'
+import { applyIssueDateInEditor } from '@/components/forms/builder/events'
+import { expectedNumber, termDays, type NumberingSettings } from '@/components/forms/builder/model'
 
 const DESTRUCTIVE = new Set(['cancelled', 'rejected'])
 
@@ -28,6 +33,19 @@ const itemColor: Record<string, string> = {
 }
 
 type CalcItems = Parameters<typeof calcTotals>[0]
+
+// What the issue dialog needs, read from the stored draft once its pending edits are written.
+type IssuePrep = {
+  status: string
+  draftDate: string
+  staleDate: string | null
+  // The due date a stale invoice or quote gets when it is issued with today's date (as in the editor).
+  todayDue: string
+  latestIssued: { number: string; date: string } | null
+  numbering: Partial<NumberingSettings>
+  zeroTotal: string | null
+  problems: IssueProblem[] | null
+}
 
 interface Props {
   document: {
@@ -56,6 +74,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
   const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
   const [paidDateInvalid, setPaidDateInvalid] = useState(false)
   const [stornoReason, setStornoReason] = useState('')
+  const [issue, setIssue] = useState<IssuePrep | null>(null)
   const busyRef = useRef(false)
   const ref = useRef<HTMLDivElement>(null)
   const uid = useId()
@@ -105,17 +124,129 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
   function changeStatus(newStatus: string) {
     setOpen(false)
     if (newStatus === status) return
-    if (DESTRUCTIVE.has(newStatus) || needsNumber(newStatus) || recordsPayment(newStatus)) {
-      if (recordsPayment(newStatus)) {
-        setPaidDate(todayStr)
-        setPaidMethod('bank')
-        setPaidDateInvalid(false)
-      }
+    if (recordsPayment(newStatus)) {
+      setPaidDate(todayStr)
+      setPaidMethod('bank')
+      setPaidDateInvalid(false)
+    }
+    if (needsNumber(newStatus)) { void prepareIssue(newStatus); return }
+    if (DESTRUCTIVE.has(newStatus) || recordsPayment(newStatus)) {
       if (createsStorno(newStatus)) setStornoReason('')
       setConfirm(newStatus)
       return
     }
     void applyStatus(newStatus)
+  }
+
+  // Issuing a draft asks the same as the editor does: today's date for a stale draft, a date
+  // before the newest issued document, a zero total. The editor's pending edits are written
+  // first, so the dialog and the checks see the draft as it is.
+  async function prepareIssue(newStatus: string) {
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    try {
+      await flushPendingEdits(doc.id)
+      const numberingColumns = `${type}_number_format, ${type}_prefix, next_${type}_number, ${type}_counter_year, ${type}_number_reset_yearly`
+      const [draft, settings, latest] = await Promise.all([
+        supabase.from('documents')
+          .select('date, currency, tax_treatment, discount_type, discount_value, clients(payment_days), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)')
+          .eq('id', doc.id).single(),
+        supabase.from('settings').select(`${numberingColumns}, default_payment_days, default_quote_validity_days`).maybeSingle(),
+        supabase.from('documents').select('number, date').eq('type', type).not('number', 'is', null).neq('id', doc.id)
+          .order('date', { ascending: false }).limit(1).maybeSingle(),
+      ])
+      if (draft.error || !draft.data) { toast.error(draft.error?.message ?? t('common.unknownError')); return }
+      const d = draft.data
+      const s = (settings.data ?? {}) as Partial<NumberingSettings & Pick<Settings, 'default_payment_days' | 'default_quote_validity_days'>>
+      // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
+      const client = d.clients as unknown as { payment_days: number | null } | null
+      const total = calcTotals(
+        d.document_items ?? [],
+        [],
+        d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
+        d.tax_treatment,
+      ).total
+      setIssue({
+        status: newStatus,
+        draftDate: d.date,
+        staleDate: d.date < todayStr ? d.date : null,
+        todayDue: addDays(todayStr, termDays(type, { default_payment_days: s.default_payment_days ?? 14, default_quote_validity_days: s.default_quote_validity_days ?? 14 }, client)),
+        latestIssued: latest.data?.number ? { number: latest.data.number, date: latest.data.date } : null,
+        numbering: s,
+        zeroTotal: total === 0 ? formatMoney(0, d.currency ?? 'EUR') : null,
+        problems: null,
+      })
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
+  }
+
+  async function confirmIssue(useToday: boolean) {
+    const prep = issue
+    if (!prep || busyRef.current) return
+    const newStatus = prep.status
+    if (recordsPayment(newStatus) && (!/^\d{4}-\d{2}-\d{2}$/.test(paidDate) || paidDate > todayStr)) {
+      setPaidDateInvalid(true)
+      return
+    }
+    busyRef.current = true
+    setBusy(true)
+    try {
+      // A stale draft moves to today; the editor on this page writes the new dates itself, so it
+      // never writes the old ones back.
+      if (prep.staleDate && useToday) {
+        // Credit notes have no payment term to follow the new date.
+        const todayDue = type === 'credit_note' ? undefined : prep.todayDue
+        const handled = await applyIssueDateInEditor(doc.id, todayStr, todayDue).catch((err: unknown) => {
+          toast.error(t('builder.notSavedToast', { error: err instanceof Error ? err.message : t('common.unknownError') }))
+          return null
+        })
+        if (handled === null) return
+        if (!handled) {
+          const { error } = await supabase.from('documents')
+            .update({ date: todayStr, ...(todayDue === undefined ? {} : { due_date: todayDue }) }).eq('id', doc.id)
+          if (error) { toast.error(error.message); return }
+        }
+      }
+      const showProblems = (problems: IssueProblem[]) => setIssue(p => (p ? { ...p, problems } : p))
+      if (recordsPayment(newStatus)) {
+        const res = await fetch('/api/invoices/bulk', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: [doc.id], status: 'paid', paidDate, method: paidMethod }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 422 && isIssueProblems(data.problems)) { showProblems(data.problems); return }
+        if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
+        if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
+      } else {
+        // Issuing (number, archive copy, Drive) runs on the server and moves a draft to 'sent'.
+        const res = await fetch(`/api/documents/${doc.id}/issue`, { method: 'POST' })
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 422 && isIssueProblems(data.problems)) { showProblems(data.problems); return }
+        if (!res.ok) {
+          toast.error(numberingErrorMessage({ code: data.code, message: typeof data.error === 'string' && data.error ? data.error : t('common.unknownError'), details: data.details }, t))
+          return
+        }
+        if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
+        if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
+        const from = status === 'draft' ? 'sent' : status
+        if (newStatus !== from) {
+          const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
+          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+          await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
+        }
+      }
+      setStatus(newStatus)
+      setIssue(null)
+      router.refresh()
+      toast.success(recordsPayment(newStatus) ? t('statusBar.markedPaid') : t('statusBar.statusUpdated', { status: statusLabel(newStatus) }))
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+    }
   }
 
   async function applyStatus(newStatus: string) {
@@ -127,9 +258,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     busyRef.current = true
     setBusy(true)
     try {
-      // Issuing renders the frozen PDF from the database and a Storno copies the invoice's lines
-      // from there, so the builder's pending edits go first.
-      if (needsNumber(newStatus) || createsStorno(newStatus)) await flushPendingEdits(doc.id)
+      // A Storno copies the invoice's lines from the database, so the builder's pending edits go first.
+      if (createsStorno(newStatus)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',
@@ -155,16 +285,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
       } else {
-        // Issuing (number, archive copy, Drive) runs on the server and moves a draft to 'sent'.
-        let from = status
-        if (needsNumber(newStatus)) {
-          const res = await fetch(`/api/documents/${doc.id}/issue`, { method: 'POST' })
-          const data = await res.json().catch(() => ({}))
-          if (!res.ok) { toast.error(data.error ?? t('common.unknownError')); return }
-          if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
-          if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
-          if (from === 'draft') from = 'sent'
-        }
+        const from = status
         if (newStatus !== from) {
           const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
           if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
@@ -189,6 +310,33 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     if (DESTRUCTIVE.has(s)) parts.push(t('statusBar.confirmDestructive'))
     return parts.join(' ')
   }
+
+  const paymentFields = (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-paid-date`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentDate')}</label>
+        <input
+          id={`${uid}-paid-date`}
+          type="date"
+          value={paidDate}
+          max={todayStr}
+          required
+          aria-invalid={paidDateInvalid || undefined}
+          aria-describedby={paidDateInvalid ? `${uid}-paid-date-error` : undefined}
+          onChange={e => { setPaidDate(e.target.value); setPaidDateInvalid(false) }}
+          className={`w-full ${inputClass} ${paidDateInvalid ? 'border-red-500 dark:border-red-500' : ''}`}
+        />
+      </div>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-paid-method`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentMethod')}</label>
+        <select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)} className={`w-full ${inputClass}`}>
+          <option value="bank">{t('payments.methodBank')}</option>
+          <option value="cash">{t('payments.methodCash')}</option>
+        </select>
+      </div>
+      {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
+    </div>
+  )
 
   // Cancelled documents and issued credit notes have nowhere to go: the badge is just a label.
   if (!targets.length) return <StatusBadge status={shown} label={statusLabel(shown)} className="shrink-0" />
@@ -237,32 +385,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         onConfirm={() => { if (confirm) void applyStatus(confirm) }}
         onCancel={() => setConfirm(null)}
       >
-        {confirm && recordsPayment(confirm) && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label htmlFor={`${uid}-paid-date`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentDate')}</label>
-              <input
-                id={`${uid}-paid-date`}
-                type="date"
-                value={paidDate}
-                max={todayStr}
-                required
-                aria-invalid={paidDateInvalid || undefined}
-                aria-describedby={paidDateInvalid ? `${uid}-paid-date-error` : undefined}
-                onChange={e => { setPaidDate(e.target.value); setPaidDateInvalid(false) }}
-                className={`w-full ${inputClass} ${paidDateInvalid ? 'border-red-500 dark:border-red-500' : ''}`}
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor={`${uid}-paid-method`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentMethod')}</label>
-              <select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)} className={`w-full ${inputClass}`}>
-                <option value="bank">{t('payments.methodBank')}</option>
-                <option value="cash">{t('payments.methodCash')}</option>
-              </select>
-            </div>
-            {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
-          </div>
-        )}
+        {confirm && recordsPayment(confirm) && paymentFields}
         {confirm && createsStorno(confirm) && (
           <div className="space-y-1">
             <label htmlFor={`${uid}-storno-reason`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('lifecycle.storno.reason')}</label>
@@ -278,6 +401,26 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
           </div>
         )}
       </ConfirmDialog>
+
+      <IssueDialog
+        open={!!issue}
+        type={type}
+        title={issue ? t('statusBar.markAsTitle', { status: statusLabel(issue.status) }) : ''}
+        description={issue ? confirmText(issue.status) : undefined}
+        confirmLabel={busy ? t('common.working') : t('common.confirm')}
+        busy={busy}
+        staleDate={issue?.staleDate ?? null}
+        draftDate={issue?.draftDate ?? todayStr}
+        todayDue={type === 'invoice' && issue ? issue.todayDue : null}
+        latestIssued={issue?.latestIssued ?? null}
+        numberFor={d => (issue ? expectedNumber(issue.numbering, type, d) : '')}
+        zeroTotal={issue?.zeroTotal ?? null}
+        problems={issue?.problems}
+        onConfirm={useToday => void confirmIssue(useToday)}
+        onCancel={() => setIssue(null)}
+      >
+        {issue && recordsPayment(issue.status) && paymentFields}
+      </IssueDialog>
     </div>
   )
 }
