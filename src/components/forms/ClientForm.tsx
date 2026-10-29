@@ -449,7 +449,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
       <Controller control={control} name="tags" render={({ field }) => <TagInput value={field.value} onChange={field.onChange} />} />
 
       <Field id={id('notes')} label={t('clients.form.notes')}>
-        <Textarea id={id('notes')} {...register('notes')} rows={3} className="min-h-16 sm:min-h-16 resize-none" />
+        <Textarea id={id('notes')} {...register('notes')} rows={3} className="resize-none" />
       </Field>
 
       <label className="flex items-start gap-2.5 text-sm cursor-pointer">

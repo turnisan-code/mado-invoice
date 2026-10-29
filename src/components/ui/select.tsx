@@ -16,7 +16,7 @@ function Select({ className, style, ...props }: React.ComponentProps<"select">) 
       className={cn(
         CONTROL_HEIGHT,
         controlClass,
-        "appearance-none py-0 pr-8 dark:scheme-dark [&_optgroup]:bg-popover [&_option]:bg-popover [&_option]:text-popover-foreground",
+        "appearance-none py-0 pr-8 disabled:pointer-events-none dark:scheme-dark [&_optgroup]:bg-popover [&_option]:bg-popover [&_option]:text-popover-foreground",
         className
       )}
       style={{ backgroundImage: CHEVRON, backgroundRepeat: "no-repeat", backgroundPosition: "right 0.5rem center", backgroundSize: "1rem", ...style }}

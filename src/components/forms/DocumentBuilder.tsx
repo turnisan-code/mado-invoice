@@ -825,11 +825,11 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-notes`}>{t('builder.notesOnDocument')}</Label>
-            <Textarea id={`${uid}-notes`} value={notes} onChange={e => patch({ notes: e.target.value })} rows={3} className="min-h-16 sm:min-h-16 resize-none" />
+            <Textarea id={`${uid}-notes`} value={notes} onChange={e => patch({ notes: e.target.value })} rows={3} className="resize-none" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-notes-internal`}>{t('builder.internalNotes')}</Label>
-            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => patch({ notesInternal: e.target.value })} rows={3} className="min-h-16 sm:min-h-16 resize-none" placeholder={t('builder.internalPlaceholder')} />
+            <Textarea id={`${uid}-notes-internal`} value={notesInternal} onChange={e => patch({ notesInternal: e.target.value })} rows={3} className="resize-none" placeholder={t('builder.internalPlaceholder')} />
           </div>
         </div>
       </div>

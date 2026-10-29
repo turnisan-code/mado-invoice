@@ -52,7 +52,7 @@ export function ScheduleFormFields({ values, onChange, disabled = false }: {
         <label htmlFor={`${id}-name`} className={labelClass}>{t('recurring.name')}</label>
         <input id={`${id}-name`} type="text" value={values.name} onChange={e => onChange({ name: e.target.value })} maxLength={120} disabled={disabled} className={inputClass} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label htmlFor={`${id}-interval`} className={labelClass}>{t('recurring.interval')}</label>
           <Select id={`${id}-interval`} value={values.interval} onChange={e => onChange({ interval: e.target.value as RecurringInterval })} disabled={disabled}>

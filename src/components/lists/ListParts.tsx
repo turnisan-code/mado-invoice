@@ -113,7 +113,7 @@ export function Pagination({ page, pageCount, onPage }: { page: number; pageCoun
   const { t } = useT()
   if (pageCount <= 1) return null
   return (
-    <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+    <div className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
       <Button type="button" variant="outline" onClick={() => onPage(page - 1)} disabled={page <= 1}>{t('common.prev')}</Button>
       <span>{t('common.pageOf', { page, count: pageCount })}</span>
       <Button type="button" variant="outline" onClick={() => onPage(page + 1)} disabled={page >= pageCount}>{t('common.next')}</Button>

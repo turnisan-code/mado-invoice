@@ -169,8 +169,8 @@ export function CatalogueField({ value, language, items, rates, invalid, classNa
                   <Input value={draft.name_de} onChange={e => setDraft(d => ({ ...d, name_de: e.target.value }))} placeholder={t('builder.nameDe')} aria-label={t('builder.nameDeLabel')} autoFocus />
                   <Input value={draft.name_en} onChange={e => setDraft(d => ({ ...d, name_en: e.target.value }))} placeholder={t('builder.nameEn')} aria-label={t('builder.nameEnLabel')} />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <MoneyInput value={draft.default_price} onValueChange={n => setDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder={t('builder.price')} aria-label={t('builder.price')} />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <MoneyInput value={draft.default_price} onValueChange={n => setDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder={t('builder.price')} aria-label={t('builder.price')} className="col-span-2 sm:col-span-1" />
                   <Select value={draft.unit} onChange={e => setDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label={t('builder.unit')}>
                     {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
                   </Select>

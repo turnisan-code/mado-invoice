@@ -73,7 +73,7 @@ function EditForm({ d, setD, onSave, onCancel, categories, error, autoFocusName 
       className="px-4 py-4 bg-neutral-50 dark:bg-neutral-800/60 border-t border-neutral-100 dark:border-neutral-800"
     >
       <datalist id={CAT_DATALIST_ID}>{categories.map(c => <option key={c} value={c} />)}</datalist>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 mb-4">
         <div className="space-y-1">
           <label htmlFor={`${id}-de`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('catalogue.nameDe')}</label>
           <input id={`${id}-de`} autoFocus={autoFocusName} value={d.name_de ?? ''} onChange={e => setD(p => ({ ...p, name_de: e.target.value }))} placeholder={t('catalogue.nameDePlaceholder')} className={fieldCls} aria-invalid={!!error || undefined} aria-describedby={error ? `${id}-error` : undefined} />
