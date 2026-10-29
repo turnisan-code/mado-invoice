@@ -16,7 +16,7 @@ import { bookamatErrorMessage } from '@/lib/bookamat-client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
-import { formatDate, viennaDate } from '@/lib/utils/document'
+import { formatDate, getTaxNote, viennaDate } from '@/lib/utils/document'
 import { NUMBER_TOKENS, formatDocumentNumber, hasYearToken, nextCounter, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
 import type { EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 
@@ -1539,7 +1539,7 @@ export default function SettingsForm({ settings }: Props) {
                     <input id={`${uid}-taxNotes-reverse_charge_de`}
                       type="text"
                       className={inp}
-                      placeholder="Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)"
+                      placeholder={getTaxNote('eu_reverse_charge', 'de') ?? ''}
                       value={taxNotes.reverse_charge_de}
                       onChange={e => { setTaxNotes(n => ({ ...n, reverse_charge_de: e.target.value })); markDirty('taxnotes') }}
                     />
@@ -1549,7 +1549,7 @@ export default function SettingsForm({ settings }: Props) {
                     <input id={`${uid}-taxNotes-reverse_charge_en`}
                       type="text"
                       className={inp}
-                      placeholder="Reverse charge — VAT to be accounted for by the recipient"
+                      placeholder={getTaxNote('eu_reverse_charge', 'en') ?? ''}
                       value={taxNotes.reverse_charge_en}
                       onChange={e => { setTaxNotes(n => ({ ...n, reverse_charge_en: e.target.value })); markDirty('taxnotes') }}
                     />
@@ -1564,7 +1564,7 @@ export default function SettingsForm({ settings }: Props) {
                     <input id={`${uid}-taxNotes-non_eu_de`}
                       type="text"
                       className={inp}
-                      placeholder="Nicht steuerbar (Leistungsort außerhalb der EU)"
+                      placeholder={getTaxNote('non_eu', 'de') ?? ''}
                       value={taxNotes.non_eu_de}
                       onChange={e => { setTaxNotes(n => ({ ...n, non_eu_de: e.target.value })); markDirty('taxnotes') }}
                     />
@@ -1574,7 +1574,7 @@ export default function SettingsForm({ settings }: Props) {
                     <input id={`${uid}-taxNotes-non_eu_en`}
                       type="text"
                       className={inp}
-                      placeholder="Not subject to Austrian VAT (place of supply outside the EU)"
+                      placeholder={getTaxNote('non_eu', 'en') ?? ''}
                       value={taxNotes.non_eu_en}
                       onChange={e => { setTaxNotes(n => ({ ...n, non_eu_en: e.target.value })); markDirty('taxnotes') }}
                     />
