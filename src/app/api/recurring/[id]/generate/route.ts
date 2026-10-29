@@ -5,6 +5,7 @@ import { formatDate, today } from '@/lib/utils/document'
 import { issueDocument } from '@/lib/pdf/issue'
 import { getT } from '@/lib/i18n/server'
 import { asDbError, lifecycleErrorMessage } from '@/lib/status'
+import { knownApiError } from '@/lib/api-errors'
 import { IssueCheckError, issueProblemMessage } from '@/lib/utils/issue-checks'
 
 export const maxDuration = 60
@@ -32,6 +33,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       console.error('[recurring/generate] issue failed:', err)
       return lifecycleErrorMessage(asDbError(err), t)
     },
+    describeDriveError: driveError => knownApiError(t, driveError) ?? t('messages.api.google_failed'),
   })
   if (!generated.length) {
     // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.
@@ -42,6 +44,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     }
     return NextResponse.json({ documentId: null, generated: 0 })
   }
+  // The warning is worded; each error's raw cause (`detail`) is only logged.
+  if (errors.length) console.error('[recurring/generate] generated with problems:', errors)
   const newest = generated[generated.length - 1]
   return NextResponse.json({
     documentId: newest.documentId,

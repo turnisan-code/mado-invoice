@@ -79,7 +79,7 @@ export interface GenerateResult {
 // is also imported by client components for its date math, so the route handlers pass it in.
 export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
   snapshotError: string | null
-  driveError: { error: string; code?: string } | null
+  driveError: DriveError | null
 }>
 
 type SourceDocument = Record<string, unknown> & {
@@ -138,21 +138,31 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
 }
 
 // Issue failures as the manual button shows them: in the UI language when the route passes t
-// (describeError words database errors, formatDate the period's date), in English for the cron
-// log. The archive and Drive failures are worded by kind; their raw text only goes to the log.
-function issueMessages({ t, describeError, formatDate }: Wording) {
+// (describeError words database errors, describeDriveError Google's, formatDate the period's
+// date), in English for the cron log. The raw text of an archive or Drive failure only goes to the log.
+function issueMessages({ t, describeError, describeDriveError, formatDate }: Wording) {
   const reason = (err: unknown) => describeError ? describeError(err) : err instanceof Error ? err.message : String(err)
   const day = (date: string) => formatDate ? formatDate(date) : date
   return {
     snapshot: (date: string) => t ? t('lifecycle.recurring.snapshotFailed', { date: day(date) }) : `${date}: issued, but the archive copy failed`,
-    drive: (date: string, code: string | undefined) => t
-      ? t('lifecycle.recurring.driveFailed', { date: day(date), error: t(code === 'google_reauth' ? 'messages.api.google_reauth' : 'messages.api.google_failed') })
+    drive: (date: string, driveError: DriveError) => t
+      ? t('lifecycle.recurring.driveFailed', {
+        date: day(date),
+        error: describeDriveError ? describeDriveError(driveError) : t(driveError.code === 'google_reauth' ? 'messages.api.google_reauth' : 'messages.api.google_failed'),
+      })
       : `${date}: issued, but the Drive archive failed`,
     issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date: day(date), error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
   }
 }
 
-type Wording = { t?: TFn; describeError?: (err: unknown) => string; formatDate?: (date: string) => string }
+type DriveError = { error: string; code?: string }
+
+type Wording = {
+  t?: TFn
+  describeError?: (err: unknown) => string
+  describeDriveError?: (driveError: DriveError) => string
+  formatDate?: (date: string) => string
+}
 
 async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult, wording: Wording) {
   const messages = issueMessages(wording)
@@ -168,7 +178,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
   if ((source as SourceDocument).status === 'cancelled') {
     const { error: pauseErr } = await supabase.from('recurring_schedules').update({ active: false }).eq('id', schedule.id)
     if (pauseErr) throw new Error(pauseErr.message)
-    result.errors.push({ scheduleId: schedule.id, message: 'template cancelled', code: 'template_cancelled' })
+    result.errors.push({ scheduleId: schedule.id, message: wording.t ? wording.t('messages.api.template_cancelled') : 'template cancelled', code: 'template_cancelled' })
     return
   }
 
@@ -189,7 +199,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
         try {
           const { snapshotError, driveError } = await issue(supabase, documentId)
           if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
-          if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError.code), detail: driveError.error })
+          if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError), detail: driveError.error })
         } catch (err) {
           result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
         }
@@ -236,7 +246,7 @@ export async function generateDueSchedules(
   if (!opts.force) query = query.lte('next_date', asOf)
   const { data: schedules, error } = await query.order('next_date')
   if (error) {
-    result.errors.push({ scheduleId: opts.scheduleId ?? '*', message: error.message })
+    result.errors.push({ scheduleId: opts.scheduleId ?? '*', message: opts.t ? opts.t('messages.api.generate_failed') : error.message, detail: error.message })
     return result
   }
 
@@ -244,7 +254,9 @@ export async function generateDueSchedules(
     try {
       await runSchedule(supabase, schedule, asOf, !!opts.force, defaultPaymentDays, opts.issue, result, opts)
     } catch (err) {
-      result.errors.push({ scheduleId: schedule.id, message: err instanceof Error ? err.message : String(err) })
+      // A lookup or write that failed partway; the periods generated before it stay.
+      const detail = err instanceof Error ? err.message : String(err)
+      result.errors.push({ scheduleId: schedule.id, message: opts.t ? opts.t('messages.recurringStopped') : detail, detail })
     }
   }
   return result

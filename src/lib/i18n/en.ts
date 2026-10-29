@@ -212,6 +212,7 @@ export const en = {
       network: 'Your answer could not be sent because there is no connection. Please check your internet connection and try again.',
     },
     googleFailed: 'Google reported an error. Try again in a moment; if it keeps happening, reconnect Google.',
+    recurringStopped: 'Generating stopped partway. Check the schedule and its invoices, then try again.',
   },
   status: {
     draft: 'Draft',
@@ -1161,9 +1162,9 @@ export const en = {
       reasonShort: 'Reason: {reason}',
     },
     recurring: {
-      issueFailed: '{date}: created as a draft, issuing failed ({error})',
+      issueFailed: '{date}: created as a draft, but not issued. {error}',
       snapshotFailed: '{date}: issued, but no archive copy was stored. The invoice page offers to create it.',
-      driveFailed: '{date}: issued, but the Drive archive failed ({error})',
+      driveFailed: '{date}: issued, but not filed in Google Drive. {error}',
     },
     convert: {
       openInvoice: 'Invoice {number}',

@@ -214,6 +214,7 @@ export const de = {
       network: 'Ihre Antwort konnte nicht gesendet werden, weil keine Verbindung besteht. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.',
     },
     googleFailed: 'Google hat einen Fehler gemeldet. Gleich noch einmal versuchen; wenn es wieder passiert, Google neu verbinden.',
+    recurringStopped: 'Das Erstellen ist mittendrin abgebrochen. Zeitplan und Rechnungen prüfen, dann noch einmal versuchen.',
   },
   status: {
     draft: 'Entwurf',
@@ -1162,9 +1163,9 @@ export const de = {
       reasonShort: 'Grund: {reason}',
     },
     recurring: {
-      issueFailed: '{date}: als Entwurf erstellt, Ausstellen fehlgeschlagen ({error})',
+      issueFailed: '{date}: als Entwurf erstellt, aber nicht ausgestellt. {error}',
       snapshotFailed: '{date}: ausgestellt, aber es wurde keine Archivkopie gespeichert. Auf der Rechnungsseite lässt sie sich erstellen.',
-      driveFailed: '{date}: ausgestellt, aber die Ablage in Google Drive ist fehlgeschlagen ({error})',
+      driveFailed: '{date}: ausgestellt, aber nicht in Google Drive abgelegt. {error}',
     },
     convert: {
       openInvoice: 'Rechnung {number}',
