@@ -47,6 +47,18 @@ export function advanceDate(date: string, interval: RecurringInterval, anchorDay
   return shiftMonths(date, MONTHS_PER_INTERVAL[interval], anchorDay)
 }
 
+export type ScheduleDates = Pick<RecurringSchedule, 'next_date' | 'interval' | 'anchor_day' | 'end_date'>
+
+// Whether `date` is the date of a period the schedule has still to generate (from next_date up to
+// end_date). The unique index documents_recurring_period_key allows one invoice per schedule and
+// date, so no other invoice of the schedule may be moved onto such a day.
+export function isUpcomingPeriodDate(schedule: ScheduleDates, date: string): boolean {
+  if (schedule.end_date && date > schedule.end_date) return false
+  let next = schedule.next_date
+  while (next < date) next = advanceDate(next, schedule.interval, schedule.anchor_day)
+  return next === date
+}
+
 // In arrears: the interval that ends the day before `date`. In advance: the interval that
 // starts on `date`. Monthly in arrears on the 1st is therefore the whole previous calendar month.
 export function servicePeriod(
@@ -90,20 +102,54 @@ type SourceDocument = Record<string, unknown> & {
   clients: { payment_days: number | null } | null
 }
 
-// Copies the template invoice into a new draft dated `date`. Returns null when that period
-// already exists (unique index documents_recurring_period_key), which a retry after a crash hits.
-async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<string | null> {
-  const period = servicePeriod(date, schedule.interval, schedule.in_advance, schedule.anchor_day)
-  // Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
-  const paymentDays = source.clients?.payment_days ?? defaultPaymentDays ?? 14
+// Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
+function paymentDaysOf(source: SourceDocument, defaultPaymentDays: number | null): number {
+  return source.clients?.payment_days ?? defaultPaymentDays ?? 14
+}
 
+// How many days before its own date a period's invoice may move when that date is taken.
+const MAX_DAYS_BACK = 6
+
+type PeriodInvoice = { id: string; date: string; dueDate: string }
+
+// Copies the template invoice into a new draft for the period dated `date`. Returns null when that
+// period already exists (a retry after a crash, overlapping runs), found by its service period: an
+// issued catch-up period is dated today, see runSchedule. When another invoice of the schedule
+// already holds `date` (documents_recurring_period_key: one invoice per schedule and date, e.g. one
+// moved to today by hand), the draft takes the nearest free day before it, so no period is skipped.
+async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<PeriodInvoice | null> {
+  const period = servicePeriod(date, schedule.interval, schedule.in_advance, schedule.anchor_day)
+  const paymentDays = paymentDaysOf(source, defaultPaymentDays)
+
+  const { data: existing, error: lookupErr } = await supabase.from('documents').select('id')
+    .eq('recurring_schedule_id', schedule.id).eq('service_date', period.start).eq('service_date_end', period.end)
+    .limit(1).maybeSingle()
+  if (lookupErr) throw new Error(lookupErr.message)
+  if (existing) return null
+
+  for (let back = 0; back <= MAX_DAYS_BACK; back++) {
+    const day = shiftDays(date, -back)
+    const created = await insertPeriodInvoice(supabase, schedule, source, day, shiftDays(day, paymentDays), period)
+    if (created !== 'taken') return created
+    const { data: holder, error: holderErr } = await supabase.from('documents').select('service_date, service_date_end')
+      .eq('recurring_schedule_id', schedule.id).eq('date', day).limit(1).maybeSingle()
+    if (holderErr) throw new Error(holderErr.message)
+    if (!holder) throw new Error(`the invoice dated ${day} could not be read`)
+    // An overlapping run has just created this very period.
+    if (holder.service_date === period.start && holder.service_date_end === period.end) return null
+  }
+  throw new Error(`no free date for the invoice of ${period.start} to ${period.end}`)
+}
+
+// 'taken' when another invoice of the schedule already has `date`.
+async function insertPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, dueDate: string, period: { start: string; end: string }): Promise<PeriodInvoice | 'taken'> {
   const { data: doc, error } = await supabase.from('documents').insert({
     type: 'invoice',
     status: 'draft',
     number: null,
     client_id: source.client_id,
     date,
-    due_date: shiftDays(date, paymentDays),
+    due_date: dueDate,
     service_date: period.start,
     service_date_end: period.end,
     recurring_schedule_id: schedule.id,
@@ -124,7 +170,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   }).select('id').single()
 
   if (error) {
-    if (error.code === '23505') return null
+    if (error.code === '23505') return 'taken'
     throw new Error(error.message)
   }
 
@@ -138,7 +184,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
     const { error: itemsErr } = await supabase.from('document_items').insert(items)
     if (itemsErr) throw new Error(itemsErr.message)
   }
-  return doc.id as string
+  return { id: doc.id as string, date, dueDate }
 }
 
 // Issue failures as the manual button shows them: in the UI language when the route passes t
@@ -156,6 +202,10 @@ function issueMessages({ t, describeError, describeDriveError, formatDate }: Wor
       })
       : `${date}: issued, but the Drive archive failed`,
     issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date: day(date), error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
+    dateTaken: (date: string) => t ? t('views.recurring.dateTaken', { date: day(date) }) : `${date}: created as draft, today's date is reserved for another invoice of this schedule`,
+    dateHeld: (date: string, draftDate: string) => t
+      ? t('views.recurring.dateHeld', { date: day(date), draftDate: day(draftDate) })
+      : `${date}: created as draft dated ${draftDate}, another invoice of this schedule already has ${date}`,
   }
 }
 
@@ -196,16 +246,51 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       break
     }
 
-    const documentId = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
-    if (documentId) {
-      result.generated.push({ scheduleId: schedule.id, documentId, date: next })
-      if (schedule.mode === 'issue') {
+    const created = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
+    const documentId = created?.id ?? null
+    if (created) {
+      result.generated.push({ scheduleId: schedule.id, documentId: created.id, date: next })
+      // Why the invoice stays a draft in 'issue' mode; the log says it in either mode.
+      let held = created.date === next ? null : messages.dateHeld(next, created.date)
+      let date = created.date
+      // An invoice is dated the day it is issued: a period caught up late is issued with today's
+      // date and the due date from today, and keeps the period as its service period, so it never
+      // gets a number after invoices dated later than it. The period key allows one invoice per
+      // schedule and date, so only one catch-up can take today, and none when today is a period
+      // date of the schedule itself. The others stay drafts at their period's date and are
+      // reported: issued with that date, they would be dated before the day they were issued.
+      if (schedule.mode === 'issue' && next < asOf) {
+        const later = advanceDate(next, schedule.interval, schedule.anchor_day)
+        if (isUpcomingPeriodDate({ ...schedule, next_date: later }, asOf)) {
+          held = messages.dateTaken(next)
+        } else {
+          const { error: dateErr } = await supabase.from('documents')
+            .update({ date: asOf, due_date: shiftDays(asOf, paymentDaysOf(source as SourceDocument, defaultPaymentDays)) })
+            .eq('id', created.id).is('number', null)
+          if (dateErr?.code === '23505') held = messages.dateTaken(next)
+          else if (dateErr) throw new Error(dateErr.message)
+          else {
+            date = asOf
+            held = null
+          }
+        }
+      }
+      if (held) {
+        result.errors.push({ scheduleId: schedule.id, message: held })
+      } else if (schedule.mode === 'issue') {
         try {
-          const { snapshotError, driveError } = await issue(supabase, documentId)
+          const { snapshotError, driveError } = await issue(supabase, created.id)
           if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
           if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError), detail: driveError.error })
         } catch (err) {
           result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
+          // The draft gets its period's dates back, as a failed bulk issue does.
+          if (date !== created.date) {
+            const { error: restoreErr } = await supabase.from('documents')
+              .update({ date: created.date, due_date: created.dueDate })
+              .eq('id', created.id).is('number', null)
+            if (restoreErr) console.error(`[recurring] dates of ${created.id} not restored:`, restoreErr.message)
+          }
         }
       }
     } else {

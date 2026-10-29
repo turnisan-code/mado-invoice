@@ -16,9 +16,11 @@ import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { StatusBadge } from './StatusBadge'
-import { displayStatus, statusLabelKey } from '@/lib/status'
+import { displayStatus, isOverdue, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
 import { invoiceKindBadge } from '@/lib/document-labels'
+import { isIssuedNoteList, latestIssued, type IssuedNote } from '@/lib/utils/bulk-issue'
+import { BulkIssueNotice, BulkIssueResult } from './BulkIssue'
 import type { BookamatState, InvoiceKind } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -76,12 +78,17 @@ function docTotals(d: Invoice) {
 const docTotal = (d: Invoice) => docTotals(d).total
 // Nothing is owed on a draft (not issued yet) or a cancelled invoice (settled by its Storno).
 const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancelled' ? 0 : docTotals(d).balance_due
-const isOpen = (d: Invoice) => d.status === 'sent' || d.status === 'overdue'
+// Outstanding: issued and still owing something; a zero total or a settled balance never is.
+const isOpen = (d: Invoice) => (d.status === 'sent' || d.status === 'overdue') && docTotal(d) > 0.005 && docBalance(d) > 0.005
 const clientLabel = (d: Invoice) => clientDisplayName(d.clients)
+// Between sent and overdue the due date decides, as in the filters and on the dashboard: the daily
+// run only catches the stored status up, e.g. after a due date was extended.
+const listStatus = (d: Invoice, todayStr: string) =>
+  d.status === 'sent' || d.status === 'overdue' ? (isOpen(d) && isOverdue(d, todayStr) ? 'overdue' : 'sent') : d.status
 // Partly paid and written-off invoices show that instead of their stored status. Dunning fees
 // and interest are paid on top and never change it.
 const shownStatus = (d: Invoice, todayStr: string) =>
-  displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
+  displayStatus({ type: 'invoice', status: listStatus(d, todayStr), total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
 
 function exportCSV(invoices: Invoice[], t: TFn, todayStr: string) {
   const rows = invoices.map(inv => {
@@ -117,6 +124,9 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
   const [paidDateInvalid, setPaidDateInvalid] = useState(false)
   const [bulkSync, setBulkSync] = useState<BulkSync | null>(null)
+  // Drafts dated before today are issued with today's date unless the confirm says otherwise.
+  const [redate, setRedate] = useState(true)
+  const [issueNotes, setIssueNotes] = useState<IssuedNote[] | null>(null)
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const invoiceCount = (count: number) => n(count, t('invoices.countOne', { count }), t('invoices.countOther', { count }))
@@ -147,6 +157,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   )
 
   const todayStr = today()
+  const latest = useMemo(() => latestIssued(invoices), [invoices])
 
   const clientOptions = useMemo(() => {
     const names = new Map<string, string>()
@@ -160,8 +171,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const filtered = useMemo(() => {
     let rows = invoices
     if (status === 'outstanding') rows = rows.filter(isOpen)
-    else if (status === 'overdue') rows = rows.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < todayStr))
-    else if (status) rows = rows.filter(d => d.status === status)
+    else if (status) rows = rows.filter(d => listStatus(d, todayStr) === status)
     if (client) rows = rows.filter(d => d.client_id === client)
     if (bookamat && bookamatConfigured) rows = rows.filter(d => bookamatState(d) === bookamat)
     if (from) rows = rows.filter(d => !!d.date && d.date >= from)
@@ -178,7 +188,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
         case 'due_date': return d.due_date ?? ''
         case 'total': return docTotal(d)
         case 'balance': return docBalance(d)
-        case 'status': return d.status
+        case 'status': return listStatus(d, todayStr)
       }
     }
     return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
@@ -258,6 +268,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   const currency = filtered[0]?.currency ?? 'EUR'
 
   function askBulk(action: BulkAction) {
+    setRedate(true)
     if (action === 'paid') {
       setPaidDate(todayStr)
       setPaidMethod('bank')
@@ -276,19 +287,24 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     const ids = selection.selectedVisible.map(d => d.id)
     const isDelete = action === 'delete'
     setBulkLoading(true)
+    // Shown once the confirm has closed, so focus moves from one dialog to the next.
+    let notes: IssuedNote[] = []
     try {
       const res = await fetch('/api/invoices/bulk', {
         method: isDelete ? 'DELETE' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isDelete ? { ids } : action === 'paid' ? { ids, status: action, paidDate, method: paidMethod } : { ids, status: action }),
+        body: JSON.stringify(isDelete ? { ids } : action === 'paid' ? { ids, status: action, paidDate, method: paidMethod, redate } : { ids, status: action, redate }),
       })
       const data = await res.json().catch(() => ({}))
+      if (isIssuedNoteList(data.documents)) notes = data.documents
       if (!res.ok) {
         // Drafts before the incomplete one were issued.
         if (res.status === 422) {
           const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
           if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
         }
+        // Drafts before the failed one were issued.
+        if (notes.length) router.refresh()
         toast.error(t(isDelete ? 'lists.deleteFailed' : 'lists.bulkFailed', { error: apiErrorMessage(t, data) }))
         return
       }
@@ -299,7 +315,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       } else {
         const { updated, skipped } = data
         const vars = { count: updated, status: statusLabel(action) }
-        toast.success(n(updated, t('invoices.markedOne', vars), t('invoices.markedOther', vars)))
+        const redated = notes.filter(note => note.movedFrom).length
+        toast.success(n(updated, t('invoices.markedOne', vars), t('invoices.markedOther', vars)), {
+          description: redated ? n(redated, t('views.bulkIssue.redatedOne', { count: redated }), t('views.bulkIssue.redatedOther', { count: redated })) : undefined,
+        })
         if (skipped) {
           toast.info(action === 'sent'
             ? n(skipped, t('invoices.skippedSentOne', { count: skipped }), t('invoices.skippedSentOther', { count: skipped }))
@@ -313,6 +332,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     } finally {
       setBulkLoading(false)
       setBulkConfirm(null)
+      setIssueNotes(notes)
     }
   }
 
@@ -324,6 +344,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       : n(count, t('invoices.exportedOne', { count }), t('invoices.exportedOther', { count })))
   }
 
+  // The drafts a confirmed "Mark sent" or "Mark paid" issues first.
+  const bulkDrafts = bulkConfirm === 'sent' || bulkConfirm === 'paid'
+    ? selection.selectedVisible.filter(d => d.status === 'draft').map(d => ({ id: d.id, date: d.date, total: docTotal(d) }))
+    : []
   const actionLabel: Record<BulkAction, string> = { sent: t('invoices.actionSent'), paid: t('invoices.actionPaid'), delete: t('invoices.actionDelete') }
   const selectedCount = selection.count
   const empty = (
@@ -391,7 +415,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             const balance = docBalance(doc)
             const selected = selection.isSelected(doc.id)
             return (
-              <div key={doc.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
+              <div key={doc.id} className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${rowStateClass(selected)} ${listStatus(doc, todayStr) === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
                 <SelectToggle large checked={selected} onToggle={() => selection.toggleOne(doc.id)} label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} />
                 <Link href={`/invoices/${doc.id}`} className="flex items-center justify-between flex-1 min-w-0 gap-3">
                   <div className="min-w-0">
@@ -441,7 +465,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
           <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
             {filtered.length === 0 && <tr><td colSpan={8}>{empty}</td></tr>}
             {pageItems.map(doc => (
-              <ClickableRow key={doc.id} href={`/invoices/${doc.id}`} className={`${rowStateClass(selection.isSelected(doc.id))} ${doc.status === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
+              <ClickableRow key={doc.id} href={`/invoices/${doc.id}`} className={`${rowStateClass(selection.isSelected(doc.id))} ${listStatus(doc, todayStr) === 'overdue' ? 'border-l-2 border-l-red-400 dark:border-l-red-600' : ''}`}>
                 <td className="pl-4 py-3 w-8">
                   <SelectToggle checked={selection.isSelected(doc.id)} onToggle={() => selection.toggleOne(doc.id)} label={t('lists.selectRow', { number: doc.number ?? t('common.draft') })} />
                 </td>
@@ -531,7 +555,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="sm:col-span-2 text-xs text-red-600 dark:text-red-400">{t('exports.lists.paidDateInvalid')}</p>}
           </div>
         )}
+        <BulkIssueNotice type="invoice" drafts={bulkDrafts} latest={latest} today={todayStr} redate={redate} onRedate={setRedate} paidDate={bulkConfirm === 'paid' ? paidDate : undefined} />
       </ConfirmDialog>
+
+      <BulkIssueResult notes={issueNotes} path="invoices" onClose={() => setIssueNotes(null)} />
 
       <Dialog
         open={!!bulkSync}
