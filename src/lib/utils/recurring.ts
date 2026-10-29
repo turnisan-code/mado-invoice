@@ -70,14 +70,16 @@ export interface GenerateResult {
   generated: { scheduleId: string; documentId: string; date: string }[]
   // Periods that already existed (retry after a crash, overlapping runs), so the cron log shows them.
   skipped: { scheduleId: string; date: string; skipped: 'already_generated' }[]
-  errors: { scheduleId: string; message: string; code?: 'template_cancelled' }[]
+  // `message` is worded (in the UI language when the caller passes t); `detail` is the raw cause,
+  // for the log only.
+  errors: { scheduleId: string; message: string; code?: 'template_cancelled'; detail?: string }[]
 }
 
 // Issuing (number, archive copy, Drive) lives in the server-only src/lib/pdf/issue.ts. This module
 // is also imported by client components for its date math, so the route handlers pass it in.
 export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
   snapshotError: string | null
-  driveError: { error: string } | null
+  driveError: { error: string; code?: string } | null
 }>
 
 type SourceDocument = Record<string, unknown> & {
@@ -136,20 +138,24 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
 }
 
 // Issue failures as the manual button shows them: in the UI language when the route passes t
-// (and describeError to word database errors), in English for the cron log.
-function issueMessages(t: TFn | undefined, describeError: ((err: unknown) => string) | undefined) {
+// (describeError words database errors, formatDate the period's date), in English for the cron
+// log. The archive and Drive failures are worded by kind; their raw text only goes to the log.
+function issueMessages({ t, describeError, formatDate }: Wording) {
   const reason = (err: unknown) => describeError ? describeError(err) : err instanceof Error ? err.message : String(err)
+  const day = (date: string) => formatDate ? formatDate(date) : date
   return {
-    snapshot: (date: string, error: string) => t ? t('lifecycle.recurring.snapshotFailed', { date, error }) : `${date}: issued, but the archive copy failed (${error})`,
-    drive: (date: string, error: string) => t ? t('lifecycle.recurring.driveFailed', { date, error }) : `${date}: issued, but the Drive archive failed (${error})`,
-    issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date, error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
+    snapshot: (date: string) => t ? t('lifecycle.recurring.snapshotFailed', { date: day(date) }) : `${date}: issued, but the archive copy failed`,
+    drive: (date: string, code: string | undefined) => t
+      ? t('lifecycle.recurring.driveFailed', { date: day(date), error: t(code === 'google_reauth' ? 'messages.api.google_reauth' : 'messages.api.google_failed') })
+      : `${date}: issued, but the Drive archive failed`,
+    issue: (date: string, err: unknown) => t ? t('lifecycle.recurring.issueFailed', { date: day(date), error: reason(err) }) : `${date}: created as draft, issuing failed (${reason(err)})`,
   }
 }
 
-type Wording = { t?: TFn; describeError?: (err: unknown) => string }
+type Wording = { t?: TFn; describeError?: (err: unknown) => string; formatDate?: (date: string) => string }
 
 async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule, asOf: string, force: boolean, defaultPaymentDays: number | null, issue: IssueDocumentFn, result: GenerateResult, wording: Wording) {
-  const messages = issueMessages(wording.t, wording.describeError)
+  const messages = issueMessages(wording)
   const { data: source, error } = await supabase
     .from('documents')
     .select('*, document_items(*), clients(payment_days)')
@@ -182,8 +188,8 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       if (schedule.mode === 'issue') {
         try {
           const { snapshotError, driveError } = await issue(supabase, documentId)
-          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next, snapshotError) })
-          if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError.error) })
+          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
+          if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError.code), detail: driveError.error })
         } catch (err) {
           result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
         }

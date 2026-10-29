@@ -1163,7 +1163,7 @@ export const de = {
     },
     recurring: {
       issueFailed: '{date}: als Entwurf erstellt, Ausstellen fehlgeschlagen ({error})',
-      snapshotFailed: '{date}: ausgestellt, aber die Archivkopie ist fehlgeschlagen ({error})',
+      snapshotFailed: '{date}: ausgestellt, aber es wurde keine Archivkopie gespeichert. Auf der Rechnungsseite lässt sie sich erstellen.',
       driveFailed: '{date}: ausgestellt, aber die Ablage in Google Drive ist fehlgeschlagen ({error})',
     },
     convert: {

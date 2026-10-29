@@ -1162,7 +1162,7 @@ export const en = {
     },
     recurring: {
       issueFailed: '{date}: created as a draft, issuing failed ({error})',
-      snapshotFailed: '{date}: issued, but the archive copy failed ({error})',
+      snapshotFailed: '{date}: issued, but no archive copy was stored. The invoice page offers to create it.',
       driveFailed: '{date}: issued, but the Drive archive failed ({error})',
     },
     convert: {

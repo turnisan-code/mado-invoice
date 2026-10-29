@@ -10,13 +10,15 @@ import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
 import { isShareExpired } from '@/lib/share'
 import { docTitle, documentLanguage, documentT } from '@/lib/document-labels'
-import type { DocumentKind } from '@/types'
+import type { DocumentKind, InvoiceKind } from '@/types'
 
 interface Props {
   documentId: string
   number: string
-  // What the portal calls it: a Storno credit note is shared as a Storno.
+  // What the portal calls it: a Storno credit note is shared as a Storno, an advance, partial or
+  // final invoice by its own title.
   kind: DocumentKind
+  invoiceKind?: InvoiceKind | null
   language: string | null | undefined
   initialToken: string | null
   // Saving to Drive needs Google connected and a Drive folder chosen.
@@ -28,7 +30,7 @@ type ShareState = { token: string | null; expiresAt: string | null; viewedAt: st
 const smallBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
 const actionBtn = 'inline-flex items-center gap-1.5 text-sm px-3 min-h-11 sm:min-h-9 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
 
-export default function ShareLinkButton({ documentId, number, kind, language, initialToken, driveReady }: Props) {
+export default function ShareLinkButton({ documentId, number, kind, invoiceKind, language, initialToken, driveReady }: Props) {
   const [share, setShare] = useState<ShareState>({ token: initialToken, expiresAt: null, viewedAt: null })
   const [details, setDetails] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -47,7 +49,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
   // Only rendered inside the open dialog, so server and first client render agree.
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
   // The share sheet's title is in the document's language, like the portal page it opens.
-  const shareTitle = `${docTitle(documentT(documentLanguage(language)), kind)} ${number}`
+  const shareTitle = `${docTitle(documentT(documentLanguage(language)), kind, invoiceKind)} ${number}`
 
   function close() {
     setOpen(false)
