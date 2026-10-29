@@ -78,6 +78,22 @@ export function settlesBalance(payment: { kind?: string | null }): boolean {
   return payment.kind !== 'fee'
 }
 
+// `total` shared out over `amounts` in proportion to them, in whole cents that add up to exactly
+// `total` (largest remainder; with a float error the smallest remainders give a cent back).
+function spreadCents(amounts: readonly number[], total: number): number[] {
+  const cents = amounts.map(a => Math.round(a * 100))
+  const sum = cents.reduce((s, c) => s + c, 0)
+  const target = Math.round(total * 100)
+  if (!sum) return amounts.map(() => 0)
+  const exact = cents.map(c => (c * target) / sum)
+  const out = exact.map(Math.floor)
+  const order = exact.map((v, i) => ({ i, rest: v - Math.floor(v) })).sort((a, b) => b.rest - a.rest || a.i - b.i)
+  let left = target - out.reduce((s, c) => s + c, 0)
+  for (let n = 0; left > 0; left--, n++) out[order[n % order.length].i]++
+  for (let n = 0; left < 0; left++, n++) out[order[order.length - 1 - (n % order.length)].i]--
+  return out.map(c => c / 100)
+}
+
 export function calcTotals(
   rawItems: CalcItem[],
   payments: { amount: number; kind?: string | null }[] = [],
@@ -102,13 +118,16 @@ export function calcTotals(
     if (!sectionItems.length) return
 
     // Lines are summed as printed (rounded to the cent), so a section's gross, discount and net
-    // on the PDF add up and Netto is the sum of the section nets.
-    const sectionSum = sectionItems.reduce((s, i) => s + lineAmount(i), 0)
+    // on the PDF add up and Netto is the sum of the section nets. A section discount is shared
+    // over its lines in whole cents that add up to exactly the section net the PDF prints, so
+    // every VAT rate's base is a sum of cent amounts.
+    const amounts = sectionItems.map(i => lineAmount(i))
+    const sectionSum = roundCents(amounts.reduce((s, a) => s + a, 0))
     const discAmt = discountAmount(sectionSum, sectionDiscount)
-    const scale = discAmt > 0 ? (sectionSum - discAmt) / sectionSum : 1
+    const bases = discAmt > 0 ? spreadCents(amounts, sectionSum - discAmt) : amounts
 
-    for (const item of sectionItems) {
-      const base = lineAmount(item) * scale
+    for (const [k, item] of sectionItems.entries()) {
+      const base = bases[k]
       const rate: VatRate = vatApplies ? (item.vat_rate as VatRate) : 0
       subtotal += base
       const vatAmt = base * (rate / 100)

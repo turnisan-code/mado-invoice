@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey, TFn, UiLang } from '@/lib/i18n'
+import { entriesLabel } from '@/lib/projects'
 import { formatMoney } from '@/lib/utils/document'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
 import type { DocumentEvent } from '@/types'
@@ -151,6 +152,25 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const link = invoiceId ? { href: `/invoices/${invoiceId}`, label: t('deposits.history.openInvoice') }
         : finalId ? { href: `/invoices/${finalId}`, label: t('deposits.history.openFinal') } : undefined
       return { text, link }
+    }
+    case 'project_invoiced': {
+      const project = str(d.project_name)
+      const id = str(d.project_id)
+      const entries = entriesLabel(t, num(d.time_entries) ?? 0, num(d.expenses) ?? 0)
+      return {
+        text: project ? t('records.history.projectInvoiced', { project, entries }) : t('records.history.projectInvoicedPlain', { entries }),
+        link: id ? { href: `/projects/${id}`, label: t('records.history.openProject') } : undefined,
+      }
+    }
+    case 'project_released': {
+      const why = str(d.reason)
+      const reason = why === 'line_removed' || why === 'storno' || why === 'cancelled' ? why : 'manual'
+      const storno = reason === 'storno' ? str(d.credit_note_id) : null
+      return {
+        text: t(`records.history.released.${reason}`, { entries: entriesLabel(t, num(d.time_entries) ?? 0, num(d.expenses) ?? 0) }),
+        subs: [storno ? str(d.credit_note_number) : null],
+        link: storno ? { href: `/credit-notes/${storno}`, label: t('archive.openStorno') } : undefined,
+      }
     }
     default:
       return { text: t(`archive.events.${event.type}`) }
