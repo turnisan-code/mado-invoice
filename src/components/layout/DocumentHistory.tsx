@@ -76,11 +76,11 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       const raw = str(d.kind)
       const kind = raw === 'skonto' || raw === 'writeoff' ? raw : 'payment'
       const amount = typeof d.amount === 'number' ? formatMoney(d.amount, currency) : ''
-      const kindLabel = raw === 'credit' ? t('lifecycle.payments.creditNotePlain') : raw === 'refund' ? t('lifecycle.credit.refund') : t(`archive.paymentKinds.${kind}` as DictKey)
+      const kindLabel = raw === 'credit' ? t('lifecycle.payments.creditNotePlain') : raw === 'refund' ? t('lifecycle.credit.refund') : raw === 'fee' ? t('books.fees.kind') : t(`archive.paymentKinds.${kind}` as DictKey)
       const creditNote = raw === 'credit' ? str(d.credit_note_id) : null
       return {
         text: t(`archive.events.${event.type}`, { kind: kindLabel, amount }),
-        subs: [d.method === 'cash' && (raw === 'payment' || raw === 'refund' || !raw) ? t('payments.cashBadge') : str(d.credit_note_number)],
+        subs: [d.method === 'cash' && (raw === 'payment' || raw === 'refund' || raw === 'fee' || !raw) ? t('payments.cashBadge') : str(d.credit_note_number)],
         link: creditNote ? { href: `/credit-notes/${creditNote}`, label: t('archive.openSource') } : undefined,
       }
     }

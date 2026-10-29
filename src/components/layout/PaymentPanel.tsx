@@ -67,8 +67,6 @@ interface Props {
   bookamatConfigured?: boolean
   // Legacy single booking id; shown until the bookings are loaded.
   bookamatBookingId?: string | null
-  // Unused: the server attaches the stored issued copy itself.
-  generatePdfForBookamat?: () => Promise<{ base64: string; filename: string } | null>
 }
 
 export default function PaymentPanel({

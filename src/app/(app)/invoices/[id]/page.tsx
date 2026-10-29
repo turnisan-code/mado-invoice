@@ -90,7 +90,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         total={totals.total}
         payments={payments}
         currency={doc.currency ?? 'EUR'}
-        bookamatConfigured={publicSettings.bookamat_configured && !!publicSettings.bookamat_bank_account_id}
+        bookamatConfigured={publicSettings.bookamat_configured}
         bookamatBookingId={doc.bookamat_booking_id ?? null}
         reminderSentAt={doc.reminder_sent_at ?? null}
         reminderLevel={doc.reminder_level ?? 0}

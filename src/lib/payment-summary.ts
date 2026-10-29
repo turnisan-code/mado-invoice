@@ -1,5 +1,5 @@
 import type { TFn } from '@/lib/i18n'
-import { roundCents } from '@/lib/utils/document'
+import { roundCents, settlesBalance } from '@/lib/utils/document'
 import type { PaymentSummaryLine } from '@/types'
 
 export type SummaryPayment = { amount: number; kind?: string | null; note?: string | null }
@@ -18,7 +18,7 @@ export function summarizePayments(payments: readonly SummaryPayment[]): PaymentS
     if (p.kind === 'credit') credits.push({ kind: 'credit', amount: roundCents(p.amount), creditNoteNumber: p.note?.trim() || null })
     else if (p.kind === 'skonto') skonto += p.amount
     else if (p.kind === 'writeoff') writeoff += p.amount
-    else if (p.kind === 'fee') continue
+    else if (!settlesBalance(p)) continue
     else paid += p.amount
   }
   credits.sort((a, b) => (a.creditNoteNumber ?? '').localeCompare(b.creditNoteNumber ?? ''))

@@ -42,7 +42,7 @@ export interface FormState {
   lines: LineItem[]
 }
 
-export type EditorDocument = Document & { items?: DocumentItem[]; payments?: { id: string; date: string; amount: number; note: string | null }[] }
+export type EditorDocument = Document & { items?: DocumentItem[]; payments?: { id: string; date: string; amount: number; note: string | null; kind?: string | null }[] }
 
 export const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 export const VAT_RATES: VatRate[] = [0, 10, 13, 20]

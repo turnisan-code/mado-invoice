@@ -185,6 +185,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       skonto_percent, skonto_days,
       items: f.lines.map(l => ({ ...l })),
       totals,
+      // Names applied credit notes, Skonto and write-offs in the summary, as the issued PDF does.
+      payments: doc?.payments ?? [],
       reference: reference ?? null,
     }
 
