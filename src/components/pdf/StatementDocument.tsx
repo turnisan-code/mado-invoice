@@ -82,6 +82,7 @@ export default function StatementDocument({ settings, client, language: lang, fr
   const title = t('projects.statement.pdf.title')
   const several = sums.length > 1
   const main = sums[0]
+  const earlier = !openOnly && rows.some(r => r.date < from)
 
   let payText: string | null = null
   if (main && main.open > 0.005) payText = t('projects.statement.pdf.pay', { amount: money(main.open, main.currency) })
@@ -101,7 +102,9 @@ export default function StatementDocument({ settings, client, language: lang, fr
           <View>
             <Text style={s.docTitle}>{title}</Text>
             <Text style={s.metaLine}>{t('projects.statement.pdf.date')} {date(issuedOn)}</Text>
-            <Text style={s.metaLine}>{t('projects.statement.pdf.period')} {t('projects.statement.pdf.periodValue', { from: date(from), to: date(to) })}</Text>
+            <Text style={s.metaLine}>
+              {t('projects.statement.pdf.period')} {openOnly ? t('projects.statement.pdf.periodUntil', { to: date(to) }) : t('projects.statement.pdf.periodValue', { from: date(from), to: date(to) })}
+            </Text>
             {!!client.client_number && <Text style={s.metaLine}>{t('projects.statement.pdf.clientNo')} {client.client_number}</Text>}
           </View>
         </View>
@@ -120,10 +123,11 @@ export default function StatementDocument({ settings, client, language: lang, fr
         <Text style={s.paragraph}>{t('projects.statement.pdf.salutation')}</Text>
         <Text style={s.paragraph}>
           {t(openOnly ? 'projects.statement.pdf.introOpen' : 'projects.statement.pdf.intro', { from: date(from), to: date(to), date: date(issuedOn) })}
+          {earlier ? ` ${t('projects.statement.pdf.introEarlier', { from: date(from) })}` : ''}
         </Text>
 
         <View style={s.table}>
-          <View style={s.headRow}>
+          <View style={s.headRow} fixed>
             <Text style={[s.headText, s.colDate]}>{t('projects.statement.pdf.columns.date')}</Text>
             <Text style={[s.headText, s.colDoc]}>{t('projects.statement.pdf.columns.document')}</Text>
             <Text style={[s.headText, s.colDue]}>{t('projects.statement.pdf.columns.due')}</Text>

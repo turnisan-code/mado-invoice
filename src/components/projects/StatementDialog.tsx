@@ -16,9 +16,10 @@ export default function StatementDialog({ clientId, onClose }: { clientId: strin
   const [from, setFrom] = useState(() => `${today().slice(0, 4)}-01-01`)
   const [openOnly, setOpenOnly] = useState(false)
 
+  // Open items are listed up to the end date, whenever they were issued.
   function open() {
-    if (!from || !to || from > to) { toast.error(t('projects.statement.rangeInvalid')); return }
-    const query = new URLSearchParams({ from, to, ...(openOnly ? { open: '1' } : {}) })
+    if (!to || (!openOnly && (!from || from > to))) { toast.error(t('projects.statement.rangeInvalid')); return }
+    const query = new URLSearchParams(openOnly ? { to, open: '1' } : { from, to })
     window.open(`/api/clients/${clientId}/statement?${query}`, '_blank', 'noopener')
     onClose()
   }
@@ -29,11 +30,11 @@ export default function StatementDialog({ clientId, onClose }: { clientId: strin
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor={`${id}-from`} className={labelClass}>{t('projects.statement.from')}</label>
-            <input id={`${id}-from`} type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className={inputClass} />
+            <input id={`${id}-from`} type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} disabled={openOnly} className={inputClass} />
           </div>
           <div>
             <label htmlFor={`${id}-to`} className={labelClass}>{t('projects.statement.to')}</label>
-            <input id={`${id}-to`} type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className={inputClass} />
+            <input id={`${id}-to`} type="date" value={to} min={openOnly ? undefined : from || undefined} onChange={e => setTo(e.target.value)} className={inputClass} />
           </div>
         </div>
         <label className="flex items-center gap-2.5 text-sm text-neutral-700 dark:text-neutral-300 cursor-pointer select-none">
