@@ -18,8 +18,9 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: settings } = await supabase.from('settings').select('*').single()
-  if (!settings?.gmail_refresh_token) return googleNotConnected()
+  const { data: settings, error: settingsErr } = await supabase.from('settings').select('*').single()
+  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
+  if (!settings.gmail_refresh_token) return googleNotConnected(settings)
 
   let payload: { to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; body?: unknown; pdfBase64?: unknown; filename?: unknown; documentId?: unknown } | null
   try {

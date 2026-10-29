@@ -6,7 +6,7 @@ import {
 } from '@/lib/utils/reminder'
 import { today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
-import { getReminderPdf } from '@/lib/pdf/snapshot'
+import { getIssuedPdf, getReminderPdf } from '@/lib/pdf/snapshot'
 import { pdfFilename, type PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, renderReminderPdf } from '@/lib/pdf/reminder'
 import { fillSubject, fillTemplate, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
@@ -14,10 +14,30 @@ import { logEvent } from '@/lib/events'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
+import { isGoogleExpired } from '@/lib/public-settings'
+import { autoSyncBookamat, type AutoSyncResult } from '@/lib/bookamat'
 
 export const maxDuration = 60
 
 type Skipped = { number: string; reason: string }
+
+// Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
+// result in the log. Runs before the reminders, whatever their settings.
+async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
+  try {
+    const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, budgetMs: 25_000 })
+    if (!results.length) console.log('[cron/bookamat] nothing to sync')
+    for (const r of results) {
+      if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)
+      else console.error(`[cron/bookamat] ${r.number} failed: ${r.error}`)
+    }
+    return results
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err)
+    console.error('[cron/bookamat] skipped:', error)
+    return { error }
+  }
+}
 
 export async function GET(req: NextRequest) {
   const denied = authorizeCron(req)
@@ -34,9 +54,11 @@ export async function GET(req: NextRequest) {
     console.error('[cron/reminders] skipped: settings row missing')
     return NextResponse.json({ skipped: 'settings_missing', overdueMarked: true })
   }
+  const bookamat = settings.bookamat_auto_sync ? { bookamat: await bookamatStep(supabase, settings) } : {}
+
   if (!settings.reminders_enabled) {
     console.log('[cron/reminders] skipped: automatic reminders are turned off in Settings')
-    return NextResponse.json({ skipped: 'reminders_disabled', overdueMarked: true })
+    return NextResponse.json({ skipped: 'reminders_disabled', overdueMarked: true, ...bookamat })
   }
 
   const maxLevel = Math.max(1, settings.reminder_max_level ?? 3)
@@ -52,7 +74,7 @@ export async function GET(req: NextRequest) {
     .eq('status', 'overdue')
     .lt('reminder_level', maxLevel)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: error.message, ...bookamat }, { status: 500 })
 
   const skipped: Skipped[] = []
   const due: { invoice: PdfDocument; level: number }[] = []
@@ -80,15 +102,22 @@ export async function GET(req: NextRequest) {
 
   if (!due.length) {
     console.log(`[cron/reminders] no reminder due (${skipped.length} skipped)`)
-    return NextResponse.json({ sent: 0, skipped })
+    return NextResponse.json({ sent: 0, skipped, ...bookamat })
   }
 
   // Without Gmail nothing can go out; say so in the log, with what is waiting, instead of
   // returning quietly. The owner sends these from the invoice page (PDF + own email app).
   if (!settings.gmail_refresh_token || !settings.gmail_email) {
     const waiting = due.map(d => `${d.invoice.number} (level ${d.level})`)
-    console.warn(`[cron/reminders] skipped: Gmail is not connected; ${due.length} reminder(s) due and not sent: ${waiting.join(', ')}`)
-    return NextResponse.json({ sent: 0, skipped: 'gmail_not_connected', due: waiting, skippedInvoices: skipped })
+    const expired = isGoogleExpired(settings)
+    const reason = expired
+      ? `the Google connection for ${settings.gmail_email} expired or was revoked (invalid_grant) — reconnect in Settings`
+      : 'Gmail is not connected'
+    console.warn(`[cron/reminders] skipped: ${reason}; ${due.length} reminder(s) due and not sent: ${waiting.join(', ')}`)
+    return NextResponse.json({
+      sent: 0, skipped: expired ? 'gmail_expired' : 'gmail_not_connected', due: waiting, skippedInvoices: skipped,
+      ...(expired ? { code: GOOGLE_REAUTH_CODE } : {}), ...bookamat,
+    })
   }
 
   const auth = getAuthorizedGoogle(settings, supabase)
@@ -159,6 +188,7 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       if (isGoogleAuthError(err)) {
         // Every further send would fail the same way; stop and leave Settings showing the expired state.
+        console.error(`[cron/reminders] stopped: the Google connection for ${settings.gmail_email} expired or was revoked (invalid_grant)`)
         await clearGoogleTokens(supabase, settings.id)
         errors.push(`${number}: ${GOOGLE_REAUTH_MESSAGE}`)
         reauth = true
@@ -170,5 +200,5 @@ export async function GET(req: NextRequest) {
 
   if (errors.length) console.error(`[cron/reminders] sent=${sent} errors=${errors.length}`, errors)
   else console.log(`[cron/reminders] sent=${sent}`)
-  return NextResponse.json({ sent, errors, skipped, ...(reauth ? { code: GOOGLE_REAUTH_CODE } : {}) })
+  return NextResponse.json({ sent, errors, skipped, ...(reauth ? { code: GOOGLE_REAUTH_CODE } : {}), ...bookamat })
 }

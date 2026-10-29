@@ -1801,7 +1801,7 @@ export const de = {
         disconnected: 'Google-Konto getrennt.',
         couldNotDisconnect: 'Trennen fehlgeschlagen.',
         disconnectTitle: 'Google trennen?',
-        disconnectDesc: 'Versand über Gmail und Speichern in Drive sind bis zur erneuten Verbindung nicht möglich.',
+        disconnectDesc: 'Versand über Gmail und Speichern in Drive sind bis zur erneuten Verbindung nicht möglich; der eingestellte Drive-Ordner wird ebenfalls entfernt.',
       },
       drive: {
         title: 'Google Drive',

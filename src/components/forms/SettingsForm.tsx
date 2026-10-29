@@ -11,6 +11,7 @@ import { reminderFigures, reminderTitle, reminderVariables } from '@/lib/utils/r
 import { defaultTemplate, documentVariables, fillSubject, fillTemplate, portalUrl, sampleDocument, starterTemplate, variablesFor } from '@/lib/templates'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
+import { bookamatErrorMessage } from '@/lib/bookamat'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
@@ -182,7 +183,9 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   // ── Sidebar active section (tab-driven, no scroll) ──────────────────────────
-  const [activeSection, setActiveSection] = useState<string>('company')
+  // Back from the Google consent screen, or sent here by the reconnect banner: the integrations.
+  const [activeSection, setActiveSection] = useState<string>(() =>
+    searchParams.get('gmail') || searchParams.get('google') || searchParams.get('section') === 'integrations' ? 'integrations' : 'company')
 
   // ── Brand state ──────────────────────────────────────────────────────────────
   const [logoUrl, setLogoUrl] = useState(settings?.logo_url ?? '')
@@ -351,6 +354,27 @@ export default function SettingsForm({ settings }: Props) {
   const [loadingAccounts, setLoadingAccounts] = useState(false)
   const [savingBookamat, setSavingBookamat] = useState(false)
   const [editingBookamat, setEditingBookamat] = useState(false)
+  // The Bookamat year the loaded accounts belong to, saved with their ids.
+  const [bookamatAccountsYear, setBookamatAccountsYear] = useState<number | null>(settings?.bookamat_accounts_year ?? null)
+  const [bookamatAutoSync, setBookamatAutoSync] = useState(!!settings?.bookamat_auto_sync)
+  const [bookamatError, setBookamatError] = useState<{ message: string; at: string | null } | null>(
+    settings?.bookamat_last_error ? { message: settings.bookamat_last_error, at: settings.bookamat_last_error_at } : null)
+  const [googleError, setGoogleError] = useState<{ message: string; at: string | null } | null>(
+    settings?.google_last_error ? { message: settings.google_last_error, at: settings.google_last_error_at } : null)
+  const [testing, setTesting] = useState<'google' | 'bookamat' | null>(null)
+  const [confirmBookamatDisconnect, setConfirmBookamatDisconnect] = useState(false)
+  const bookamatIdSetters = [setBookamatBankId, setBookamatCashId, setBookamatCostId, setBookamatVat0, setBookamatVatRc, setBookamatVatNonEu, setBookamatVat10, setBookamatVat13, setBookamatVat20]
+  // What is saved, so Cancel in edit mode can go back to it.
+  const [savedBookamat, setSavedBookamat] = useState<{ username: string; country: string; accountsYear: number | null; ids: (number | '')[] }>({
+    username: settings?.bookamat_username ?? '',
+    country: settings?.bookamat_country ?? 'at',
+    accountsYear: settings?.bookamat_accounts_year ?? null,
+    ids: [
+      settings?.bookamat_bank_account_id, settings?.bookamat_cash_account_id, settings?.bookamat_cost_account_id,
+      settings?.bookamat_vat_account_0, settings?.bookamat_vat_account_rc, settings?.bookamat_vat_account_non_eu,
+      settings?.bookamat_vat_account_10, settings?.bookamat_vat_account_13, settings?.bookamat_vat_account_20,
+    ].map(id => id ?? ''),
+  })
 
   // ── Last focused ref (for variable insertion) ────────────────────────────────
   const lastFocused = useRef<{ el: HTMLTextAreaElement | HTMLInputElement; setter: (v: string) => void } | null>(null)
@@ -384,9 +408,15 @@ export default function SettingsForm({ settings }: Props) {
 
   // ── URL param handling ───────────────────────────────────────────────────────
   useEffect(() => {
-    const status = searchParams.get('gmail')
+    const status = searchParams.get('gmail') ?? searchParams.get('google')
+    if (!status) return
     if (status === 'connected') toast.success(t('settings.integrations.google.connectedToast'))
     if (status === 'error')     toast.error(t('settings.integrations.google.failedToast'))
+    // Shown once: a reload or Back must not repeat the toast.
+    const rest = new URLSearchParams(searchParams.toString())
+    rest.delete('gmail')
+    rest.delete('google')
+    router.replace(rest.size ? `/settings?${rest}` : '/settings', { scroll: false })
     // `t` only changes with the UI language, and re-running then would repeat the toast.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
@@ -644,8 +674,30 @@ export default function SettingsForm({ settings }: Props) {
       return
     }
     setGoogle({ email: null, connected: false, connectedAt: null, scopes: null })
+    // The Drive folder belonged to that account and was removed with it.
+    setDriveFolder('')
+    setDriveSaved({ id: null, name: null })
+    setDriveDirty(false)
+    setGoogleError(null)
     setConfirmDisconnect(false)
     toast.success(t('settings.integrations.google.disconnected'))
+  }
+
+  async function testGoogle() {
+    setTesting('google')
+    const res = await fetch('/api/gmail/test', { method: 'POST' }).catch(() => null)
+    setTesting(null)
+    const data = res ? await res.json().catch(() => ({})) : {}
+    if (!res?.ok) {
+      const message = typeof data.error === 'string' && data.error ? data.error : t('common.unknownError')
+      setGoogleError({ message, at: new Date().toISOString() })
+      if (res?.status === 401) setGoogle(g => ({ ...g, connected: false }))
+      toast.error(t('books.google.testFailed', { error: message }))
+      return
+    }
+    setGoogleError(null)
+    const email = data.email ?? google.email ?? ''
+    toast.success(data.folder ? t('books.google.testOkDrive', { email, folder: data.folder }) : t('books.google.testOk', { email }))
   }
 
   async function saveDriveFolder() {
@@ -678,9 +730,10 @@ export default function SettingsForm({ settings }: Props) {
       body: JSON.stringify({ username: bookamatUsername, apiKey: bookamatApiKey, country: bookamatCountry }),
     })
     setLoadingAccounts(false)
-    if (!res.ok) { const { error } = await res.json().catch(() => ({})); toast.error(error ?? t('settings.integrations.bookamat.loadFailed')); return }
+    if (!res.ok) { const payload = await res.json().catch(() => ({})); toast.error(bookamatErrorMessage(t, payload, t('settings.integrations.bookamat.loadFailed'))); return }
     const data = await res.json()
     setBookamatAccounts(data)
+    setBookamatAccountsYear(typeof data.year === 'number' ? data.year : null)
   }
 
   async function saveBookamat() {
@@ -690,6 +743,7 @@ export default function SettingsForm({ settings }: Props) {
       bookamat_username:        bookamatUsername || null,
       ...(bookamatApiKey ? { bookamat_api_key: bookamatApiKey } : {}),
       bookamat_country:         bookamatCountry,
+      bookamat_accounts_year:   bookamatAccountsYear,
       bookamat_bank_account_id: bookamatBankId   || null,
       bookamat_cash_account_id: bookamatCashId   || null,
       bookamat_cost_account_id: bookamatCostId   || null,
@@ -702,6 +756,12 @@ export default function SettingsForm({ settings }: Props) {
     }).eq('id', settings.id)
     setSavingBookamat(false)
     if (error) { toast.error(error.message); return }
+    setSavedBookamat({
+      username: bookamatUsername,
+      country: bookamatCountry,
+      accountsYear: bookamatAccountsYear,
+      ids: [bookamatBankId, bookamatCashId, bookamatCostId, bookamatVat0, bookamatVatRc, bookamatVatNonEu, bookamatVat10, bookamatVat13, bookamatVat20],
+    })
     if (bookamatApiKey) setBookamatKeySaved(true)
     setBookamatApiKey('')
     setBookamatAccounts(null)
@@ -721,6 +781,66 @@ export default function SettingsForm({ settings }: Props) {
     setBookamatAccounts(null)
     setEditingBookamat(true)
     toast.success(t('settings.integrations.bookamat.keyRemoved'))
+  }
+
+  // Leaves edit mode with what is saved.
+  function cancelBookamatEdit() {
+    const saved = savedBookamat
+    setBookamatUsername(saved.username)
+    setBookamatApiKey('')
+    setBookamatCountry(saved.country)
+    setBookamatAccountsYear(saved.accountsYear)
+    bookamatIdSetters.forEach((set, i) => set(saved.ids[i]))
+    setBookamatAccounts(null)
+    setEditingBookamat(false)
+  }
+
+  async function disconnectBookamat() {
+    if (!settings) return
+    setSavingBookamat(true)
+    const { error } = await supabase.from('settings').update({
+      bookamat_username: null, bookamat_api_key: null, bookamat_bank_account_id: null, bookamat_cash_account_id: null,
+      bookamat_cost_account_id: null, bookamat_vat_account_0: null, bookamat_vat_account_rc: null, bookamat_vat_account_non_eu: null,
+      bookamat_vat_account_10: null, bookamat_vat_account_13: null, bookamat_vat_account_20: null, bookamat_accounts_year: null,
+      bookamat_auto_sync: false, bookamat_last_error: null, bookamat_last_error_at: null,
+    }).eq('id', settings.id)
+    setSavingBookamat(false)
+    if (error) { toast.error(error.message); return }
+    setConfirmBookamatDisconnect(false)
+    setBookamatUsername('')
+    setBookamatApiKey('')
+    setBookamatKeySaved(false)
+    setBookamatAccounts(null)
+    setBookamatAccountsYear(null)
+    for (const set of bookamatIdSetters) set('')
+    setSavedBookamat({ username: '', country: bookamatCountry, accountsYear: null, ids: bookamatIdSetters.map(() => '' as const) })
+    setBookamatAutoSync(false)
+    setBookamatError(null)
+    setEditingBookamat(false)
+    toast.success(t('books.settings.disconnected'))
+  }
+
+  async function testBookamat() {
+    setTesting('bookamat')
+    const res = await fetch('/api/bookamat/test', { method: 'POST' }).catch(() => null)
+    setTesting(null)
+    const data = res ? await res.json().catch(() => ({})) : {}
+    if (!res?.ok) {
+      const message = bookamatErrorMessage(t, data)
+      setBookamatError({ message, at: new Date().toISOString() })
+      toast.error(t('books.settings.testFailed', { error: message }))
+      return
+    }
+    setBookamatError(null)
+    toast.success(t('books.settings.testOk', { year: data.year }))
+  }
+
+  async function toggleBookamatAutoSync(on: boolean) {
+    if (!settings) return
+    setBookamatAutoSync(on)
+    const { error } = await supabase.from('settings').update({ bookamat_auto_sync: on }).eq('id', settings.id)
+    if (error) { setBookamatAutoSync(!on); toast.error(error.message); return }
+    toast.success(t(on ? 'books.settings.autoSyncOn' : 'books.settings.autoSyncOff'))
   }
 
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -746,7 +866,8 @@ export default function SettingsForm({ settings }: Props) {
 
   async function removeLogo() {
     if (!settings) return
-    await supabase.from('settings').update({ logo_url: null }).eq('id', settings.id)
+    const { error } = await supabase.from('settings').update({ logo_url: null }).eq('id', settings.id)
+    if (error) { toast.error(t('books.logoRemoveFailed', { error: error.message })); return }
     setLogoUrl('')
     toast.success(t('settings.company.logoRemoved'))
   }
@@ -1623,6 +1744,19 @@ export default function SettingsForm({ settings }: Props) {
                     ? t('settings.integrations.google.driveGranted')
                     : <>{t('settings.integrations.google.driveNotConfirmed')}<a href="/api/gmail/auth" className="underline">{t('settings.integrations.google.reconnect')}</a>{t('settings.integrations.google.driveNotConfirmedTail')}</>}
                 </p>
+                <button
+                  type="button"
+                  onClick={() => void testGoogle()}
+                  disabled={testing === 'google'}
+                  className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
+                >
+                  {testing === 'google' ? t('books.google.testing') : t('books.google.test')}
+                </button>
+                {googleError && (
+                  <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleError.message })}
+                  </p>
+                )}
               </div>
             ) : google.email ? (
               <div className="space-y-2">
@@ -1645,6 +1779,11 @@ export default function SettingsForm({ settings }: Props) {
                 >
                   <Mail size={14} /> {t('settings.integrations.google.reconnectGoogle')}
                 </a>
+                {googleError && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 break-words">
+                    {t('books.google.lastError', { date: googleError.at ? formatDate(googleError.at, lang) : '—', error: googleError.message })}
+                  </p>
+                )}
               </div>
             ) : (
               <a
@@ -1710,31 +1849,73 @@ export default function SettingsForm({ settings }: Props) {
             description={t('settings.integrations.bookamat.description')}
           >
             {bookamatUsername && !bookamatAccounts && !editingBookamat ? (
-              <div className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
-                <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400">
-                  <CheckCircle size={14} />
-                  <span>{bookamatUsername}</span>
-                  {bookamatBankId && <span className="text-green-600/60 dark:text-green-400/60">{t('settings.integrations.bookamat.accountsConfigured')}</span>}
-                </span>
-                <span className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setEditingBookamat(true)}
-                    className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
-                  >
-                    {t('settings.integrations.bookamat.change')}
-                  </button>
-                  {bookamatKeySaved && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
+                  <span className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400 min-w-0">
+                    <CheckCircle size={14} className="shrink-0" />
+                    <span className="truncate">{bookamatUsername}</span>
+                    {bookamatBankId !== '' && <span className="text-green-600/60 dark:text-green-400/60">{t('settings.integrations.bookamat.accountsConfigured')}</span>}
+                  </span>
+                  <span className="flex items-center gap-3">
                     <button
                       type="button"
-                      onClick={() => setConfirmRemoveKey(true)}
+                      onClick={() => setEditingBookamat(true)}
+                      className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
+                    >
+                      {t('settings.integrations.bookamat.change')}
+                    </button>
+                    {bookamatKeySaved && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRemoveKey(true)}
+                        disabled={savingBookamat}
+                        className="text-xs px-2 py-2 -my-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                      >
+                        {t('settings.integrations.bookamat.removeKey')}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBookamatDisconnect(true)}
                       disabled={savingBookamat}
                       className="text-xs px-2 py-2 -my-2 -mr-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                     >
-                      {t('settings.integrations.bookamat.removeKey')}
+                      {t('books.settings.disconnect')}
                     </button>
-                  )}
-                </span>
+                  </span>
+                </div>
+                {bookamatAccountsYear != null && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('books.settings.accountsYear', { year: bookamatAccountsYear })}</p>
+                )}
+                {bookamatKeySaved && (
+                  <button
+                    type="button"
+                    onClick={() => void testBookamat()}
+                    disabled={testing === 'bookamat'}
+                    className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
+                  >
+                    {testing === 'bookamat' ? t('books.settings.testing') : t('books.settings.test')}
+                  </button>
+                )}
+                {bookamatError && (
+                  <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">
+                    {t('books.settings.lastError', { date: bookamatError.at ? formatDate(bookamatError.at, lang) : '—', error: bookamatError.message })}
+                  </p>
+                )}
+                {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && (
+                  <label className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
+                      checked={bookamatAutoSync}
+                      onChange={e => void toggleBookamatAutoSync(e.target.checked)}
+                    />
+                    <span>
+                      {t('books.settings.autoSync')}
+                      <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{t('books.settings.autoSyncHint')}</span>
+                    </span>
+                  </label>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
@@ -1854,6 +2035,26 @@ export default function SettingsForm({ settings }: Props) {
                     </button>
                   </div>
                 )}
+                {savedBookamat.username && (
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={cancelBookamatEdit}
+                      disabled={savingBookamat}
+                      className="text-sm px-3 h-8 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50 text-neutral-700 dark:text-neutral-300"
+                    >
+                      {t('books.settings.cancel')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmBookamatDisconnect(true)}
+                      disabled={savingBookamat}
+                      className="text-xs px-2 py-2 rounded-md text-neutral-500 hover:text-red-500 dark:text-neutral-400 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                    >
+                      {t('books.settings.disconnect')}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </IntegrationCard>
@@ -1880,6 +2081,16 @@ export default function SettingsForm({ settings }: Props) {
         busy={savingBookamat}
         onConfirm={removeBookamatKey}
         onCancel={() => setConfirmRemoveKey(false)}
+      />
+      <ConfirmDialog
+        open={confirmBookamatDisconnect}
+        title={t('books.settings.disconnectTitle')}
+        description={t('books.settings.disconnectDesc')}
+        confirmLabel={savingBookamat ? t('common.removing') : t('books.settings.disconnect')}
+        destructive
+        busy={savingBookamat}
+        onConfirm={() => void disconnectBookamat()}
+        onCancel={() => setConfirmBookamatDisconnect(false)}
       />
     </div>
   )

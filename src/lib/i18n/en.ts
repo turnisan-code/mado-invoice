@@ -1799,7 +1799,7 @@ export const en = {
         disconnected: 'Google account disconnected.',
         couldNotDisconnect: 'Could not disconnect.',
         disconnectTitle: 'Disconnect Google?',
-        disconnectDesc: 'Sending via Gmail and saving to Drive stop until you connect the account again.',
+        disconnectDesc: 'Sending via Gmail and saving to Drive stop until you connect the account again; the Drive folder setting is removed too.',
       },
       drive: {
         title: 'Google Drive',
