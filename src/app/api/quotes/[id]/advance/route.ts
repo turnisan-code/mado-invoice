@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
-import { advanceItems, depositTotals, loadQuoteDeposits } from '@/lib/deposits'
+import { advanceItems, billedAmount, depositTotals, loadQuoteDeposits } from '@/lib/deposits'
 import { logEvent } from '@/lib/events'
 import { getT } from '@/lib/i18n/server'
 import { addDays, formatMoney, roundCents, today } from '@/lib/utils/document'
@@ -9,7 +9,7 @@ import { addDays, formatMoney, roundCents, today } from '@/lib/utils/document'
 // value: 30 } or { mode: 'amount', value: 1500 } (gross). The draft carries one line per VAT rate
 // of the quote, the quote's service date as the expected one and the client's payment terms; it
 // is issued from the editor. A sent quote becomes accepted, as on conversion. Advance invoices
-// never add up to more than the quote.
+// never add up to more than the quote, and none follows the quote's own invoice.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser()
   if (!auth.ok) return auth.response
@@ -37,9 +37,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const quoteTotal = depositTotals(quote).total
   const gross = roundCents(mode === 'percent' ? quoteTotal * value / 100 : value)
   if (quoteTotal <= 0 || gross <= 0) return NextResponse.json({ error: t('deposits.errors.emptyQuote') }, { status: 400 })
-  const earlier = (await loadQuoteDeposits(supabase, id))
+  const [deposits, { data: conversion, error: convErr }] = await Promise.all([
+    loadQuoteDeposits(supabase, id),
+    supabase.from('documents').select('id').eq('converted_from_id', id).eq('type', 'invoice')
+      .in('invoice_kind', ['standard', 'final']).neq('status', 'cancelled').limit(1).maybeSingle(),
+  ])
+  if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 })
+  if (conversion) return NextResponse.json({ error: t('deposits.errors.quoteConverted') }, { status: 409 })
+  const earlier = deposits
     .filter(d => d.invoice_kind === 'advance' && d.status !== 'cancelled')
-    .reduce((s, d) => s + depositTotals(d).total, 0)
+    .reduce((s, d) => s + billedAmount(d), 0)
   if (roundCents(earlier + gross) > quoteTotal + 0.005) {
     return NextResponse.json({ error: t('deposits.errors.exceedsQuote', { amount: formatMoney(roundCents(earlier + gross)), total: formatMoney(quoteTotal) }) }, { status: 409 })
   }

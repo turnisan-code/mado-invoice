@@ -5,8 +5,8 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
 import {
-  deductionItems, deductionParts, depositErrorMessage, discountOf, linkDeposit, loadClientDeposits, sameDeductions, unlinkDeposit,
-  type DepositCheck, type DepositInvoice,
+  deductionItems, deductionParts, depositErrorMessage, discountOf, linkDeposit, loadClientDeposits, loadQuoteInvoices, sameDeductions,
+  unlinkDeposit, type DepositCheck, type DepositInvoice, type QuoteInvoice,
 } from '@/lib/deposits'
 import { lineAmount } from '@/lib/utils/document'
 import type { DocumentType, InvoiceKind } from '@/types'
@@ -15,8 +15,8 @@ import { makeId, type EditorDocument, type FormState, type LineItem } from './mo
 const amountsKey = (lines: readonly LineItem[]) =>
   lines.filter(l => l.line_type === 'deduction').map(l => `${l.vat_rate}|${lineAmount(l)}`).sort().join(',')
 
-// The advance and partial invoices an invoice deducts or could deduct (the client's issued ones).
-// A draft final invoice keeps its deduction lines in step with them; an issued one keeps the
+// The advance and partial invoices an invoice deducts or could deduct (the client's issued ones),
+// and the other invoices made from the quote it came from. A draft final invoice keeps its deduction lines in step with them; an issued one keeps the
 // deduction it was issued with. `setKind` changes the kind in the form at once (the snapshot the
 // next save writes included).
 export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }: {
@@ -32,23 +32,25 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
   const { t } = useT()
   const enabled = type === 'invoice'
   const issued = !!doc?.number
-  const [loaded, setLoaded] = useState<{ clientId: string; invoices: DepositInvoice[] } | null>(null)
+  const [loaded, setLoaded] = useState<{ clientId: string; invoices: DepositInvoice[]; fromQuote: QuoteInvoice[] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [version, setVersion] = useState(0)
 
   const clientId = form.clientId
+  const sourceId = doc?.converted_from_id ?? null
   useEffect(() => {
     if (!enabled || !clientId) return
     let current = true
-    loadClientDeposits(createClient(), clientId)
-      .then(list => { if (current) setLoaded({ clientId, invoices: list }) })
+    const supabase = createClient()
+    Promise.all([loadClientDeposits(supabase, clientId), docId ? loadQuoteInvoices(supabase, sourceId, docId) : []])
+      .then(([list, fromQuote]) => { if (current) setLoaded({ clientId, invoices: list, fromQuote }) })
       .catch(e => {
         if (!current) return
         toast.error(t('deposits.builder.loadFailed', { error: e instanceof Error ? e.message : String(e) }))
-        setLoaded({ clientId, invoices: [] })
+        setLoaded({ clientId, invoices: [], fromQuote: [] })
       })
     return () => { current = false }
-  }, [enabled, clientId, t, version])
+  }, [enabled, clientId, sourceId, docId, t, version])
 
   const invoices = useMemo(() => (loaded && loaded.clientId === clientId ? loaded.invoices : null), [loaded, clientId])
   const linked = useMemo(
@@ -110,7 +112,11 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
   })
 
   const check: DepositCheck | undefined = enabled
-    ? { kind: form.invoiceKind, documentId: docId, language: form.language, discount: discountOf({ discount_type: form.discountType, discount_value: form.discountValue }), invoices: invoices ?? [] }
+    ? {
+        kind: form.invoiceKind, documentId: docId, language: form.language,
+        discount: discountOf({ discount_type: form.discountType, discount_value: form.discountValue }),
+        invoices: invoices ?? [], fromQuote: loaded?.fromQuote ?? [],
+      }
     : undefined
 
   return {

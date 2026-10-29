@@ -255,6 +255,8 @@ export interface DepositCheck {
   discount: Discount
   // The client's issued, uncancelled advance and partial invoices (loadClientDeposits).
   invoices: DepositInvoice[]
+  // The other invoices made from the same quote (loadQuoteInvoices).
+  fromQuote: QuoteInvoice[]
 }
 
 export function depositProblems(input: {
@@ -283,6 +285,19 @@ export function depositProblems(input: {
 
   for (const d of linked) {
     if (d.invoice_kind === 'advance' && depositOpen(d) > 0.005) problems.push({ code: 'advanceOpen', number: d.number ?? '' })
+  }
+
+  // A quote is billed once: its final (or plain) invoice waits for the advance and partial
+  // invoices made from it and deducts every issued one, and none follows its issued invoice.
+  const fromQuote = input.deposit.fromQuote
+  if (isDepositKind(kind)) {
+    const invoiced = fromQuote.find(s => !isDepositKind(s.invoice_kind) && s.number)
+    if (invoiced) problems.push({ code: 'quoteInvoiced', number: invoiced.number! })
+  } else {
+    if (fromQuote.some(s => isDepositKind(s.invoice_kind) && !s.number)) problems.push({ code: 'advanceDraftPending' })
+    for (const s of fromQuote) {
+      if (isDepositKind(s.invoice_kind) && s.number && !s.final_invoice_id) problems.push({ code: 'advanceNotDeducted', number: s.number })
+    }
   }
 
   if (lines.length) {
@@ -390,12 +405,29 @@ export async function loadQuoteDeposits(supabase: SupabaseClient, quoteId: strin
   return withCreditsAndFinals(supabase, (data ?? []) as unknown as DepositRow[])
 }
 
+export interface QuoteInvoice { id: string; number: string | null; invoice_kind: InvoiceKind; final_invoice_id: string | null }
+
+// The other uncancelled invoices made from the quote `sourceId`, drafts included; none when the
+// source is no quote (a recurring invoice points at its template the same way).
+export async function loadQuoteInvoices(supabase: SupabaseClient, sourceId: string | null | undefined, selfId: string): Promise<QuoteInvoice[]> {
+  if (!sourceId) return []
+  const [source, siblings] = await Promise.all([
+    supabase.from('documents').select('type').eq('id', sourceId).maybeSingle(),
+    supabase.from('documents').select('id, number, invoice_kind, final_invoice_id')
+      .eq('type', 'invoice').eq('converted_from_id', sourceId).neq('status', 'cancelled').neq('id', selfId),
+  ])
+  if (source.error) throw new Error(source.error.message)
+  if (siblings.error) throw new Error(siblings.error.message)
+  return source.data?.type === 'quote' ? (siblings.data ?? []) as QuoteInvoice[] : []
+}
+
 type CheckedDoc = DiscountFields & {
   id: string
   type: string
   client_id: string | null
   language: string | null
   invoice_kind?: InvoiceKind | null
+  converted_from_id?: string | null
   document_items?: { line_type?: string | null }[] | null
 }
 
@@ -404,13 +436,11 @@ export async function loadDepositCheck(supabase: SupabaseClient, doc: CheckedDoc
   if (doc.type !== 'invoice') return undefined
   const kind = doc.invoice_kind ?? 'standard'
   const deducts = kind === 'final' || (doc.document_items ?? []).some(isDeductionLine)
-  return {
-    kind,
-    documentId: doc.id,
-    language: doc.language === 'en' ? 'en' : 'de',
-    discount: discountOf(doc),
-    invoices: deducts && doc.client_id ? await loadClientDeposits(supabase, doc.client_id) : [],
-  }
+  const [invoices, fromQuote] = await Promise.all([
+    deducts && doc.client_id ? loadClientDeposits(supabase, doc.client_id) : [],
+    loadQuoteInvoices(supabase, doc.converted_from_id, doc.id),
+  ])
+  return { kind, documentId: doc.id, language: doc.language === 'en' ? 'en' : 'de', discount: discountOf(doc), invoices, fromQuote }
 }
 
 // Writes a draft final invoice's deduction lines from the invoices it deducts now (after the

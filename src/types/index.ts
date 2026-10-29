@@ -28,8 +28,8 @@ export type IssueProblem =
   | { code: 'noClient' | 'noItems' | 'currencyNotEur' | 'reverseChargeNoUid' | 'clientCountryMissing' | 'noServiceDate' | 'negativeTotal' }
   | { code: 'periodStartMissing' | 'periodEndBeforeStart'; index?: number; position?: number }
   | { code: 'blankDescription' | 'badQuantity' | 'missingPrice' | 'badDiscount'; index: number; position: number }
-  | { code: 'depositZero' | 'deductionExceedsTotal' | 'deductionsOutdated' }
-  | { code: 'advanceOpen' | 'advanceSettledElsewhere'; number: string }
+  | { code: 'depositZero' | 'deductionExceedsTotal' | 'deductionsOutdated' | 'advanceDraftPending' | 'creditNoteDeductions' }
+  | { code: 'advanceOpen' | 'advanceSettledElsewhere' | 'advanceNotDeducted' | 'quoteInvoiced'; number: string }
 
 export interface Settings {
   id: string

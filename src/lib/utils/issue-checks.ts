@@ -103,6 +103,9 @@ export function issueProblems(input: IssueCheckInput): IssueProblem[] {
   // total (it is capped at the net), so the lines decide.
   if (input.type !== 'credit_note' && items.length && issueTotal(input) < 0) problems.push({ code: 'negativeTotal' })
   if (input.type === 'invoice' && input.deposit) problems.push(...depositProblems({ items: input.items, taxTreatment, deposit: input.deposit }))
+  // A credit note made from a final invoice copies its deductions, which only its Storno may keep:
+  // on a partial credit they would take the advance payments off the credit.
+  if (input.type === 'credit_note' && input.items.some(isDeductionLine)) problems.push({ code: 'creditNoteDeductions' })
   return problems
 }
 
@@ -131,9 +134,13 @@ export function issueProblemMessage(p: IssueProblem, t: TFn): string {
     case 'depositZero':
     case 'deductionExceedsTotal':
     case 'deductionsOutdated':
+    case 'advanceDraftPending':
+    case 'creditNoteDeductions':
       return t(`deposits.problems.${p.code}`)
     case 'advanceOpen':
     case 'advanceSettledElsewhere':
+    case 'advanceNotDeducted':
+    case 'quoteInvoiced':
       return t(`deposits.problems.${p.code}`, { number: p.number })
     default:
       return t(`issueChecks.problems.${p.code}`)

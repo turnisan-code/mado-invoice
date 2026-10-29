@@ -439,6 +439,10 @@ export const en = {
       deductionsOutdated: 'The deductions no longer match the invoices this final invoice deducts. Open it in the editor to update them.',
       advanceOpen: 'Advance invoice {number} is not settled. Only money received is deducted: record its payment, write off the rest, or cancel it with a Storno if nothing came in.',
       advanceSettledElsewhere: '{number} is already deducted on another final invoice.',
+      advanceNotDeducted: '{number} was issued for this quote but is not deducted here. Add it under "Deducted invoices".',
+      advanceDraftPending: 'This quote still has a draft advance or partial invoice. Issue it and deduct it here first, or delete the draft.',
+      quoteInvoiced: 'Invoice {number} for this quote is already issued. Another advance or partial invoice would bill the work twice.',
+      creditNoteDeductions: 'The deductions copied from the final invoice would reduce this credit. Remove them; only a Storno keeps them.',
     },
     errors: {
       useFinal: 'This quote has advance invoices: create the final invoice, which deducts them.',
@@ -447,6 +451,7 @@ export const en = {
       badAmount: 'Enter a percentage up to 100 or an amount above zero.',
       emptyQuote: 'This quote has no amount to ask an advance payment for.',
       exceedsQuote: 'The advance invoices would come to {amount}, more than the quote total of {total}.',
+      quoteConverted: 'This quote already has its invoice, so no further advance invoice can be made from it.',
     },
     history: {
       created: 'Advance invoice created ({amount})',

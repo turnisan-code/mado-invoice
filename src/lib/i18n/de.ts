@@ -440,6 +440,10 @@ export const de = {
       deductionsOutdated: 'Die Abzüge passen nicht mehr zu den Rechnungen, die diese Schlussrechnung abzieht. Öffne sie im Editor, um sie anzupassen.',
       advanceOpen: 'Anzahlungsrechnung {number} ist nicht erledigt. Abgezogen wird nur, was eingegangen ist: erfasse die Zahlung, schreib den Rest ab oder storniere sie, wenn nichts eingegangen ist.',
       advanceSettledElsewhere: '{number} wird bereits in einer anderen Schlussrechnung abgezogen.',
+      advanceNotDeducted: '{number} wurde zu diesem Angebot ausgestellt, wird hier aber nicht abgezogen. Unter „Abgezogene Rechnungen“ hinzufügen.',
+      advanceDraftPending: 'Zu diesem Angebot gibt es noch einen Entwurf einer Anzahlungs- oder Teilrechnung. Zuerst ausstellen und hier abziehen oder den Entwurf löschen.',
+      quoteInvoiced: 'Zu diesem Angebot ist die Rechnung {number} bereits ausgestellt. Eine weitere Anzahlungs- oder Teilrechnung würde die Leistung doppelt verrechnen.',
+      creditNoteDeductions: 'Die aus der Schlussrechnung übernommenen Abzüge würden diese Gutschrift verringern. Bitte entfernen – nur ein Storno behält sie.',
     },
     errors: {
       useFinal: 'Zu diesem Angebot gibt es Anzahlungsrechnungen: Erstelle die Schlussrechnung, die sie abzieht.',
@@ -448,6 +452,7 @@ export const de = {
       badAmount: 'Gib einen Prozentsatz bis 100 oder einen Betrag über null ein.',
       emptyQuote: 'Dieses Angebot hat keinen Betrag, für den eine Anzahlung angefordert werden kann.',
       exceedsQuote: 'Die Anzahlungsrechnungen kämen auf {amount}, mehr als die Angebotssumme von {total}.',
+      quoteConverted: 'Zu diesem Angebot gibt es bereits die Rechnung; eine weitere Anzahlungsrechnung ist nicht mehr möglich.',
     },
     history: {
       created: 'Anzahlungsrechnung erstellt ({amount})',

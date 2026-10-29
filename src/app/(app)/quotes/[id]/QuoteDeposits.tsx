@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getT } from '@/lib/i18n/server'
 import { buttonVariants } from '@/components/ui/button'
 import ConvertDocumentButton from '@/components/layout/ConvertDocumentButton'
-import { depositOpen, depositTotals, loadQuoteDeposits, type DepositInvoice } from '@/lib/deposits'
+import { billedAmount, depositOpen, depositTotals, loadQuoteDeposits, type DepositInvoice } from '@/lib/deposits'
 import { invoiceKindLabel } from '@/lib/document-labels'
 import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import type { InvoiceKind } from '@/types'
@@ -29,7 +29,8 @@ const loadQuoteInvoicing = cache(async (quoteId: string) => {
 const live = (d: DepositInvoice) => d.status !== 'cancelled'
 
 // Once converted, the quote links to its invoice; until then it offers an advance invoice and the
-// conversion, which becomes the final invoice as soon as there are advance or partial invoices.
+// conversion, which becomes the final invoice once an advance or partial invoice is issued (a
+// draft one is issued or deleted first, the issue checks say so).
 export async function QuoteInvoicingActions({ quote }: { quote: Quote }) {
   const { t } = await getT()
   const { conversion, deposits } = await loadQuoteInvoicing(quote.id)
@@ -46,11 +47,11 @@ export async function QuoteInvoicingActions({ quote }: { quote: Quote }) {
     )
   }
   if (quote.status !== 'sent' && quote.status !== 'accepted') return null
-  const advanced = roundCents(deposits.filter(d => live(d) && d.invoice_kind === 'advance').reduce((s, d) => s + depositTotals(d).total, 0))
+  const advanced = roundCents(deposits.filter(d => live(d) && d.invoice_kind === 'advance').reduce((s, d) => s + billedAmount(d), 0))
   return (
     <>
       <AdvanceInvoiceButton quoteId={quote.id} quoteTotal={depositTotals(quote).total} advanced={advanced} />
-      <ConvertDocumentButton kind={deposits.some(live) ? 'final_invoice' : 'invoice'} sourceId={quote.id} />
+      <ConvertDocumentButton kind={deposits.some(d => live(d) && d.number) ? 'final_invoice' : 'invoice'} sourceId={quote.id} />
     </>
   )
 }
@@ -61,7 +62,7 @@ export async function QuoteDepositList({ quote }: { quote: Quote }) {
   const { deposits } = await loadQuoteInvoicing(quote.id)
   if (!deposits.length) return null
   const currency = quote.currency ?? 'EUR'
-  const invoiced = roundCents(deposits.filter(live).reduce((s, d) => s + depositTotals(d).total, 0))
+  const invoiced = roundCents(deposits.filter(live).reduce((s, d) => s + billedAmount(d), 0))
 
   return (
     <section aria-labelledby={`deposits-${quote.id}`} className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
