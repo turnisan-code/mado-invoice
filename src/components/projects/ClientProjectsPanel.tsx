@@ -25,10 +25,12 @@ export default function ClientProjectsPanel({ client, projects }: { client: Clie
 
   return (
     <div className={`${cardClass} overflow-hidden`}>
-      <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-4 border-b border-neutral-100 dark:border-neutral-800">
+      {/* Without projects the card stays a single row, so it costs little room on a phone. */}
+      <div className={`flex items-center justify-between gap-3 flex-wrap px-5 py-4 ${projects.length ? 'border-b border-neutral-100 dark:border-neutral-800' : ''}`}>
         <div className="min-w-0">
           <span className="text-sm font-medium">{t('projects.client.title')}</span>
           {unbilled > 0 && <span className="ml-2 text-xs text-amber-600 tabular-nums">{t('projects.client.unbilled', { amount: formatMoney(unbilled) })}</span>}
+          {!projects.length && <span className="block text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t('projects.client.none')}</span>}
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => setStatement(true)} className={buttonClass}>
@@ -39,26 +41,27 @@ export default function ClientProjectsPanel({ client, projects }: { client: Clie
           </button>
         </div>
       </div>
-      {projects.length === 0
-        ? <p className="px-5 py-6 text-sm text-neutral-400 dark:text-neutral-500">{t('projects.client.none')}</p>
-        : (
-          <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
-            {projects.map(p => (
-              <Link key={p.id} href={`/projects/${p.id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-                <span className="flex-1 min-w-0 flex items-center gap-2">
+      {projects.length > 0 && (
+        <div className="divide-y divide-neutral-50 dark:divide-neutral-800">
+          {projects.map(p => (
+            <Link key={p.id} href={`/projects/${p.id}`} className="flex items-center gap-3 px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+              {/* On a phone the unbilled line goes under the name, which keeps the room it needs. */}
+              <span className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:gap-3">
+                <span className="flex items-center gap-2 min-w-0 sm:flex-1">
                   <span className="text-sm font-medium truncate">{p.name}</span>
                   <TimerDot projectId={p.id} />
                 </span>
                 {p.unbilledAmount > 0 && (
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums shrink-0">
+                  <span className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums sm:shrink-0">
                     {t('projects.unbilledLine', { hours: formatDuration(p.unbilledMinutes), amount: formatMoney(p.unbilledAmount) })}
                   </span>
                 )}
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${projectStatusColor[p.status]}`}>{t(`projects.statuses.${p.status}`)}</span>
-              </Link>
-            ))}
-          </div>
-        )}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${projectStatusColor[p.status]}`}>{t(`projects.statuses.${p.status}`)}</span>
+            </Link>
+          ))}
+        </div>
+      )}
       {creating && <ProjectDialog clients={[client]} defaultClientId={client.id} lockClient onClose={() => setCreating(false)} />}
       {statement && <StatementDialog clientId={client.id} onClose={() => setStatement(false)} />}
     </div>

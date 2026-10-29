@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState, type KeyboardEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, FileText, Pencil, Plus, Receipt, Trash2, Undo2 } from 'lucide-react'
@@ -30,6 +30,7 @@ type Row = { billable: boolean; invoiced_document_id: string | null; date: strin
 type Target = { kind: 'time' | 'expense'; id: string }
 
 const NO_FILTERS: Filters = { billing: 'all', from: '', to: '', q: '' }
+const TABS = ['time', 'expenses'] as const
 
 function billingOf(row: Row): Exclude<Billing, 'all'> {
   if (row.invoiced_document_id) return 'billed'
@@ -55,7 +56,8 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   const router = useRouter()
   const supabase = createClient()
   const { t, lang } = useT()
-  const [tab, setTab] = useState<'time' | 'expenses'>('time')
+  const tabsId = useId()
+  const [tab, setTab] = useState<(typeof TABS)[number]>('time')
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [editing, setEditing] = useState(false)
   const [deletingProject, setDeletingProject] = useState(false)
@@ -187,6 +189,20 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
     )
   }
 
+  // Arrow keys, Home and End move between the tabs (WAI-ARIA tabs pattern).
+  function onTabKey(e: KeyboardEvent<HTMLButtonElement>) {
+    const i = TABS.indexOf(tab)
+    const next = e.key === 'ArrowRight' ? TABS[(i + 1) % TABS.length]
+      : e.key === 'ArrowLeft' ? TABS[(i + TABS.length - 1) % TABS.length]
+      : e.key === 'Home' ? TABS[0]
+      : e.key === 'End' ? TABS[TABS.length - 1]
+      : null
+    if (!next) return
+    e.preventDefault()
+    setTab(next)
+    document.getElementById(`${tabsId}-tab-${next}`)?.focus()
+  }
+
   const emptyRows = (empty: string) => (
     <p className="px-4 py-10 text-center text-sm text-neutral-400 dark:text-neutral-500">{filtersActive ? t('projects.entries.noMatch') : empty}</p>
   )
@@ -262,13 +278,17 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
       {/* Entries */}
       <div className={`${cardClass} overflow-hidden`}>
         <div className="flex border-b border-neutral-100 dark:border-neutral-800" role="tablist">
-          {(['time', 'expenses'] as const).map(key => (
+          {TABS.map(key => (
             <button
               key={key}
+              id={`${tabsId}-tab-${key}`}
               type="button"
               role="tab"
               aria-selected={tab === key}
+              aria-controls={`${tabsId}-panel`}
+              tabIndex={tab === key ? 0 : -1}
               onClick={() => setTab(key)}
+              onKeyDown={onTabKey}
               className={`flex-1 sm:flex-none px-5 h-11 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-neutral-900 dark:border-white text-neutral-900 dark:text-white' : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'}`}
             >
               {key === 'time' ? t('projects.detail.time') : t('projects.detail.expenses')}
@@ -277,141 +297,143 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
           ))}
         </div>
 
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 p-3 border-b border-neutral-100 dark:border-neutral-800">
-          <select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className={`${inputClass} sm:w-auto`}>
-            {(['all', 'unbilled', 'billed', 'nonBillable'] as const).map(b => <option key={b} value={b}>{t(`projects.filters.${b}`)}</option>)}
-          </select>
-          <input type="search" value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder={t('projects.filters.search')} aria-label={t('projects.filters.search')} className={`${inputClass} sm:w-56`} />
-          <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-            <span className="shrink-0">{t('projects.filters.from')}</span>
-            <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} className={`${inputClass} sm:w-auto min-w-0`} />
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-            <span className="shrink-0">{t('projects.filters.to')}</span>
-            <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} className={`${inputClass} sm:w-auto min-w-0`} />
-          </label>
-          {filtersActive && (
-            <button type="button" onClick={() => setFilters(NO_FILTERS)} className="col-span-2 text-xs text-neutral-500 dark:text-neutral-400 underline underline-offset-2 min-h-9 sm:min-h-0 sm:self-center">
-              {t('projects.filters.reset')}
-            </button>
-          )}
-        </div>
+        <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-tab-${tab}`}>
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 p-3 border-b border-neutral-100 dark:border-neutral-800">
+            <select value={filters.billing} onChange={e => setFilters(f => ({ ...f, billing: e.target.value as Billing }))} aria-label={t('projects.filters.label')} className={`${inputClass} sm:w-auto`}>
+              {(['all', 'unbilled', 'billed', 'nonBillable'] as const).map(b => <option key={b} value={b}>{t(`projects.filters.${b}`)}</option>)}
+            </select>
+            <input type="search" value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder={t('projects.filters.search')} aria-label={t('projects.filters.search')} className={`${inputClass} sm:w-56`} />
+            <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+              <span className="shrink-0">{t('projects.filters.from')}</span>
+              <input type="date" value={filters.from} onChange={e => setFilters(f => ({ ...f, from: e.target.value }))} className={`${inputClass} sm:w-auto min-w-0`} />
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+              <span className="shrink-0">{t('projects.filters.to')}</span>
+              <input type="date" value={filters.to} onChange={e => setFilters(f => ({ ...f, to: e.target.value }))} className={`${inputClass} sm:w-auto min-w-0`} />
+            </label>
+            {filtersActive && (
+              <button type="button" onClick={() => setFilters(NO_FILTERS)} className="col-span-2 text-xs text-neutral-500 dark:text-neutral-400 underline underline-offset-2 min-h-9 sm:min-h-0 sm:self-center">
+                {t('projects.filters.reset')}
+              </button>
+            )}
+          </div>
 
-        {tab === 'time' ? (
-          <>
-            {/* Mobile cards */}
-            <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
-              {shownEntries.length === 0 && emptyRows(t('projects.entries.emptyTime'))}
-              {shownEntries.map(e => (
-                <div key={e.id} className="px-4 py-3 space-y-1.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm min-w-0 break-words">{description(e.description)}</p>
-                    <span className="text-sm font-medium tabular-nums shrink-0">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryAmount(e, project))}</span>
-                  </div>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-                    {formatDate(e.date, lang)} · {t('projects.hours', { hours: formatDuration(e.minutes) })}
-                    {billingOf(e) !== 'nonBillable' && <> · {formatMoney(entryRate(e, project))}/h</>}
-                  </p>
-                  <div className="flex items-center justify-between gap-2 -mb-1">
-                    {billingBadge(e)}
-                    <div className="-mr-2.5">{rowActions(e, { kind: 'time', id: e.id }, () => setTimeDialog({ entry: e }))}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* Desktop table */}
-            <table className="hidden sm:table w-full text-sm">
-              <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
-                <tr>
-                  <th className={th}>{t('projects.entries.date')}</th>
-                  <th className={thRight}>{t('projects.entries.duration')}</th>
-                  <th className={th}>{t('projects.entries.description')}</th>
-                  <th className={thRight}>{t('projects.entries.rate')}</th>
-                  <th className={thRight}>{t('projects.entries.amount')}</th>
-                  <th className={th}>{t('projects.entries.billing')}</th>
-                  <th className="px-2 py-3"><span className="sr-only">{t('common.actions')}</span></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
-                {shownEntries.length === 0 && <tr><td colSpan={7}>{emptyRows(t('projects.entries.emptyTime'))}</td></tr>}
+          {tab === 'time' ? (
+            <>
+              {/* Mobile cards */}
+              <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
+                {shownEntries.length === 0 && emptyRows(t('projects.entries.emptyTime'))}
                 {shownEntries.map(e => (
-                  <tr key={e.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-                    <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{formatDate(e.date, lang)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{formatDuration(e.minutes)}</td>
-                    <td className="px-4 py-2.5 max-w-xs break-words">{description(e.description)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryRate(e, project))}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryAmount(e, project))}</td>
-                    <td className="px-4 py-2.5">{billingBadge(e)}</td>
-                    <td className="px-2 py-1.5 text-right">{rowActions(e, { kind: 'time', id: e.id }, () => setTimeDialog({ entry: e }))}</td>
-                  </tr>
+                  <div key={e.id} className="px-4 py-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm min-w-0 break-words">{description(e.description)}</p>
+                      <span className="text-sm font-medium tabular-nums shrink-0">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryAmount(e, project))}</span>
+                    </div>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+                      {formatDate(e.date, lang)} · {t('projects.hours', { hours: formatDuration(e.minutes) })}
+                      {billingOf(e) !== 'nonBillable' && <> · {formatMoney(entryRate(e, project))}/h</>}
+                    </p>
+                    <div className="flex items-center justify-between gap-2 -mb-1">
+                      {billingBadge(e)}
+                      <div className="-mr-2.5">{rowActions(e, { kind: 'time', id: e.id }, () => setTimeDialog({ entry: e }))}</div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {shownEntries.length > 0 && (
-              <p className="px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-                {t('projects.entries.totalTime', { count: entryCount(shownEntries.length), duration: formatDuration(shownMinutes), amount: formatMoney(shownTimeAmount) })}
-              </p>
-            )}
-          </>
-        ) : (
-          <>
-            <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
-              {shownExpenses.length === 0 && emptyRows(t('projects.entries.emptyExpenses'))}
-              {shownExpenses.map(x => (
-                <div key={x.id} className="px-4 py-3 space-y-1.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm min-w-0 break-words">{x.description}</p>
-                    <span className="text-sm font-medium tabular-nums shrink-0">{formatMoney(expensePrice(x))}</span>
-                  </div>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-                    {formatDate(x.date, lang)} · {t('projects.entries.net')} {formatMoney(x.net_amount)} · {x.vat_rate} %
-                    {!!x.markup_percent && <> · +{num(x.markup_percent)} %</>}
-                  </p>
-                  <div className="flex items-center justify-between gap-2 -mb-1">
-                    {billingBadge(x)}
-                    <div className="-mr-2.5">{rowActions(x, { kind: 'expense', id: x.id }, () => setExpenseDialog({ expense: x }))}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <table className="hidden sm:table w-full text-sm">
-              <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
-                <tr>
-                  <th className={th}>{t('projects.entries.date')}</th>
-                  <th className={th}>{t('projects.entries.description')}</th>
-                  <th className={thRight}>{t('projects.entries.net')}</th>
-                  <th className={thRight}>{t('projects.entries.vat')}</th>
-                  <th className={thRight}>{t('projects.entries.markup')}</th>
-                  <th className={thRight}>{t('projects.entries.price')}</th>
-                  <th className={th}>{t('projects.entries.billing')}</th>
-                  <th className="px-2 py-3"><span className="sr-only">{t('common.actions')}</span></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
-                {shownExpenses.length === 0 && <tr><td colSpan={8}>{emptyRows(t('projects.entries.emptyExpenses'))}</td></tr>}
+              </div>
+              {/* Desktop table */}
+              <table className="hidden sm:table w-full text-sm">
+                <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
+                  <tr>
+                    <th className={th}>{t('projects.entries.date')}</th>
+                    <th className={thRight}>{t('projects.entries.duration')}</th>
+                    <th className={th}>{t('projects.entries.description')}</th>
+                    <th className={thRight}>{t('projects.entries.rate')}</th>
+                    <th className={thRight}>{t('projects.entries.amount')}</th>
+                    <th className={th}>{t('projects.entries.billing')}</th>
+                    <th className="px-2 py-3"><span className="sr-only">{t('common.actions')}</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
+                  {shownEntries.length === 0 && <tr><td colSpan={7}>{emptyRows(t('projects.entries.emptyTime'))}</td></tr>}
+                  {shownEntries.map(e => (
+                    <tr key={e.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                      <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{formatDate(e.date, lang)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">{formatDuration(e.minutes)}</td>
+                      <td className="px-4 py-2.5 max-w-xs break-words">{description(e.description)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryRate(e, project))}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{billingOf(e) === 'nonBillable' ? '—' : formatMoney(entryAmount(e, project))}</td>
+                      <td className="px-4 py-2.5">{billingBadge(e)}</td>
+                      <td className="px-2 py-1.5 text-right">{rowActions(e, { kind: 'time', id: e.id }, () => setTimeDialog({ entry: e }))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {shownEntries.length > 0 && (
+                <p className="px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+                  {t('projects.entries.totalTime', { count: entryCount(shownEntries.length), duration: formatDuration(shownMinutes), amount: formatMoney(shownTimeAmount) })}
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="sm:hidden divide-y divide-neutral-100 dark:divide-neutral-800">
+                {shownExpenses.length === 0 && emptyRows(t('projects.entries.emptyExpenses'))}
                 {shownExpenses.map(x => (
-                  <tr key={x.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
-                    <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{formatDate(x.date, lang)}</td>
-                    <td className="px-4 py-2.5 max-w-xs break-words">{x.description}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(x.net_amount)}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.vat_rate} %</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.markup_percent ? `${num(x.markup_percent)} %` : '—'}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(expensePrice(x))}</td>
-                    <td className="px-4 py-2.5">{billingBadge(x)}</td>
-                    <td className="px-2 py-1.5 text-right">{rowActions(x, { kind: 'expense', id: x.id }, () => setExpenseDialog({ expense: x }))}</td>
-                  </tr>
+                  <div key={x.id} className="px-4 py-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-sm min-w-0 break-words">{x.description}</p>
+                      <span className="text-sm font-medium tabular-nums shrink-0">{formatMoney(expensePrice(x))}</span>
+                    </div>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+                      {formatDate(x.date, lang)} · {t('projects.entries.net')} {formatMoney(x.net_amount)} · {x.vat_rate} %
+                      {!!x.markup_percent && <> · +{num(x.markup_percent)} %</>}
+                    </p>
+                    <div className="flex items-center justify-between gap-2 -mb-1">
+                      {billingBadge(x)}
+                      <div className="-mr-2.5">{rowActions(x, { kind: 'expense', id: x.id }, () => setExpenseDialog({ expense: x }))}</div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {shownExpenses.length > 0 && (
-              <p className="px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
-                {t('projects.entries.totalExpenses', { count: expenseCount(shownExpenses.length), amount: formatMoney(shownExpenseAmount) })}
-              </p>
-            )}
-            <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
-          </>
-        )}
-        {hasBilled && <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.entries.locked')}</p>}
+              </div>
+              <table className="hidden sm:table w-full text-sm">
+                <thead className="border-b border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800">
+                  <tr>
+                    <th className={th}>{t('projects.entries.date')}</th>
+                    <th className={th}>{t('projects.entries.description')}</th>
+                    <th className={thRight}>{t('projects.entries.net')}</th>
+                    <th className={thRight}>{t('projects.entries.vat')}</th>
+                    <th className={thRight}>{t('projects.entries.markup')}</th>
+                    <th className={thRight}>{t('projects.entries.price')}</th>
+                    <th className={th}>{t('projects.entries.billing')}</th>
+                    <th className="px-2 py-3"><span className="sr-only">{t('common.actions')}</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-50 dark:divide-neutral-800">
+                  {shownExpenses.length === 0 && <tr><td colSpan={8}>{emptyRows(t('projects.entries.emptyExpenses'))}</td></tr>}
+                  {shownExpenses.map(x => (
+                    <tr key={x.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                      <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{formatDate(x.date, lang)}</td>
+                      <td className="px-4 py-2.5 max-w-xs break-words">{x.description}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(x.net_amount)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.vat_rate} %</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-neutral-500 dark:text-neutral-400">{x.markup_percent ? `${num(x.markup_percent)} %` : '—'}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">{formatMoney(expensePrice(x))}</td>
+                      <td className="px-4 py-2.5">{billingBadge(x)}</td>
+                      <td className="px-2 py-1.5 text-right">{rowActions(x, { kind: 'expense', id: x.id }, () => setExpenseDialog({ expense: x }))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {shownExpenses.length > 0 && (
+                <p className="px-4 py-3 border-t border-neutral-100 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 tabular-nums">
+                  {t('projects.entries.totalExpenses', { count: expenseCount(shownExpenses.length), amount: formatMoney(shownExpenseAmount) })}
+                </p>
+              )}
+              <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.detail.vatNote')}</p>
+            </>
+          )}
+          {hasBilled && <p className="px-4 pb-3 text-xs text-neutral-400 dark:text-neutral-500">{t('projects.entries.locked')}</p>}
+        </div>
       </div>
 
       {/* Invoices */}
