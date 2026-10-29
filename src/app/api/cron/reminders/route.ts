@@ -14,7 +14,7 @@ import { logEvent } from '@/lib/events'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
-import { isGoogleExpired } from '@/lib/public-settings'
+import { isBookamatConfigured, isGoogleExpired } from '@/lib/public-settings'
 import { autoSyncBookamat, type AutoSyncResult } from '@/lib/bookamat'
 
 export const maxDuration = 60
@@ -24,6 +24,10 @@ type Skipped = { number: string; reason: string }
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
 // result in the log. Runs before the reminders, whatever their settings.
 async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
+  if (!isBookamatConfigured(settings)) {
+    console.warn('[cron/bookamat] skipped: automatic sync is on, but Bookamat is not fully configured')
+    return { error: 'not_configured' }
+  }
   try {
     const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, budgetMs: 25_000 })
     if (!results.length) console.log('[cron/bookamat] nothing to sync')

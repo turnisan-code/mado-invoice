@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { toCsv, csvDate, type CsvValue } from '@/lib/utils/csv'
 import { createZipStream, type ZipEntry } from '@/lib/utils/zip'
@@ -254,9 +255,9 @@ async function pdfZipResponse(supabase: Supabase, period: Period, t: TFn, lang: 
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const params = req.nextUrl.searchParams
   const kind = params.get('kind') as Kind
