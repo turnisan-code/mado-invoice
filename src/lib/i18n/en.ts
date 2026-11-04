@@ -2713,6 +2713,11 @@ export const en = {
         delete: 'Delete drafts',
         bookamat_sync: 'Sync with Bookamat',
       },
+      clientKinds: {
+        claude_ai: 'claude.ai (web, desktop, mobile)',
+        claude_code: 'Claude Code',
+        static: 'own OAuth client',
+      },
       callsTitle: 'Recent requests',
       callsEmpty: 'No requests yet.',
       callFailed: 'failed: {code}',

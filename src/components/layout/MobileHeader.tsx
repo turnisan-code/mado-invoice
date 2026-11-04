@@ -23,7 +23,8 @@ export default function MobileHeader() {
   async function signOut() {
     setMoreOpen(false)
     rememberUiLang(lang)
-    await createClient().auth.signOut()
+    // This device only, as in the sidebar.
+    await createClient().auth.signOut({ scope: 'local' })
     window.location.assign('/login')
   }
 
