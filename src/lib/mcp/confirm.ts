@@ -83,7 +83,7 @@ export function describeAction(row: McpAction, t: TFn, handle?: string): ToolRes
       created_at: row.created_at,
       expires_at: row.expires_at,
       ...(row.finished_at ? { finished_at: row.finished_at } : {}),
-      ...(state === 'done' && result ? { result: { summary: result.summary, ...(result.data ?? {}), ...(result.warnings?.length ? { warnings: result.warnings } : {}) } } : {}),
+      ...(state === 'done' && result ? { result: { summary: result.summary, ...(englishPreview(result.data ?? {}, t) as Record<string, unknown>), ...(result.warnings?.length ? { warnings: result.warnings } : {}) } } : {}),
       ...(state === 'failed' && row.error ? { error: row.error } : {}),
     },
   }
@@ -208,7 +208,16 @@ export async function approveAction(
   const def = actionKind(row.kind)
   if (!def) return { ok: false, reason: 'not_found' }
   const args = def.argsSchema.parse(row.args)
-  if (await def.fingerprint(ctx, args) !== row.fingerprint) return { ok: false, reason: 'state_changed' }
+  let fingerprint: string
+  try {
+    fingerprint = await def.fingerprint(ctx, args)
+  } catch (err) {
+    // Refused now (issued, billed, gone since): it changed. A failed read is an error.
+    const { code } = toToolError(err, ctx.t)
+    if (code === 'database' || code === 'internal') throw err
+    return { ok: false, reason: 'state_changed' }
+  }
+  if (fingerprint !== row.fingerprint) return { ok: false, reason: 'state_changed' }
 
   if (requireCode) {
     const check = await checkCode()
