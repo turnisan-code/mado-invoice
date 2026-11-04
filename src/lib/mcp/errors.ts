@@ -82,7 +82,7 @@ function codedError(e: CodedError, t: TFn): ToolError {
   const message = typeof e.message === 'string' ? e.message : ''
   const details = typeof e.details === 'string' ? e.details : null
 
-  if (MCP_CODES.has(code)) return { code, message: mcpErrorText(code as McpErrorCode, t) }
+  if (MCP_CODES.has(code)) return { code, message: mcpErrorText(code as McpErrorCode, t, undefined, { in_use: details }) }
   if (LIFECYCLE_CODE.test(code)) {
     switch (code) {
       case 'MI030': return { code, message: t('mcp.errors.notFound') }
@@ -94,7 +94,6 @@ function codedError(e: CodedError, t: TFn): ToolError {
   }
   if (SQL_MESSAGES.has(message)) return { code: message, message: mcpErrorText(message as McpErrorCode, t) }
   if (code === 'PGRST116') return { code: 'not_found', message: t('mcp.errors.notFound') }
-  if (code === 'not_found') return { code, message: t('mcp.errors.notFound') }
   const known = knownApiError(t, { code, error: message, details: e.details })
   if (known) return { code, message: known }
   console.error('[mcp] database error:', code, message)
