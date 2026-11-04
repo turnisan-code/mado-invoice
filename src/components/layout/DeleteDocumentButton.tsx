@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
+import { deleteDraft } from '@/lib/services/lifecycle'
 
 interface Props {
   id: string
@@ -34,8 +35,8 @@ export default function DeleteDocumentButton({ id, backTo, docNumber, isTemplate
 
   async function handleDelete() {
     setLoading(true)
-    const { data, error } = await supabase.from('documents').delete().eq('id', id).is('number', null).select('id')
-    if (error || !data?.length) {
+    const { deleted, error } = await deleteDraft(supabase, id)
+    if (error || !deleted) {
       toast.error(error ? dbErrorMessage(t, error) : t('lifecycle.errors.issuedNoDelete'))
       setLoading(false)
       setConfirming(false)

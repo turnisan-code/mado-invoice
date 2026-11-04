@@ -25,6 +25,7 @@ import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/type
 import type { TFn } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
+import { deleteClient } from '@/lib/services/lifecycle'
 
 interface Props {
   client?: Client
@@ -36,9 +37,6 @@ interface Props {
 }
 
 const TAX_OPTIONS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
-
-// Postgres foreign_key_violation: documents.client_id and projects.client_id are "on delete restrict".
-const FK_VIOLATION = '23503'
 
 function makeSchema(t: TFn) {
   return z.object({
@@ -263,13 +261,10 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
   async function handleDelete() {
     if (!client) return
     setDeleting(true)
-    const { error } = await supabase.from('clients').delete().eq('id', client.id)
+    const { error, inUse } = await deleteClient(supabase, client.id)
     if (error) {
-      if (error.code === FK_VIOLATION) {
-        // The violated constraint names the table that still refers to the client.
-        const projects = /"projects"/.test(`${error.message} ${error.details ?? ''}`)
-        toast.error(t(projects ? 'views.clientDelete.hasProjects' : 'clients.form.hasDocuments'))
-      } else failed(error)
+      if (inUse) toast.error(t(inUse === 'projects' ? 'views.clientDelete.hasProjects' : 'clients.form.hasDocuments'))
+      else failed(error)
       setDeleting(false)
       setConfirmDelete(false)
       return

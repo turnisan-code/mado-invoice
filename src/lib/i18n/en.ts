@@ -2626,6 +2626,33 @@ export const en = {
     confirm: 'Confirm',
     cancel: 'Cancel',
   },
+  mcp: {
+    errors: {
+      policyLocked: 'The confirmation settings can only be changed in Mado, not from a Claude connection.',
+      actionUnavailable: 'This action is unknown, has expired, was already used, or cannot be run this way.',
+      claudeOnly: 'Only a Claude connection can prepare actions.',
+      freshCode: 'Approving needs a fresh code from your authenticator app. Enter the current code and try again.',
+      invalidInput: 'The arguments are not valid: {issues}',
+      notFound: 'Not found. It may have been deleted; search again for its current id.',
+      draftOnly: 'Only drafts can be changed. An issued document is corrected with a credit note or a Storno.',
+      scope: 'This connection was not granted {scope}. Reconnect Claude and allow it on the consent page.',
+      deadline: 'This took too long and was stopped. Check the current state before trying again.',
+      stateChanged: 'Something changed since this action was prepared. Prepare it again.',
+      labelMismatch: 'The label does not match the prepared action. Pass the label exactly as it was returned.',
+      tooManyPending: 'Too many actions are waiting for approval. Approve or reject them in Mado, or let them expire after 15 minutes.',
+      rateLimited: 'Too many requests. Wait a minute and try again.',
+      resultTooLarge: 'The result is too large. Narrow the search or fetch the next page with offset.',
+    },
+    consent: {
+      title: 'Connect Claude to Mado Invoice',
+    },
+    connectedApps: {
+      title: 'Connected apps',
+    },
+    approve: {
+      title: 'Approve an action from Claude',
+    },
+  },
 }
 
 export type Dict = typeof en

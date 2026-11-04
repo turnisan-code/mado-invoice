@@ -12,6 +12,7 @@ import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { budgetUse, entryAmount, entryRate, expensePrice, formatDuration, isUnbilled, projectTotals } from '@/lib/projects'
 import { statusLabelKey } from '@/lib/status'
+import { deleteProject as removeProject } from '@/lib/services/lifecycle'
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import type { Project, ProjectExpense, TimeEntry, VatRate } from '@/types'
@@ -127,11 +128,11 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
 
   async function deleteProject() {
     setBusy(true)
-    const { error } = await supabase.from('projects').delete().eq('id', project.id)
+    const { error, billed } = await removeProject(supabase, project.id)
     if (error) {
       setBusy(false)
       // projects_delete_guard: entries were billed since the page loaded.
-      if (error.code === 'MI033') { setDeletingProject(false); toast.info(t('projects.form.deleteBilled')); router.refresh(); return }
+      if (billed) { setDeletingProject(false); toast.info(t('projects.form.deleteBilled')); router.refresh(); return }
       toast.error(t('projects.form.deleteFailed'))
       return
     }

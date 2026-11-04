@@ -2626,4 +2626,31 @@ export const de = {
     confirm: 'Bestätigen',
     cancel: 'Abbrechen',
   },
+  mcp: {
+    errors: {
+      policyLocked: 'Die Bestätigungseinstellungen lassen sich nur in Mado ändern, nicht über eine Claude-Verbindung.',
+      actionUnavailable: 'Diese Aktion ist unbekannt, abgelaufen, bereits verwendet oder kann so nicht ausgeführt werden.',
+      claudeOnly: 'Nur eine Claude-Verbindung kann Aktionen vorbereiten.',
+      freshCode: 'Zum Freigeben ist ein aktueller Code aus der Authenticator-App nötig. Den aktuellen Code eingeben und erneut versuchen.',
+      invalidInput: 'Die Angaben sind ungültig: {issues}',
+      notFound: 'Nicht gefunden. Vielleicht wurde es gelöscht; erneut nach der aktuellen ID suchen.',
+      draftOnly: 'Nur Entwürfe können geändert werden. Ein ausgestelltes Dokument wird mit einer Gutschrift oder einem Storno korrigiert.',
+      scope: 'Diese Verbindung hat {scope} nicht erhalten. Claude neu verbinden und es auf der Zustimmungsseite erlauben.',
+      deadline: 'Das hat zu lange gedauert und wurde abgebrochen. Vor einem neuen Versuch den aktuellen Stand prüfen.',
+      stateChanged: 'Seit dem Vorbereiten dieser Aktion hat sich etwas geändert. Die Aktion neu vorbereiten.',
+      labelMismatch: 'Die Bezeichnung passt nicht zur vorbereiteten Aktion. Die Bezeichnung genau so übergeben, wie sie zurückgegeben wurde.',
+      tooManyPending: 'Zu viele Aktionen warten auf Freigabe. Sie in Mado freigeben oder ablehnen, oder nach 15 Minuten ablaufen lassen.',
+      rateLimited: 'Zu viele Anfragen. Eine Minute warten und erneut versuchen.',
+      resultTooLarge: 'Das Ergebnis ist zu groß. Die Suche eingrenzen oder die nächste Seite mit offset abrufen.',
+    },
+    consent: {
+      title: 'Claude mit Mado Invoice verbinden',
+    },
+    connectedApps: {
+      title: 'Verbundene Apps',
+    },
+    approve: {
+      title: 'Aktion von Claude freigeben',
+    },
+  },
 } satisfies Dict

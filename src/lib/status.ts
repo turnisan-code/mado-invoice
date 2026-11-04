@@ -137,9 +137,9 @@ export function statusLabelKey(status: DisplayStatus | string): DictKey {
 
 type DbError = { code?: string | null; message: string; details?: string | null }
 
-// The lifecycle trigger and RPCs raise English messages with MI010–MI018, the deposit guards MI019–MI022; numbering (MI001–MI003)
-// and issue_document's MI004 (incomplete, every reason in the detail) are worded by
-// numberingErrorMessage, which also covers anything else without the raw text.
+// The lifecycle trigger and RPCs raise English messages with MI010–MI018, the deposit guards MI019–MI022, the Claude
+// connector's guards MI040–MI043; numbering (MI001–MI003) and issue_document's MI004 (incomplete, every reason in the
+// detail) are worded by numberingErrorMessage, which also covers anything else without the raw text.
 export function lifecycleErrorMessage(error: DbError, t: TFn): string {
   switch (error.code) {
     case 'MI010': return t('lifecycle.errors.transition')
@@ -155,6 +155,10 @@ export function lifecycleErrorMessage(error: DbError, t: TFn): string {
     case 'MI020': return t('deposits.errors.deducted')
     case 'MI021': return t('deposits.errors.invalidLink')
     case 'MI022': return t('records.deposits.moneyLocked')
+    case 'MI040': return t('mcp.errors.policyLocked')
+    case 'MI041': return t('mcp.errors.actionUnavailable')
+    case 'MI042': return t('mcp.errors.claudeOnly')
+    case 'MI043': return t('mcp.errors.freshCode')
     default: return numberingErrorMessage(error, t)
   }
 }
