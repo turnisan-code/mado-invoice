@@ -245,7 +245,7 @@ export interface IssuePreview {
 }
 
 export class IssueRefusal extends Error {
-  constructor(readonly reason: 'already_issued' | 'cancelled' | 'not_found', readonly documentId: string, readonly number: string | null = null) {
+  constructor(readonly reason: 'already_issued' | 'cancelled', readonly documentId: string, readonly number: string | null = null) {
     super(reason)
   }
 }
