@@ -302,7 +302,8 @@ export async function acquireSessionLease(service: ServiceClient, grantId: strin
     .update({ sb_lease_until: iso(now + SESSION_REFRESH_LEASE * 1000) })
     .eq('id', grantId)
     .is('revoked_at', null)
-    .or(`sb_lease_until.is.null,sb_lease_until.lt.${iso(now)}`)
+    // PostgREST needs the timestamp quoted: '.' and ':' are reserved in or().
+    .or(`sb_lease_until.is.null,sb_lease_until.lt."${iso(now)}"`)
     .select(SESSION_COLUMNS)
   check(error)
   return (data as StoredSession[] | null)?.[0] ?? null

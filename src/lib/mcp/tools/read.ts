@@ -30,6 +30,11 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const uuid = (what: string) => z.string().regex(UUID, 'must be a uuid').describe(what)
 const isoDate = (what: string) => z.string().regex(ISO_DATE, 'must be YYYY-MM-DD').describe(what)
 const DOCUMENT_TYPES = ['invoice', 'quote', 'credit_note'] as const
+// Long histories, projects and statements are cut here so one result stays within MAX_RESULT_CHARS;
+// the totals say how many there are.
+const HISTORY_SHOWN = 50
+const ENTRIES_SHOWN = 200
+const STATEMENT_ROWS_SHOWN = 200
 
 function page<T>(rows: readonly T[], offset: number, limit: number) {
   const items = rows.slice(offset, offset + limit)
@@ -136,7 +141,7 @@ const searchDocuments = defineTool({
 const getDocument = defineTool({
   name: 'get_document',
   title: 'Get document',
-  description: 'One invoice, quote or credit note in full: client, lines in order, totals, payments and payment state, the total it was issued with, history (with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
+  description: 'One invoice, quote or credit note in full: client, lines in order, totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({ id: uuid('Document id') }),
   hints: READ,
@@ -211,7 +216,8 @@ const getDocument = defineTool({
         ...extras,
         notes: doc.notes,
         internal_notes: doc.notes_internal,
-        history: detail.history.map(e => ({ at: e.created_at, type: e.type, actor: e.actor ?? null, detail: e.detail })),
+        history: detail.history.slice(0, HISTORY_SHOWN).map(e => ({ at: e.created_at, type: e.type, actor: e.actor ?? null, detail: e.detail })),
+        history_total: detail.history.length,
         reminders: detail.reminders,
         app_url: documentUrl(doc.type, doc.id),
         pdf_url: doc.number ? documentPdfUrl(doc.id) : null,
@@ -441,7 +447,7 @@ const listProjects = defineTool({
 const getProject = defineTool({
   name: 'get_project',
   title: 'Get project',
-  description: 'One project with its time entries and expenses (unbilled ones by default; include_billed for all), totals, and the invoice lines its unbilled work would produce with grouping entry, description or day, at the default VAT rate.',
+  description: 'One project with its time entries and expenses (unbilled ones by default; include_billed for all; newest 200 each), totals, and the invoice lines its unbilled work would produce with grouping entry, description or day, at the default VAT rate.',
   scope: 'mado:read',
   inputSchema: z.object({
     id: uuid('Project id'),
@@ -468,11 +474,13 @@ const getProject = defineTool({
           client: { id: project.client_id, name: clientDisplayName(client) },
         },
         ...projectFigures(project, totals),
-        time_entries: shownEntries.map(e => ({
+        time_entries_total: shownEntries.length,
+        expenses_total: shownExpenses.length,
+        time_entries: shownEntries.slice(0, ENTRIES_SHOWN).map(e => ({
           id: e.id, date: e.date, minutes: e.minutes, description: e.description, billable: e.billable, rate: e.rate,
           billed_rate: e.billed_rate, invoiced_document_id: e.invoiced_document_id,
         })),
-        expenses: shownExpenses.map(x => ({
+        expenses: shownExpenses.slice(0, ENTRIES_SHOWN).map(x => ({
           id: x.id, date: x.date, description: x.description, net_amount: x.net_amount, vat_rate: x.vat_rate,
           markup_percent: x.markup_percent, billable: x.billable, invoiced_document_id: x.invoiced_document_id,
         })),
@@ -577,7 +585,7 @@ const getVatReport = defineTool({
 const getClientStatement = defineTool({
   name: 'get_client_statement',
   title: 'Client statement',
-  description: 'A client\'s statement of account as of today: every issued invoice and credit note dated from…to (default: this year up to today) plus older ones still open, with total, settled (paid, credited, Skonto, written off) and open amounts (credit notes negative), and the sums. open_only lists every open document up to `to`. statement_pdf_url opens the PDF in the owner\'s browser.',
+  description: 'A client\'s statement of account as of today: every issued invoice and credit note dated from…to (default: this year up to today) plus older ones still open, with total, settled (paid, credited, Skonto, written off) and open amounts (credit notes negative), and the sums (the latest 200 rows are listed; the sums cover all). open_only lists every open document up to `to`. statement_pdf_url opens the PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({
     client_id: uuid('Client id'),
@@ -599,7 +607,8 @@ const getClientStatement = defineTool({
       data: {
         client: { id: statement.client.id, name: clientDisplayName(statement.client) },
         from: args.open_only ? null : from, to, open_only: args.open_only,
-        rows: statement.rows.map(r => ({ ...r, app_url: documentUrl(r.kind === 'invoice' ? 'invoice' : 'credit_note', r.id) })),
+        rows_total: statement.rows.length,
+        rows: statement.rows.slice(-STATEMENT_ROWS_SHOWN).map(r => ({ ...r, app_url: documentUrl(r.kind === 'invoice' ? 'invoice' : 'credit_note', r.id) })),
         sums: statement.sums,
         statement_pdf_url: appUrl(`/api/clients/${args.client_id}/statement?${params}`),
       },
