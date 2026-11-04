@@ -77,7 +77,7 @@ const clientFields = {
   vat_id: z.string().max(30).optional().describe('UID / VAT ID, e.g. ATU12345678.'),
   tax_treatment: z.enum(['at_vat', 'eu_reverse_charge', 'non_eu']).optional().describe('Default: suggested from country and VAT ID.'),
   language: z.enum(['de', 'en']).optional(),
-  payment_days: z.number().int().min(0).max(365).nullable().optional().describe('null: the default payment term from Settings.'),
+  payment_terms_days: z.number().int().min(0).max(365).nullable().optional().describe('Days to pay; null: the default from Settings.'),
   skonto_percent: z.number().min(0).max(100).nullable().optional(),
   skonto_days: z.number().int().min(0).max(365).nullable().optional(),
   einvoice_format: z.enum(['ebinterface', 'ubl']).nullable().optional(),
@@ -102,7 +102,7 @@ function withPatch(values: ClientValues, p: ClientPatch): ClientValues {
   if (p.vat_id !== undefined) v.uid_number = p.vat_id
   if (p.tax_treatment !== undefined) v.tax_treatment = p.tax_treatment
   if (p.language !== undefined) v.language = p.language
-  if (p.payment_days !== undefined) v.payment_days = p.payment_days
+  if (p.payment_terms_days !== undefined) v.payment_days = p.payment_terms_days
   if (p.skonto_percent !== undefined) v.skonto_percent = p.skonto_percent
   if (p.skonto_days !== undefined) v.skonto_days = p.skonto_days
   if (p.einvoice_format !== undefined) v.einvoice_format = p.einvoice_format ?? ''
@@ -127,7 +127,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
       country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment, language: client.language,
-      payment_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
+      payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
     },
   }
 }
@@ -364,7 +364,7 @@ const linkDeposit = defineTool({
   inputSchema: z.object({ final_invoice_id: id, invoice_id: id, linked: z.boolean() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
   async run(args, ctx) {
-    const { data: docs, error } = await ctx.supabase.from('documents').select('id, type, number, status, invoice_kind, client_id').in('id', [args.final_invoice_id, args.invoice_id])
+    const { data: docs, error } = await ctx.supabase.from('documents').select('id, type, number, status, invoice_kind, client_id, final_invoice_id').in('id', [args.final_invoice_id, args.invoice_id])
     if (error) throw error
     const final = docs?.find(d => d.id === args.final_invoice_id)
     const deposit = docs?.find(d => d.id === args.invoice_id)
@@ -374,9 +374,13 @@ const linkDeposit = defineTool({
     if (args.linked && (deposit.type !== 'invoice' || !deposit.number || deposit.status === 'cancelled' || !['advance', 'partial'].includes(deposit.invoice_kind) || deposit.client_id !== final.client_id)) {
       throw invalid(ctx.t('deposits.errors.invalidLink'))
     }
-    const result = await setDepositLink(ctx.supabase, args.final_invoice_id, args.invoice_id, args.linked)
+    const already = args.linked === (deposit.final_invoice_id === final.id)
+    // A repeat only brings the deduction lines in step with what is deducted now.
+    const result = already ? (await writeDeductions(ctx.supabase, final.id), 'ok') : await setDepositLink(ctx.supabase, final.id, deposit.id, args.linked)
     if (result === 'taken') throw invalid(ctx.t('deposits.builder.taken', { number: deposit.number ?? '' }))
-    return documentReply(ctx, args.final_invoice_id, args.linked ? `Now deducting ${deposit.number}.` : `No longer deducting ${deposit.number ?? 'it'}.`)
+    const lead = already ? `Unchanged: ${args.linked ? 'already' : 'not'} deducting ${deposit.number ?? 'it'}.`
+      : args.linked ? `Now deducting ${deposit.number}.` : `No longer deducting ${deposit.number ?? 'it'}.`
+    return documentReply(ctx, args.final_invoice_id, lead)
   },
 })
 
