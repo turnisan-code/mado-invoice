@@ -204,10 +204,11 @@ async function numberTaken(supabase: SupabaseClient, number: string): Promise<bo
   return !!data?.length
 }
 
-// The newest issued document of a type, as startBulkIssue reads it.
+// The newest issued document of a type, as startBulkIssue reads it; of several on that date the
+// highest number, so two reads agree.
 export async function latestIssuedOf(supabase: SupabaseClient, type: DocumentType): Promise<LatestIssued | null> {
   const { data, error } = await supabase.from('documents').select('number, date').eq('type', type).not('number', 'is', null)
-    .order('date', { ascending: false }).limit(1).maybeSingle()
+    .order('date', { ascending: false }).order('number', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   return data?.number ? { number: data.number, date: data.date } : null
 }

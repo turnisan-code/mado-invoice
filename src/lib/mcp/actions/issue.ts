@@ -41,7 +41,8 @@ export async function loadIssueState(ctx: ServiceContext, ids: readonly string[]
     drafts: drafts.map(draftState),
     numbering: types.map(type => ({ type, ...numberingOf(settings, type) })),
     terms: { payment_days: settings.default_payment_days ?? null, validity_days: settings.default_quote_validity_days ?? null },
-    latest: types.map(type => latest.get(type) ?? null),
+    // Only the date (it decides the order warning): a document issued meanwhile moves the counter.
+    latest: types.map(type => latest.get(type)?.date ?? null),
   })
   return { drafts, settings, latest, today: day, fingerprint }
 }
