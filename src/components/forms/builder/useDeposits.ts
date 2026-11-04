@@ -6,9 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
 import {
-  deductionItems, deductionParts, discountOf, linkDeposit, loadClientDeposits, loadQuoteInvoices, sameDeductions,
-  unlinkDeposit, type DepositCheck, type DepositInvoice, type QuoteInvoice,
+  deductionItems, deductionParts, discountOf, loadClientDeposits, loadQuoteInvoices, sameDeductions,
+  type DepositCheck, type DepositInvoice, type QuoteInvoice,
 } from '@/lib/deposits'
+import { setDepositLink } from '@/lib/services/drafts'
 import { asDbError } from '@/lib/status'
 import { lineAmount } from '@/lib/utils/document'
 import type { DocumentType, InvoiceKind } from '@/types'
@@ -100,7 +101,7 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
 
   // Deducting an invoice makes this one the final invoice.
   const link = (d: DepositInvoice) => change(async () => {
-    const result = await linkDeposit(supabase, docId!, d.id)
+    const result = await setDepositLink(supabase, docId!, d.id, true, { syncLines: false })
     if (result === 'taken') {
       toast.error(t('deposits.builder.taken', { number: d.number ?? '' }))
       return false
@@ -110,7 +111,7 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
   }, 'final')
 
   const unlink = (d: DepositInvoice) => change(async () => {
-    await unlinkDeposit(supabase, docId!, d.id)
+    await setDepositLink(supabase, docId!, d.id, false, { syncLines: false })
     toast.success(t('deposits.builder.removed', { number: d.number ?? '' }))
     return true
   })

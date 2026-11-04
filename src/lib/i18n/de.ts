@@ -1861,6 +1861,7 @@ export const de = {
       not_found: 'Rechnung nicht gefunden',
       not_issued: 'Rechnung nicht ausgestellt',
       cancelled: 'Rechnung storniert',
+      date_future: 'Zahlungsdatum in der Zukunft',
     },
     bookamatHint: 'Bezahlte Rechnungen in der Rechnungsliste an Bookamat übertragen →',
     another: 'Weiteren Kontoauszug importieren',
