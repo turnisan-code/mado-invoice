@@ -56,7 +56,7 @@ async function check<T>(result: { data: T; error: unknown }): Promise<T> {
 const getContext = defineTool({
   name: 'get_context',
   title: 'Business context',
-  description: 'Start here. Today\'s date (Vienna), the business, the next document numbers, default VAT and terms, which integrations are connected, and what this connection may do (scopes, how each irreversible action is approved). No secrets.',
+  description: 'Start here. Today\'s date (Vienna), the business, the numbering formats and the next number per document type, default VAT and terms, which integrations are connected, and what this connection may do (scopes, how each irreversible action is approved). No secrets.',
   scope: 'mado:read',
   inputSchema: z.object({}),
   hints: READ,
@@ -76,7 +76,9 @@ const getContext = defineTool({
           address: [s.address_line1, s.address_line2, `${s.zip} ${s.city}`.trim(), s.country].filter(Boolean).join(', '),
           uid_number: s.uid_number,
         },
-        next_numbers: Object.fromEntries(DOCUMENT_TYPES.map(type => [type, expectedNumber(s, type, date) || null])),
+        numbering: Object.fromEntries(DOCUMENT_TYPES.map(type => [type, {
+          format: s[`${type}_number_format`], prefix: s[`${type}_prefix`], next_if_issued_today: expectedNumber(s, type, date) || null,
+        }])),
         defaults: {
           vat_rate: s.default_vat_rate, payment_days: s.default_payment_days, quote_validity_days: s.default_quote_validity_days,
           tax_treatment: s.default_tax_treatment, language: s.default_language, unit: s.default_unit,
