@@ -4,12 +4,13 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import { Plus, FileX, Download } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { formatMoney, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
-import { creditNoteSettled, displayStatus, statusLabelKey } from '@/lib/status'
+import { statusLabelKey } from '@/lib/status'
+import { creditNoteShownStatus as shownStatus, linesTotal as docTotal } from '@/lib/services/queries'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -44,18 +45,7 @@ export interface CreditNote {
   applied?: number
 }
 
-function docTotal(d: CreditNote) {
-  return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
-}
-
-function isSettled(d: CreditNote) {
-  const refunded = (d.payments ?? []).filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0)
-  return creditNoteSettled(docTotal(d), d.applied ?? 0, refunded)
-}
-
 const clientLabel = (d: CreditNote) => clientDisplayName(d.clients)
-const shownStatus = (d: CreditNote, todayStr: string) =>
-  displayStatus({ type: 'credit_note', status: d.status, creditSettled: isSettled(d) }, todayStr)
 
 function exportCSV(docs: CreditNote[], t: TFn, todayStr: string) {
   const rows = docs.map(d => [

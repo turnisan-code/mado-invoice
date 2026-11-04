@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, MessageSquareQuote, Download, Send } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { formatMoney, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -13,6 +13,7 @@ import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { StatusBadge } from './StatusBadge'
+import { linesTotal as docTotal, quoteExpired as isExpired, quoteShownStatus as shownStatus } from '@/lib/services/queries'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
@@ -46,16 +47,7 @@ export interface Quote {
   document_items: DocItem[]
 }
 
-function docTotal(d: Quote) {
-  return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
-}
-
-function isExpired(d: Quote, todayStr: string) {
-  return d.status === 'sent' && !!d.due_date && d.due_date < todayStr
-}
-
 const clientLabel = (d: Quote) => clientDisplayName(d.clients)
-const shownStatus = (d: Quote, todayStr: string) => isExpired(d, todayStr) ? 'expired' : d.status
 
 function exportCSV(quotes: Quote[], todayStr: string, t: TFn) {
   const rows = quotes.map(d => [
