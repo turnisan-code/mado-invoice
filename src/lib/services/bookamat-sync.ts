@@ -12,6 +12,7 @@ import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import { creditNoteSettled } from '@/lib/status'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
+import type { VatRate } from '@/types'
 
 // One sync as the sync route runs it: `adopt` records bookings an earlier attempt created but
 // could not store (its `pending`), instead of booking them again.
@@ -60,6 +61,9 @@ export type BookamatPreviewDoc = {
 
 export interface BookamatPreview {
   document: BookamatPreviewDoc
+  // The VAT rates of its lines and why a 0 % line is free of VAT: they choose the VAT accounts.
+  rates: VatRate[]
+  taxTreatment: string | null
   // What the sync would post, one booking per calendar year; empty when everything is booked.
   bookings: PlannedBooking[]
   // Dunning fees received: reported, never booked.
@@ -125,6 +129,8 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
       recorded,
       pending: doc.bookamat_pending ?? null,
     },
+    rates: totals.vat_groups.map(g => g.rate),
+    taxTreatment: doc.tax_treatment,
     bookings: unbookedPlan(plan.bookings, recorded),
     fees: plan.fees,
     unsettled,

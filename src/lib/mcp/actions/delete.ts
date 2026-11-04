@@ -11,7 +11,7 @@ import { McpToolError } from '../errors'
 import { fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, notice } from './common'
-import { clip, money, word, type Worded } from './words'
+import { clip, entries, money, word, type Worded } from './words'
 
 type Named = { name: string; company: string | null } | null
 
@@ -49,10 +49,10 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
     const client = clip(clientDisplayName(doc.clients))
     const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
     const notices: Worded[] = [notice('mcp.approve.notices.deleteDraft')]
-    if (cascades.payments.length) notices.push(notice('mcp.approve.notices.deletePayments', { count: cascades.payments.length }))
+    if (cascades.payments.length) notices.push(notice(cascades.payments.length === 1 ? 'mcp.approve.notices.deletePaymentsOne' : 'mcp.approve.notices.deletePayments', { count: cascades.payments.length }))
     if (cascades.schedules.length) notices.push(notice('mcp.approve.notices.deleteSchedule'))
-    if (cascades.time.length || cascades.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { time: cascades.time.length, expenses: cascades.expenses.length }))
-    if (cascades.deposits.length) notices.push(notice('mcp.approve.notices.releasesDeposits', { count: cascades.deposits.length }))
+    if (cascades.time.length || cascades.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { entries: entries(cascades.time.length, cascades.expenses.length) }))
+    if (cascades.deposits.length) notices.push(notice(cascades.deposits.length === 1 ? 'mcp.approve.notices.releasesDepositsOne' : 'mcp.approve.notices.releasesDeposits', { count: cascades.deposits.length }))
     return {
       summary: notice('mcp.approve.labels.deleteDraft', { type: { docType: doc.type }, client, gross: money(gross, doc.currency) }),
       notices,
@@ -88,7 +88,7 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
   const project = clip(data.name as string)
   const client = clip(clientDisplayName((data as unknown as { clients: Named }).clients))
   const notices: Worded[] = [notice('mcp.approve.notices.deleteProject')]
-  if (time.length || expenses.length) notices.push(notice('mcp.approve.notices.deleteProjectEntries', { time: time.length, expenses: expenses.length }))
+  if (time.length || expenses.length) notices.push(notice('mcp.approve.notices.deleteProjectEntries', { entries: entries(time.length, expenses.length) }))
   return {
     summary: notice('mcp.approve.labels.deleteProject', { project, client }),
     notices,

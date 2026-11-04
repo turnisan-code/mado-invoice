@@ -1,7 +1,7 @@
 // Booking an issued document's money in Bookamat, one booking per calendar year, with the frozen
 // PDF attached.
 import { z } from 'zod'
-import { BookamatError, type BookamatSettings } from '@/lib/bookamat'
+import { BookamatError, vatAccounts, type BookamatSettings } from '@/lib/bookamat'
 import { bookamatPreview, syncBookamatWithAdopt } from '@/lib/services/bookamat-sync'
 import { clip, money, word, type Worded } from './words'
 import { documentUrl } from '../config'
@@ -29,6 +29,17 @@ async function load(ctx: ServiceContext, documentId: string) {
   return { settings, preview, fingerprint }
 }
 
+// null: not set in Settings (the sync refuses); `cash` only when money came in cash.
+function bookingAccounts(settings: BookamatSettings, preview: Awaited<ReturnType<typeof bookamatPreview>>) {
+  const vat = vatAccounts(settings, preview.taxTreatment)
+  return {
+    bank: settings.bookamat_bank_account_id ?? null,
+    ...(preview.bookings.some(b => b.cash > 0) ? { cash: settings.bookamat_cash_account_id ?? null } : {}),
+    income: settings.bookamat_cost_account_id ?? null,
+    vat: [...new Set(preview.rates)].sort((a, b) => a - b).map(rate => ({ rate, account: vat[rate] ?? null })),
+  }
+}
+
 const argsSchema = z.object({ document_id: z.uuid() })
 type Args = z.output<typeof argsSchema>
 
@@ -36,14 +47,14 @@ export const bookamatSyncAction = defineAction<Args>({
   kind: 'bookamat_sync',
   argsSchema,
   async prepare(ctx, args) {
-    const { preview, fingerprint } = await load(ctx, args.document_id)
+    const { settings, preview, fingerprint } = await load(ctx, args.document_id)
     const d = preview.document
     if (!preview.bookings.length && !preview.unsettled) throw refuse(ctx, 'mcp.approve.refusals.alreadyBooked', { number: d.number })
     const amount = preview.bookings.reduce((s, b) => s + (b.kind === 'refund' ? -b.amount : b.amount), 0)
     const notices: Worded[] = [notice('mcp.approve.notices.bookamatPdf')]
     if (preview.unsettled) notices.push(notice('mcp.approve.notices.bookamatUnsettled'))
     if (preview.fees > 0) notices.push(notice('mcp.approve.notices.bookamatFees', { amount: money(preview.fees) }))
-    if (d.recorded.length) notices.push(notice('mcp.approve.notices.bookamatRecorded', { count: d.recorded.length }))
+    if (d.recorded.length) notices.push(notice(d.recorded.length === 1 ? 'mcp.approve.notices.bookamatRecordedOne' : 'mcp.approve.notices.bookamatRecorded', { count: d.recorded.length }))
     const summary = notice('mcp.approve.labels.bookamat', { number: d.number, count: preview.bookings.length, amount: money(Math.round(amount * 100) / 100) })
     return {
       label: word(ctx.t, 'en', summary),
@@ -52,6 +63,9 @@ export const bookamatSyncAction = defineAction<Args>({
         notices,
         document: { id: d.id, type: d.type, number: d.number, client: clip(d.client), total: d.total, app_url: documentUrl(d.type, d.id) },
         bookings: preview.bookings,
+        // The Bookamat account ids from Settings each booking posts to (for another year, the
+        // account of the same name in that year).
+        accounts: bookingAccounts(settings, preview),
         recorded: d.recorded,
         fees: preview.fees,
       },

@@ -5,12 +5,9 @@ import { Fragment } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import type { TFn, UiLang } from '@/lib/i18n'
 import { StatusBadge } from '@/components/lists/StatusBadge'
-import { isWorded, word, type Worded } from '@/lib/mcp/actions/words'
+import { errorText, isWorded, word, type Worded } from '@/lib/mcp/actions/words'
 import type { ActionState } from '@/lib/mcp/confirm'
 import { formatDate, formatMoney } from '@/lib/utils/document'
-import { bookamatErrorMessage } from '@/lib/bookamat-client'
-import { knownApiError } from '@/lib/api-errors'
-import { lifecycleErrorMessage } from '@/lib/status'
 import type { McpAction } from '@/types'
 
 type Obj = Record<string, unknown>
@@ -66,30 +63,35 @@ function DocLine({ d, t, lang, expected }: { d: Obj; t: TFn; lang: UiLang; expec
   )
 }
 
-function Addresses({ values, foreign, t }: { values: string[]; foreign: string[]; t: TFn }) {
+// Addresses not on the client record, or on it but never emailed from Mado, stand out.
+function Addresses({ values, foreign, unconfirmed, t }: { values: string[]; foreign: string[]; unconfirmed: string[]; t: TFn }) {
   const strange = new Set(foreign.map(a => a.toLowerCase()))
+  const fresh = new Set(unconfirmed.map(a => a.toLowerCase()))
   return (
     <span className="flex flex-wrap gap-x-2 gap-y-1">
-      {values.map(a => (
-        <span key={a} className={strange.has(a.toLowerCase()) ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
-          {a}{strange.has(a.toLowerCase()) && <span className="ml-1 text-xs font-normal">({t('mcp.approve.preview.notOnRecord')})</span>}
-        </span>
-      ))}
+      {values.map(a => {
+        const hint = strange.has(a.toLowerCase()) ? t('mcp.approve.preview.notOnRecord') : fresh.has(a.toLowerCase()) ? t('mcp.approve.preview.firstEmail') : null
+        return (
+          <span key={a} className={hint ? 'font-medium text-amber-700 dark:text-amber-400' : ''}>
+            {a}{hint && <span className="ml-1 text-xs font-normal">({hint})</span>}
+          </span>
+        )
+      })}
     </span>
   )
 }
 
 function EmailBlock({ email, t }: { email: Obj; t: TFn }) {
-  const foreign = strings(email.foreign)
+  const marks = { foreign: strings(email.foreign), unconfirmed: strings(email.unconfirmed), t }
   const body = text(email.body)
   return (
     <section className={cardCls + ' p-4 sm:p-5'}>
       <h3 className="text-sm font-semibold mb-1">{t('mcp.approve.preview.email')}</h3>
       <dl className="divide-y divide-neutral-100 dark:divide-neutral-800">
         {email.from ? <Field label={t('mcp.approve.preview.from')}>{text(email.from)}</Field> : null}
-        <Field label={t('mcp.approve.preview.to')}><Addresses values={strings(email.to)} foreign={foreign} t={t} /></Field>
-        {strings(email.cc).length > 0 && <Field label={t('mcp.approve.preview.cc')}><Addresses values={strings(email.cc)} foreign={foreign} t={t} /></Field>}
-        {strings(email.bcc).length > 0 && <Field label={t('mcp.approve.preview.bcc')}><Addresses values={strings(email.bcc)} foreign={foreign} t={t} /></Field>}
+        <Field label={t('mcp.approve.preview.to')}><Addresses values={strings(email.to)} {...marks} /></Field>
+        {strings(email.cc).length > 0 && <Field label={t('mcp.approve.preview.cc')}><Addresses values={strings(email.cc)} {...marks} /></Field>}
+        {strings(email.bcc).length > 0 && <Field label={t('mcp.approve.preview.bcc')}><Addresses values={strings(email.bcc)} {...marks} /></Field>}
         {email.subject !== undefined && <Field label={t('mcp.approve.preview.subject')}>{text(email.subject)}</Field>}
         {strings(email.attachments).length > 0 && <Field label={t('mcp.approve.preview.attachments')}>{strings(email.attachments).join(', ')}</Field>}
       </dl>
@@ -188,6 +190,14 @@ export function ActionPreview({ row, t, lang }: { row: Pick<McpAction, 'kind' | 
     case 'bookamat_sync': {
       const doc = obj(p.document)
       const bookings = list(p.bookings).map(obj)
+      const accounts = obj(p.accounts)
+      const account = (v: unknown) => (v == null || v === '' ? t('mcp.approve.preview.accountMissing') : `#${text(v)}`)
+      const accountRows: [string, string][] = p.accounts ? [
+        [t('mcp.approve.preview.accountBank'), account(accounts.bank)],
+        ...('cash' in accounts ? [[t('mcp.approve.preview.accountCash'), account(accounts.cash)] as [string, string]] : []),
+        [t('mcp.approve.preview.accountIncome'), account(accounts.income)],
+        ...list(accounts.vat).map(obj).map(v => [t('mcp.approve.preview.accountVat', { rate: num(v.rate) }), account(v.account)] as [string, string]),
+      ] : []
       return (
         <>
           <Documents docs={[{ ...doc, gross: doc.total }]} t={t} lang={lang} />
@@ -206,6 +216,12 @@ export function ActionPreview({ row, t, lang }: { row: Pick<McpAction, 'kind' | 
             </ul>
             {num(p.fees) > 0 && <Figures rows={[[t('mcp.approve.preview.fees'), money(p.fees)]]} />}
           </section>
+          {accountRows.length > 0 && (
+            <section className={cardCls + ' px-4 sm:px-5 py-2'}>
+              <h3 className="text-sm font-semibold pt-2">{t('mcp.approve.preview.accounts')}</h3>
+              <Figures rows={accountRows} />
+            </section>
+          )}
         </>
       )
     }
@@ -224,28 +240,13 @@ export function Notices({ items, t }: { items: string[]; t: TFn }) {
   )
 }
 
-// A stored failure in the owner's language where its code is one the app words; otherwise the
-// English text it was stored with.
-export function storedErrorText(error: unknown, t: TFn): string {
-  const e = obj(error)
-  const code = text(e.code)
-  const message = text(e.message)
-  const details = obj(e.details)
-  if (code.startsWith('einvoice_')) return t(`einvoice.errors.${code.slice('einvoice_'.length)}` as 'einvoice.errors.not_issued')
-  if (code.startsWith('bookamat_')) return bookamatErrorMessage(t, { code: code.slice('bookamat_'.length), error: message, detail: details.detail ?? details })
-  if (/^MI0\d\d$/.test(code)) return lifecycleErrorMessage({ code, message, details: text(details.detail) || null }, t)
-  if (code === 'state_changed') return t('mcp.errors.stateChanged')
-  if (code === 'deadline') return t('mcp.errors.deadline')
-  return knownApiError(t, { code, error: message, problems: details.problems }) ?? (message || t('mcp.approve.errors.generic'))
-}
-
 // What came of it: the result lines in the owner's language, with links to what was made.
 export function ActionResult({ row, state, t, lang }: { row: Pick<McpAction, 'result' | 'error'>; state: ActionState; t: TFn; lang: UiLang }) {
   if (state === 'failed') {
     return (
       <section role="alert" className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-300">
         <h3 className="font-medium mb-1">{t('mcp.approve.failedHeading')}</h3>
-        <p>{storedErrorText(row.error, t)}</p>
+        <p>{errorText(t, lang, row.error)}</p>
       </section>
     )
   }

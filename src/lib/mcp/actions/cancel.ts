@@ -11,7 +11,7 @@ import { McpToolError } from '../errors'
 import { fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, notice, refuse } from './common'
-import { clip, money, word, type Worded } from './words'
+import { clip, entries, money, word, type Worded } from './words'
 
 type CancelDoc = {
   id: string
@@ -63,8 +63,8 @@ export const cancelAction = defineAction<Args>({
     const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
     const client = clip(clientDisplayName(doc.clients))
     const notices: Worded[] = [notice('mcp.approve.notices.cancelFinal')]
-    if (released.time.length || released.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { time: released.time.length, expenses: released.expenses.length }))
-    if (released.deposits.length) notices.push(notice('mcp.approve.notices.releasesDeposits', { count: released.deposits.length }))
+    if (released.time.length || released.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { entries: entries(released.time.length, released.expenses.length) }))
+    if (released.deposits.length) notices.push(notice(released.deposits.length === 1 ? 'mcp.approve.notices.releasesDepositsOne' : 'mcp.approve.notices.releasesDeposits', { count: released.deposits.length }))
     const summary = doc.number
       ? notice('mcp.approve.labels.cancelIssued', { type: { docType: doc.type }, number: doc.number, client })
       : notice('mcp.approve.labels.cancelDraft', { type: { docType: doc.type }, client, gross: money(gross, doc.currency) })

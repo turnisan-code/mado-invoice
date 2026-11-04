@@ -4,7 +4,7 @@
 import { z } from 'zod'
 import { ACTION_KINDS, defineTool, type AnyToolDef, type ToolHints } from '../types'
 import { ACTION_HANDLE_PREFIX, documentUrl } from '../config'
-import { actionStatus, confirmAction, prepareAction } from '../confirm'
+import { actionStatus, confirmAction, MAX_LABEL_CHARS, prepareAction } from '../confirm'
 import { McpToolError } from '../errors'
 import { MAX_ISSUE_DOCUMENTS } from '../actions/issue'
 import { resolveIssueAndSend } from '../actions/issue-and-send'
@@ -23,7 +23,7 @@ const einvoice = z.enum(['ebinterface', 'ubl', 'none']).optional()
 const subject = z.string().max(MAX_SUBJECT).optional().describe('Default: the email template filled in for this document.')
 const body = z.string().max(MAX_BODY).optional().describe('Default: the email template filled in for this document. {{portal_link}} becomes the client-portal link when it is sent.')
 
-const APPROVAL = 'Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status.'
+const APPROVAL = "Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status. If approval is 'chat' instead, ask the owner, then call confirm_action with the same confirmation_id, action and label."
 
 export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
@@ -41,7 +41,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_issue_and_send',
     title: 'Prepare: issue and email a draft',
-    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; any other address is always approved in Mado. ${APPROVAL}`,
+    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid().describe('The draft.'),
@@ -59,7 +59,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_email',
     title: 'Prepare: email a document',
-    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; any other address is always approved in Mado. ${APPROVAL}`,
+    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid(),
@@ -77,7 +77,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_reminder',
     title: 'Prepare: payment reminder',
-    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. ${APPROVAL}`,
+    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. Recipients (gmail) default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
@@ -85,8 +85,8 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
       to: addresses(MAX_RECIPIENTS, "Default (gmail): the client's email."),
       cc: addresses(MAX_COPIES, "Default (gmail): the client's CC list."),
       bcc: addresses(MAX_COPIES, 'Default: none.'),
-      subject: z.string().max(MAX_SUBJECT).optional().describe('Default (gmail): the reminder template for this level.'),
-      body: z.string().max(MAX_BODY).optional().describe('Gmail only. Default: the reminder template for this level.'),
+      subject: z.string().max(MAX_SUBJECT).optional().describe('Default (gmail), also when empty: the reminder template for this level.'),
+      body: z.string().max(MAX_BODY).optional().describe('Gmail only. Default, also when empty: the reminder template for this level.'),
     }),
     hints: PREPARE,
     run: async (args, ctx) => prepareAction(ctx, 'send_reminder', await resolveSendReminder(ctx, args)),
@@ -141,7 +141,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
     inputSchema: z.object({
       confirmation_id: handle,
       action: z.enum(ACTION_KINDS as [string, ...string[]]),
-      label: z.string().max(500).describe('Exactly as prepare returned it.'),
+      label: z.string().max(MAX_LABEL_CHARS).describe('Exactly as prepare returned it.'),
     }),
     hints: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     meta: { 'anthropic/requiresUserInteraction': true },

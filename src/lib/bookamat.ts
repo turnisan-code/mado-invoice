@@ -255,7 +255,7 @@ export function bookingLines(plan: PlannedBooking, groups: { rate: VatRate; base
 }
 
 // The 0 % account depends on why nothing is charged: reverse charge, non-EU, or a domestic 0 % line.
-function vatAccounts(settings: BookamatSettings, taxTreatment: string | null): Partial<Record<VatRate, number>> {
+export function vatAccounts(settings: BookamatSettings, taxTreatment: string | null): Partial<Record<VatRate, number>> {
   const zero = taxTreatment === 'eu_reverse_charge' ? settings.bookamat_vat_account_rc
     : taxTreatment === 'non_eu' ? settings.bookamat_vat_account_non_eu
     : settings.bookamat_vat_account_0

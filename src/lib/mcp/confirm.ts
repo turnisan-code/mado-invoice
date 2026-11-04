@@ -8,7 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { makeT, type TFn } from '@/lib/i18n'
 import type { McpAction, McpActionKind } from '@/types'
 import { actionKind } from './actions'
-import { isWorded, word } from './actions/words'
+import { storedError } from './actions/common'
+import { isWorded, word, type StoredError } from './actions/words'
 import { ACTION_HANDLE_PREFIX, approveUrl } from './config'
 import { randomToken, sha256Hex } from './crypto'
 import { McpToolError, toToolError, type ToolError } from './errors'
@@ -37,11 +38,16 @@ export function argsHash(args: unknown): string {
   return sha256Hex(canonicalJson(args))
 }
 
-// Worded parts of a stored preview, in English for Claude.
+// The longest label an action can have (an email to 30 addresses of 254 characters): confirm_action
+// must accept every label exactly.
+export const MAX_LABEL_CHARS = 10_000
+
+// Worded parts of a stored preview, in English for Claude. A stored error's dictionary key
+// (`worded`) only serves the approval page; its message is the English text.
 export function englishPreview(value: unknown, t: TFn = makeT('en')): unknown {
   if (isWorded(value)) return word(t, 'en', value)
   if (Array.isArray(value)) return value.map(v => englishPreview(v, t))
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, englishPreview(v, t)]))
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'worded').map(([k, v]) => [k, englishPreview(v, t)]))
   return value
 }
 
@@ -84,7 +90,7 @@ export function describeAction(row: McpAction, t: TFn, handle?: string): ToolRes
       expires_at: row.expires_at,
       ...(row.finished_at ? { finished_at: row.finished_at } : {}),
       ...(state === 'done' && result ? { result: { summary: result.summary, ...(englishPreview(result.data ?? {}, t) as Record<string, unknown>), ...(result.warnings?.length ? { warnings: result.warnings } : {}) } } : {}),
-      ...(state === 'failed' && row.error ? { error: row.error } : {}),
+      ...(state === 'failed' && row.error ? { error: englishPreview(row.error, t) } : {}),
     },
   }
 }
@@ -96,6 +102,7 @@ export async function prepareAction(ctx: ToolContext, kind: McpActionKind, rawAr
   if (!def) throw new McpToolError('internal')
   const args = def.argsSchema.parse(rawArgs)
   const prep = await def.prepare(ctx, args)
+  if (prep.label.length > MAX_LABEL_CHARS) throw new McpToolError('internal')
   const { handle, hash } = newActionHandle()
   const { data, error } = await ctx.supabase.rpc('mcp_create_action', {
     p_handle_hash: hash,
@@ -132,7 +139,7 @@ export async function prepareAction(ctx: ToolContext, kind: McpActionKind, rawAr
 
 export type RunResult = { ok: true; outcome: ActionOutcome } | { ok: false; error: ToolError; thrown: unknown }
 
-async function finish(supabase: SupabaseClient, id: string, ok: boolean, result: ActionOutcome | null, error: ToolError | null) {
+async function finish(supabase: SupabaseClient, id: string, ok: boolean, result: ActionOutcome | null, error: StoredError | null) {
   const { error: finishErr } = await supabase.rpc('mcp_finish_action', { p_id: id, p_ok: ok, p_result: result, p_error: error })
   if (finishErr) console.error(`[mcp] outcome of action ${id} not recorded:`, finishErr.code, finishErr.message)
 }
@@ -150,7 +157,7 @@ export async function runClaimed(ctx: ServiceContext, row: McpAction): Promise<R
     await finish(ctx.supabase, row.id, true, { summary: outcome.summary, data: outcome.data, ...(outcome.warnings?.length ? { warnings: outcome.warnings } : {}) }, null)
     return { ok: true, outcome }
   } catch (thrown) {
-    const error = toToolError(thrown, ctx.t)
+    const error = storedError(thrown, ctx.t)
     await finish(ctx.supabase, row.id, false, null, error)
     return { ok: false, error, thrown }
   }

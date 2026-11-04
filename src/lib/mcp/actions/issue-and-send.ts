@@ -4,19 +4,19 @@
 import { z } from 'zod'
 import { pdfFilename } from '@/lib/pdf/render'
 import { einvoiceFilename } from '@/lib/einvoice/common'
-import { foreignAddresses, sendDocumentEmail } from '@/lib/services/email'
+import { sendDocumentEmail } from '@/lib/services/email'
 import { clientDisplayName } from '@/lib/utils/clients'
 import type { EInvoiceFormat } from '@/types'
 import { APP_URL } from '../config'
-import { McpToolError, toToolError, type ToolError } from '../errors'
+import { McpToolError } from '../errors'
 import { fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
-import { checkAddresses, emailArgs, gmailConnected, mayOutlastClient, notice, refuse } from './common'
+import { checkAddresses, emailArgs, gmailConnected, mayOutlastClient, newRecipients, notice, refuse, storedError } from './common'
 import { issueNotices, issueOutcome, loadIssueState, previewIssue, runIssue, withLinks } from './issue'
 import {
   clientEInvoice, composeFor, emailFailureError, emailNotices, emailState, loadEmailDoc, recipients, type EmailInput,
 } from './send-email'
-import { clip, money, word, type Worded } from './words'
+import { clip, money, word, type StoredError, type Worded } from './words'
 
 const argsSchema = z.object({
   document_id: z.uuid(),
@@ -64,8 +64,8 @@ export const issueAndSendAction = defineAction<Args>({
     if (args.einvoice && doc.type === 'quote') throw refuse(ctx, 'mcp.approve.refusals.einvoiceQuote')
 
     const all = [...args.to, ...args.cc, ...args.bcc]
-    const foreign = foreignAddresses(all, doc.clients)
-    const notices: Worded[] = [...issueNotices(preview), ...emailNotices(args, foreign)]
+    const recipientsCheck = await newRecipients(ctx, all, doc.clients)
+    const notices: Worded[] = [...issueNotices(preview), ...emailNotices(args, recipientsCheck)]
     if (args.einvoice) notices.push(notice('mcp.approve.notices.einvoiceAfterIssue'))
     const summary = notice('mcp.approve.labels.issueAndSend', {
       type: { docType: planned.type }, client: clip(planned.client?.name ?? clientDisplayName(doc.clients)), number: planned.expected_number,
@@ -82,11 +82,11 @@ export const issueAndSendAction = defineAction<Args>({
         email: {
           from: issue.settings.gmail_email, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
           attachments: [pdfFilename(planned.expected_number), ...(args.einvoice ? [einvoiceFilename(planned.expected_number, args.einvoice)] : [])],
-          einvoice: args.einvoice, upload_to_drive: false, foreign,
+          einvoice: args.einvoice, upload_to_drive: false, ...recipientsCheck,
         },
       },
       warnings: notices.map(n => word(ctx.t, 'en', n)),
-      forceApp: foreign.length > 0 || mayOutlastClient(ctx, { documents: 1 }),
+      forceApp: recipientsCheck.foreign.length + recipientsCheck.unconfirmed.length > 0 || mayOutlastClient(ctx, { documents: 1 }),
       fingerprint,
     }
   },
@@ -100,21 +100,22 @@ export const issueAndSendAction = defineAction<Args>({
     const all = [...args.to, ...args.cc, ...args.bcc]
 
     let email: Record<string, unknown> | null = null
-    let emailError: ToolError | null = null
+    let emailError: StoredError | null = null
     if (number !== args.expected_number) {
-      emailError = { code: 'number_changed', message: ctx.t('mcp.approve.result.numberChanged', { number, expected: args.expected_number }) }
+      const changed = notice('mcp.approve.result.numberChanged', { number, expected: args.expected_number })
+      emailError = { code: 'number_changed', message: word(ctx.t, 'en', changed), worded: changed }
     } else {
       const sent = await sendDocumentEmail(ctx.supabase, await ctx.settings(), {
         documentId: args.document_id, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
         einvoice: args.einvoice, portalOrigin: APP_URL,
       })
       if (sent.ok) email = { to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, attachments: sent.attachments, einvoice: sent.einvoice }
-      else emailError = toToolError(emailFailureError(ctx, sent), ctx.t)
+      else emailError = storedError(emailFailureError(ctx, sent), ctx.t)
     }
 
     const report: Worded[] = [...issued.report]
     if (email) report.push(notice('mcp.approve.result.sent', { to: { list: all } }))
-    else report.push(notice('mcp.approve.result.notSent', { number, error: emailError?.message ?? '' }))
+    else if (emailError) report.push(notice('mcp.approve.result.notSent', { number, error: { error: emailError } }))
     const warnings = [...(issued.warnings ?? []), ...(emailError ? [word(ctx.t, 'en', report.at(-1)!)] : [])]
     return {
       summary: report.map(w => word(ctx.t, 'en', w)).join(' '),

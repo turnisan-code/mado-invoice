@@ -58,9 +58,3 @@ export function clientAddresses(client: { email?: string | null; cc_emails?: rea
   const { emails } = parseEmailList([client?.email ?? '', ...(client?.cc_emails ?? [])])
   return new Set(emails.map(a => a.toLowerCase()))
 }
-
-// The addresses of an email that are not on the client record, as written.
-export function foreignAddresses(addresses: readonly string[], client: Parameters<typeof clientAddresses>[0]): string[] {
-  const known = clientAddresses(client)
-  return addresses.filter(a => !known.has(a.trim().toLowerCase()))
-}

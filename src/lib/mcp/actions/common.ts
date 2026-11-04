@@ -1,15 +1,16 @@
 // What the irreversible action kinds share: the long-run rule, refusals worded for Claude, the
 // email fields and the state rows their fingerprints hash.
 import { z } from 'zod'
-import type { DictKey, TranslateVars } from '@/lib/i18n'
-import { isPlainAddress } from '@/lib/templates'
+import type { DictKey, TFn, TranslateVars } from '@/lib/i18n'
+import { clientAddresses } from '@/lib/services/email-compose'
+import { isPlainAddress, parseEmailList } from '@/lib/templates'
 import { orderItems } from '@/lib/utils/document'
 import type { Settings } from '@/types'
 import { LONG_ACTION_DOCUMENTS, TOOL_DEADLINE_MS } from '../config'
-import { McpToolError, type McpErrorCode } from '../errors'
+import { McpToolError, toToolError, type McpErrorCode } from '../errors'
 import { cents } from '../fingerprint'
 import type { ServiceContext, ToolContext } from '../types'
-import type { Worded } from './words'
+import { isWorded, type StoredError, type Worded } from './words'
 
 // Claude Code gives up when no byte arrives within 60 s: what may take longer is approved and run
 // in Mado for such grants, whatever the policy says.
@@ -17,11 +18,20 @@ export function mayOutlastClient(ctx: ToolContext, { documents = 1, bookamat = f
   return TOOL_DEADLINE_MS[ctx.grant.clientKind] < 60_000 && (bookamat || documents > LONG_ACTION_DOCUMENTS)
 }
 
+// The refusal keeps its dictionary key (`worded`), so a failure stored with an action reads in the
+// owner's language on the approval page; Claude gets the English message.
 export function refuse(ctx: ServiceContext, key: DictKey, vars?: TranslateVars, code: McpErrorCode = 'invalid_input', details?: Record<string, unknown>): McpToolError {
-  return new McpToolError(code, { message: ctx.t(key, vars), ...(details ? { details } : {}) })
+  return Object.assign(new McpToolError(code, { message: ctx.t(key, vars), ...(details ? { details } : {}) }), { worded: notice(key, vars) })
 }
 
 export const notice = (key: DictKey, vars?: Worded['vars']): Worded => ({ key, ...(vars ? { vars } : {}) })
+
+// A failure as it is stored with an action (its result or its error): the English ToolError, plus
+// the dictionary key of a refusal.
+export function storedError(err: unknown, t: TFn): StoredError {
+  const worded = err && typeof err === 'object' ? (err as { worded?: unknown }).worded : undefined
+  return { ...toToolError(err, t), ...(isWorded(worded) ? { worded } : {}) }
+}
 
 // A refusal with a code errors.ts already words: an API code (src/lib/api-errors.ts, e.g.
 // 'nothing_outstanding', 'google_reauth') or a lifecycle code (MI012 an issued invoice needs a
@@ -62,6 +72,50 @@ export function uniqueAddresses(list: readonly string[]): string[] {
 
 export function gmailConnected(settings: Pick<Settings, 'gmail_refresh_token' | 'gmail_email'>): boolean {
   return !!settings.gmail_refresh_token && !!settings.gmail_email
+}
+
+// ─── Recipients ──────────────────────────────────────────────────────────────
+
+// Enough history for any client; an address emailed only before it counts as new (approved in Mado).
+const EMAILED_HISTORY_ROWS = 1000
+
+// Every address the owner emailed this client's documents to from Mado: the browser's own emails
+// and reminders and the actions approved there (actor null). Not what a Claude session sent, the
+// reminder cron, or a reminder only recorded as sent another way.
+export async function ownerEmailed(ctx: ServiceContext, clientId: string): Promise<Set<string>> {
+  const { data, error } = await ctx.supabase.from('document_events')
+    .select('detail, documents!inner(client_id)')
+    .eq('documents.client_id', clientId)
+    .in('type', ['emailed', 'reminder_sent'])
+    .is('actor', null)
+    .order('created_at', { ascending: false })
+    .limit(EMAILED_HISTORY_ROWS)
+  if (error) throw error
+  const out = new Set<string>()
+  for (const row of (data ?? []) as { detail: Record<string, unknown> | null }[]) {
+    const d = row.detail ?? {}
+    if (d.automatic === true || d.manual === true) continue
+    const parts = [d.to, d.cc, d.bcc].flatMap(v => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.filter((a): a is string => typeof a === 'string') : []))
+    for (const address of parseEmailList(parts).emails) out.add(address.toLowerCase())
+  }
+  return out
+}
+
+// The recipients the owner approves in Mado whatever the policy: `foreign` is not on the client
+// record, `unconfirmed` is on it but was never emailed from Mado by the owner. Claude can write
+// the client record (update_client, create_client), so being on it alone does not make an
+// address known.
+export async function newRecipients(
+  ctx: ServiceContext,
+  addresses: readonly string[],
+  client: { id: string; email?: string | null; cc_emails?: readonly string[] | null } | null | undefined,
+): Promise<{ foreign: string[]; unconfirmed: string[] }> {
+  const onRecord = clientAddresses(client)
+  const foreign = addresses.filter(a => !onRecord.has(a.trim().toLowerCase()))
+  const listed = addresses.filter(a => onRecord.has(a.trim().toLowerCase()))
+  if (!client || !listed.length) return { foreign, unconfirmed: [] }
+  const emailed = await ownerEmailed(ctx, client.id)
+  return { foreign, unconfirmed: listed.filter(a => !emailed.has(a.trim().toLowerCase())) }
 }
 
 // ─── Fingerprint rows ────────────────────────────────────────────────────────

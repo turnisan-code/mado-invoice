@@ -5,9 +5,10 @@ import { pdfFilename } from '@/lib/pdf/render'
 import { exportEInvoice } from '@/lib/einvoice/export'
 import { einvoiceFilename } from '@/lib/einvoice/common'
 import {
-  composeDocumentEmail, documentEmailTemplate, foreignAddresses, hasPortalLinkToken, sendDocumentEmail,
+  composeDocumentEmail, documentEmailTemplate, hasPortalLinkToken, sendDocumentEmail,
   type EmailFailure,
 } from '@/lib/services/email'
+import { PRINTED_CLIENT_COLUMNS, type PrintedClient } from '@/lib/services/issue'
 import { parseEmailList, templateLang } from '@/lib/templates'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
@@ -16,18 +17,18 @@ import { APP_URL, documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
-import { checkAddresses, codedError, emailArgs, gmailConnected, itemsState, notice, paymentsState, refuse, uniqueAddresses } from './common'
+import { checkAddresses, codedError, emailArgs, gmailConnected, itemsState, newRecipients, notice, paymentsState, refuse, uniqueAddresses } from './common'
 import { clip, money, word, type Worded } from './words'
 
 const EMAIL_DOC_COLUMNS = [
   'id', 'type', 'number', 'status', 'date', 'due_date', 'language', 'currency', 'tax_treatment', 'discount_type', 'discount_value',
   'skonto_percent', 'skonto_days', 'invoice_kind', 'issued_total', 'drive_file_id', 'service_date', 'service_date_end', 'buyer_reference', 'notes',
-  'clients(id, name, company, email, cc_emails, einvoice_format)',
+  `clients(id, cc_emails, einvoice_format, ${PRINTED_CLIENT_COLUMNS})`,
   'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)',
   'payments(id, date, amount, kind, method)',
 ].join(', ')
 
-export type EmailClient = { id: string; name: string; company: string | null; email: string | null; cc_emails: string[] | null; einvoice_format: EInvoiceFormat | null }
+export type EmailClient = PrintedClient & { id: string; cc_emails: string[] | null; einvoice_format: EInvoiceFormat | null }
 
 export type EmailDoc = {
   id: string
@@ -46,6 +47,10 @@ export type EmailDoc = {
   invoice_kind: InvoiceKind | null
   issued_total: number | null
   drive_file_id: string | null
+  service_date: string | null
+  service_date_end: string | null
+  buyer_reference: string | null
+  notes: string | null
   clients: EmailClient | null
   document_items: Record<string, unknown>[] | null
   payments: { id: string; date: string; amount: number; kind: string | null; method: string | null }[] | null
@@ -112,14 +117,17 @@ export function emailState(doc: EmailDoc, settings: Settings) {
 }
 
 // What a document email depends on: where it goes and from where, the document's state, and the
-// content the e-invoice is built from when one is attached.
+// content the e-invoice is built from when one is attached (with the client as it prints).
 function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
+  const client = doc.clients
   return {
     document: { id: doc.id, type: doc.type, number: doc.number, status: doc.status, currency: doc.currency, issued_total: cents(doc.issued_total), total: docTotals(doc, false).total },
     ...emailState(doc, settings),
     content: einvoice ? {
       date: doc.date, due_date: doc.due_date, tax_treatment: doc.tax_treatment, discount_type: doc.discount_type, discount_value: cents(doc.discount_value),
+      service_date: doc.service_date, service_date_end: doc.service_date_end, buyer_reference: doc.buyer_reference, notes: doc.notes,
       items: itemsState(doc.document_items), payments: paymentsState(doc.payments),
+      client: client ? Object.fromEntries(PRINTED_CLIENT_COLUMNS.split(', ').map(k => [k, client[k as keyof PrintedClient] ?? null])) : null,
     } : null,
   }
 }
@@ -127,13 +135,17 @@ function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
 // A failed send as the error Claude and the approval page are told: nothing was sent.
 export function emailFailureError(ctx: ServiceContext, failure: EmailFailure): unknown {
   if (failure.stage === 'send') return codedError(failure.failure.code, failure.failure.error)
-  if (failure.stage === 'portal_link') return new McpToolError('internal', { message: ctx.t('mcp.approve.result.portalLinkFailed') })
+  if (failure.stage === 'portal_link') return refuse(ctx, 'mcp.approve.result.portalLinkFailed', undefined, 'internal')
   return failure.error
 }
 
-export function emailNotices(mail: { to: string[]; cc: string[]; bcc: string[]; subject: string; body: string }, foreign: string[]): Worded[] {
+export function emailNotices(
+  mail: { subject: string; body: string },
+  { foreign, unconfirmed }: { foreign: string[]; unconfirmed: string[] },
+): Worded[] {
   const out: Worded[] = []
   if (foreign.length) out.push(notice('mcp.approve.notices.foreign', { addresses: { list: foreign } }))
+  if (unconfirmed.length) out.push(notice('mcp.approve.notices.unconfirmed', { addresses: { list: unconfirmed } }))
   if (hasPortalLinkToken(mail.subject) || hasPortalLinkToken(mail.body)) out.push(notice('mcp.approve.notices.portalLink'))
   return out
 }
@@ -176,10 +188,10 @@ export const sendEmailAction = defineAction<Args>({
     // Built (not stored, nothing fetched) to learn now whether it can be.
     if (args.einvoice) await exportEInvoice(ctx.supabase, doc.id, args.einvoice, { pdf: false })
 
-    const foreign = foreignAddresses([...args.to, ...args.cc, ...args.bcc], doc.clients)
+    const recipientsCheck = await newRecipients(ctx, [...args.to, ...args.cc, ...args.bcc], doc.clients)
     const total = docTotals(doc).total
     const issuedTotal = doc.issued_total == null ? null : Number(doc.issued_total)
-    const notices = emailNotices(args, foreign)
+    const notices = emailNotices(args, recipientsCheck)
     if (issuedTotal != null && Math.abs(total - issuedTotal) >= 0.005) {
       notices.push(notice('mcp.approve.notices.totalChanged', { issued: money(issuedTotal, doc.currency), current: money(total, doc.currency) }))
     }
@@ -195,11 +207,11 @@ export const sendEmailAction = defineAction<Args>({
         email: {
           from: settings.gmail_email, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
           attachments: [pdfFilename(doc.number), ...(args.einvoice ? [einvoiceFilename(doc.number, args.einvoice)] : [])],
-          einvoice: args.einvoice, upload_to_drive: args.upload_to_drive, foreign,
+          einvoice: args.einvoice, upload_to_drive: args.upload_to_drive, ...recipientsCheck,
         },
       },
       warnings: notices.map(n => word(ctx.t, 'en', n)),
-      forceApp: foreign.length > 0,
+      forceApp: recipientsCheck.foreign.length + recipientsCheck.unconfirmed.length > 0,
       fingerprint: fingerprintOf(sendState(doc, settings, !!args.einvoice)),
     }
   },
@@ -216,7 +228,7 @@ export const sendEmailAction = defineAction<Args>({
     if (!sent.ok) throw emailFailureError(ctx, sent)
     const report: Worded[] = [notice('mcp.approve.result.sent', { to: { list: [...args.to, ...args.cc, ...args.bcc] } })]
     if (sent.drive) report.push(notice('mcp.approve.result.driveArchived'))
-    if (sent.driveError) report.push(notice('mcp.approve.result.driveUploadFailed', { error: sent.driveError.error }))
+    if (sent.driveError) report.push(notice('mcp.approve.result.driveUploadFailed', { error: { error: { code: sent.driveError.code, message: sent.driveError.error } } }))
     return {
       summary: report.map(w => word(ctx.t, 'en', w)).join(' '),
       data: {

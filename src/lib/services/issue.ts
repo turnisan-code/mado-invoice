@@ -1,6 +1,8 @@
 // Issuing drafts: what issuing them would do (the numbers they would get, their dates, what to
 // watch out for) and the run that issues them in date order, as the lists' bulk actions do. Every
 // number still comes from issue_document (src/lib/pdf/issue.ts); nothing here reads cookies.
+// Server only (the PDF renderer).
+import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { checkIssuable } from '@/lib/pdf/issue'
 import { issueBulkDraft, lostEntries, startBulkIssue, todayIsPeriodDate, type BulkDraft, type BulkIssue } from '@/lib/pdf/bulk'
@@ -75,11 +77,33 @@ export async function issueMany<D extends IssueDraft>(
 
 // ─── What issuing would do ───────────────────────────────────────────────────
 
+// What the PDF and the e-invoice print of the client (src/components/pdf/InvoiceDocument.tsx,
+// src/lib/einvoice/common.ts, fetchBuyerReference).
+export const PRINTED_CLIENT_COLUMNS = 'name, company, address_line1, address_line2, zip, city, country, uid_number, client_number, phone, email, peppol_scheme, peppol_id, buyer_reference, supplier_number'
+
+export type PrintedClient = {
+  name: string
+  company: string | null
+  address_line1: string | null
+  address_line2: string | null
+  zip: string | null
+  city: string | null
+  country: string | null
+  uid_number: string | null
+  client_number: string | null
+  phone: string | null
+  email: string | null
+  peppol_scheme: string | null
+  peppol_id: string | null
+  buyer_reference: string | null
+  supplier_number: string | null
+}
+
 export const ISSUE_DRAFT_COLUMNS = [
   'id', 'type', 'number', 'status', 'date', 'due_date', 'created_at', 'client_id', 'language', 'currency', 'tax_treatment',
   'service_date', 'service_date_end', 'notes', 'discount_type', 'discount_value', 'skonto_percent', 'skonto_days',
   'invoice_kind', 'buyer_reference', 'converted_from_id', 'cancels_document_id', 'recurring_schedule_id',
-  'clients(id, name, company, payment_days, uid_number, country)',
+  `clients(id, payment_days, ${PRINTED_CLIENT_COLUMNS})`,
   'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)',
   'payments(id, date, amount, kind)',
 ].join(', ')
@@ -108,7 +132,7 @@ export type IssueDraftRow = {
   converted_from_id: string | null
   cancels_document_id: string | null
   recurring_schedule_id: string | null
-  clients: { id: string; name: string; company: string | null; payment_days: number | null; uid_number: string | null; country: string | null } | null
+  clients: (PrintedClient & { id: string; payment_days: number | null }) | null
   document_items: IssueDraftItem[] | null
   payments: { id: string; date: string; amount: number; kind: string | null }[] | null
 }

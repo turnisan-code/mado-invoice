@@ -10,7 +10,7 @@ import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, itemsState, notice, paymentsState } from './common'
-import { clip, money, word, type Worded } from './words'
+import { clip, entries, money, word, type Worded } from './words'
 
 const INVOICE_COLUMNS = [
   'id', 'type', 'number', 'status', 'date', 'currency', 'tax_treatment', 'discount_type', 'discount_value', 'invoice_kind', 'final_invoice_id',
@@ -103,8 +103,8 @@ export const stornoAction = defineAction<Args>({
     const notices: Worded[] = [notice('mcp.approve.notices.stornoCancels', { number })]
     if (applied > 0) notices.push(notice('mcp.approve.notices.stornoApplied', { amount: money(applied, currency) }))
     if (refund > 0.005) notices.push(notice('mcp.approve.notices.stornoRefund', { amount: money(refund, currency) }))
-    if (s.released.time || s.released.expenses) notices.push(notice('mcp.approve.notices.stornoReleases', { time: s.released.time, expenses: s.released.expenses }))
-    if (s.released.deposits) notices.push(notice('mcp.approve.notices.stornoDeposits', { count: s.released.deposits }))
+    if (s.released.time || s.released.expenses) notices.push(notice('mcp.approve.notices.stornoReleases', { entries: entries(s.released.time, s.released.expenses) }))
+    if (s.released.deposits) notices.push(notice(s.released.deposits === 1 ? 'mcp.approve.notices.stornoDepositsOne' : 'mcp.approve.notices.stornoDeposits', { count: s.released.deposits }))
     if (s.settings.drive_folder_id && s.settings.gmail_refresh_token) notices.push(notice('mcp.approve.notices.drive'))
     const summary = notice('mcp.approve.labels.storno', { number, creditNote, amount: money(s.total, currency) })
     return {

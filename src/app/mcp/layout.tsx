@@ -3,7 +3,10 @@ import Link from 'next/link'
 import Logo from '@/components/ui/Logo'
 import { getT } from '@/lib/i18n/server'
 
-export const metadata: Metadata = { robots: { index: false, follow: false } }
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getT()
+  return { title: t('mcp.approve.title'), robots: { index: false, follow: false } }
+}
 
 // Approvals open from a link in Claude, often on the phone: a page of their own, without the
 // app's navigation. The proxy has already asked for the password and the authenticator code.

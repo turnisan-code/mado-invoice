@@ -7,11 +7,11 @@ import {
 } from '@/lib/services/issue'
 import type { DocumentType } from '@/types'
 import { documentPdfUrl, documentUrl } from '../config'
-import { McpToolError, toToolError } from '../errors'
+import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ActionOutcome, type ServiceContext, type ToolContext } from '../types'
-import { itemsState, mayOutlastClient, notice, paymentsState, refuse } from './common'
-import { clip, money, word, type Worded } from './words'
+import { itemsState, mayOutlastClient, notice, paymentsState, refuse, storedError } from './common'
+import { clip, entries, money, word, type Worded } from './words'
 
 export const MAX_ISSUE_DOCUMENTS = 10
 
@@ -66,7 +66,7 @@ export function issueNotices(preview: IssuePreview): Worded[] {
     if (d.date_kept) out.push(notice('mcp.approve.notices.dateKept', { number, date: { date: d.date } }))
     if (d.before_latest) out.push(notice('mcp.approve.notices.beforeLatest', { number, date: { date: d.issue_date }, latest: d.before_latest.number, latestDate: { date: d.before_latest.date } }))
     if (d.zero_total) out.push(notice('mcp.approve.notices.zeroTotal', { number }))
-    if (d.unlinked) out.push(notice('mcp.approve.notices.unlinked', { number, time: d.unlinked.time, expenses: d.unlinked.expenses }))
+    if (d.unlinked) out.push(notice('mcp.approve.notices.unlinked', { number, entries: entries(d.unlinked.time, d.unlinked.expenses) }))
     if (d.credits) out.push(notice('mcp.approve.notices.creditApplied', { number, invoice: d.credits.number ?? '' }))
   }
   if (preview.drive) out.push(notice('mcp.approve.notices.drive'))
@@ -97,11 +97,15 @@ export function issueOutcome<D extends IssueDraftRow>(ctx: ServiceContext, run: 
     if (n.beforeLatest) warnings.push(notice('mcp.approve.result.beforeLatest', { number: n.number, latest: n.beforeLatest.number }))
     if (n.snapshotFailed) warnings.push(notice('mcp.approve.result.archiveFailed', { number: n.number }))
     if (n.driveError) warnings.push(notice('mcp.approve.result.driveFailed', { number: n.number }))
-    if (n.unlinked) warnings.push(notice('mcp.approve.notices.unlinked', { number: n.number, time: n.unlinked.time, expenses: n.unlinked.expenses }))
+    if (n.unlinked) warnings.push(notice('mcp.approve.notices.unlinked', { number: n.number, entries: entries(n.unlinked.time, n.unlinked.expenses) }))
   }
-  const failed = run.failed ? { document_id: run.failed.draft.id, error: toToolError(run.failed.error, ctx.t) } : null
-  if (failed) warnings.push(notice('mcp.approve.result.issueFailed', { count: drafts.length - run.notes.length, error: failed.error.message }))
-  else if (run.stopped.length) warnings.push(notice('mcp.approve.result.notReached', { count: run.stopped.length }))
+  const failed = run.failed ? { document_id: run.failed.draft.id, error: storedError(run.failed.error, ctx.t) } : null
+  const notIssued = drafts.length - run.notes.length
+  if (failed) {
+    warnings.push(notice(notIssued === 1 ? 'mcp.approve.result.issueFailedOne' : 'mcp.approve.result.issueFailed', { count: notIssued, error: { error: failed.error } }))
+  } else if (run.stopped.length) {
+    warnings.push(notice(run.stopped.length === 1 ? 'mcp.approve.result.notReachedOne' : 'mcp.approve.result.notReached', { count: run.stopped.length }))
+  }
   return {
     report: [...report, ...warnings],
     warnings: warnings.map(w => word(ctx.t, 'en', w)),

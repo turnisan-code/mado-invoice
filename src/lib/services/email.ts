@@ -13,7 +13,7 @@ import type { EInvoiceFormat, Settings } from '@/types'
 import { fillPortalLink, hasPortalLinkToken } from './email-compose'
 
 export {
-  clientAddresses, composeDocumentEmail, documentEmailTemplate, fillPortalLink, foreignAddresses, hasPortalLinkToken,
+  clientAddresses, composeDocumentEmail, documentEmailTemplate, fillPortalLink, hasPortalLinkToken,
   PORTAL_LINK_TOKEN, templateUsesPortalLink,
 } from './email-compose'
 
