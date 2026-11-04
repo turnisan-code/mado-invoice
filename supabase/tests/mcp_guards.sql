@@ -8,7 +8,7 @@
 --   claude         the session of a seeded claude.ai grant, at aal2
 --   claude2        the session of a second (Claude Code) grant
 -- The first failed check stops the script with "FAIL <check>"; a clean run ends with the row
--- 'all MCP guard checks passed'.
+-- 'all MCP guard checks passed', selected after the rollback so the SQL editor shows it.
 
 begin;
 
@@ -83,6 +83,7 @@ begin
 
   v_base := jsonb_build_object('sub', v_owner, 'role', 'authenticated', 'aud', 'authenticated');
   perform set_config('mcp_test.grant', v_grant::text, true);
+  perform set_config('mcp_test.grant2', v_grant2::text, true);
   perform set_config('mcp_test.doc', v_doc::text, true);
   perform set_config('mcp_test.has_factor', (exists (
     select 1 from auth.mfa_factors f where f.user_id = v_owner and f.status = 'verified'))::text, true);
@@ -106,6 +107,7 @@ set local role authenticated;
 
 do $$
 declare
+  v_event uuid;
   v_actor text;
 begin
   perform public.mcp_test_ok('browser: owner with the second factor', public.is_app_user());
@@ -130,8 +132,10 @@ begin
 
   insert into public.document_events (document_id, type, actor)
   values (current_setting('mcp_test.doc')::uuid, 'status_changed', 'claude_code')
-  returning actor into v_actor;
+  returning id, actor into v_event, v_actor;
   perform public.mcp_test_ok('browser event: a sent actor is cleared', v_actor is null);
+  update public.document_events set actor = 'claude_code' where id = v_event returning actor into v_actor;
+  perform public.mcp_test_ok('browser event: an actor cannot be set later', v_actor is null);
 end $$;
 
 -- ─── Claude grant session ────────────────────────────────────────────────────
@@ -142,6 +146,7 @@ set local role authenticated;
 do $$
 declare
   v       record;
+  v_event uuid;
   v_actor text;
 begin
   perform public.mcp_test_ok('claude: recognised', public.is_mcp_session());
@@ -186,13 +191,19 @@ begin
     $q$update public.settings set mcp_confirm_policy = '{}' where id is not null$q$, 'MI040');
   perform public.mcp_test_raises('claude cannot switch off the approval code (MI040)',
     $q$update public.settings set mcp_approval_totp = false where id is not null$q$, 'MI040');
+  perform public.mcp_test_raises('claude cannot delete the settings row (MI040)',
+    'delete from public.settings where id is not null', 'MI040');
+  perform public.mcp_test_raises('claude cannot insert a settings row (MI040)',
+    $q$insert into public.settings (mcp_confirm_policy, mcp_approval_totp) values ('{"issue": "chat", "send_email": "chat"}', false)$q$, 'MI040');
   update public.settings set company_name = company_name where id is not null;
   perform public.mcp_test_ok('claude still writes other settings', true);
 
   insert into public.document_events (document_id, type, actor)
   values (current_setting('mcp_test.doc')::uuid, 'status_changed', 'claude_code')
-  returning actor into v_actor;
+  returning id, actor into v_event, v_actor;
   perform public.mcp_test_ok('claude event: actor from the grant, not from the insert', v_actor = 'claude_ai');
+  update public.document_events set actor = null where id = v_event returning actor into v_actor;
+  perform public.mcp_test_ok('claude event: the actor cannot be cleared', v_actor = 'claude_ai');
 end $$;
 
 -- ─── Expiry and a foreign grant ──────────────────────────────────────────────
@@ -208,9 +219,14 @@ end $$;
 reset role;
 select set_config('request.jwt.claims', current_setting('mcp_test.claude2'), true);
 set local role authenticated;
-do $$ begin
+do $$
+declare
+  v record;
+begin
   perform public.mcp_test_ok('second grant: its own session', public.is_mcp_session() and public.mcp_session_grant() <> current_setting('mcp_test.grant')::uuid);
   perform public.mcp_test_raises('another grant cannot claim (MI041)', format('select public.mcp_claim_action(%L)', public.mcp_test_h('mca_other')), 'MI041');
+  select * into v from public.mcp_create_action(public.mcp_test_h('mca_revoked'), 'cancel', '{}', 'ah', 'fp', 'Cancel', '{}', false);
+  perform set_config('mcp_test.revoked', v.id::text, true);
 end $$;
 
 reset role;
@@ -228,6 +244,7 @@ end $$;
 
 -- ─── Approving in Mado ───────────────────────────────────────────────────────
 reset role;
+update public.mcp_grants set revoked_at = now(), revoked_reason = 'guard test' where id = current_setting('mcp_test.grant2')::uuid;
 select set_config('request.jwt.claims', current_setting('mcp_test.browser_stale'), true);
 set local role authenticated;
 do $$ begin
@@ -241,6 +258,12 @@ do $$
 declare
   v record;
 begin
+  perform public.mcp_test_raises('approve what a revoked connection prepared (MI041)',
+    format('select public.mcp_approve_action(%L)', current_setting('mcp_test.revoked')), 'MI041');
+  perform public.mcp_reject_action(current_setting('mcp_test.revoked')::uuid);
+  perform public.mcp_test_ok('reject what a revoked connection prepared',
+    (select status = 'rejected' from public.mcp_actions where id = current_setting('mcp_test.revoked')::uuid));
+
   select * into v from public.mcp_approve_action(current_setting('mcp_test.cancel')::uuid);
   perform public.mcp_test_ok('approve: running via app', v.status = 'running' and v.claimed_via = 'app');
   perform public.mcp_test_raises('approve twice (MI041)', format('select public.mcp_approve_action(%L)', current_setting('mcp_test.cancel')), 'MI041');
@@ -350,6 +373,6 @@ begin
 end $$;
 
 reset role;
-select 'all MCP guard checks passed' as result;
-
 rollback;
+
+select 'all MCP guard checks passed' as result;

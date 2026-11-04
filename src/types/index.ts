@@ -508,6 +508,8 @@ export interface McpGrant {
   scopes: string[]
   created_at: string
   last_used_at: string | null
+  // Moved forward by every token refresh; the connection ends after 30 days without one.
+  idle_expires_at: string
   expires_at: string
   revoked_at: string | null
   revoked_reason: string | null

@@ -93,8 +93,9 @@ server at `${NEXT_PUBLIC_APP_URL}/api/mcp`. Mado is its own sign-in server: conn
 owner's password, the authenticator code (a verified TOTP factor is required) and then a fresh
 code on the consent page. Each connection gets its own Supabase session, kept encrypted on the
 server, so Claude only ever reads and writes what RLS lets the owner do. Claude edits drafts only;
-issuing, sending, reminders, Storno, cancelling, deleting and the Bookamat sync are prepared by
-Claude and wait for the owner's approval.
+issued documents are corrected with a Storno or a credit note. Issuing, sending, issuing and
+sending a draft in one approval, reminders, Storno, cancelling, deleting and the Bookamat sync are
+prepared by Claude and wait for the owner's approval.
 
 Setup:
 
@@ -103,7 +104,8 @@ Setup:
    than a Claude connection should last. Keep the Email provider enabled: each connection is a
    server-side magic-link session, no email is sent.
 2. Database: run `supabase/migrations/20261105_mcp.sql`, then `supabase/tests/mcp_guards.sql`. The
-   test rolls back on its own and ends with `all MCP guard checks passed`.
+   test rolls back on its own; the SQL editor shows the row `all MCP guard checks passed`, or
+   the first failed check as an error (`FAIL …`).
 3. Vercel: add `MCP_SECRET` (Production) and check that `NEXT_PUBLIC_APP_URL` is exactly the
    production origin without a trailing slash; redeploy. Locally, put both in `.env.local`.
 4. Check the deployment: `curl -si -X POST https://<your-app>/api/mcp` answers 401 with
@@ -129,10 +131,11 @@ current authenticator code. Pending approvals are also listed at `/mcp/approve` 
 app's prompt is the only gate). An email to any address that is not on the client record is
 always approved in Mado. A prepared action expires after 15 minutes.
 
-Disconnecting: Account → Connected apps → Revoke takes effect at once. Signing out in the sidebar
-ends only this device's session; “Sign out everywhere”, a password change or removing the
-connector in Claude also disconnects Claude. Limits per connection: access token 1 hour, refresh
-after 30 days without use, 90 days at most; 120 calls a minute and 3000 a day.
+Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
+prepared can then only be rejected. Signing out in the sidebar ends only this device's session;
+“Sign out everywhere”, a password change or removing the connector in Claude also disconnects
+Claude. Limits per connection: an access token lasts 1 hour; the connection ends after 30 days without
+use and after 90 days at most; 120 calls a minute and 3000 a day.
 
 ## Crons
 

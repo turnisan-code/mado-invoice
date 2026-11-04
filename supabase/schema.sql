@@ -138,7 +138,8 @@ create table settings (
   peppol_id                   text,
   -- Claude connector (20261105_mcp.sql): per action kind 'app' (approve in Mado, also for a kind
   -- not listed) or 'chat' (Claude's own prompt), and whether approving in Mado asks for a current
-  -- authenticator code. A Claude session cannot change either (settings_mcp_guard, MI040).
+  -- authenticator code. A Claude session can change neither, nor insert or delete this row
+  -- (settings_mcp_guard, MI040).
   mcp_confirm_policy          jsonb not null default '{}' constraint settings_mcp_confirm_policy_check check (
                                 jsonb_typeof(mcp_confirm_policy) = 'object'
                                 and not jsonb_path_exists(mcp_confirm_policy, '$.* ? (@.type() != "string" || (@ != "app" && @ != "chat"))')),
@@ -436,7 +437,7 @@ create table document_events (
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz,
   -- The Claude connection that wrote it ('claude_ai', 'claude_code', 'static'); null for the
-  -- browser and the crons. Set by document_events_actor, whatever the insert sends.
+  -- browser and the crons. Set by document_events_actor, whatever the insert sends; kept on update.
   actor       text constraint document_events_actor_check check (actor is null or actor in ('claude_ai', 'claude_code', 'static'))
 );
 
@@ -1729,7 +1730,7 @@ alter table public.mcp_actions enable row level security;
 alter table public.mcp_calls   enable row level security;
 
 revoke all on table public.mcp_grants, public.mcp_codes, public.mcp_tokens, public.mcp_actions, public.mcp_calls from anon, authenticated;
-grant select (id, client_name, client_kind, redirect_uri, scopes, created_at, last_used_at, expires_at, revoked_at, revoked_reason)
+grant select (id, client_name, client_kind, redirect_uri, scopes, created_at, last_used_at, idle_expires_at, expires_at, revoked_at, revoked_reason)
   on public.mcp_grants to authenticated;
 grant select on public.mcp_actions, public.mcp_calls to authenticated;
 
@@ -1919,7 +1920,8 @@ end;
 $$;
 
 -- The owner approves in Mado: never from a Claude session, and with mcp_approval_totp on only
--- with an authenticator code entered in the last five minutes.
+-- with an authenticator code entered in the last five minutes. What a revoked connection prepared
+-- (refresh-token reuse revokes it as theft) can only be rejected.
 create or replace function public.mcp_approve_action(p_id uuid)
 returns setof public.mcp_actions
 language plpgsql security definer
@@ -1937,8 +1939,8 @@ begin
     select 1
     from jsonb_array_elements(case when jsonb_typeof(v_claims -> 'amr') = 'array' then v_claims -> 'amr' else '[]'::jsonb end) e
     where e ->> 'method' = 'totp'
-      and (e ->> 'timestamp') ~ '^[0-9]+(\.[0-9]+)?$'
-      and (e ->> 'timestamp')::numeric >= extract(epoch from now()) - 300
+      and case when (e ->> 'timestamp') ~ '^[0-9]+(\.[0-9]+)?$' then (e ->> 'timestamp')::numeric end
+        >= extract(epoch from now()) - 300
   ) then
     raise exception using errcode = 'MI043', message = 'Approving needs a fresh authenticator code.';
   end if;
@@ -1946,6 +1948,7 @@ begin
   update public.mcp_actions a set
     status = 'running', claimed_at = now(), claimed_via = 'app', claimed_session = public.mcp_jwt_session_id()
   where a.id = p_id and a.status = 'pending' and a.expires_at > now()
+    and exists (select 1 from public.mcp_grants g where g.id = a.grant_id and g.revoked_at is null)
   returning * into v_row;
   if v_row.id is null then
     raise exception using errcode = 'MI041', message = 'The action is unknown, expired, already used or not executable here.';
@@ -1991,18 +1994,23 @@ end;
 $$;
 
 -- ─── Triggers ────────────────────────────────────────────────────────────────
+-- A Claude session neither changes the policy nor replaces the settings row that holds it.
 create or replace function public.settings_mcp_guard()
 returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  if new.mcp_confirm_policy is distinct from old.mcp_confirm_policy
-     or new.mcp_approval_totp is distinct from old.mcp_approval_totp then
-    if public.is_mcp_session() then
+  if public.is_mcp_session() then
+    if tg_op <> 'UPDATE' then
+      raise exception using errcode = 'MI040', message = 'The confirmation policy cannot be changed from a Claude connection.';
+    end if;
+    if new.mcp_confirm_policy is distinct from old.mcp_confirm_policy
+       or new.mcp_approval_totp is distinct from old.mcp_approval_totp then
       raise exception using errcode = 'MI040', message = 'The confirmation policy cannot be changed from a Claude connection.';
     end if;
   end if;
+  if tg_op = 'DELETE' then return old; end if;
   return new;
 end;
 $$;
@@ -2011,22 +2019,31 @@ drop trigger if exists settings_mcp_guard on public.settings;
 create trigger settings_mcp_guard
   before update of mcp_confirm_policy, mcp_approval_totp on public.settings
   for each row execute function public.settings_mcp_guard();
+drop trigger if exists settings_mcp_guard_rows on public.settings;
+create trigger settings_mcp_guard_rows
+  before insert or delete on public.settings
+  for each row execute function public.settings_mcp_guard();
 
--- Whatever the insert sent, the actor is the writing session's grant kind, or null.
+-- Whatever the insert sent, the actor is the writing session's grant kind, or null; an update
+-- keeps it.
 create or replace function public.document_events_actor()
 returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  new.actor := (select g.client_kind from public.mcp_grants g where g.sb_session_id = public.mcp_jwt_session_id());
+  if tg_op = 'UPDATE' then
+    new.actor := old.actor;
+  else
+    new.actor := (select g.client_kind from public.mcp_grants g where g.sb_session_id = public.mcp_jwt_session_id());
+  end if;
   return new;
 end;
 $$;
 
 drop trigger if exists document_events_actor on public.document_events;
 create trigger document_events_actor
-  before insert on public.document_events
+  before insert or update of actor on public.document_events
   for each row execute function public.document_events_actor();
 
 create or replace function public.mcp_calls_prune()
