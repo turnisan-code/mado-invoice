@@ -10,9 +10,10 @@ import type { DocumentStatus, DocumentType } from '@/types'
 const refusal = (code: string, message: string, details = '') => new PostgrestError({ code, message, details, hint: '' })
 
 // A status step other than issuing, a Storno or a payment, with its 'status_changed' event.
-// documents_status_guard has the last word (MI010–MI014); a step canTransition already rules out
-// is refused here with the guard's MI010. `current` is the state the caller shows (the status
-// menu); without it the document is read first.
+// documents_status_guard has the last word (MI010–MI014); a step canTransition already rules out,
+// and an invoice marked paid without a payment (the guard allows sent → paid), are refused here
+// with the guard's MI010. `current` is the state the caller shows (the status menu); without it the
+// document is read first.
 export async function setDocumentStatus(
   supabase: SupabaseClient,
   id: string,
@@ -28,7 +29,7 @@ export async function setDocumentStatus(
   }
   const from = doc.status
   if (to === from) return { error: null, from, changed: false }
-  if (!canTransition(doc.type, from, to)) {
+  if (!canTransition(doc.type, from, to) || (doc.type === 'invoice' && to === 'paid')) {
     return { error: refusal('MI010', `A ${doc.type.replace('_', ' ')} cannot change from ${from} to ${to}.`, `${from}>${to}`), from, changed: false }
   }
   const { error } = await supabase.from('documents').update({ status: to }).eq('id', id)

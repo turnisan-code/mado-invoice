@@ -16,6 +16,7 @@ export function toolsForScopes(scopes: readonly string[]): AnyToolDef[] {
   return TOOLS.filter(tool => scopes.includes(tool.scope))
 }
 
-export function findTool(name: string): AnyToolDef | undefined {
-  return TOOLS.find(tool => tool.name === name)
+// A tool outside the grant's scopes is not found, so a caller cannot forget the check.
+export function findTool(name: string, scopes: readonly string[]): AnyToolDef | undefined {
+  return TOOLS.find(tool => tool.name === name && scopes.includes(tool.scope))
 }

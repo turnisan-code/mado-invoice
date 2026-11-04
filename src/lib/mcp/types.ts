@@ -30,8 +30,9 @@ export interface McpGrantInfo {
 }
 
 // What a service call needs. `supabase` acts as the owner under RLS (the grant's aal2 session in a
-// tool, the cookie session on the approval page); never the service role. `t` is English for the
-// model (makeT('en')); services never read cookies for a language.
+// tool, the cookie session on the approval page); never the service role. `t` is always English
+// (makeT('en')), on the approval page too: what it words is stored for Claude. Services never read
+// cookies for a language.
 export interface ServiceContext {
   supabase: SupabaseClient
   // The settings row, read once per request.
@@ -101,9 +102,15 @@ export interface ActionPreparation {
   fingerprint: string
 }
 
+// What execute() did, stored in mcp_actions.result and read by Claude (confirm_action,
+// get_action_status). `summary` is English for the model; the approval page words its own result
+// in the owner's language from `data`. A step that fails after an irreversible one succeeded does
+// not fail the action: issue_and_send that issued but could not send returns normally (status
+// 'done') with the number in data and the send error in data.email_error and `warnings`.
 export interface ActionOutcome {
   summary: string
   data: Record<string, unknown>
+  warnings?: string[]
 }
 
 // One kind of irreversible action. prepare() reads and checks only (blocking problems throw and

@@ -2,6 +2,11 @@
 // connector's own codes, lifecycle refusals (MI0xx), the API codes the routes use, issue problems,
 // e-invoice and Bookamat errors. SQL text, stack traces and anything not recognised never reach
 // Claude: unknown database failures are 'database', anything else 'internal' (both logged here).
+// A tool, service or action kind reports a failure without adding a code here: McpToolError with
+// one of the codes below (a `message` of its own where the dictionary text does not fit, the
+// specifics in `details`), a { code, details } object with a code of src/lib/api-errors.ts
+// (e.g. 'not_issued', 'no_email', 'expired'), an MI0xx database error, IssueCheckError,
+// EInvoiceError or BookamatError.
 import { ZodError } from 'zod'
 import type { DictKey, TFn, TranslateVars } from '@/lib/i18n'
 import { knownApiError } from '@/lib/api-errors'
@@ -37,7 +42,8 @@ export interface ToolError {
 }
 
 // Thrown by tools and services for the connector's own refusals. Without a message the code is
-// worded from the dictionary (mcp.errors.*), with `vars` filled in.
+// worded from the dictionary (mcp.errors.*); the specifics (the missing scope, the rate-limit
+// window) go in `details`, which reach Claude with it.
 export class McpToolError extends Error {
   readonly code: McpErrorCode
   readonly vars?: TranslateVars
@@ -52,15 +58,16 @@ export class McpToolError extends Error {
   }
 }
 
+// The dictionary texts have no placeholders a thrower could leave unfilled; a variant is chosen
+// from `details` (client_in_use: in_use, rate_limited: window).
 function mcpErrorText(code: McpErrorCode, t: TFn, vars?: TranslateVars, details?: Record<string, unknown>): string {
   if (code === 'client_in_use') return t(details?.in_use === 'projects' ? 'views.clientDelete.hasProjects' : 'clients.form.hasDocuments')
+  if (code === 'rate_limited' && details?.window === 'day') return t('mcp.errors.rateLimitedDay')
   return t(MCP_ERROR_KEYS[code], vars)
 }
 
 const MCP_CODES = new Set<string>([...Object.keys(MCP_ERROR_KEYS), 'client_in_use'])
 const LIFECYCLE_CODE = /^MI0\d\d$/
-// Raised as plain exceptions by 20261105_mcp.sql, told apart by their message.
-const SQL_MESSAGES = new Set<string>(['rate_limited', 'too_many_pending'])
 
 type CodedError = { code?: unknown; message?: unknown; details?: unknown; hint?: unknown; problems?: unknown }
 
@@ -76,12 +83,24 @@ function zodIssues(err: ZodError): string {
   return err.issues.map(i => `${i.path.length ? i.path.join('.') : 'input'}: ${i.message}`).join('; ')
 }
 
+// 'rate_limited' from mcp_authenticate: detail 'minute' or 'day', hint = seconds until the window resets.
+function rateLimitDetails(detail: string | null, hint: unknown): Record<string, unknown> {
+  const seconds = Number(hint)
+  return { window: detail === 'day' ? 'day' : 'minute', ...(Number.isFinite(seconds) && seconds > 0 ? { retry_after_seconds: Math.ceil(seconds) } : {}) }
+}
+
 // A database, RPC or route-style error ({ code, message, details }).
 function codedError(e: CodedError, t: TFn): ToolError {
   const code = typeof e.code === 'string' ? e.code : ''
   const message = typeof e.message === 'string' ? e.message : ''
   const details = typeof e.details === 'string' ? e.details : null
 
+  // 'rate_limited' and 'too_many_pending' are plain exceptions of 20261105_mcp.sql, told apart by
+  // their message.
+  if (code === 'rate_limited' || message === 'rate_limited') {
+    const limit = rateLimitDetails(details, e.hint)
+    return { code: 'rate_limited', message: mcpErrorText('rate_limited', t, undefined, limit), details: limit }
+  }
   if (MCP_CODES.has(code)) return { code, message: mcpErrorText(code as McpErrorCode, t, undefined, { in_use: details }) }
   if (LIFECYCLE_CODE.test(code)) {
     switch (code) {
@@ -92,7 +111,7 @@ function codedError(e: CodedError, t: TFn): ToolError {
       default: return { code, message: lifecycleErrorMessage({ code, message, details }, t), ...(details ? { details: { detail: details } } : {}) }
     }
   }
-  if (SQL_MESSAGES.has(message)) return { code: message, message: mcpErrorText(message as McpErrorCode, t) }
+  if (message === 'too_many_pending') return { code: message, message: mcpErrorText(message, t) }
   if (code === 'PGRST116') return { code: 'not_found', message: t('mcp.errors.notFound') }
   const known = knownApiError(t, { code, error: message, details: e.details })
   if (known) return { code, message: known }
@@ -113,7 +132,7 @@ export function toToolError(err: unknown, t: TFn): ToolError {
   if (err instanceof BookamatError) {
     return { code: `bookamat_${err.code}`, message: bookamatErrorMessage(t, { code: err.code, error: err.message, detail: err.detail }) }
   }
-  if (err instanceof ZodError) return { code: 'invalid_input', message: t('mcp.errors.invalidInput', { issues: zodIssues(err) }) }
+  if (err instanceof ZodError) return { code: 'invalid_input', message: `${t('mcp.errors.invalidInput')} ${zodIssues(err)}` }
   if (err && typeof err === 'object') {
     const e = err as CodedError
     if (isProblemList(e.problems)) return problemsError(e.problems, t)
@@ -121,6 +140,7 @@ export function toToolError(err: unknown, t: TFn): ToolError {
     // DocumentNotFoundError (src/lib/pdf/render.ts), told apart without importing the PDF renderer.
     if (err instanceof Error && err.message === 'Document not found') return { code: 'not_found', message: t('mcp.errors.notFound') }
   }
-  console.error('[mcp] tool failed:', err)
+  // Name and message only: a third-party error can carry request config or response bodies.
+  console.error('[mcp] tool failed:', err instanceof Error ? `${err.name}: ${err.message}` : typeof err)
   return { code: 'internal', message: t('messages.api.server_error') }
 }
