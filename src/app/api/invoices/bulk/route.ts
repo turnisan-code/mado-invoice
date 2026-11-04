@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { issueBulkDraft, startBulkIssue, type BulkDraft } from '@/lib/pdf/bulk'
-import { issueOrder, type IssuedNote } from '@/lib/utils/bulk-issue'
+import type { BulkDraft } from '@/lib/pdf/bulk'
+import { issueMany, startIssueBatches } from '@/lib/services/issue'
 import { apiError, databaseError, invalidJson, isUuidList, issueFailure, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { canTransition, DOCUMENT_STATUSES } from '@/lib/status'
@@ -64,27 +64,24 @@ export async function PATCH(req: Request) {
   // Drafts get the next number in date order, plus their archive copy; issuing also sets them to
   // 'sent'. Each one's archive, Drive and project-link problems come back in `documents`. The first
   // incomplete draft stops the run: 422 says which one and why (problems, see issue-checks.ts).
-  const notes: IssuedNote[] = []
-  const drafts = issueOrder(invoices.filter(d => !d.number || d.status === 'draft'))
-  const started = drafts.length ? await startBulkIssue(supabase, 'invoice', redate, today()) : null
+  const drafts = invoices.filter(d => !d.number || d.status === 'draft').map(d => ({ ...d, type: 'invoice' as const }))
+  const started = drafts.length ? await startIssueBatches(supabase, ['invoice'], redate, today()) : null
   if (started && 'error' in started) return databaseError(started.error)
-  for (const d of drafts) {
-    try {
-      // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
-      notes.push(await issueBulkDraft(supabase, started!.batch, d as unknown as BulkDraft))
-      if (d.status === 'draft') d.status = 'sent'
-    } catch (err) {
-      const issued = notes.length
-      if (err instanceof IssueCheckError) {
-        // The toast's title names the draft, so it is worded here in the UI language.
-        const { t, lang } = await getT()
-        const client = clientDisplayName(d.clients as unknown as NamedClient | null)
-        const document = d.number ?? t('editor.bulk.draft', { client, date: formatDate(d.date, lang) })
-        return apiError(422, 'incomplete', t('editor.bulk.incomplete', { document }), { problems: err.problems, documentId: d.id, issued, documents: notes })
-      }
-      return issueFailure(err, 'issue_failed', { issued, documents: notes })
+  // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
+  const { notes, failed } = started ? await issueMany(supabase, started.batches, drafts as unknown as (BulkDraft & typeof drafts[number])[]) : { notes: [], failed: null }
+  if (failed) {
+    const { draft: d, error: err } = failed
+    const issued = notes.length
+    if (err instanceof IssueCheckError) {
+      // The toast's title names the draft, so it is worded here in the UI language.
+      const { t, lang } = await getT()
+      const client = clientDisplayName(d.clients as unknown as NamedClient | null)
+      const document = d.number ?? t('editor.bulk.draft', { client, date: formatDate(d.date, lang) })
+      return apiError(422, 'incomplete', t('editor.bulk.incomplete', { document }), { problems: err.problems, documentId: d.id, issued, documents: notes })
     }
+    return issueFailure(err, 'issue_failed', { issued, documents: notes })
   }
+  for (const d of invoices) if (d.status === 'draft' && notes.some(n => n.id === d.id)) d.status = 'sent'
 
   if (target === 'paid') {
     // "Paid" means money arrived: record the open balance as a payment on the date and by the

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { apiError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
-import { BOOKAMAT_SETTINGS_COLUMNS, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
+import { BOOKAMAT_SETTINGS_COLUMNS, type BookamatSettings } from '@/lib/bookamat'
 import type { AdoptBooking } from '@/lib/bookamat-client'
-import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { syncBookamat } from '@/lib/services/bookamat-sync'
 
 export const maxDuration = 60
 
@@ -38,10 +38,7 @@ export async function POST(req: NextRequest) {
   const { data: settings, error: settingsErr } = await supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single()
   if (settingsErr || !settings) return settingsUnavailable(settingsErr)
 
-  const result = await syncBookamatDocument(supabase, settings as unknown as BookamatSettings, body.documentId, {
-    adopt,
-    loadPdf: async id => getIssuedPdf(supabase, id, 'on_demand'),
-  })
+  const result = await syncBookamat(supabase, settings as unknown as BookamatSettings, body.documentId, { adopt })
   if (!result.ok) {
     const { status, ...payload } = result
     return NextResponse.json(payload, { status })

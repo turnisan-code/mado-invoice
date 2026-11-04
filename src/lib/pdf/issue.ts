@@ -9,6 +9,7 @@ import { getIssuedPdf } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 import { applyCreditNote } from '@/lib/credits'
 import { loadDepositCheck } from '@/lib/deposits'
+import type { IssueProblem } from '@/types'
 
 export type IssueOutcome = {
   number: string
@@ -18,9 +19,9 @@ export type IssueOutcome = {
   driveError: { error: string; code?: string } | null
 }
 
-// The checks the builder shows inline, run on the stored document before a number is taken, so
-// every issuance path refuses an incomplete document with readable reasons (IssueCheckError).
-async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
+type IssueCheck = { problems: IssueProblem[]; uiLanguage: unknown }
+
+async function loadIssueCheck(supabase: SupabaseClient, documentId: string): Promise<IssueCheck> {
   const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents')
       .select('id, type, client_id, language, invoice_kind, converted_from_id, discount_type, discount_value, currency, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
@@ -44,7 +45,20 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
     settings,
     deposit: await loadDepositCheck(supabase, doc),
   })
-  if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(settings?.ui_language) ? settings.ui_language : 'en'))
+  return { problems, uiLanguage: settings?.ui_language }
+}
+
+// The checks the builder shows inline, run on the stored document: what stands between it and a
+// number (empty when it may be issued). Throws only when the document or settings cannot be read.
+export async function checkIssuable(supabase: SupabaseClient, documentId: string): Promise<IssueProblem[]> {
+  return (await loadIssueCheck(supabase, documentId)).problems
+}
+
+// Run before a number is taken, so every issuance path refuses an incomplete document with
+// readable reasons (IssueCheckError).
+async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
+  const { problems, uiLanguage } = await loadIssueCheck(supabase, documentId)
+  if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(uiLanguage) ? uiLanguage : 'en'))
 }
 
 // The total the frozen PDF prints (before payments), kept so a later edit that changes the amount

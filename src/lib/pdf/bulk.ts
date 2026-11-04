@@ -53,7 +53,7 @@ export async function startBulkIssue(supabase: SupabaseClient, type: DocumentTyp
 
 // Time entries and expenses billed on the invoice that no longer sit on one of its lines (as the
 // issue dialog's ProjectLinkWarning checks). A failed check reports nothing.
-async function lostEntries(supabase: SupabaseClient, documentId: string): Promise<IssuedNote['unlinked']> {
+export async function lostEntries(supabase: SupabaseClient, documentId: string): Promise<IssuedNote['unlinked']> {
   const billed = (table: 'time_entries' | 'project_expenses') => supabase.from(table).select('document_item_id').eq('invoiced_document_id', documentId)
   const [time, expenses, items] = await Promise.all([
     billed('time_entries'),
@@ -73,7 +73,7 @@ async function lostEntries(supabase: SupabaseClient, documentId: string): Promis
 // documents_recurring_period_key allows one invoice per schedule and date: a recurring draft keeps
 // its date when today belongs to a period its schedule has still to generate, or the daily run
 // would find the day taken. When the schedule cannot be read, the date is kept as well.
-async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, today: string): Promise<boolean> {
+export async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, today: string): Promise<boolean> {
   const { data, error } = await supabase.from('recurring_schedules').select('next_date, interval, anchor_day, end_date').eq('id', scheduleId).maybeSingle()
   if (error) {
     console.error(`[bulk] recurring schedule ${scheduleId} not read:`, error.message)

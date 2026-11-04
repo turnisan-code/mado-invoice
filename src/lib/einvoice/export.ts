@@ -11,8 +11,9 @@ import { toUbl } from './ubl'
 // Server-only: the e-invoice of an issued invoice or credit note, built from the stored document,
 // with the buyer reference the PDF and the portal print (fetchBuyerReference). Peppol embeds the
 // issued PDF; it is only fetched (and, for a document issued before archive copies existed, stored)
-// once the XML is known to be valid.
-export async function exportEInvoice(supabase: SupabaseClient, documentId: string, format: EInvoiceFormat) {
+// once the XML is known to be valid. With { pdf: false } nothing is fetched or stored: the XML is
+// only built, to learn whether it can be (a preview before sending).
+export async function exportEInvoice(supabase: SupabaseClient, documentId: string, format: EInvoiceFormat, { pdf: withPdf = true }: { pdf?: boolean } = {}) {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.clients) throw new Error('Document has no client')
   if (!doc.number) throw new EInvoiceError('not_issued', 'Only issued documents can be e-invoices')
@@ -45,11 +46,13 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
   if (format === 'ubl') {
     toUbl(inv)
     let pdf: { filename: string; base64: string } | null = null
-    try {
-      const issued = await getIssuedPdf(supabase, documentId, 'on_demand')
-      pdf = { filename: issued.filename, base64: issued.buffer.toString('base64') }
-    } catch (err) {
-      console.error(`[einvoice] ${doc.number}: issued PDF unavailable, exported without it:`, err)
+    if (withPdf) {
+      try {
+        const issued = await getIssuedPdf(supabase, documentId, 'on_demand')
+        pdf = { filename: issued.filename, base64: issued.buffer.toString('base64') }
+      } catch (err) {
+        console.error(`[einvoice] ${doc.number}: issued PDF unavailable, exported without it:`, err)
+      }
     }
     xml = toUbl(withAttachment(inv, pdf))
     attached = !!pdf
