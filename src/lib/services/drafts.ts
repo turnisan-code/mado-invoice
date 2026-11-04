@@ -43,7 +43,9 @@ export type SaveDraftError =
   // the date and due date the document keeps.
   | { kind: 'recurring_period'; error: PostgrestError; stored: { date: string | null; due_date: string | null } | null }
   | { kind: 'database'; error: PostgrestError }
-  // draftOnly: the document has a number or is no draft (or is gone); nothing was written.
+  // draftOnly: the document has a number or is no draft (or is gone); nothing was written. Also a
+  // Claude session's lines refused because the document was issued after its header was saved
+  // (document_items_mcp_guard, MI044).
   | { kind: 'draft_only' }
 
 export interface SavedDraft {
@@ -56,8 +58,8 @@ export interface SavedDraft {
 // Header, then items: a new document is inserted as an unnumbered EUR draft once, an existing one
 // updated; replace_document_items keeps every line under the id it carries, so what is billed on a
 // line stays linked to it. `onHeaderSaved` runs as soon as the header is written, before the items.
-// `draftOnly` refuses a document that has a number or is not a draft any more (neither the update
-// nor replace_document_items checks that on their own).
+// `draftOnly` refuses a document that has a number or is not a draft any more (the update does not
+// check that on its own; replace_document_items does only for a Claude session).
 export async function saveDraft(
   supabase: SupabaseClient,
   { id, type, fields, items, keepStoredDate = false }: DraftWrite,
@@ -87,6 +89,7 @@ export async function saveDraft(
     opts.onHeaderSaved?.(id, true)
   }
   const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
+  if (itemsErr?.code === 'MI044') return { id, inserted, error: { kind: 'draft_only' } }
   return { id, inserted, error: itemsErr ? { kind: 'database', error: itemsErr } : null }
 }
 

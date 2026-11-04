@@ -27,6 +27,11 @@ export interface NewPayment {
 
 export type DocumentPayment = NewPayment & { document_id: string }
 
+// A payment Claude recorded with an idempotency key keeps it in import_ref, scoped to the invoice
+// so a retry finds it; it is no bank transaction (the fee part carries ':fee').
+export const mcpPaymentRef = (invoiceId: string, key: string) => `mcp:${invoiceId}:${key}`
+export const isMcpPaymentRef = (ref: string | null | undefined) => !!ref?.startsWith('mcp:')
+
 // More than is open: the open balance is the payment, the rest dunning fees and interest
 // ('fee', not turnover) when `excess` says so, otherwise all of it is a payment (an overpayment).
 export function splitOverpayment(amount: number, open: number, excess: 'fee' | 'payment' | undefined): { paid: number; fee: number } {

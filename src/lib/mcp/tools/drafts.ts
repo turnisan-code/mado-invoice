@@ -3,7 +3,7 @@
 // is not a draft; issued documents are corrected with a credit note or a Storno.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
-import { initialForm, type FormState } from '@/components/forms/builder/model'
+import { initialForm, linesFromItems, type FormState } from '@/components/forms/builder/model'
 import { applyCreditNote, documentTotal, loadCreditNoteSettlement, unappliedCreditNotes } from '@/lib/credits'
 import { writeDeductions } from '@/lib/deposits'
 import { entryAmount, expensePrice, formatDuration, INVOICE_GROUPINGS, MAX_ENTRY_MINUTES, parseDuration, PROJECT_STATUSES } from '@/lib/projects'
@@ -13,8 +13,8 @@ import { draftPayload, duplicateDocument, saveDraft, setDepositLink, type SaveDr
 import { ServiceError } from '@/lib/services/errors'
 import { deleteDraft, setDocumentStatus } from '@/lib/services/lifecycle'
 import {
-  paymentRefusal, paymentRows, recordInvoicePayments, recordRefund, removePayment, reopensOnRemoval, settledSum, settlementRow, skontoOffered,
-  type NewPayment, type RemovedPayment,
+  markPaid, mcpPaymentRef, PAYABLE, paymentRefusal, paymentRows, recordInvoicePayments, recordRefund, removePayment, reopensOnRemoval, settledSum,
+  settlementRow, skontoOffered, type NewPayment, type RecordedPayments, type RemovedPayment,
 } from '@/lib/services/payments'
 import {
   deleteEntry, expenseProblem, expenseRow, invoiceProjectEntries, projectProblem, projectRow, releaseEntries, saveExpense, saveProject,
@@ -30,7 +30,7 @@ import type { Client, Payment, PaymentMethod, Project, ProjectExpense, TimeEntry
 import { clientUrl, projectUrl } from '../config'
 import {
   applyClientChange, applyHeader, applyLineOps, describeDocument, headerInput, id, isoDate, lineInput, lineOpsInput, loadCatalogue,
-  MAX_LINES, newLines, replaceLines, type LineInput,
+  MAX_AMOUNT, MAX_LINES, newLines, replaceLines, type LineInput,
 } from '../draft-form'
 import { McpToolError } from '../errors'
 import { defineTool, type AnyToolDef, type ToolContext } from '../types'
@@ -114,6 +114,18 @@ function withPatch(values: ClientValues, p: ClientPatch): ClientValues {
 
 const suggestion = (v: ClientValues) => suggestTaxTreatment(v.country, isValidVatId(normalizeVatId(v.uid_number)))
 
+// clients.mcp_recipients (20261105_mcp_drafts.sql): an address a Claude session writes onto a
+// client is marked until the owner saves the client in Mado, and an email naming it is approved
+// in Mado whatever the confirmation policy says.
+const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record: emails to it are approved in Mado until the owner saves the client there.'
+
+// The addresses this write put on the client, as the database marks them.
+function writtenAddresses(before: Pick<Client, 'email' | 'cc_emails'> | null, after: Client): string[] {
+  const list = (c: Pick<Client, 'email' | 'cc_emails'>) => [c.email ?? '', ...(c.cc_emails ?? [])].map(a => a.trim().toLowerCase()).filter(Boolean)
+  const known = new Set(before ? list(before) : [])
+  return [...new Set(list(after).filter(a => !known.has(a)))]
+}
+
 // A client that already has this email or VAT ID is only a warning in the client form; here the
 // call is refused until Claude confirms with allow_duplicate.
 async function duplicatesOf(supabase: SupabaseClient, email: string | null, uid: string | null, exceptId?: string) {
@@ -121,13 +133,17 @@ async function duplicatesOf(supabase: SupabaseClient, email: string | null, uid:
   return found.map(d => ({ id: d.client.id, client: clientWithNumber(d.client), reasons: d.reasons }))
 }
 
-function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}) {
+function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}, written: string[] = []) {
   return {
-    summary: `${lead} ${clientWithNumber(client)}.`,
+    summary: [
+      `${lead} ${clientWithNumber(client)}.`,
+      written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado.` : '',
+    ].filter(Boolean).join(' '),
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
-      country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment, language: client.language,
-      payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
+      cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
+      language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
+      ...(written.length ? { approved_in_mado: written } : {}),
     },
   }
 }
@@ -135,7 +151,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
 const createClient = defineTool({
   name: 'create_client',
   title: 'Create client',
-  description: 'Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client).',
+  description: `Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client). ${RECIPIENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ ...clientFields, country: clientFields.country.unwrap(), allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: false, idempotentHint: false },
@@ -151,14 +167,14 @@ const createClient = defineTool({
     const { client, error } = await saveClient(ctx.supabase, payload)
     if (error) throw error
     if (!client) throw notFound()
-    return clientReply(client, 'Created client', { suggested_tax_treatment: suggestion(values), ...(duplicates.length ? { duplicates } : {}) })
+    return clientReply(client, 'Created client', { suggested_tax_treatment: suggestion(values), ...(duplicates.length ? { duplicates } : {}) }, writtenAddresses(null, client))
   },
 })
 
 const updateClient = defineTool({
   name: 'update_client',
   title: 'Update client',
-  description: "Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. An email address or VAT ID another client has is refused unless allow_duplicate is true.",
+  description: `Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. A new email or CC list applies to every later email to the client, from Mado too. An email address or VAT ID another client has is refused unless allow_duplicate is true. ${RECIPIENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ id, patch: clientPatch, allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -179,7 +195,7 @@ const updateClient = defineTool({
     if (error) throw error
     if (!client) throw notFound()
     const suggested = suggestion(values)
-    return clientReply(client, 'Updated client', suggested && suggested !== client.tax_treatment ? { suggested_tax_treatment: suggested } : {})
+    return clientReply(client, 'Updated client', suggested && suggested !== client.tax_treatment ? { suggested_tax_treatment: suggested } : {}, writtenAddresses(current, client))
   },
 })
 
@@ -222,7 +238,7 @@ const createDocument = defineTool({
 const updateDocument = defineTool({
   name: 'update_document',
   title: 'Update draft',
-  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited.",
+  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited. If the owner has the draft open in Mado's editor, its next autosave writes the editor's version back; ask them to close it first.",
   scope: 'mado:write',
   inputSchema: z.object({
     id,
@@ -251,7 +267,8 @@ const updateDocument = defineTool({
     const list = (clients ?? []) as Client[]
     const previous = list.find(c => c.id === doc.client_id) ?? null
 
-    let f: FormState = initialForm(doc.type, pub, list, { ...doc, items: doc.document_items ?? [] })
+    // The stored lines as they are: the editor's blank first line of an empty document is no line.
+    let f: FormState = { ...initialForm(doc.type, pub, list, { ...doc, items: doc.document_items ?? [] }), lines: linesFromItems(doc.document_items ?? []) }
     f = applyHeader(doc.type, f, header, { settings: pub })
     let client = previous
     if (header.client_id && header.client_id !== doc.client_id) {
@@ -374,10 +391,19 @@ const linkDeposit = defineTool({
     if (args.linked && (deposit.type !== 'invoice' || !deposit.number || deposit.status === 'cancelled' || !['advance', 'partial'].includes(deposit.invoice_kind) || deposit.client_id !== final.client_id)) {
       throw invalid(ctx.t('deposits.errors.invalidLink'))
     }
+    const taken = () => invalid(ctx.t('deposits.builder.taken', { number: deposit.number ?? '' }))
+    if (args.linked && deposit.final_invoice_id && deposit.final_invoice_id !== final.id) throw taken()
     const already = args.linked === (deposit.final_invoice_id === final.id)
     // A repeat only brings the deduction lines in step with what is deducted now.
     const result = already ? (await writeDeductions(ctx.supabase, final.id), 'ok') : await setDepositLink(ctx.supabase, final.id, deposit.id, args.linked)
-    if (result === 'taken') throw invalid(ctx.t('deposits.builder.taken', { number: deposit.number ?? '' }))
+    if (result === 'taken') {
+      // Another final invoice took it meanwhile; linkDeposit had already made this draft a final invoice.
+      if (final.invoice_kind !== 'final') {
+        const { error: kindErr } = await ctx.supabase.from('documents').update({ invoice_kind: final.invoice_kind ?? 'standard' }).eq('id', final.id).is('number', null)
+        if (kindErr) console.error(`[mcp] kind of ${final.id} not restored:`, kindErr.message)
+      }
+      throw taken()
+    }
     const lead = already ? `Unchanged: ${args.linked ? 'already' : 'not'} deducting ${deposit.number ?? 'it'}.`
       : args.linked ? `Now deducting ${deposit.number}.` : `No longer deducting ${deposit.number ?? 'it'}.`
     return documentReply(ctx, args.final_invoice_id, lead)
@@ -403,6 +429,7 @@ async function loadMoneyDoc(supabase: SupabaseClient, documentId: string): Promi
 }
 
 function payable(doc: MoneyDoc | null, date: string, ctx: ToolContext): MoneyDoc {
+  if (doc?.type === 'credit_note') throw invalid('This is a credit note: payments and settlements go on invoices; money paid back on a credit note is record_refund.')
   const refusal = paymentRefusal(doc, date, today())
   if (refusal === 'not_found') throw notFound()
   if (refusal === 'not_issued') throw invalid(ctx.t('payments.issueBeforePayment'))
@@ -422,7 +449,7 @@ const recordPayment = defineTool({
   scope: 'mado:write',
   inputSchema: z.object({
     invoice_id: id,
-    amount: z.number().positive().max(1_000_000_000).describe('EUR received.'),
+    amount: z.number().positive().max(MAX_AMOUNT).describe('EUR received.'),
     date: isoDate.describe('The day the money arrived; not in the future.'),
     method: z.enum(['bank', 'cash']),
     reference: z.string().max(140).optional(),
@@ -434,10 +461,10 @@ const recordPayment = defineTool({
   async run(args, ctx) {
     const doc = payable(await loadMoneyDoc(ctx.supabase, args.invoice_id), args.date, ctx)
     const payments = doc.payments ?? []
-    const key = args.idempotency_key ? `mcp:${doc.id}:${args.idempotency_key}` : null
+    const key = args.idempotency_key ? mcpPaymentRef(doc.id, args.idempotency_key) : null
     if (key) {
       const earlier = payments.filter(p => p.import_ref === key || p.import_ref === `${key}:fee`)
-      if (earlier.length) return paymentReply(doc, payments, earlier, false, true)
+      if (earlier.length) return paymentReply(doc, payments, earlier, await catchUpPaid(ctx, doc, payments), true)
     }
     const total = documentTotal(doc)
     if (paymentState(total, payments) === 'nothing_due') throw invalid(ctx.t('lifecycle.payments.nothingToPay'))
@@ -455,26 +482,44 @@ const recordPayment = defineTool({
     if (result.error?.code === '23505' && key) {
       const again = await loadMoneyDoc(ctx.supabase, doc.id)
       const stored = (again?.payments ?? []).filter(p => p.import_ref === key || p.import_ref === `${key}:fee`)
-      if (stored.length) return paymentReply(again!, again!.payments ?? [], stored, false, true)
+      if (stored.length) return paymentReply(again!, again!.payments ?? [], stored, await catchUpPaid(ctx, again!, again!.payments ?? []), true)
     }
     if (result.error) throw result.error
-    return paymentReply(doc, [...payments, ...result.added], result.added, result.settled && !result.statusError, false)
+    return paymentReply(doc, [...payments, ...result.added], result.added, paidOutcome(result), false)
   },
 })
 
-function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], becamePaid: boolean, repeated: boolean) {
+type PaidOutcome = { becamePaid: boolean; failed: boolean }
+
+const paidOutcome = (r: RecordedPayments): PaidOutcome => ({ becamePaid: r.settled && !r.statusError, failed: r.settled && !!r.statusError })
+
+// A retry finds its payment recorded; if marking the invoice paid failed that time, it goes again.
+async function catchUpPaid(ctx: ToolContext, doc: MoneyDoc, all: Payment[]): Promise<PaidOutcome> {
+  if (!PAYABLE.includes(doc.status) || settledSum(all) < documentTotal(doc) - 0.005) return { becamePaid: false, failed: false }
+  const { updated, error } = await markPaid(ctx.supabase, [doc])
+  if (error) console.error(`[mcp] ${doc.id} not marked paid:`, error.message)
+  return { becamePaid: updated.length > 0, failed: !!error }
+}
+
+const NOT_MARKED_PAID = 'The money is recorded, but the invoice could not be marked paid; open it in Mado.'
+
+function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], { becamePaid, failed }: PaidOutcome, repeated: boolean) {
   const total = documentTotal(doc)
   const balance = balanceOf(total, all)
   const status = becamePaid ? 'paid' : doc.status
   const what = added.map(p => `${money(p.amount, doc.currency)}${p.kind === 'fee' ? ' as fees' : ''}`).join(' and ')
+  const warning = failed ? NOT_MARKED_PAID : null
   return {
-    summary: repeated
-      ? `Already recorded with this idempotency key on ${doc.number}: ${what}.`
-      : `Recorded ${what} on ${doc.number}. ${becamePaid ? 'The invoice is paid.' : balance > 0.005 ? `Open: ${money(balance, doc.currency)}.` : ''}`.trim(),
+    summary: [
+      repeated ? `Already recorded with this idempotency key on ${doc.number}: ${what}.` : `Recorded ${what} on ${doc.number}.`,
+      becamePaid ? 'The invoice is paid.' : !repeated && balance > 0.005 ? `Open: ${money(balance, doc.currency)}.` : '',
+      warning ?? '',
+    ].filter(Boolean).join(' '),
     data: {
       invoice_id: doc.id, number: doc.number, added: added.map(shortPayment), repeated,
       total, balance_due: balance, status, became_paid: becamePaid,
       payment_state: paymentState(total, all),
+      ...(warning ? { warnings: [warning] } : {}),
     },
   }
 }
@@ -531,7 +576,7 @@ const settleBalance = defineTool({
     const result = await recordInvoicePayments(ctx.supabase, { id: doc.id, status: doc.status, total, payments },
       [settlementRow(kind, balance, today(), { skontoPercent: doc.skonto_percent, reason })])
     if (result.error) throw result.error
-    return paymentReply(doc, [...payments, ...result.added], result.added, result.settled && !result.statusError, false)
+    return paymentReply(doc, [...payments, ...result.added], result.added, paidOutcome(result), false)
   },
 })
 
@@ -581,7 +626,7 @@ const recordRefundTool = defineTool({
   scope: 'mado:write',
   inputSchema: z.object({
     credit_note_id: id,
-    amount: z.number().positive().max(1_000_000_000),
+    amount: z.number().positive().max(MAX_AMOUNT),
     date: isoDate.describe('The day the money left; not in the future.'),
     method: z.enum(['bank', 'cash']),
     reference: z.string().max(140).optional(),
@@ -638,7 +683,7 @@ const saveProjectTool = defineTool({
     status: z.enum(PROJECT_STATUSES as ['active', 'done', 'archived']).optional(),
     hourly_rate: z.number().min(0).max(100_000).nullable().optional().describe('Net EUR for time entries without a rate of their own.'),
     budget_hours: z.number().min(0).max(1_000_000).nullable().optional().describe('0 or null: no budget.'),
-    budget_amount: z.number().min(0).max(1_000_000_000).nullable().optional().describe('Net EUR; 0 or null: no budget.'),
+    budget_amount: z.number().min(0).max(MAX_AMOUNT).nullable().optional().describe('Net EUR; 0 or null: no budget.'),
     notes: z.string().max(10_000).optional(),
   }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: false },
@@ -721,7 +766,7 @@ const logTime = defineTool({
 const expenseFields = {
   date: isoDate,
   description: z.string().min(1).max(500),
-  net_amount: z.number().positive().max(1_000_000_000).describe('Net EUR.'),
+  net_amount: z.number().positive().max(MAX_AMOUNT).describe('Net EUR.'),
   vat_rate: z.union([z.literal(0), z.literal(10), z.literal(13), z.literal(20)]),
   billable: z.boolean().optional().describe('Default true.'),
   markup_percent: z.number().min(0).max(1000).nullable().optional(),

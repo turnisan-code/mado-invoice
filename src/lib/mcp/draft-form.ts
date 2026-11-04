@@ -12,13 +12,17 @@ import type { TFn } from '@/lib/i18n'
 import type { PublicSettings } from '@/lib/public-settings'
 import { cataloguePrice, catalogueLineText, rateMap } from '@/lib/utils/catalogue'
 import { clientDisplayName } from '@/lib/utils/clients'
-import { calcTotals, formatMoney, lineAmount, orderItems } from '@/lib/utils/document'
+import { calcTotals, formatMoney, lineAmount, orderItems, today } from '@/lib/utils/document'
 import { issueProblemMessage, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import type { CatalogueItem, Client, DocumentType, Settings, Unit, VatRate } from '@/types'
 import { documentUrl } from './config'
 import { McpToolError } from './errors'
 
 export const MAX_LINES = 200
+// What the numeric(10,2) money columns (line prices, payments, expenses, budgets) and the
+// numeric(10,4) quantity hold; anything larger fails in the database.
+export const MAX_AMOUNT = 99_999_999.99
+export const MAX_QUANTITY = 999_999.9999
 
 export const isoDate = z.iso.date()
 export const id = z.guid()
@@ -30,14 +34,14 @@ export const lineInput = z.object({
   id: id.optional().describe('Only in update_document: an existing line of this draft to keep (its billed time and expenses stay linked).'),
   line_type: z.enum(['item', 'heading', 'text', 'separator', 'subtotal', 'page_break']).optional().describe("Default 'item'. 'subtotal' closes a section and may carry the section's discount."),
   description: z.string().max(5000).optional(),
-  quantity: z.number().min(-1_000_000).max(1_000_000).optional(),
+  quantity: z.number().min(-MAX_QUANTITY).max(MAX_QUANTITY).optional(),
   unit: z.enum(UNITS as [Unit, ...Unit[]]).optional(),
-  unit_price: z.number().min(-1_000_000_000).max(1_000_000_000).optional().describe('Net, EUR.'),
+  unit_price: z.number().min(-MAX_AMOUNT).max(MAX_AMOUNT).optional().describe('Net, EUR.'),
   vat_rate: VAT.optional(),
   service_date: isoDate.nullable().optional(),
   service_date_end: isoDate.nullable().optional(),
   discount_type: z.enum(['percent', 'fixed']).nullable().optional(),
-  discount_value: z.number().min(0).max(1_000_000_000).optional(),
+  discount_value: z.number().min(0).max(MAX_AMOUNT).optional(),
   catalogue_item_id: id.nullable().optional().describe('Fills description, unit, VAT and the client\'s price from the catalogue unless given.'),
 })
 export type LineInput = z.output<typeof lineInput>
@@ -51,7 +55,7 @@ export const headerInput = {
   tax_treatment: z.enum(['at_vat', 'eu_reverse_charge', 'non_eu']).optional(),
   notes: z.string().max(10_000).nullable().optional().describe('Printed on the document.'),
   notes_internal: z.string().max(10_000).nullable().optional().describe('Never printed.'),
-  discount: z.object({ type: z.enum(['percent', 'fixed']), value: z.number().min(0).max(1_000_000_000) }).nullable().optional()
+  discount: z.object({ type: z.enum(['percent', 'fixed']), value: z.number().min(0).max(MAX_AMOUNT) }).nullable().optional()
     .describe('Discount on the whole document; null removes it.'),
   skonto_percent: z.number().min(0).max(100).nullable().optional().describe('Invoices only.'),
   skonto_days: z.number().int().min(0).max(365).nullable().optional().describe('Invoices only.'),
@@ -239,7 +243,8 @@ type StoredDoc = {
 const money = (amount: number, currency: string) => formatMoney(amount, currency, 'en')
 
 // The stored document as the reply of every draft tool: header, ordered lines with their net,
-// totals, what would stop issuing it (worded) and the number issuing would give it today.
+// totals, what would stop issuing it (worded) and the number issuing would give it today (issuing
+// moves an earlier date to today unless told otherwise, so that number follows today's date).
 export async function describeDocument(
   supabase: SupabaseClient,
   settings: Settings | PublicSettings,
@@ -267,12 +272,13 @@ export async function describeDocument(
         deposit: await loadDepositCheck(supabase, doc as Parameters<typeof loadDepositCheck>[1]),
       })
     : []
-  const expected = draft ? expectedNumber(settings, doc.type, doc.date) || null : null
+  const issueDate = draft && doc.date < today() ? today() : doc.date
+  const expected = draft ? expectedNumber(settings, doc.type, issueDate) || null : null
   const client = doc.clients ? { id: doc.clients.id, name: clientDisplayName(doc.clients), client_number: doc.clients.client_number } : null
   const kind = doc.type === 'invoice' && doc.invoice_kind && doc.invoice_kind !== 'standard' ? `${doc.invoice_kind} invoice` : doc.type.replace('_', ' ')
   const parts = [
     `${draft ? 'Draft' : doc.number ?? 'Document'} ${kind} for ${client?.name ?? 'no client'}, ${money(totals.total, doc.currency)} gross, ${items.filter(i => (i.line_type ?? 'item') === 'item').length} item line(s).`,
-    expected ? `Issuing it now would give it ${expected}.` : '',
+    expected ? `Issuing it now would give it ${expected}${issueDate !== doc.date ? ', dated today' : ''}.` : '',
     problems.length ? `Before it can be issued: ${problems.map(p => issueProblemMessage(p, t)).join(' ')}` : draft ? 'Nothing stops issuing it.' : '',
   ]
   return {
@@ -317,7 +323,7 @@ export async function describeDocument(
         total_vat: totals.total_vat,
         total: totals.total,
       },
-      ...(draft ? { issue_problems: problems.map(p => ({ ...p, message: issueProblemMessage(p, t) })), expected_number: expected } : {}),
+      ...(draft ? { issue_problems: problems.map(p => ({ ...p, message: issueProblemMessage(p, t) })), expected_number: expected, expected_issue_date: issueDate } : {}),
       app_url: documentUrl(doc.type, doc.id),
     },
   }

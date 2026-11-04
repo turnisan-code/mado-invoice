@@ -159,6 +159,7 @@ export function lifecycleErrorMessage(error: DbError, t: TFn): string {
     case 'MI041': return t('mcp.errors.actionUnavailable')
     case 'MI042': return t('mcp.errors.claudeOnly')
     case 'MI043': return t('mcp.errors.freshCode')
+    case 'MI044': return t('mcp.errors.draftOnly')
     default: return numberingErrorMessage(error, t)
   }
 }
