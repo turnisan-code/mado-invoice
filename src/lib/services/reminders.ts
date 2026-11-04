@@ -93,7 +93,8 @@ export interface ReminderRequest {
 
 export type SentReminder = { ok: true; sentAt: string; level: number; attachments: string[]; to: string; subject: string }
 export type ReminderSendFailure =
-  | { ok: false; stage: 'google_not_connected' | 'no_email' }
+  | { ok: false; stage: 'google_not_connected' }
+  | { ok: false; stage: 'no_email' }
   | { ok: false; stage: 'pdf' | 'portal_link'; error: unknown }
   | { ok: false; stage: 'send'; failure: GoogleFailure }
 

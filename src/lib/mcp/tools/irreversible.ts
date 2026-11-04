@@ -1,5 +1,177 @@
 // Irreversible work (scope mado:irreversible): the prepare_* tools, confirm_action and
-// get_action_status, in the order tools/list shows them.
-import type { AnyToolDef } from '../types'
+// get_action_status, in the order tools/list shows them; plus create_credit_note (mado:write),
+// which belongs with the Storno it is the gentle form of.
+import { z } from 'zod'
+import { ACTION_KINDS, defineTool, type AnyToolDef, type ToolHints } from '../types'
+import { ACTION_HANDLE_PREFIX, documentUrl } from '../config'
+import { actionStatus, confirmAction, prepareAction } from '../confirm'
+import { McpToolError } from '../errors'
+import { MAX_ISSUE_DOCUMENTS } from '../actions/issue'
+import { resolveIssueAndSend } from '../actions/issue-and-send'
+import { resolveSendEmail } from '../actions/send-email'
+import { resolveSendReminder } from '../actions/send-reminder'
+import { MAX_BODY, MAX_COPIES, MAX_RECIPIENTS, MAX_SUBJECT } from '../actions/common'
+import { createCreditNote } from '@/lib/services/credit-notes'
 
-export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = []
+// prepare_* only store an expiring row in mcp_actions; no business data changes.
+const PREPARE: ToolHints = { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+
+const handle = z.string().startsWith(ACTION_HANDLE_PREFIX).max(64).describe('The confirmation_id a prepare_* tool returned.')
+const addresses = (max: number, what: string) => z.array(z.string().max(254)).max(max).optional().describe(what)
+const einvoice = z.enum(['ebinterface', 'ubl', 'none']).optional()
+  .describe("Attach the client's e-invoice: ebInterface or Peppol UBL. Default: the format set on the client, unless the total changed since issuing; 'none' attaches none.")
+const subject = z.string().max(MAX_SUBJECT).optional().describe('Default: the email template filled in for this document.')
+const body = z.string().max(MAX_BODY).optional().describe('Default: the email template filled in for this document. {{portal_link}} becomes the client-portal link when it is sent.')
+
+const APPROVAL = 'Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status.'
+
+export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
+  defineTool({
+    name: 'prepare_issue',
+    title: 'Prepare: issue documents',
+    description: `Prepare issuing 1 to ${MAX_ISSUE_DOCUMENTS} drafts (invoices, quotes, credit notes). Issuing assigns the next gapless legal numbers, freezes the PDF, archives it to Drive and applies a credit note to its invoice. The preview lists per draft the expected number, issue date, due date, client and gross total, with warnings (numbers out of date order, zero total, lost project links). An incomplete draft is refused with its problems. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      document_ids: z.array(z.uuid()).min(1).max(MAX_ISSUE_DOCUMENTS).describe('Draft ids, each once.'),
+      redate_to_today: z.boolean().optional().describe("Issue drafts dated before today with today's date (and due dates from the client's terms). Default true, as in the app."),
+    }),
+    hints: PREPARE,
+    run: (args, ctx) => prepareAction(ctx, 'issue', { document_ids: args.document_ids, redate_to_today: args.redate_to_today ?? true }),
+  }),
+  defineTool({
+    name: 'prepare_issue_and_send',
+    title: 'Prepare: issue and email a draft',
+    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; any other address is always approved in Mado. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      document_id: z.uuid().describe('The draft.'),
+      redate_to_today: z.boolean().optional().describe("Issue a draft dated before today with today's date. Default true."),
+      to: addresses(MAX_RECIPIENTS, "Default: the client's email."),
+      cc: addresses(MAX_COPIES, "Default: the client's CC list."),
+      bcc: addresses(MAX_COPIES, 'Default: none.'),
+      subject,
+      body,
+      attach_einvoice: einvoice,
+    }),
+    hints: PREPARE,
+    run: async (args, ctx) => prepareAction(ctx, 'issue_and_send', await resolveIssueAndSend(ctx, args)),
+  }),
+  defineTool({
+    name: 'prepare_send_email',
+    title: 'Prepare: email a document',
+    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; any other address is always approved in Mado. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      document_id: z.uuid(),
+      to: addresses(MAX_RECIPIENTS, "Default: the client's email."),
+      cc: addresses(MAX_COPIES, "Default: the client's CC list."),
+      bcc: addresses(MAX_COPIES, 'Default: none.'),
+      subject,
+      body,
+      attach_einvoice: einvoice,
+      upload_to_drive: z.boolean().optional().describe('Also archive the PDF to the Drive folder after sending. Default: when Drive is set up and the document is not archived there yet.'),
+    }),
+    hints: PREPARE,
+    run: async (args, ctx) => prepareAction(ctx, 'send_email', await resolveSendEmail(ctx, args)),
+  }),
+  defineTool({
+    name: 'prepare_send_reminder',
+    title: 'Prepare: payment reminder',
+    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      invoice_id: z.uuid(),
+      mode: z.enum(['gmail', 'manual']).describe("'gmail' sends it from the connected account; 'manual' only records it."),
+      to: addresses(MAX_RECIPIENTS, "Default (gmail): the client's email."),
+      cc: addresses(MAX_COPIES, "Default (gmail): the client's CC list."),
+      bcc: addresses(MAX_COPIES, 'Default: none.'),
+      subject: z.string().max(MAX_SUBJECT).optional().describe('Default (gmail): the reminder template for this level.'),
+      body: z.string().max(MAX_BODY).optional().describe('Gmail only. Default: the reminder template for this level.'),
+    }),
+    hints: PREPARE,
+    run: async (args, ctx) => prepareAction(ctx, 'send_reminder', await resolveSendReminder(ctx, args)),
+  }),
+  defineTool({
+    name: 'prepare_storno',
+    title: 'Prepare: Storno',
+    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      invoice_id: z.uuid(),
+      reason: z.string().max(500).optional().describe('Kept in the history of both documents.'),
+    }),
+    hints: PREPARE,
+    run: (args, ctx) => prepareAction(ctx, 'storno', { invoice_id: args.invoice_id, ...(args.reason !== undefined ? { reason: args.reason } : {}) }),
+  }),
+  defineTool({
+    name: 'prepare_cancel',
+    title: 'Prepare: cancel a document',
+    description: `Prepare cancelling a draft of any type, or an issued quote. Cancelled is final. An issued invoice is cancelled with prepare_storno; an issued credit note can never be cancelled. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({ document_id: z.uuid() }),
+    hints: PREPARE,
+    run: (args, ctx) => prepareAction(ctx, 'cancel', args),
+  }),
+  defineTool({
+    name: 'prepare_delete',
+    title: 'Prepare: delete',
+    description: `Prepare a permanent delete. A draft goes with its lines, payments, history and reminders, and a recurring schedule it is the template of; its project entries and deducted invoices are freed. A client can only be deleted without documents or projects (set it inactive instead), a project only without billed entries (archive it instead). Issued documents are never deleted. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      kind: z.enum(['draft', 'client', 'project']),
+      id: z.uuid(),
+    }),
+    hints: PREPARE,
+    run: (args, ctx) => prepareAction(ctx, 'delete', args),
+  }),
+  defineTool({
+    name: 'prepare_bookamat_sync',
+    title: 'Prepare: Bookamat sync',
+    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. ${APPROVAL}`,
+    scope: 'mado:irreversible',
+    inputSchema: z.object({ document_id: z.uuid() }),
+    hints: PREPARE,
+    run: (args, ctx) => prepareAction(ctx, 'bookamat_sync', args),
+  }),
+  defineTool({
+    name: 'confirm_action',
+    title: 'Confirm prepared action',
+    description: "Run a prepared action the owner allowed to be confirmed in chat (approval 'chat'). Pass the confirmation_id, the action and the label exactly as prepare returned them. The server checks that the action belongs to this connection, is unchanged, pending and not expired, then runs it once; a repeated call returns the stored result. An action with approval 'app' is never run here: the answer is its status and approve_url.",
+    scope: 'mado:irreversible',
+    inputSchema: z.object({
+      confirmation_id: handle,
+      action: z.enum(ACTION_KINDS as [string, ...string[]]),
+      label: z.string().max(500).describe('Exactly as prepare returned it.'),
+    }),
+    hints: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+    meta: { 'anthropic/requiresUserInteraction': true },
+    run: (args, ctx) => confirmAction(ctx, { confirmation_id: args.confirmation_id, action: args.action as typeof ACTION_KINDS[number], label: args.label }),
+  }),
+  defineTool({
+    name: 'get_action_status',
+    title: 'Action status',
+    description: 'The state of a prepared action: pending (with approve_url), running, done (with the result), failed (with the error), rejected or expired.',
+    scope: 'mado:irreversible',
+    inputSchema: z.object({ confirmation_id: handle }),
+    hints: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: (args, ctx) => actionStatus(ctx, args.confirmation_id),
+  }),
+  defineTool({
+    name: 'create_credit_note',
+    title: 'Create credit-note draft',
+    description: 'Create a credit-note DRAFT from an issued invoice (a partial correction; it does not cancel the invoice). Edit it with update_document and issue it with prepare_issue, which applies it to the invoice. To cancel the whole invoice use prepare_storno.',
+    scope: 'mado:write',
+    inputSchema: z.object({ invoice_id: z.uuid() }),
+    hints: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    async run(args, ctx) {
+      const { data, error } = await createCreditNote(ctx.supabase, args.invoice_id, { cancel: false })
+      if (error) throw error
+      if (!data) throw new McpToolError('not_found', { details: { invoice_id: args.invoice_id } })
+      const appUrl = documentUrl('credit_note', data.creditNoteId)
+      return {
+        summary: ctx.t('mcp.approve.result.creditNoteDraft', { url: appUrl }),
+        data: { credit_note_id: data.creditNoteId, status: 'draft', invoice_id: args.invoice_id, app_url: appUrl },
+      }
+    },
+  }),
+]

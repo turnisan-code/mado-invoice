@@ -256,7 +256,7 @@ export async function issuePreview(
   supabase: SupabaseClient,
   settings: IssueSettings,
   drafts: readonly IssueDraftRow[],
-  { redate, today }: { redate: boolean; today: string },
+  { redate, today, latestIssued }: { redate: boolean; today: string; latestIssued?: ReadonlyMap<DocumentType, LatestIssued | null> },
 ): Promise<IssuePreview> {
   for (const d of drafts) {
     if (d.number) throw new IssueRefusal('already_issued', d.id, d.number)
@@ -295,7 +295,7 @@ export async function issuePreview(
     const ofType = ordered.filter(d => d.type === type)
     const expected = await expectedNumbers(supabase, settings, type, ofType.map(d => plans.get(d.id)!.date))
     ofType.forEach((d, i) => numbers.set(d.id, expected[i]))
-    latest.set(type, await latestIssuedOf(supabase, type))
+    latest.set(type, latestIssued?.has(type) ? latestIssued.get(type) ?? null : await latestIssuedOf(supabase, type))
   }
 
   const docs: IssuePreviewDoc[] = []
