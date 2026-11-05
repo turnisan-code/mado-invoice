@@ -35,7 +35,7 @@ async function loadInvoice(ctx: ServiceContext, id: string, mode: 'gmail' | 'man
   throw codedError(loaded.reason, loaded.reason)
 }
 
-function reminderState({ invoice, settings }: LoadedReminder) {
+function reminderState({ invoice, settings }: LoadedReminder, mode: 'gmail' | 'manual') {
   return {
     today: today(),
     invoice: {
@@ -44,8 +44,10 @@ function reminderState({ invoice, settings }: LoadedReminder) {
       discount_value: exact(invoice.discount_value), items: itemsState(invoice.document_items as unknown as Record<string, unknown>[]),
       payments: paymentsState(invoice.payments as unknown as Record<string, unknown>[]),
     },
-    // As the Mahnung prints it, the copies, and Claude's mark (a write after prepare is a change).
-    client: { ...printedClient(invoice.clients), cc_emails: invoice.clients?.cc_emails ?? [], mcp_written_at: claudeWrittenAt(invoice.clients) },
+    // Gmail: the client as the Mahnung prints it, the copies, and Claude's mark (a write after prepare
+    // is a change). A reminder only recorded reads nothing of the client (its recipients and subject
+    // are the arguments), so no change to the client stops it, nor the owner's save that clears the mark.
+    ...(mode === 'gmail' ? { client: { ...printedClient(invoice.clients), cc_emails: invoice.clients?.cc_emails ?? [], mcp_written_at: claudeWrittenAt(invoice.clients) } } : {}),
     settings: {
       max_level: settings.reminder_max_level ?? null, fee: cents(settings.reminder_fee), interest: exact(settings.reminder_interest_rate),
       grace_days: settings.reminder_grace_days ?? null, sender: settings.gmail_email ?? null, connected: !!settings.gmail_refresh_token,
@@ -142,11 +144,11 @@ export const sendReminderAction = defineAction<Args>({
       },
       warnings: notices.map(n => word(ctx.t, 'en', n)),
       forceApp: recipientsCheck.foreign.length + recipientsCheck.unconfirmed.length > 0,
-      fingerprint: fingerprintOf(reminderState(loaded)),
+      fingerprint: fingerprintOf(reminderState(loaded, args.mode)),
     }
   },
   async fingerprint(ctx, args) {
-    return fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id, args.mode)))
+    return fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id, args.mode), args.mode))
   },
   async execute(ctx, args) {
     const loaded = await loadInvoice(ctx, args.invoice_id, args.mode)

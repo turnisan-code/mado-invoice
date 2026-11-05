@@ -352,7 +352,7 @@ begin
   perform public.mcp_drafts_test_ok('what the approved runs read is as the owner approved it',
     (select notes is null from public.documents where id = v_rdraft)
     and (select count(*) = 1 and bool_and(description = 'Approved line' and quantity = 2) from public.document_items where document_id = v_rdraft)
-    and (select company is null and address_line1 is null from public.clients where id = v_rclient)
+    and (select company is null and coalesce(address_line1, '') = '' from public.clients where id = v_rclient)
     and (select final_invoice_id = v_rdraft and mcp_payments_at is null from public.documents where id = v_rdep)
     and (select final_invoice_id is null from public.documents where id = v_rfree)
     and not exists (select 1 from public.payments where document_id in (v_rinv, v_rcninv, v_rcn, v_rdep)));

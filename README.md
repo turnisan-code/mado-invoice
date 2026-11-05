@@ -172,7 +172,9 @@ its name and address, the Storno credit note is archived with its name, address 
 good, the bookings carry its name and VAT ID, the e-invoice its name, address, VAT ID and buyer
 reference, and the approval page shows only its name. A change Claude makes to the client after
 preparing one of these makes the approval page say so, with a link to the client, and the action
-cannot run. Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
+cannot run. A reminder only recorded as sent another way prints nothing of the client, so it is not
+refused, and neither a change to the client nor the owner saving it stops it.
+Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
 client Claude has just created is the usual way; the approval page then shows the recipient block
 and VAT ID the document is numbered and archived with for good, and the buyer reference the PDF
 prints from the client (or a credit note's invoice) when the draft has none of its own. A Peppol

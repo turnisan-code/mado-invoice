@@ -77,7 +77,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_reminder',
     title: 'Prepare: payment reminder',
-    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. Recipients (gmail) default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A gmail reminder is refused while the client was created or changed from Claude and not saved in Mado since: the Mahnung prints it. ${APPROVAL}`,
+    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. Recipients (gmail) default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A gmail reminder is refused while the client was created or changed from Claude and not saved in Mado since: the Mahnung prints it. A manual one prints nothing of the client, so a change to the client after preparing it does not stop it. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
