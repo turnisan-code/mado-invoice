@@ -974,7 +974,7 @@ export const de = {
     language: 'Sprache',
     automaticReminders: 'Automatische Mahnungen',
     off: 'Aus',
-    changedByClaude: 'Claude hat diesen Kunden geändert. Automatische Mahnungen und automatisch ausgestellte Rechnungen für ihn warten, bis Sie die Daten prüfen und den Kunden hier speichern.',
+    changedByClaude: 'Claude hat diesen Kunden angelegt oder geändert. Bis die Daten geprüft und der Kunde hier gespeichert ist, warten automatische Mahnungen, der automatische Bookamat-Abgleich und automatisch ausgestellte Rechnungen für ihn, aus diesen Daten wird keine Archivkopie seiner Belege erstellt, und Freigabelinks zeigen Name und Adresse nicht.',
     form: {
       name: 'Name',
       namePlaceholder: 'Ansprechperson',
@@ -1357,6 +1357,7 @@ export const de = {
     errors: {
       not_issued: 'Nur ausgestellte Dokumente haben eine Archivkopie.',
       stored_unreadable: 'Das gespeicherte PDF konnte gerade nicht gelesen werden. Bitte gleich noch einmal versuchen.',
+      client_changed: 'Claude hat den Kunden dieses Dokuments angelegt oder geändert, und die Archivkopie würde diesen Empfängerblock dauerhaft festhalten. Den Kunden prüfen und in Mado speichern, dann noch einmal versuchen.',
     },
     history: 'Verlauf',
     subject: 'Betreff: {subject}',
@@ -1729,6 +1730,11 @@ export const de = {
   },
   payments: {
     title: 'Zahlungen',
+    claudeChanged: {
+      notice: 'Claude hat bei dieser Rechnung eine Zahlung erfasst, geändert oder entfernt. Automatische Mahnungen lassen sie aus, bis die Zahlungen geprüft und hier bestätigt sind.',
+      confirm: 'Zahlungen stimmen',
+      confirmed: 'Automatische Mahnungen berücksichtigen diese Rechnung wieder.',
+    },
     balance: 'Offen:',
     overpaidBy: 'Überzahlt um {amount}',
     paidInFull: 'Vollständig bezahlt',
@@ -2702,7 +2708,7 @@ export const de = {
       approvalsCountOther: '{count} Aktionen warten',
       approvalsOpen: 'Freigaben öffnen',
       policyTitle: 'Wie endgültige Aktionen freigegeben werden',
-      policyHint: '„In Claude bestätigen“ macht die Rückfrage der Claude-App zur einzigen Prüfung für diese Aktion. Immer in Mado freigegeben, gleich was hier eingestellt ist: eine E-Mail oder Mahnung an eine Adresse, die nicht beim Kunden hinterlegt ist, an eine Adresse, die Claude beim Kunden eingetragen hat (bis Sie den Kunden in Mado speichern), oder an eine hinterlegte Adresse, an die Sie für diesen Kunden noch nie aus Mado geschrieben haben; bei Verbindungen mit Claude Code (und einem eigenen OAuth-Client) ein Bookamat-Abgleich oder das Ausstellen von mehr als 3 Dokumenten auf einmal; und das Löschen der Vorlage eines wiederkehrenden Zeitplans. Solange Sie einen Kunden, den Claude angelegt oder geändert hat, nicht in Mado speichern, bekommt er keine automatischen Mahnungen und keine automatisch ausgestellten Rechnungen.',
+      policyHint: '„In Claude bestätigen“ macht die Rückfrage der Claude-App zur einzigen Prüfung für diese Aktion. Immer in Mado freigegeben, gleich was hier eingestellt ist: eine E-Mail oder Mahnung an eine Adresse, die nicht beim Kunden hinterlegt ist, an eine Adresse, die Claude beim Kunden eingetragen hat (bis Sie den Kunden in Mado speichern), oder an eine hinterlegte Adresse, an die Sie für diesen Kunden noch nie aus Mado geschrieben haben; bei Verbindungen mit Claude Code (und einem eigenen OAuth-Client) ein Bookamat-Abgleich oder das Ausstellen von mehr als 3 Dokumenten auf einmal; und das Löschen der Vorlage eines wiederkehrenden Zeitplans. Ein Kunde, den Claude angelegt oder geändert hat, bekommt bis zum Speichern in Mado keine automatischen Mahnungen, keinen automatischen Bookamat-Abgleich und keine automatisch ausgestellten Rechnungen, aus seinen Daten wird keine Archivkopie erstellt, und Freigabelinks zeigen Name und Adresse nicht. Eine Rechnung, bei der Claude eine Zahlung erfasst, geändert oder entfernt hat, bekommt keine automatischen Mahnungen, bis ihre Zahlungen auf der Rechnung bestätigt sind.',
       channelApp: 'In Mado freigeben',
       channelChat: 'In Claude bestätigen',
       approvalCode: 'Beim Freigeben in Mado einen Code aus der Authenticator-App verlangen',

@@ -973,7 +973,7 @@ export const en = {
     language: 'Language',
     automaticReminders: 'Automatic reminders',
     off: 'Off',
-    changedByClaude: 'Claude changed this client. Automatic reminders and automatically issued invoices for it wait until you check the details and save the client here.',
+    changedByClaude: 'Claude created or changed this client. Until you check the details and save the client here, automatic reminders, the automatic Bookamat sync and automatically issued invoices for it wait, no archive copy of its documents is made from these details, and share links leave out its name and address.',
     form: {
       name: 'Name',
       namePlaceholder: 'Contact name',
@@ -1356,6 +1356,7 @@ export const en = {
     errors: {
       not_issued: 'Only issued documents have an archive copy.',
       stored_unreadable: 'The stored PDF could not be read right now. Try again in a moment.',
+      client_changed: 'Claude created or changed this document’s client, and the archive copy would keep that recipient block for good. Check the client and save it in Mado, then try again.',
     },
     history: 'History',
     subject: 'Subject: {subject}',
@@ -1728,6 +1729,11 @@ export const en = {
   },
   payments: {
     title: 'Payments',
+    claudeChanged: {
+      notice: 'Claude recorded, changed or removed a payment on this invoice. Automatic reminders skip it until you have checked its payments and confirm them here.',
+      confirm: 'Payments are correct',
+      confirmed: 'Automatic reminders include this invoice again.',
+    },
     balance: 'Balance:',
     overpaidBy: 'Overpaid by {amount}',
     paidInFull: 'Paid in full',
@@ -2702,7 +2708,7 @@ export const en = {
       approvalsCountOther: '{count} actions waiting',
       approvalsOpen: 'Open approvals',
       policyTitle: 'How irreversible actions are approved',
-      policyHint: '“Confirm in Claude” makes the Claude app’s own prompt the only check for that action. Always approved in Mado, whatever is set here: an email or reminder to an address that is not on the client record, to an address Claude wrote onto the client (until you save the client in Mado), or to an address on the record you have never emailed from Mado for that client; on Claude Code connections (and an own OAuth client), a Bookamat sync or issuing more than 3 documents at once; and deleting the template of a recurring schedule. Until you save a client Claude created or changed in Mado, it gets no automatic reminders and no automatically issued invoices.',
+      policyHint: '“Confirm in Claude” makes the Claude app’s own prompt the only check for that action. Always approved in Mado, whatever is set here: an email or reminder to an address that is not on the client record, to an address Claude wrote onto the client (until you save the client in Mado), or to an address on the record you have never emailed from Mado for that client; on Claude Code connections (and an own OAuth client), a Bookamat sync or issuing more than 3 documents at once; and deleting the template of a recurring schedule. Until you save a client Claude created or changed in Mado, it gets no automatic reminders, no automatic Bookamat sync and no automatically issued invoices, no archive copy is made from it, and share links leave out its name and address. An invoice whose payments Claude recorded, changed or removed gets no automatic reminders until you confirm its payments on the invoice.',
       channelApp: 'Approve in Mado',
       channelChat: 'Confirm in Claude',
       approvalCode: 'Ask for a code from the authenticator app when approving in Mado',

@@ -9,6 +9,7 @@ import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import ConvertDocumentButton from '@/components/layout/ConvertDocumentButton'
 import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
+import ClaudePaymentsNotice from '@/components/layout/ClaudePaymentsNotice'
 import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { toPublicSettings } from '@/lib/public-settings'
@@ -102,6 +103,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </span>
         </p>
       )}
+      {/* Payments a Claude session changed hold the automatic reminders until confirmed here. */}
+      {doc.mcp_payments_at && (doc.status === 'sent' || doc.status === 'overdue') && <ClaudePaymentsNotice documentId={doc.id} />}
       <InvoicePageClient
         type="invoice"
         settings={publicSettings}

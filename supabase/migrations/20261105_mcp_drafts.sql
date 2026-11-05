@@ -14,12 +14,19 @@
 --     action whose arguments name one of them is approved in Mado whatever the policy says
 --     (mcp_actions_recipients), so Claude cannot write an address onto a client and then send
 --     there with only the chat prompt as the gate. The reminder cron skips them too.
---   * clients.mcp_written_at: when a Claude session last changed the client, until the owner saves
---     it in Mado. Meanwhile the reminder cron skips the client's invoices
---     (src/app/api/cron/reminders/route.ts) and a schedule that issues automatically creates its
---     invoices as drafts (src/lib/utils/recurring.ts): a Mahnung or an issued invoice would carry
---     what Claude wrote there (the name, the recipient block, the payment terms) without anyone
---     approving it.
+--   * clients.mcp_written_at: when a Claude session last created or changed the client, until the
+--     owner saves it in Mado. Meanwhile the reminder cron skips the client's invoices
+--     (src/app/api/cron/reminders/route.ts), its automatic Bookamat step skips the client's
+--     documents (autoSyncBookamat in src/lib/bookamat.ts), a schedule that issues automatically
+--     creates its invoices as drafts (src/lib/utils/recurring.ts), no archive copy of an issued
+--     document is made from the client afterwards (getIssuedPdf in src/lib/pdf/snapshot.ts) and
+--     the client portal leaves the recipient block out: a Mahnung, a booking, an issued invoice or
+--     a frozen PDF would carry what Claude wrote there (the name, the recipient block, the UID,
+--     the payment terms) without anyone approving it.
+--   * documents.mcp_payments_at: when a Claude session last recorded, changed or removed a payment
+--     row of an invoice, until the owner confirms the invoice's payments on its page in Mado.
+--     Meanwhile the reminder cron skips the invoice: removing a payment reopens a paid invoice or
+--     raises what is open, so an automatic Mahnung would ask for money the client paid.
 -- Error codes: MI044 = only a draft's lines can be changed from a Claude connection, MI045 = the
 -- template of a recurring schedule cannot be changed or deleted from one.
 -- Mirrored in supabase/schema.sql; supabase/tests/mcp_drafts_guards.sql checks the guards and
@@ -131,6 +138,11 @@ $$;
 -- that [[:space:]] matches and \s does not (U+0085 under ICU), where the earlier split cut it and
 -- may have left it unmarked; an address that lower() changes or makes equal to another one on the
 -- client, which the earlier fold may have taken for an address already there and left unmarked.
+-- That version had no mcp_written_at, so what Claude changed on a client under it is not known:
+-- the column is added here and set on every client with a mark after the redo and on every client
+-- created since the first Claude connection, so the crons and the archive copy hold them until the
+-- owner saves them in Mado. A change Claude made under it to the name, company, UID or terms of
+-- another client, with no address, left no trace (README: the owner checks and saves those).
 -- The two triggers below are bypassed for this one update, inside this statement.
 do $$
 declare
@@ -164,6 +176,12 @@ begin
          lateral (select public.mcp_address_set(array[c2.email] || coalesce(c2.cc_emails, '{}')) as addrs) s
   ) r
   where r.id = c.id and c.mcp_recipients is distinct from r.marks;
+  alter table public.clients add column mcp_written_at timestamptz;
+  execute $q$
+    update public.clients set mcp_written_at = now()
+    where cardinality(mcp_recipients) > 0
+       or created_at >= (select min(g.created_at) from public.mcp_grants g)
+  $q$;
   foreach v_trigger in array v_triggers loop
     execute format('alter table public.clients enable trigger %I', v_trigger);
   end loop;
@@ -266,6 +284,57 @@ create trigger mcp_actions_recipients
   before insert on public.mcp_actions
   for each row execute function public.mcp_actions_recipients();
 
+-- ─── Payments Claude changed ─────────────────────────────────────────────────
+-- A payment, fee, Skonto, write-off or applied credit that a Claude session records, changes or
+-- removes on an invoice sets documents.mcp_payments_at, until the owner confirms the invoice's
+-- payments on its page in Mado. Meanwhile the reminder cron skips the invoice
+-- (src/app/api/cron/reminders/route.ts): a removed row reopens a paid invoice or raises what is
+-- open, and a recorded one is listed as received, so an automatic Mahnung would ask the client for
+-- money by what Claude wrote, without anyone approving it. A Claude session only ever sets or
+-- moves the mark forward (documents_mcp_payments_guard); the owner's browser clears it.
+alter table public.documents add column if not exists mcp_payments_at timestamptz;
+
+create or replace function public.payments_mcp_mark()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_old uuid;
+  v_new uuid;
+begin
+  if public.is_mcp_session() then
+    if tg_op <> 'INSERT' then v_old := old.document_id; end if;
+    if tg_op <> 'DELETE' then v_new := new.document_id; end if;
+    update public.documents d set mcp_payments_at = now()
+    where d.id in (v_old, v_new) and d.type = 'invoice';
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function public.documents_mcp_payments_guard()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if public.is_mcp_session() then
+    new.mcp_payments_at := greatest(old.mcp_payments_at, new.mcp_payments_at);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_mcp_mark on public.payments;
+create trigger payments_mcp_mark
+  after insert or update or delete on public.payments
+  for each row execute function public.payments_mcp_mark();
+drop trigger if exists documents_mcp_payments_guard on public.documents;
+create trigger documents_mcp_payments_guard
+  before update of mcp_payments_at on public.documents
+  for each row execute function public.documents_mcp_payments_guard();
+
 -- ─── Function privileges ─────────────────────────────────────────────────────
 revoke execute on function public.mcp_address_set(text[]) from public, anon;
 grant execute on function public.mcp_address_set(text[]) to authenticated;
@@ -274,3 +343,5 @@ revoke execute on function public.documents_mcp_template_guard() from public, an
 revoke execute on function public.clients_mcp_recipients() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients_seen() from public, anon, authenticated;
 revoke execute on function public.mcp_actions_recipients() from public, anon, authenticated;
+revoke execute on function public.payments_mcp_mark() from public, anon, authenticated;
+revoke execute on function public.documents_mcp_payments_guard() from public, anon, authenticated;

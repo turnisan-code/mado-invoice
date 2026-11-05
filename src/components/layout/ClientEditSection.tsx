@@ -17,8 +17,9 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
   const { t } = useT()
 
   // A client a Claude session created or changed (clients.mcp_written_at, 20261105_mcp_drafts.sql):
-  // the reminder cron skips its invoices and schedules that issue automatically create drafts for
-  // it until the owner saves it here (the client form clears the mark).
+  // the reminder cron and its Bookamat step skip its documents, schedules that issue automatically
+  // create drafts for it, no archive copy is made from it and the portal leaves its address out,
+  // until the owner saves it here (the client form clears the mark).
   const claudeNotice = client.mcp_written_at ? (
     <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300">
       {t('clients.changedByClaude')}

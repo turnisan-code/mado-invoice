@@ -37,8 +37,17 @@ const loadShared = cache(async (token: string) => {
   if (!doc?.number || !doc.clients) return null
   const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings) return null
-  const [reference, buyerReference] = await Promise.all([fetchCreditReference(supabase, doc), fetchBuyerReference(supabase, doc, doc.clients)])
-  return { doc, client: doc.clients, settings: settings as Settings, reference, buyerReference }
+  // A client a Claude session created or changed, not saved by the owner in Mado since
+  // (clients.mcp_written_at, 20261105_mcp_drafts.sql): what Claude wrote there reaches nobody
+  // unattended, so until then the page leaves out the recipient block and the client's default
+  // buyer reference, and the PDF route only serves a copy stored before (getIssuedPdf). A client
+  // read without the column (that migration not applied) has not been changed by Claude.
+  const clientHeld = !!doc.clients.mcp_written_at
+  const [reference, buyerReference] = await Promise.all([
+    fetchCreditReference(supabase, doc),
+    fetchBuyerReference(supabase, doc, clientHeld ? null : doc.clients),
+  ])
+  return { doc, client: doc.clients, clientHeld, settings: settings as Settings, reference, buyerReference }
 })
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
@@ -78,7 +87,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const shared = await loadShared(token)
   if (!shared) notFound()
 
-  const { doc, client, settings, reference, buyerReference } = shared
+  const { doc, client, clientHeld, settings, reference, buyerReference } = shared
   const lang = documentLanguage(doc.language)
   const t = documentT(lang)
   const company = settings.company_name || settings.owner_name
@@ -164,18 +173,20 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-        <div>
-          <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">{recipientLabel(t, kind)}</h2>
-          <div className="text-sm text-neutral-700 space-y-0.5 break-words">
-            {client.company && <div className="font-medium">{client.company}</div>}
-            {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
-            <div>{client.address_line1}</div>
-            {client.address_line2 && <div>{client.address_line2}</div>}
-            <div>{[client.zip, client.city].filter(Boolean).join(' ')}</div>
-            <div>{countryName(client.country, lang)}</div>
-            {client.uid_number && <div className="text-neutral-500 text-xs mt-1">{t('pdfPortal.issuer.uid')} {client.uid_number}</div>}
+        {clientHeld ? <div className="hidden sm:block" /> : (
+          <div>
+            <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">{recipientLabel(t, kind)}</h2>
+            <div className="text-sm text-neutral-700 space-y-0.5 break-words">
+              {client.company && <div className="font-medium">{client.company}</div>}
+              {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
+              <div>{client.address_line1}</div>
+              {client.address_line2 && <div>{client.address_line2}</div>}
+              <div>{[client.zip, client.city].filter(Boolean).join(' ')}</div>
+              <div>{countryName(client.country, lang)}</div>
+              {client.uid_number && <div className="text-neutral-500 text-xs mt-1">{t('pdfPortal.issuer.uid')} {client.uid_number}</div>}
+            </div>
           </div>
-        </div>
+        )}
         <dl className="text-sm space-y-2">
           <div className="flex justify-between gap-4">
             <dt className="text-neutral-500">{t('pdfPortal.date')}</dt>

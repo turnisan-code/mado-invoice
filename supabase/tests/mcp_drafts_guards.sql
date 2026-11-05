@@ -1,7 +1,8 @@
 -- Checks the guards of supabase/migrations/20261105_mcp_drafts.sql: a Claude session writes the
 -- lines of drafts only (MI044), leaves the template of a recurring schedule of either mode as it
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
--- until the owner saves the client there; a client it changed keeps mcp_written_at until then.
+-- until the owner saves the client there; a client it changed keeps mcp_written_at until then, and
+-- an invoice whose payments it changed keeps mcp_payments_at until the owner confirms them.
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
@@ -55,6 +56,8 @@ declare
   v_tpl_is  uuid;
   v_tpl_dr  uuid;
   v_stale   uuid;
+  v_paid    uuid;
+  v_pay     uuid;
   v_base    jsonb;
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
@@ -88,6 +91,13 @@ begin
          (v_tpl_dr, 'MCP draft guard test, draft', 'monthly', 1, current_date + 30, 'draft', true);
   update public.settings set mcp_confirm_policy = '{"send_email": "chat", "send_reminder": "chat"}', mcp_approval_totp = true where id is not null;
 
+  -- A paid invoice, due a month ago.
+  insert into public.documents (type, client_id, number, status, due_date) values ('invoice', v_other, 'MCP-GUARD-TEST-3', 'sent', current_date - 30) returning id into v_paid;
+  insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
+  values (v_paid, 0, 'item', 'Paid line', 1, 'hour', 100, 20);
+  insert into public.payments (document_id, date, amount, kind, method) values (v_paid, current_date - 20, 120, 'payment', 'bank') returning id into v_pay;
+  update public.documents set status = 'paid' where id = v_paid;
+
   -- A client as an earlier version of mcp_address_set (lower()) left it: Claude wrote the email and
   -- the mark has the earlier, glibc lower() form. The trigger is bypassed to store that mark.
   alter table public.clients disable trigger clients_mcp_recipients;
@@ -104,6 +114,8 @@ begin
   perform set_config('mcp_test.tpl_issued', v_tpl_is::text, true);
   perform set_config('mcp_test.tpl_draft', v_tpl_dr::text, true);
   perform set_config('mcp_test.stale', v_stale::text, true);
+  perform set_config('mcp_test.paid', v_paid::text, true);
+  perform set_config('mcp_test.payment', v_pay::text, true);
   perform set_config('mcp_test.browser', (v_base || jsonb_build_object('session_id', v_browser,
     'amr', jsonb_build_array(jsonb_build_object('method', 'totp', 'timestamp', v_now - 60))))::text, true);
   perform set_config('mcp_test.claude', (v_base || jsonb_build_object('session_id', v_claude,
@@ -201,6 +213,31 @@ begin
     and (select count(*) = 1 and bool_and(description = 'Retainer') from public.document_items where document_id = v_tpl_dr));
 end $$;
 
+-- ─── Claude: payments of an invoice ──────────────────────────────────────────
+do $$
+declare
+  v_paid   uuid := current_setting('mcp_test.paid')::uuid;
+  v_issued uuid := current_setting('mcp_test.issued')::uuid;
+  v_status text;
+  v_at     timestamptz;
+begin
+  perform public.mcp_drafts_test_ok('an invoice whose payments claude has not changed: no mcp_payments_at',
+    (select mcp_payments_at is null and status = 'paid' from public.documents where id = v_paid));
+  v_status := public.remove_payment(current_setting('mcp_test.payment')::uuid, true);
+  select mcp_payments_at into v_at from public.documents where id = v_paid;
+  perform public.mcp_drafts_test_ok('claude removes the payment of a paid, past-due invoice: overdue again, mcp_payments_at set',
+    v_status = 'overdue' and v_at is not null);
+  update public.documents set mcp_payments_at = null where id = v_paid returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('claude cannot clear mcp_payments_at', v_at is not null);
+  update public.documents set mcp_payments_at = now() - interval '1 day' where id = v_paid returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('claude cannot move mcp_payments_at back', v_at > now() - interval '1 hour');
+  perform public.mcp_drafts_test_ok('an issued invoice claude has not paid: no mcp_payments_at',
+    (select mcp_payments_at is null from public.documents where id = v_issued));
+  insert into public.payments (document_id, date, amount, kind, method) values (v_issued, current_date, 10, 'payment', 'bank');
+  perform public.mcp_drafts_test_ok('claude records a payment: mcp_payments_at set',
+    (select mcp_payments_at is not null from public.documents where id = v_issued));
+end $$;
+
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
 do $$
 declare
@@ -276,10 +313,17 @@ set local role authenticated;
 do $$
 declare
   v_client  uuid := current_setting('mcp_test.client')::uuid;
+  v_paid    uuid := current_setting('mcp_test.paid')::uuid;
   v_marks   text[];
   v_written timestamptz;
+  v_at      timestamptz;
 begin
   perform public.mcp_drafts_test_ok('browser: not a Claude session', not public.is_mcp_session());
+  update public.documents set mcp_payments_at = null where id = v_paid returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('browser: the owner confirms the payments, mcp_payments_at cleared', v_at is null);
+  insert into public.payments (document_id, date, amount, kind, method) values (v_paid, current_date, 120, 'payment', 'bank');
+  perform public.mcp_drafts_test_ok('browser: a payment the owner records sets no mcp_payments_at',
+    (select mcp_payments_at is null from public.documents where id = v_paid));
   insert into public.document_items (document_id, sort_order, line_type, description)
   values (current_setting('mcp_test.issued')::uuid, 1, 'text', 'Owner note');
   perform public.mcp_drafts_test_ok('browser still writes an issued document''s lines',

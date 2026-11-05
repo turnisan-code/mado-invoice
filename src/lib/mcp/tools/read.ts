@@ -151,7 +151,7 @@ const searchDocuments = defineTool({
 const getDocument = defineTool({
   name: 'get_document',
   title: 'Get document',
-  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. recurring_template: the recurring schedule it is the template of (locked: true); whatever the schedule\'s mode, Claude cannot change the document and deleting it is approved in Mado: ask the owner to edit it there. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
+  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. issued.payments_unconfirmed: true when Claude recorded, changed or removed a payment on the invoice and the owner has not confirmed its payments in Mado since; automatic reminders skip it until then. recurring_template: the recurring schedule it is the template of (locked: true); whatever the schedule\'s mode, Claude cannot change the document and deleting it is approved in Mado: ask the owner to edit it there. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({ id: uuid('Document id') }),
   hints: READ,
@@ -224,6 +224,7 @@ const getDocument = defineTool({
               at: doc.issued_at ?? null, issued_total: doc.issued_total ?? null,
               changed_since_issue: doc.issued_total != null && Math.abs(doc.issued_total - totals.total) > 0.005,
               archive_pdf_stored: !!doc.pdf_path, sent_at: doc.sent_at ?? null, reminder_level: doc.reminder_level ?? 0,
+              ...(doc.mcp_payments_at ? { payments_unconfirmed: true } : {}),
             }
           : null,
         ...extras,

@@ -193,9 +193,10 @@ create table clients (
   -- cc_emails, until the owner saves the client in Mado; an email to one of them is approved in
   -- Mado (clients_mcp_recipients, mcp_actions_recipients).
   mcp_recipients  text[] not null default '{}',
-  -- When a Claude session last changed the client, until the owner saves it in Mado; meanwhile the
-  -- reminder cron skips its invoices and a recurring schedule that issues automatically creates
-  -- drafts for it (src/lib/utils/recurring.ts).
+  -- When a Claude session last created or changed the client, until the owner saves it in Mado;
+  -- meanwhile the reminder cron and its Bookamat step skip its documents, a recurring schedule that
+  -- issues automatically creates drafts for it (src/lib/utils/recurring.ts), no archive copy is
+  -- made from it (src/lib/pdf/snapshot.ts) and the portal leaves its recipient block out.
   mcp_written_at  timestamptz
 );
 
@@ -345,6 +346,10 @@ create table documents (
   -- On an advance or partial invoice: the final invoice that deducts it (at most one). Deleting a
   -- draft final invoice frees it, so does a Storno of the final invoice (documents_deposit_release).
   final_invoice_id    uuid references documents(id) on delete set null,
+  -- Claude connector (20261105_mcp_drafts.sql): when a Claude session last recorded, changed or
+  -- removed a payment row of the invoice, until the owner confirms its payments on the invoice
+  -- page; meanwhile the reminder cron skips it (payments_mcp_mark, documents_mcp_payments_guard).
+  mcp_payments_at     timestamptz,
   constraint documents_invoice_kind_check
     check (invoice_kind in ('standard', 'advance', 'partial', 'final') and (type = 'invoice' or invoice_kind = 'standard')),
   constraint documents_final_invoice_check
@@ -2236,6 +2241,11 @@ $$;
 -- that [[:space:]] matches and \s does not (U+0085 under ICU), where the earlier split cut it and
 -- may have left it unmarked; an address that lower() changes or makes equal to another one on the
 -- client, which the earlier fold may have taken for an address already there and left unmarked.
+-- That version had no mcp_written_at, so what Claude changed on a client under it is not known:
+-- the column is added here and set on every client with a mark after the redo and on every client
+-- created since the first Claude connection, so the crons and the archive copy hold them until the
+-- owner saves them in Mado. A change Claude made under it to the name, company, UID or terms of
+-- another client, with no address, left no trace (README: the owner checks and saves those).
 -- The two triggers below are bypassed for this one update, inside this statement.
 do $$
 declare
@@ -2269,6 +2279,12 @@ begin
          lateral (select public.mcp_address_set(array[c2.email] || coalesce(c2.cc_emails, '{}')) as addrs) s
   ) r
   where r.id = c.id and c.mcp_recipients is distinct from r.marks;
+  alter table public.clients add column mcp_written_at timestamptz;
+  execute $q$
+    update public.clients set mcp_written_at = now()
+    where cardinality(mcp_recipients) > 0
+       or created_at >= (select min(g.created_at) from public.mcp_grants g)
+  $q$;
   foreach v_trigger in array v_triggers loop
     execute format('alter table public.clients enable trigger %I', v_trigger);
   end loop;
@@ -2368,6 +2384,55 @@ create trigger mcp_actions_recipients
   before insert on public.mcp_actions
   for each row execute function public.mcp_actions_recipients();
 
+-- ─── Payments Claude changed ─────────────────────────────────────────────────
+-- A payment, fee, Skonto, write-off or applied credit that a Claude session records, changes or
+-- removes on an invoice sets documents.mcp_payments_at, until the owner confirms the invoice's
+-- payments on its page in Mado. Meanwhile the reminder cron skips the invoice
+-- (src/app/api/cron/reminders/route.ts): a removed row reopens a paid invoice or raises what is
+-- open, and a recorded one is listed as received, so an automatic Mahnung would ask the client for
+-- money by what Claude wrote, without anyone approving it. A Claude session only ever sets or
+-- moves the mark forward (documents_mcp_payments_guard); the owner's browser clears it.
+create or replace function public.payments_mcp_mark()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_old uuid;
+  v_new uuid;
+begin
+  if public.is_mcp_session() then
+    if tg_op <> 'INSERT' then v_old := old.document_id; end if;
+    if tg_op <> 'DELETE' then v_new := new.document_id; end if;
+    update public.documents d set mcp_payments_at = now()
+    where d.id in (v_old, v_new) and d.type = 'invoice';
+  end if;
+  return null;
+end;
+$$;
+
+create or replace function public.documents_mcp_payments_guard()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if public.is_mcp_session() then
+    new.mcp_payments_at := greatest(old.mcp_payments_at, new.mcp_payments_at);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_mcp_mark on public.payments;
+create trigger payments_mcp_mark
+  after insert or update or delete on public.payments
+  for each row execute function public.payments_mcp_mark();
+drop trigger if exists documents_mcp_payments_guard on public.documents;
+create trigger documents_mcp_payments_guard
+  before update of mcp_payments_at on public.documents
+  for each row execute function public.documents_mcp_payments_guard();
+
 revoke execute on function public.mcp_address_set(text[]) from public, anon;
 grant execute on function public.mcp_address_set(text[]) to authenticated;
 revoke execute on function public.document_items_mcp_guard() from public, anon, authenticated;
@@ -2375,6 +2440,8 @@ revoke execute on function public.documents_mcp_template_guard() from public, an
 revoke execute on function public.clients_mcp_recipients() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients_seen() from public, anon, authenticated;
 revoke execute on function public.mcp_actions_recipients() from public, anon, authenticated;
+revoke execute on function public.payments_mcp_mark() from public, anon, authenticated;
+revoke execute on function public.documents_mcp_payments_guard() from public, anon, authenticated;
 
 -- ─── Storage: issued documents ───────────────────────────────────────────────
 -- The PDF of every issued document is stored once in this private bucket (documents.pdf_path)

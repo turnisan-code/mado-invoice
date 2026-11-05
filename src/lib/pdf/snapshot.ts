@@ -7,7 +7,7 @@ import type { Settings } from '@/types'
 const BUCKET = 'documents'
 
 // Failures the UI words itself (archive.errors.*); any other failure carries the raw message.
-export type ArchiveErrorCode = 'not_issued' | 'stored_unreadable'
+export type ArchiveErrorCode = 'not_issued' | 'stored_unreadable' | 'client_changed'
 
 export class ArchiveError extends Error {
   constructor(readonly code: ArchiveErrorCode, message: string) {
@@ -61,6 +61,12 @@ export type IssuedPdf = {
 // previous attempt stored it but could not link it), that object is adopted as the copy. When the
 // linked object itself is gone (deleted in the Storage dashboard), a copy is stored again at the
 // same key so outgoing actions keep working.
+// Except at issue, no copy is rendered while a Claude session's change to the client is not saved
+// by the owner in Mado (clients.mcp_written_at, 20261105_mcp_drafts.sql): the copy keeps the
+// recipient block for good, and the crons, the portal and every later email reuse it, so client
+// data Claude wrote would become the numbered document without anyone approving it. It fails
+// closed like an unreadable copy; a stored copy is still served. A client read without the column
+// (that migration not applied) has not been changed by Claude.
 export async function getIssuedPdf(
   supabase: SupabaseClient,
   documentId: string,
@@ -78,6 +84,9 @@ export async function getIssuedPdf(
     }
   }
 
+  if (source !== 'issue' && doc.clients?.mcp_written_at) {
+    throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
+  }
   const path = doc.pdf_path ?? storageKey(doc.date, doc.number)
   let buffer = await renderLoadedPdf(supabase, asIssued(doc), settings, { includeQr: true })
   const { error: uploadErr } = await supabase.storage

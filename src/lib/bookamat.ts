@@ -679,11 +679,23 @@ export async function resetBookamatSync(supabase: SupabaseClient, documentId: st
   return message ? fail(500, 'database', message) : null
 }
 
-export type AutoSyncResult = { number: string; ok: boolean; bookings?: string[]; error?: string }
+// `held`: why the document was left for a later run (neither synced nor failed).
+export type AutoSyncResult = { number: string; ok: boolean; bookings?: string[]; error?: string; held?: string }
+
+// A document whose client a Claude session created or changed, and the owner has not saved in Mado
+// since (clients.mcp_written_at, 20261105_mcp_drafts.sql), is not booked unattended: the booking's
+// title carries the client's name, its UID goes to Bookamat as the booking's vatin (reverse charge,
+// ZM), and a document issued before archive copies existed would get its frozen PDF rendered from
+// that client. The owner's own sync in Mado is not held. The whole client row is read, so a
+// database without the column holds nothing.
+const AUTO_SYNC_HELD = 'client changed from a Claude connection: save the client in Mado to confirm it'
+type ClientMark = { clients: { mcp_written_at?: string | null } | null }
+const changedByClaude = (row: ClientMark | null) => !!row?.clients?.mcp_written_at
 
 // The daily cron step: paid invoices and refunded credit notes from this and last year that have
 // no booking yet, failed before or have pending bookings, oldest first, documents that failed
-// before last. It ends by `deadline`, so the cron keeps its time for the reminders.
+// before last; those of a client Claude changed are listed as held. It ends by `deadline`, so the
+// cron keeps its time for the reminders.
 export async function autoSyncBookamat(
   supabase: SupabaseClient,
   settings: BookamatSettings,
@@ -694,7 +706,7 @@ export async function autoSyncBookamat(
   const since = `${year - 1}-01-01`
   const { data, error } = await supabase
     .from('documents')
-    .select('id, type, number, status, date, bookamat_error, bookamat_booking_id, bookamat_pending, bookamat_bookings(id), payments(kind, amount)')
+    .select('id, type, number, status, date, bookamat_error, bookamat_booking_id, bookamat_pending, bookamat_bookings(id), payments(kind, amount), clients(*)')
     .in('type', ['invoice', 'credit_note'])
     .not('number', 'is', null)
     .in('status', ['paid', 'cancelled', 'sent'])
@@ -704,14 +716,25 @@ export async function autoSyncBookamat(
   if (error) throw new Error(error.message)
 
   const t = settingsT(settings)
-  const candidates = ((data ?? []) as unknown as (StateInput & { id: string; number: string; bookamat_pending: unknown })[])
+  const candidates = ((data ?? []) as unknown as (StateInput & ClientMark & { id: string; number: string; bookamat_pending: unknown })[])
     .filter(d => parsePending(d.bookamat_pending).length > 0 || ((!d.bookamat_bookings?.length || !!d.bookamat_error) && hasMoneyToBook(d)))
     .sort((a, b) => Number(!!a.bookamat_error) - Number(!!b.bookamat_error))
 
-  const results: AutoSyncResult[] = []
+  // Held ones take no place in this run's limit; a pending booking of theirs waits as well.
+  const results: AutoSyncResult[] = candidates.filter(changedByClaude).map(d => ({ number: d.number, ok: false, held: AUTO_SYNC_HELD }))
   const resolver = new AccountResolver(credentialsOf(settings), settings.bookamat_accounts_year, deadline)
-  for (const doc of candidates.slice(0, limit)) {
+  for (const doc of candidates.filter(d => !changedByClaude(d)).slice(0, limit)) {
     if (deadline - Date.now() < MIN_POST_MS) break
+    // Read again just before booking: the client may have been changed since the list was read.
+    const { data: fresh, error: freshErr } = await supabase.from('documents').select('clients(*)').eq('id', doc.id).maybeSingle()
+    if (freshErr) {
+      results.push({ number: doc.number, ok: false, error: freshErr.message })
+      continue
+    }
+    if (changedByClaude(fresh as ClientMark | null)) {
+      results.push({ number: doc.number, ok: false, held: AUTO_SYNC_HELD })
+      continue
+    }
     let outcome = await syncBookamatDocument(supabase, settings, doc.id, { loadPdf, resolver, deadline })
     // Bookamat has the booking but the database did not take it: hand it straight back.
     if (!outcome.ok && outcome.pending?.length) outcome = await syncBookamatDocument(supabase, settings, doc.id, { adopt: outcome.pending, loadPdf, resolver, deadline })

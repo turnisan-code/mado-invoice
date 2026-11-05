@@ -123,9 +123,19 @@ const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on 
 
 // clients.mcp_written_at (20261105_mcp_drafts.sql): nothing goes out unattended for a client a
 // Claude session created or changed until the owner saves it in Mado: the reminder cron skips its
-// invoices (src/app/api/cron/reminders/route.ts), and a schedule that issues automatically creates
-// its invoices as drafts (src/lib/utils/recurring.ts).
-const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, and a recurring schedule that issues invoices automatically for it creates them as drafts instead, so no reminder or invoice numbered without approval carries client data Claude wrote (name, company, address, terms).'
+// invoices and its Bookamat step the client's documents (src/app/api/cron/reminders/route.ts,
+// autoSyncBookamat), a schedule that issues automatically creates its invoices as drafts
+// (src/lib/utils/recurring.ts), no archive copy is rendered from it (getIssuedPdf) and the portal
+// leaves its recipient block out.
+const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms).'
+
+// documents.mcp_payments_at (20261105_mcp_drafts.sql): a payment row a Claude session records,
+// changes or removes on an invoice holds its automatic reminders until the owner confirms the
+// payments on the invoice page in Mado (src/app/api/cron/reminders/route.ts).
+const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice holds its automatic reminders until the owner confirms its payments on the invoice in Mado, so no Mahnung goes out unattended on payments Claude wrote.'
+const PAYMENTS_HELD = 'Until the owner confirms the payments on the invoice in Mado, automatic reminders skip it; tell the owner.'
+// The reminder cron only looks at invoices that are open.
+const remindable = (type: string, status: string) => type === 'invoice' && (status === 'sent' || status === 'overdue')
 
 // The schedules that issue automatically for a client Claude has just changed: they now create
 // drafts. Only for the reply; a failed lookup leaves the note out.
@@ -162,14 +172,14 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
     summary: [
       `${lead} ${clientWithNumber(client)}.`,
       written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado.` : '',
-      changed ? `Until the owner saves this client in Mado, automatic reminders skip its invoices${schedules}; tell the owner.` : '',
+      changed ? `Until the owner saves this client in Mado, automatic reminders and the automatic Bookamat sync skip its documents${schedules}; tell the owner.` : '',
     ].filter(Boolean).join(' '),
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
       cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
       language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
       ...(written.length ? { approved_in_mado: written } : {}),
-      ...(changed ? { reminders_held: true } : {}),
+      ...(changed ? { reminders_held: true, bookamat_sync_held: true } : {}),
       ...(held.length ? { auto_issue_held: held.map(h => ({ schedule_id: h.id, name: h.name, app_url: appUrl('/recurring') })) } : {}),
     },
   }
@@ -474,7 +484,7 @@ const shortPayment = (p: Payment) => ({ id: p.id, date: p.date, amount: p.amount
 const recordPayment = defineTool({
   name: 'record_payment',
   title: 'Record payment',
-  description: "Record money received on an ISSUED invoice (drafts are refused; nothing is issued implicitly). More than the open balance needs overpayment: 'fee' (the rest is dunning fees and interest, not turnover) or 'payment'. The invoice becomes paid once settled. Pass an idempotency_key to make a retry safe.",
+  description: `Record money received on an ISSUED invoice (drafts are refused; nothing is issued implicitly). More than the open balance needs overpayment: 'fee' (the rest is dunning fees and interest, not turnover) or 'payment'. The invoice becomes paid once settled. Pass an idempotency_key to make a retry safe. ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({
     invoice_id: id,
@@ -538,16 +548,20 @@ function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], { becameP
   const status = becamePaid ? 'paid' : doc.status
   const what = added.map(p => `${money(p.amount, doc.currency)}${p.kind === 'fee' ? ' as fees' : ''}`).join(' and ')
   const warning = failed ? NOT_MARKED_PAID : null
+  // Set by the database on every payment row a Claude session writes (documents.mcp_payments_at).
+  const held = !repeated && remindable(doc.type, status)
   return {
     summary: [
       repeated ? `Already recorded with this idempotency key on ${doc.number}: ${what}.` : `Recorded ${what} on ${doc.number}.`,
       becamePaid ? 'The invoice is paid.' : !repeated && balance > 0.005 ? `Open: ${money(balance, doc.currency)}.` : '',
+      held ? PAYMENTS_HELD : '',
       warning ?? '',
     ].filter(Boolean).join(' '),
     data: {
       invoice_id: doc.id, number: doc.number, added: added.map(shortPayment), repeated,
       total, balance_due: balance, status, became_paid: becamePaid,
       payment_state: paymentState(total, all),
+      ...(held ? { reminders_held: true } : {}),
       ...(warning ? { warnings: [warning] } : {}),
     },
   }
@@ -556,7 +570,7 @@ function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], { becameP
 const removePaymentTool = defineTool({
   name: 'remove_payment',
   title: 'Remove payment',
-  description: "Delete a payment, fee, Skonto, write-off, applied credit or refund row. A paid invoice that is no longer settled is reopened (sent or overdue). Money an issued final invoice deducts stays (refused).",
+  description: `Delete a payment, fee, Skonto, write-off, applied credit or refund row. A paid invoice that is no longer settled is reopened (sent or overdue). Money an issued final invoice deducts stays (refused). ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ payment_id: id }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -571,12 +585,15 @@ const removePaymentTool = defineTool({
     const reopen = doc.type === 'invoice' && reopensOnRemoval(doc.status, total, remaining)
     const { reopened, error: removeErr } = await removePayment(ctx.supabase, doc.id, row.id, { reopen, removed: row as RemovedPayment })
     if (removeErr) throw removeErr
+    const status = reopened ?? doc.status
+    const held = remindable(doc.type, status)
     return {
-      summary: `Removed ${money(row.amount, doc.currency)} (${row.kind}) from ${doc.number ?? 'the document'}.${reopened ? ` It is ${reopened} again.` : ''}`,
+      summary: `Removed ${money(row.amount, doc.currency)} (${row.kind}) from ${doc.number ?? 'the document'}.${reopened ? ` It is ${reopened} again.` : ''}${held ? ` ${PAYMENTS_HELD}` : ''}`,
       data: {
         removed: { id: row.id, date: row.date, amount: row.amount, kind: row.kind, method: row.method },
-        document_id: doc.id, number: doc.number, status: reopened ?? doc.status, reopened: !!reopened,
+        document_id: doc.id, number: doc.number, status, reopened: !!reopened,
         ...(doc.type === 'invoice' ? { balance_due: balanceOf(total, remaining) } : {}),
+        ...(held ? { reminders_held: true } : {}),
       },
     }
   },
@@ -585,7 +602,7 @@ const removePaymentTool = defineTool({
 const settleBalance = defineTool({
   name: 'settle_balance',
   title: 'Settle balance',
-  description: "Close an issued invoice's remaining balance without money: 'skonto' (only when the money arrived within the Skonto period and covers the total less Skonto) or 'write_off' (a reason is required from EUR 1.00 up). The invoice becomes paid.",
+  description: `Close an issued invoice's remaining balance without money: 'skonto' (only when the money arrived within the Skonto period and covers the total less Skonto) or 'write_off' (a reason is required from EUR 1.00 up). The invoice becomes paid. ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ invoice_id: id, how: z.enum(['skonto', 'write_off']), reason: z.string().max(200).optional() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: false },
@@ -612,7 +629,7 @@ const settleBalance = defineTool({
 const applyCreditNoteTool = defineTool({
   name: 'apply_credit_note',
   title: 'Apply credit note',
-  description: 'Apply an issued credit note to the open balance of the invoice it corrects (credit_note_id), or catch up on every issued credit note not applied yet (all: true). Issuing a credit note applies it already; a repeat changes nothing.',
+  description: `Apply an issued credit note to the open balance of the invoice it corrects (credit_note_id), or catch up on every issued credit note not applied yet (all: true). Issuing a credit note applies it already; a repeat changes nothing. ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ credit_note_id: id.optional(), all: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: false, idempotentHint: true },

@@ -26,11 +26,13 @@ const HELD_BACK = {
   written: 'address written by Claude: save the client in Mado to confirm it',
   unchecked: 'address not plain ASCII on a client with addresses written by Claude: save the client in Mado to confirm it',
   changed: 'client changed from a Claude connection: save the client in Mado to confirm it',
+  payments: 'payments changed from a Claude connection: confirm them on the invoice in Mado',
 } as const
 
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
 // result in the log. Runs before the reminders, whatever their settings, and every Bookamat call
-// ends by the step's deadline, so the reminders keep more than half of the function's time.
+// ends by the step's deadline, so the reminders keep more than half of the function's time. A
+// document of a client Claude changed is held back (autoSyncBookamat), as its reminders are below.
 async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
   if (!isBookamatConfigured(settings)) {
     console.warn('[cron/bookamat] skipped: automatic sync is on, but Bookamat is not fully configured')
@@ -40,7 +42,8 @@ async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, se
     const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, deadline: Date.now() + 25_000 })
     if (!results.length) console.log('[cron/bookamat] nothing to sync')
     for (const r of results) {
-      if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)
+      if (r.held) console.log(`[cron/bookamat] ${r.number} held back: ${r.held}`)
+      else if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)
       else console.error(`[cron/bookamat] ${r.number} failed: ${r.error}`)
     }
     return results
@@ -120,6 +123,14 @@ export async function GET(req: NextRequest) {
     // not applied) has not been changed by Claude.
     if (client.mcp_written_at) {
       skipped.push({ number: invoice.number, reason: HELD_BACK.changed })
+      continue
+    }
+    // Nor does an invoice whose payments a Claude session recorded, changed or removed
+    // (documents.mcp_payments_at, until the owner confirms them on the invoice page): removing one
+    // reopens a paid invoice or raises what is open, so the Mahnung would ask the client for money
+    // it paid. An invoice read without the column (that migration not applied) has none.
+    if (invoice.mcp_payments_at) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK.payments })
       continue
     }
     if (invoiceTotals(invoice).balance_due <= 0.005) { skipped.push({ number: invoice.number, reason: 'nothing outstanding' }); continue }

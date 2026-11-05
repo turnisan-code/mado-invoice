@@ -155,7 +155,7 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
 }
 
 // 'taken' when another invoice of the schedule already has `date`. What is copied from the template
-// here is what a Claude session may not change on the template of an 'issue' schedule
+// here is what a Claude session may not change on the template of any recurring schedule
 // (documents_mcp_template_guard in 20261105_mcp_drafts.sql): keep both lists alike. What comes
 // from the client record instead (the due date from its terms, the recipient block at issue) is
 // held back by clientChangedByClaude.

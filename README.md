@@ -106,7 +106,12 @@ Setup:
 2. Database: run `supabase/migrations/20261105_mcp.sql` and `20261105_mcp_drafts.sql`, then
    `supabase/tests/mcp_guards.sql` and `supabase/tests/mcp_drafts_guards.sql`. Each test rolls
    back on its own; the SQL editor shows the row `all MCP guard checks passed` (`all MCP draft
-   guard checks passed`), or the first failed check as an error (`FAIL …`).
+   guard checks passed`), or the first failed check as an error (`FAIL …`). Where an earlier
+   version of `20261105_mcp_drafts.sql` was applied (one without `clients.mcp_written_at`), the
+   migration treats every client with an address Claude wrote, and every client created since the
+   first Claude connection, as changed by Claude until the owner saves it. A change Claude made
+   under that version to another client's name, company, VAT ID or terms alone left no trace:
+   check and save the clients Claude worked on then.
 3. Vercel: add `MCP_SECRET` (Production) and check that `NEXT_PUBLIC_APP_URL` is exactly the
    production origin without a trailing slash; redeploy. Locally, put both in `.env.local`.
 4. Check the deployment: `curl -si -X POST https://<your-app>/api/mcp` answers 401 with
@@ -146,13 +151,23 @@ is set to, these are always approved in Mado:
 
 A client Claude created or changed (`create_client`, `update_client`, any field) also stays
 unconfirmed until the owner saves it in Mado, and its page says so: meanwhile the automatic
-reminders skip its invoices, and a recurring schedule that issues invoices automatically creates
-its invoices as drafts, each with the reason in the cron log (or the warning of “Generate now”),
-since a Mahnung or an issued invoice would carry the name, recipient block and payment terms
-Claude wrote. Addresses Claude wrote are skipped by the reminders on their own as well (a client
-whose email Claude wrote gets none, a CC Claude wrote is left out, and until the client is saved
-any address on it that is not plain ASCII, as the app cannot match it against the marks for
-certain).
+reminders skip its invoices, the automatic Bookamat sync skips its documents, and a recurring
+schedule that issues invoices automatically creates its invoices as drafts, each with the reason
+in the cron log (or the warning of “Generate now”), since a Mahnung, a booking or an issued
+invoice would carry the name, recipient block, VAT ID and payment terms Claude wrote. For the
+same reason no archive copy (the frozen PDF of an issued document that has none yet, e.g. one
+issued before archive copies existed) is made from such a client: downloads, emails and the
+portal's PDF of that document fail with a notice until the client is saved, and the portal page
+leaves the recipient block out. Addresses Claude wrote are skipped by the reminders on their own
+as well (a client whose email Claude wrote gets none, a CC Claude wrote is left out, and until the
+client is saved any address on it that is not plain ASCII, as the app cannot match it against the
+marks for certain).
+
+An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
+applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`) gets no
+automatic reminders until the owner confirms its payments on the invoice page (“Payments are
+correct”): removing a payment reopens a paid invoice or raises what is open, and the Mahnung would
+otherwise ask the client, unattended, for money it paid.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
@@ -170,7 +185,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 | Path | Schedule (UTC) | Does |
 |---|---|---|
 | `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts. |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets none, nor does an address Claude wrote. |
+| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice whose payments Claude changed until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 
