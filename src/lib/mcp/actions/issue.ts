@@ -73,8 +73,13 @@ export function issueNotices(preview: IssuePreview): Worded[] {
     if (d.unlinked) out.push(notice('mcp.approve.notices.unlinked', { number, entries: entries(d.unlinked.time, d.unlinked.expenses) }))
     if (d.credits) out.push(notice('mcp.approve.notices.creditApplied', { number, invoice: d.credits.number ?? '' }))
     // Not refused (issuing for a client Claude just created is the usual way), but the owner sees
-    // what is numbered and archived for good.
-    if (d.claude_client) out.push(notice('mcp.approve.notices.clientChanged', { number, details: clip(d.claude_client, 240) }))
+    // what is numbered and archived for good: the recipient block, the UID and a buyer reference
+    // that comes from the client (or a credit note's invoice), not from the draft.
+    if (d.claude_client && d.claude_buyer_reference) {
+      out.push(notice('mcp.approve.notices.clientChangedReference', { number, details: clip(d.claude_client, 240), reference: clip(d.claude_buyer_reference, 120) }))
+    } else if (d.claude_client) {
+      out.push(notice('mcp.approve.notices.clientChanged', { number, details: clip(d.claude_client, 240) }))
+    }
   }
   if (preview.drive) out.push(notice('mcp.approve.notices.drive'))
   return out
@@ -166,8 +171,9 @@ export async function stillApproved(
 // a draft later in it is still an unnumbered draft meanwhile, so each is compared with the approved
 // state once more just before its number is taken; a change stops the run there (state_changed)
 // and what was issued before stays issued. While a run approved in Mado lasts, the database also
-// refuses Claude's writes to the drafts and their clients (MI046); a run Claude confirmed in the
-// chat runs on Claude's own session, so there this check is what holds it.
+// refuses Claude's writes to the drafts, the invoices a final draft deducts and their clients
+// (MI046); a run Claude confirmed in the chat runs on Claude's own session, so there this check is
+// what holds it (a deduction changed meanwhile fails the draft's issue check, deductionsOutdated).
 export async function runIssue(ctx: ServiceContext, ids: readonly string[], redate: boolean, approved: ApprovedDrafts | undefined) {
   if (!approved) throw new McpToolError('internal')
   const drafts = ids.map(id => approved.get(id)).filter((d): d is IssueDraftRow => !!d)

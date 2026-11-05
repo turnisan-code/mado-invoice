@@ -66,7 +66,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
         </div>
       </div>
       {/* Refunds a Claude session changed hold the automatic Bookamat sync until confirmed here. */}
-      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="credit_note" seenAt={doc.mcp_payments_at} />}
+      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="credit_note" seenAt={doc.mcp_payments_at} clientHeld={!!client?.mcp_written_at} />}
       {/* So does a client Claude changed, until it is saved; the archive copy and the share link's
           recipient block wait too. */}
       {doc.number && client?.mcp_written_at && <ClaudeClientNotice clientId={client.id} kind="credit_note" t={t} />}

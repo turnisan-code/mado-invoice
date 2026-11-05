@@ -16,8 +16,10 @@ import { dbErrorMessage } from '@/lib/api-errors'
 // is what the Bookamat step books). Confirming clears the mark; a Claude session cannot
 // (documents_mcp_payments_guard). Only the mark the page was rendered with (`seenAt`, read with the
 // payments it lists) is cleared: a later change from Claude moves it forward, and that one the
-// owner has not seen, so the page reloads instead.
-export default function ClaudePaymentsNotice({ documentId, kind, seenAt }: { documentId: string; kind: 'invoice' | 'credit_note'; seenAt: string }) {
+// owner has not seen, so the page reloads instead. `clientHeld`: the document's client carries
+// Claude's mark too (clients.mcp_written_at, shown by ClaudeClientNotice), so the reminders and
+// the Bookamat sync still wait for the client to be saved, and the toast says so.
+export default function ClaudePaymentsNotice({ documentId, kind, seenAt, clientHeld = false }: { documentId: string; kind: 'invoice' | 'credit_note'; seenAt: string; clientHeld?: boolean }) {
   const [busy, setBusy] = useState(false)
   const router = useRouter()
   const { t } = useT()
@@ -32,7 +34,9 @@ export default function ClaudePaymentsNotice({ documentId, kind, seenAt }: { doc
       router.refresh()
       return
     }
-    toast.success(t(kind === 'invoice' ? 'payments.claudeChanged.confirmed' : 'payments.claudeChanged.confirmedCreditNote'))
+    toast.success(t(kind === 'invoice'
+      ? (clientHeld ? 'payments.claudeChanged.confirmedClientHeld' : 'payments.claudeChanged.confirmed')
+      : (clientHeld ? 'payments.claudeChanged.confirmedCreditNoteClientHeld' : 'payments.claudeChanged.confirmedCreditNote')))
     router.refresh()
   }
 

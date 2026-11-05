@@ -68,11 +68,12 @@ export type IssuedPdf = {
 // owner has not confirmed the payments a Claude session recorded, changed or removed on the
 // document (documents.mcp_payments_at): the copy keeps the payments dated up to the issue day
 // (asIssued), so a payment Claude dated that day, or one it removed, would be frozen into it. It
-// fails closed like an unreadable copy; a stored copy is still served. A row read without the
-// columns (that migration not applied) has nothing from Claude. `unattended` (the recurring
-// generator issuing a period invoice nobody looked at): the same holds at issue, checked in the very
-// read the copy is rendered from, so a client Claude changes after the generator's own check is
-// not frozen into it either.
+// fails closed like an unreadable copy; a stored copy is still served, also one already at the key
+// but never linked (rendered before, it is adopted as above): only a copy rendered now waits. A
+// row read without the columns (that migration not applied) has nothing from Claude. `unattended`
+// (the recurring generator issuing a period invoice nobody looked at): the same holds at issue,
+// checked in the very read the copy is rendered from, so a client Claude changes after the
+// generator's own check is not frozen into it either.
 export async function getIssuedPdf(
   supabase: SupabaseClient,
   documentId: string,
@@ -91,14 +92,18 @@ export async function getIssuedPdf(
     }
   }
 
+  const path = doc.pdf_path ?? storageKey(doc.date, doc.number)
   const held = source !== 'issue' || !!opts.unattended
-  if (held && doc.clients?.mcp_written_at) {
-    throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
-  }
-  if (held && doc.mcp_payments_at) {
+  if (held && (doc.clients?.mcp_written_at || doc.mcp_payments_at)) {
+    // Only a copy rendered now waits: one already stored at the key whose link was never written
+    // (the upload succeeded, linking it failed) was rendered before, and is adopted.
+    const stored = doc.pdf_path ? null : await readStoredPdf(supabase, path)
+    if (stored) return linkCopy(supabase, { buffer: stored, filename, path, doc, settings }, source)
+    if (doc.clients?.mcp_written_at) {
+      throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
+    }
     throw new ArchiveError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no archive copy is made with them')
   }
-  const path = doc.pdf_path ?? storageKey(doc.date, doc.number)
   let buffer = await renderLoadedPdf(supabase, asIssued(doc), settings, { includeQr: true })
   const { error: uploadErr } = await supabase.storage
     .from(BUCKET)
@@ -113,8 +118,17 @@ export async function getIssuedPdf(
     if (!uploadErr) await logEvent(supabase, doc.id, 'archived', { path, source, restored: true })
     return { buffer, filename, path, created: !uploadErr, doc, settings }
   }
+  return linkCopy(supabase, { buffer, filename, path, doc, settings }, source)
+}
 
-  // Conditional, so two concurrent requests link (and log) the copy only once.
+// Links the copy stored at `path` to a document without one. Conditional, so two concurrent
+// requests link (and log) the copy only once.
+async function linkCopy(
+  supabase: SupabaseClient,
+  copy: Omit<IssuedPdf, 'created'>,
+  source: 'issue' | 'on_demand' | 'manual',
+): Promise<IssuedPdf> {
+  const { doc, path } = copy
   const { data: linked, error: linkErr } = await supabase
     .from('documents')
     .update({ pdf_path: path })
@@ -125,5 +139,5 @@ export async function getIssuedPdf(
   const created = !!linked?.length
   if (created) await logEvent(supabase, doc.id, 'archived', { path, source })
 
-  return { buffer, filename, path, created, doc: { ...doc, pdf_path: path }, settings }
+  return { ...copy, created, doc: { ...doc, pdf_path: path } }
 }

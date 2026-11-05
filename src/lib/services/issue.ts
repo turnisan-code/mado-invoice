@@ -8,6 +8,7 @@ import { checkIssuable } from '@/lib/pdf/issue'
 import { issueBulkDraft, lostEntries, startBulkIssue, todayIsPeriodDate, type BulkDraft, type BulkIssue, type MovedDates } from '@/lib/pdf/bulk'
 import { beforeLatest, issueOrder, movesToToday, type IssuedNote, type LatestIssued } from '@/lib/utils/bulk-issue'
 import { clientDisplayName } from '@/lib/utils/clients'
+import { fetchBuyerReference } from '@/lib/utils/document-reference'
 import { addDays, calcTotals } from '@/lib/utils/document'
 import { formatDocumentNumber, hasYearToken, nextCounter } from '@/lib/utils/numbering'
 import { termDays } from '@/components/forms/builder/model'
@@ -265,6 +266,10 @@ export interface IssuePreviewDoc {
   // (clients.mcp_written_at): the recipient block and UID the document is numbered and archived
   // with, on one line.
   claude_client: string | null
+  // With claude_client, the buyer reference the PDF prints ('Your reference') while the draft has
+  // none of its own: the client's default (Claude writes it with update_client), on a credit note
+  // its invoice's first (fetchBuyerReference). Null when it prints none or the draft's own.
+  claude_buyer_reference: string | null
 }
 
 export interface IssuePreview {
@@ -350,6 +355,7 @@ export async function issuePreview(
       if (error) throw error
       if (data) credits = { id: data.id, number: data.number }
     }
+    const claudeClient = d.clients?.mcp_written_at ? d.clients : null
     docs.push({
       id: d.id,
       type: d.type,
@@ -365,7 +371,8 @@ export async function issuePreview(
       unlinked: d.type === 'invoice' ? await lostEntries(supabase, d.id) : null,
       zero_total: gross === 0,
       credits,
-      claude_client: d.clients?.mcp_written_at ? printedRecipient(d.clients) : null,
+      claude_client: claudeClient ? printedRecipient(claudeClient) : null,
+      claude_buyer_reference: claudeClient && d.buyer_reference == null ? await fetchBuyerReference(supabase, d, claudeClient) : null,
     })
   }
   return {

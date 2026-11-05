@@ -159,8 +159,9 @@ checks the client again just before the number is taken and when the archive cop
 change Claude makes while the invoice is being issued leaves it a draft, or, once numbered,
 without an archive copy until the client is saved (the cron log says which). For the
 same reason no archive copy (the frozen PDF of an issued document that has none yet, e.g. one
-issued before archive copies existed) is made from such a client: downloads, emails and the
-portal's PDF of that document fail with a notice until the client is saved, and the portal page
+issued before archive copies existed) is rendered from such a client: downloads, emails and the
+portal's PDF of that document fail with a notice until the client is saved (a copy already stored
+at issue whose link to the document was not saved is still used), and the portal page
 leaves the recipient block out. Addresses Claude wrote are skipped by the reminders on their own
 as well (a client whose email Claude wrote gets none, a CC Claude wrote is left out, and until the
 client is saved any address on it that is not plain ASCII, as the app cannot match it against the
@@ -173,9 +174,10 @@ reference, and the approval page shows only its name. A change Claude makes to t
 preparing one of these makes the approval page say so, with a link to the client, and the action
 cannot run. Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
 client Claude has just created is the usual way; the approval page then shows the recipient block
-and VAT ID the document is numbered and archived with for good. A Peppol UBL downloaded in Mado for
-a document without an archive copy goes without its PDF while such a client is not saved, and the
-download says why.
+and VAT ID the document is numbered and archived with for good, and the buyer reference the PDF
+prints from the client (or a credit note's invoice) when the draft has none of its own. A Peppol
+UBL downloaded in Mado for a document without an archive copy goes without its PDF while such a
+client is not saved, and the download says why.
 
 An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
 applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
@@ -204,14 +206,15 @@ once; where any earlier version was applied, also every credit note applied from
 connection.
 
 While an action approved in Mado runs (issuing takes seconds per draft: the number, the PDF, the
-Drive copy), Claude cannot change the documents it names, their lines and payments, or their
-clients: the database refuses (MI046) until the action has finished, ten minutes after the
-approval at most. The run also compares each draft, with its client, once more just before its
-number is taken, and an issue-and-send the document and client before the email goes out; one that
-changed after the approval stops the run there, what was issued before stays issued and the result
-lists the rest as not issued. An action Claude confirms in chat runs on Claude's own connection,
-which the database cannot tell apart from Claude's other changes, so there that comparison is the
-check.
+Drive copy), Claude cannot change the documents it names, their lines and payments, the advance
+and partial invoices a final invoice among them deducts (no linking or unlinking one, no payment
+on one), or their clients: the database refuses (MI046) until the action has finished, ten
+minutes after the approval at most. The run also compares each draft, with its client, once more
+just before its number is taken, and an issue-and-send the document and client before the email
+goes out; one that changed after the approval stops the run there, what was issued before stays
+issued and the result lists the rest as not issued. An action Claude confirms in chat runs on
+Claude's own connection, which the database cannot tell apart from Claude's other changes, so
+there that comparison is the check.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.

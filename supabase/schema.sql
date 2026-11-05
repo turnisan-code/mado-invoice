@@ -2486,14 +2486,16 @@ create trigger documents_mcp_payments_guard
 -- meanwhile; an email, a reminder or a booking reads the client and the rows it is made of as the
 -- run goes. So while the run lasts, a Claude session writes nothing it reads: the documents its
 -- arguments name (document_ids, document_id, invoice_id, the draft or client to delete), their
--- lines and payments (also a credit that names such a credit note) and the clients of those
--- documents (MI046). A Claude write committed before the claim changes the fingerprint and stops
--- the run; one after it is refused here. The hold ends with the run, or ten minutes after the claim
--- at most (STALE_RUN_MS in src/lib/mcp/confirm.ts: a run that died with its function). An action
--- Claude confirms in the chat runs on Claude's own session, which this cannot tell apart from
--- Claude's other writes; that run, like an approved one, compares each draft again just before its
--- number is taken and before the email goes out (src/lib/mcp/actions/issue.ts). The owner's
--- browser, the crons and the approved run itself are not affected.
+-- lines and payments (also a credit that names such a credit note), the advance and partial
+-- invoices such a final invoice deducts (final_invoice_id before or after the write: linking or
+-- unlinking one, or a payment that marks it) and the clients of those documents (MI046). A Claude
+-- write committed before the claim changes the fingerprint and stops the run; one after it is
+-- refused here. The hold ends with the run, or ten minutes after the claim at most (STALE_RUN_MS
+-- in src/lib/mcp/confirm.ts: a run that died with its function). An action Claude confirms in the
+-- chat runs on Claude's own session, which this cannot tell apart from Claude's other writes; that
+-- run, like an approved one, compares each draft again just before its number is taken and before
+-- the email goes out (src/lib/mcp/actions/issue.ts). The owner's browser, the crons and the
+-- approved run itself are not affected.
 create index if not exists mcp_actions_running_idx on public.mcp_actions(claimed_at) where status = 'running';
 
 -- Whether such a run names one of the documents or clients, or a document of one of the clients.
@@ -2529,7 +2531,10 @@ end;
 $$;
 
 -- A Claude session's update or delete of a document or client, and any write of a line or payment
--- (of the document, or naming a credit note in credit_note_id), that such a run reads.
+-- (of the document, or naming a credit note in credit_note_id), that such a run reads. A document
+-- also counts for the final invoice that deducts it, before and after the write: issuing a final
+-- invoice reads the invoices it deducts (src/lib/deposits.ts loadDepositCheck), and unlinking one
+-- (unlinkDeposit) is a write of that invoice alone.
 create or replace function public.mcp_approved_run_guard()
 returns trigger
 language plpgsql security definer
@@ -2543,7 +2548,8 @@ begin
     if tg_table_name = 'clients' then
       v_clients := array[old.id];
     elsif tg_table_name = 'documents' then
-      v_documents := array[old.id];
+      v_documents := array[old.id, old.final_invoice_id];
+      if tg_op <> 'DELETE' then v_documents := v_documents || new.final_invoice_id; end if;
     else
       if tg_op <> 'INSERT' then v_documents := array[old.document_id]; end if;
       if tg_op <> 'DELETE' then v_documents := v_documents || new.document_id; end if;
@@ -2554,7 +2560,7 @@ begin
     end if;
     if public.mcp_approved_run_holds(v_documents, v_clients) then
       raise exception using errcode = 'MI046',
-        message = 'An action the owner approved is running on this document or its client. Try again when it has finished.';
+        message = 'An action the owner approved is running on this document, its client or the final invoice that deducts it. Try again when it has finished.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;

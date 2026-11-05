@@ -106,7 +106,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       )}
       {/* Payments a Claude session changed hold the automatic reminders and Bookamat sync until
           confirmed here, also on a paid or cancelled invoice. */}
-      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="invoice" seenAt={doc.mcp_payments_at} />}
+      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="invoice" seenAt={doc.mcp_payments_at} clientHeld={!!client?.mcp_written_at} />}
       {/* So does a client Claude changed (the whole row is read: a database without the column has
           no mark), and the archive copy and the share link's recipient block wait too. */}
       {doc.number && client?.mcp_written_at && <ClaudeClientNotice clientId={client.id} kind="invoice" t={t} />}
