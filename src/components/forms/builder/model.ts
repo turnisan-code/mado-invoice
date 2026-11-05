@@ -67,6 +67,46 @@ export function termDays(type: DocumentType, settings: Pick<Settings, 'default_q
   return client?.payment_days ?? settings.default_payment_days
 }
 
+// The Skonto an invoice for this client starts with; each field the client leaves empty follows
+// the settings default, and 0 % means none. Only invoices carry Skonto.
+export function skontoTerms(
+  type: DocumentType,
+  settings: Pick<Settings, 'default_skonto_percent' | 'default_skonto_days'>,
+  client?: Pick<Client, 'skonto_percent' | 'skonto_days'> | null,
+): { percent: number | null; days: number | null } {
+  const percent = type === 'invoice' ? client?.skonto_percent ?? settings.default_skonto_percent : null
+  if (!percent || percent <= 0) return { percent: null, days: null }
+  return { percent, days: client?.skonto_days ?? settings.default_skonto_days ?? null }
+}
+
+type TermsSettings = Pick<Settings, 'default_quote_validity_days' | 'default_payment_days' | 'default_skonto_percent' | 'default_skonto_days'>
+type TermsClient = Pick<Client, 'payment_days' | 'skonto_percent' | 'skonto_days'>
+
+// What a new document for this client starts with: the due date from its terms and, on an
+// invoice, its Skonto.
+export function clientTerms(type: DocumentType, settings: TermsSettings, client: TermsClient, date: string): Pick<FormState, 'dueDate' | 'skontoPercent' | 'skontoDays'> {
+  const skonto = skontoTerms(type, settings, client)
+  return { dueDate: addDays(date, termDays(type, settings, client)), skontoPercent: skonto.percent ?? '', skontoDays: skonto.days ?? '' }
+}
+
+const sameSkonto = (value: number | '', term: number | null) =>
+  value === '' ? term === null : term !== null && Number(value) === Number(term)
+
+// What changing the client sets on an unissued document: the due date from the new client's terms
+// and, only while the form still holds the previous client's Skonto, the new client's. A Skonto
+// set or cleared by hand stays.
+export function clientChangeTerms(
+  type: DocumentType,
+  settings: TermsSettings,
+  f: Pick<FormState, 'date' | 'skontoPercent' | 'skontoDays'>,
+  previous: Pick<Client, 'skonto_percent' | 'skonto_days'> | null | undefined,
+  next: TermsClient,
+): Partial<Pick<FormState, 'dueDate' | 'skontoPercent' | 'skontoDays'>> {
+  const terms = clientTerms(type, settings, next, f.date || today())
+  const prev = skontoTerms(type, settings, previous)
+  return sameSkonto(f.skontoPercent, prev.percent) && sameSkonto(f.skontoDays, prev.days) ? terms : { dueDate: terms.dueDate }
+}
+
 export function linesFromItems(items: DocumentItem[]): LineItem[] {
   return orderItems(items).map(i => ({
     id: makeId(),
@@ -91,6 +131,7 @@ export function linesFromItems(items: DocumentItem[]): LineItem[] {
 // the invoice it corrects; any other draft (a duplicate, a converted quote) becomes EUR.
 export function initialForm(type: DocumentType, settings: PublicSettings, clients: Client[], doc?: EditorDocument, defaultClientId?: string): FormState {
   const initialClient = !doc && defaultClientId ? clients.find(c => c.id === defaultClientId) ?? null : null
+  const skonto = skontoTerms(type, settings, initialClient)
   const dueDate = doc && (doc.due_date || doc.number || doc.cancels_document_id)
     ? doc.due_date ?? ''
     : addDays(doc?.date || today(), termDays(type, settings, doc ? clients.find(x => x.id === doc.client_id) : initialClient))
@@ -107,9 +148,9 @@ export function initialForm(type: DocumentType, settings: PublicSettings, client
     notesInternal: doc?.notes_internal ?? '',
     discountType: doc?.discount_type ?? null,
     discountValue: doc?.discount_value ?? 0,
-    // Skonto only exists on invoices; new ones start from the settings defaults.
-    skontoPercent: doc ? (doc.skonto_percent ?? '') : type === 'invoice' ? (settings.default_skonto_percent ?? '') : '',
-    skontoDays: doc ? (doc.skonto_days ?? '') : type === 'invoice' ? (settings.default_skonto_days ?? '') : '',
+    // Skonto only exists on invoices; new ones start from the client's terms or the settings defaults.
+    skontoPercent: doc ? (doc.skonto_percent ?? '') : (skonto.percent ?? ''),
+    skontoDays: doc ? (doc.skonto_days ?? '') : (skonto.days ?? ''),
     invoiceKind: doc?.invoice_kind ?? 'standard',
     lines: doc?.items?.length ? linesFromItems(doc.items) : [blankLine(settings)],
   }
@@ -167,10 +208,10 @@ export function storedKeyOf(type: DocumentType, f: FormState, storedDate: string
   return savedKeyOf(type, f.date || !storedDate ? f : { ...f, date: storedDate })
 }
 
-// What the user wrote beyond the client and what follows from it (language, tax, due date):
-// a new document is only created once there is something worth keeping.
+// What the user wrote beyond the client and what follows from it (language, tax, due date,
+// Skonto): a new document is only created once there is something worth keeping.
 export function contentKeyOf(f: FormState): string {
-  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.skontoPercent, f.skontoDays, itemsPayload(f.lines)])
+  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, itemsPayload(f.lines)])
 }
 
 type NumberingKey<T extends DocumentType> =

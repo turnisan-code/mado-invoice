@@ -156,6 +156,9 @@ export interface Client {
   currency: Currency
   // null = settings.default_payment_days
   payment_days: number | null
+  // Skonto prefilled on the client's new invoices: null = the settings default, 0 = none.
+  skonto_percent?: number | null
+  skonto_days?: number | null
   status: ClientStatus
   tags: string[]
   notes: string | null
@@ -177,6 +180,23 @@ export interface ClientDefaults {
   tax_treatment: TaxTreatment
   language: Language
   payment_days: number
+  skonto_percent: number | null
+  skonto_days: number | null
+}
+
+// A client's own price for a catalogue item (rate card); picking the item for that client uses it.
+export interface ClientRate {
+  id: string
+  client_id: string
+  catalogue_item_id: string
+  price: number
+  note: string | null
+}
+
+// What the catalogue page shows per item: document lines that use it and the latest document date.
+export interface CatalogueUsage {
+  uses: number
+  lastUsed: string | null
 }
 
 export interface CountryOption {

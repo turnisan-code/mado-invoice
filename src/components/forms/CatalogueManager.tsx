@@ -4,10 +4,10 @@ import { useEffect, useId, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, ChevronUp, ChevronDown, Search } from 'lucide-react'
-import { formatMoney } from '@/lib/utils/document'
+import { formatDate, formatMoney } from '@/lib/utils/document'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import type { CatalogueItem, Unit, VatRate } from '@/types'
+import type { CatalogueItem, CatalogueUsage, Unit, VatRate } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
 import { dropIndex, moveItem, type DropEdge } from './builder/model'
@@ -17,8 +17,8 @@ const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 const CAT_DATALIST_ID = 'cat-options'
 
-// usage: document lines per catalogue item id, counted when the page loaded.
-interface Props { initialItems: CatalogueItem[]; usage: Record<string, number> }
+// usage: per catalogue item id, the document lines using it and the latest document date, read when the page loaded.
+interface Props { initialItems: CatalogueItem[]; usage: Record<string, CatalogueUsage> }
 interface AddingState { category: string | null }
 type Draft = Partial<CatalogueItem>
 type PendingDelete = { kind: 'item'; id: string } | { kind: 'category'; cat: string; count: number }
@@ -138,7 +138,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   const refocus = useRef<{ id: string; control: 'handle' | 'up' | 'down' } | null>(null)
   const renameInFlight = useRef(false)
   const supabase = createClient()
-  const { t } = useT()
+  const { t, lang } = useT()
 
   const categories = Array.from(new Set(items.map(i => i.category).filter(Boolean))) as string[]
   const allCatNames = Array.from(new Set([...categories, ...pendingCats]))
@@ -173,9 +173,15 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     if (!editingId) return
     const names = draftNames(draft)
     if (!names) { setFormError(t('catalogue.nameRequired')); return }
-    const payload = editableFields(draft, names)
-    const { error } = await supabase.from('catalogue_items').update(payload).eq('id', editingId)
-    if (error) { toast.error(error.message); return }
+    // Only the columns this edit changed are written.
+    const original = items.find(i => i.id === editingId)
+    const payload = Object.fromEntries(
+      Object.entries(editableFields(draft, names)).filter(([key, value]) => original?.[key as keyof CatalogueItem] !== value),
+    ) as Partial<CatalogueItem>
+    if (Object.keys(payload).length) {
+      const { error } = await supabase.from('catalogue_items').update(payload).eq('id', editingId)
+      if (error) { toast.error(error.message); return }
+    }
     setItems(items.map(i => i.id === editingId ? { ...i, ...payload } : i))
     setEditingId(null)
     setFormError(null)
@@ -439,9 +445,10 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                       {(item.description_de || item.description_en) && (
                         <p className="text-xs text-neutral-400 dark:text-neutral-500 line-clamp-1 mt-0.5 leading-snug">{item.description_de || item.description_en}</p>
                       )}
-                      {(usage[item.id] ?? 0) > 0 && (
+                      {(usage[item.id]?.uses ?? 0) > 0 && (
                         <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 leading-snug">
-                          {n(usage[item.id], t('clientData.catalogue.usedOne'), t('clientData.catalogue.usedOther', { count: usage[item.id] }))}
+                          {n(usage[item.id].uses, t('clientData.catalogue.usedOne'), t('clientData.catalogue.usedOther', { count: usage[item.id].uses }))}
+                          {usage[item.id].lastUsed && ` · ${t('rates.lastUsed', { date: formatDate(usage[item.id].lastUsed!, lang) })}`}
                         </p>
                       )}
                     </div>

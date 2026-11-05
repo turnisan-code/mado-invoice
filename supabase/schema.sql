@@ -164,6 +164,9 @@ create table clients (
   currency      text not null default 'EUR' constraint clients_currency_check check (currency = 'EUR'),
   -- NULL = settings.default_payment_days.
   payment_days  integer constraint clients_payment_days_check check (payment_days is null or payment_days between 0 and 365),
+  -- Skonto prefilled on the client's new invoices; NULL = the settings default, 0 % = none.
+  skonto_percent numeric constraint clients_skonto_percent_check check (skonto_percent is null or skonto_percent between 0 and 100),
+  skonto_days    integer constraint clients_skonto_days_check check (skonto_days is null or skonto_days between 0 and 365),
   status        text not null default 'active' check (status in ('active','inactive','lead')),
   tags          text[] not null default '{}',
   notes         text,
@@ -236,6 +239,19 @@ insert into catalogue_items (name_de, name_en, default_price, unit, vat_rate, ca
   ('Mixing',                   'Mixing',                    0, 'flat',  20, 'Production',  60),
   ('Mastering',                'Mastering',                 0, 'flat',  20, 'Production',  70),
   ('Mikrofon Miete',           'Microphone Rental',         0, 'day',   20, 'Equipment',   80);
+
+-- A client's own price for a catalogue item (rate card); picking the item for that client uses it.
+create table client_rates (
+  id                uuid primary key default uuid_generate_v4(),
+  created_at        timestamptz not null default now(),
+  client_id         uuid not null references clients(id) on delete cascade,
+  catalogue_item_id uuid not null references catalogue_items(id) on delete cascade,
+  price             numeric(10,2) not null,
+  note              text
+);
+
+create unique index client_rates_client_item_key on client_rates(client_id, catalogue_item_id);
+create index client_rates_catalogue_item_idx on client_rates(catalogue_item_id);
 
 -- Writes only sort_order, in one statement, in the order of p_ids.
 create or replace function reorder_catalogue_items(p_ids uuid[])
@@ -759,12 +775,15 @@ begin
 end;
 $$;
 
--- How many document lines use each catalogue item, for the counts on the catalogue page.
+-- How many document lines use each catalogue item and the date of the latest such document,
+-- for the counts on the catalogue page.
 create or replace function catalogue_usage()
-returns table (catalogue_item_id uuid, uses bigint) language sql stable as $$
-  select catalogue_item_id, count(*) from document_items
-  where catalogue_item_id is not null
-  group by catalogue_item_id
+returns table (catalogue_item_id uuid, uses bigint, last_used date) language sql stable as $$
+  select i.catalogue_item_id, count(*), max(d.date)
+  from document_items i
+  join documents d on d.id = i.document_id
+  where i.catalogue_item_id is not null
+  group by i.catalogue_item_id
 $$;
 
 -- Lifecycle (20261030_lifecycle.sql): error codes MI010–MI018 are mapped to the app's dictionaries.
@@ -1155,6 +1174,7 @@ alter table reminder_log    enable row level security;
 alter table document_events enable row level security;
 alter table recurring_schedules enable row level security;
 alter table bookamat_bookings enable row level security;
+alter table client_rates    enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on clients         for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -1166,6 +1186,7 @@ create policy "owner" on reminder_log    for all to authenticated using (is_app_
 create policy "owner" on document_events for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on recurring_schedules for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on bookamat_bookings for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on client_rates    for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Storage: issued documents ───────────────────────────────────────────────
 -- The PDF of every issued document is stored once in this private bucket (documents.pdf_path)

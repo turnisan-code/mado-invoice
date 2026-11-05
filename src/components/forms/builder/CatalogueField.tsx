@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { formatMoney } from '@/lib/utils/document'
+import { catalogueName, cataloguePrice, type RateMap } from '@/lib/utils/catalogue'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { CatalogueItem, Language, Unit, VatRate } from '@/types'
@@ -18,17 +19,15 @@ const EMPTY_DRAFT = { name_de: '', name_en: '', default_price: 0, unit: 'flat' a
 
 type Position = { top?: number; bottom?: number; left: number; width?: string }
 
-export function catalogueName(item: CatalogueItem, language: Language): string {
-  return language === 'de' ? item.name_de || item.name_en || '' : item.name_en || item.name_de || ''
-}
-
 // A line's description: free text over several lines, and while it is a single line a search of
 // the catalogue (arrow keys pick, Escape closes, Enter on a highlighted entry takes it). It stays
 // a textbox, the one role a textarea may have; aria-controls and aria-activedescendant tie the list to it.
-export function CatalogueField({ value, language, items, invalid, className, onChange, onPick, onItemCreated }: {
+export function CatalogueField({ value, language, items, rates, invalid, className, onChange, onPick, onItemCreated }: {
   value: string
   language: Language
   items: CatalogueItem[]
+  // The client's own prices, shown (and taken) instead of the catalogue price.
+  rates: RateMap
   invalid: boolean
   className: string
   onChange: (description: string) => void
@@ -154,7 +153,10 @@ export function CatalogueField({ value, language, items, invalid, className, onC
                 className={`w-full text-left px-3 py-2.5 sm:py-2 text-sm flex justify-between items-center gap-3 ${highlight === i ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800'}`}
               >
                 <span className="min-w-0 truncate">{catalogueName(item, language)}</span>
-                <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{formatMoney(item.default_price)}/{t(`units.${item.unit}` as DictKey)}</span>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0 text-right">
+                  {formatMoney(cataloguePrice(item, rates))}/{t(`units.${item.unit}` as DictKey)}
+                  {rates[item.id] !== undefined && <span className="block text-[11px]">{t('rates.clientRate')}</span>}
+                </span>
               </button>
             ))}
           </div>

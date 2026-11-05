@@ -6,7 +6,9 @@ import { Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { today } from '@/lib/utils/document'
+import { clientTerms } from '@/components/forms/builder/model'
 import { useT } from '@/lib/i18n/client'
+import type { DocumentType } from '@/types'
 
 interface Props {
   docId: string
@@ -22,21 +24,25 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
 
   async function duplicate() {
     setLoading(true)
-    const { data: doc, error } = await supabase
-      .from('documents')
-      .select('*, document_items(*)')
-      .eq('id', docId)
-      .single()
+    const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
+      supabase.from('documents').select('*, document_items(*), clients(payment_days, skonto_percent, skonto_days)').eq('id', docId).single(),
+      supabase.from('settings').select('default_payment_days, default_quote_validity_days, default_skonto_percent, default_skonto_days').maybeSingle(),
+    ])
 
-    if (error || !doc) { toast.error(t('documents.couldNotLoad')); setLoading(false); return }
+    if (error || !doc || settingsErr || !settings) { toast.error(t('documents.couldNotLoad')); setLoading(false); return }
+
+    // The copy is a new document: dated today, due and with Skonto as the client's terms say.
+    const date = today()
+    const type = doc.type as DocumentType
+    const terms = clientTerms(type, settings, doc.clients ?? { payment_days: null }, date)
 
     const { data: newDoc, error: insertErr } = await supabase
       .from('documents')
       .insert({
         type: doc.type,
         client_id: doc.client_id,
-        date: today(),
-        due_date: null,
+        date,
+        due_date: type === 'credit_note' ? null : terms.dueDate,
         service_date: null,
         language: doc.language,
         // EUR only: a copy of an old USD/GBP document starts as a EUR draft.
@@ -47,6 +53,8 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
         notes_internal: null,
         discount_type: doc.discount_type,
         discount_value: doc.discount_value,
+        skonto_percent: terms.skontoPercent === '' ? null : terms.skontoPercent,
+        skonto_days: terms.skontoDays === '' ? null : terms.skontoDays,
         status: 'draft',
         number: null,
       })

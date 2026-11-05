@@ -6,6 +6,7 @@ import ClientForm from '@/components/forms/ClientForm'
 import type { Client, ClientDefaults, CountryOption } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
+import { formatLocaleNumber } from '@/lib/utils/number'
 
 // countryLabel comes from the server: Node's and the browser's ICU can name a region differently,
 // which would break hydration.
@@ -18,6 +19,15 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
   if (editing) {
     return <ClientForm client={client} defaults={defaults} countries={countries} onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
   }
+
+  const ownSkonto = client.skonto_percent != null || client.skonto_days != null
+  const skontoPercent = client.skonto_percent ?? defaults.skonto_percent
+  const skontoDays = client.skonto_days ?? defaults.skonto_days
+  const skontoLabel = !skontoPercent
+    ? t('rates.skontoNoneLong')
+    : skontoDays != null
+      ? t('rates.skontoTerms', { percent: formatLocaleNumber(skontoPercent, 2), days: skontoDays })
+      : `${formatLocaleNumber(skontoPercent, 2)} %`
 
   const address = [
     client.address_line1,
@@ -85,6 +95,12 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
         <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('clients.language')}</span>
         <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{client.language === 'en' ? t('common.english') : t('common.german')}</span>
       </div>
+      {ownSkonto && (
+        <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between gap-3">
+          <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('rates.skonto')}</span>
+          <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300 text-right">{skontoLabel}</span>
+        </div>
+      )}
       {client.reminders_opt_out && (
         <div className="mt-3 pt-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between">
           <span className="text-xs text-neutral-500 dark:text-neutral-400">{t('clients.automaticReminders')}</span>
