@@ -32,8 +32,9 @@ const argsSchema = z.object({
 type Args = z.output<typeof argsSchema>
 
 // With an e-invoice, refused while the client or the payments carry Claude's mark (send-email.ts):
-// the e-invoice is built from them as it is sent. Checked when prepared and whenever the state is
-// compared again.
+// the e-invoice is built from them as it is sent. Checked when prepared, whenever the state is
+// compared again, and as the e-invoice is built (claudeHold): a mark set while the run goes stops
+// the email, the document stays issued.
 async function loadState(ctx: ServiceContext, args: Pick<Args, 'document_id' | 'redate_to_today'> & { einvoice?: EInvoiceFormat | null }) {
   const [issue, doc] = await Promise.all([loadIssueState(ctx, [args.document_id], args.redate_to_today), loadEmailDoc(ctx, args.document_id)])
   if (args.einvoice) refuseClaudeEInvoice(ctx, doc)
@@ -121,7 +122,7 @@ export const issueAndSendAction = defineAction<Args, ApprovedDrafts>({
     } else {
       const sent = await sendDocumentEmail(ctx.supabase, await ctx.settings(), {
         documentId: args.document_id, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
-        einvoice: args.einvoice, portalOrigin: APP_URL,
+        einvoice: args.einvoice, portalOrigin: APP_URL, claudeHold: true,
       })
       if (sent.ok) email = { to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, attachments: sent.attachments, einvoice: sent.einvoice }
       else emailError = storedError(emailFailureError(ctx, sent), ctx.t)

@@ -34,6 +34,9 @@ export interface DocumentEmail {
   // Fill a {{portal_link}} left in the text with the document's client-portal link, created on
   // first use; without an origin the text is sent as it is.
   portalOrigin?: string | null
+  // An email Claude prepared: the e-invoice waits for a client or an invoice's payments a Claude
+  // session changed and the owner has not saved or confirmed (exportEInvoice), nothing is sent.
+  claudeHold?: boolean
 }
 
 export type EInvoiceAttachment = MailAttachment & { format: EInvoiceFormat; number: string; pdfEmbedded: boolean }
@@ -70,7 +73,7 @@ export async function sendDocumentEmail(supabase: SupabaseClient, settings: Sett
   let xml: EInvoiceAttachment | null = null
   if (mail.einvoice && documentId) {
     try {
-      const built = await exportEInvoice(supabase, documentId, mail.einvoice)
+      const built = await exportEInvoice(supabase, documentId, mail.einvoice, { claudeHold: !!mail.claudeHold })
       xml = { filename: built.filename, content: Buffer.from(built.xml, 'utf8'), contentType: 'application/xml', format: mail.einvoice, number: built.number, pdfEmbedded: built.attached }
     } catch (error) {
       return { ok: false, stage: 'einvoice', error }

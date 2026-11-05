@@ -24,11 +24,24 @@ type Created = { credit_note_id: string; number: string | null; invoice_status: 
 // transaction, then it gets its frozen PDF and is applied here. A `reason` is kept in the history
 // of both documents. `error` carries MI017 (already cancelled), MI018 (a draft) or MI020 (deducted
 // on an issued final invoice); null data = no such invoice.
+// A Storno's archive copy is made with the client as it was before its number was taken
+// (issueDocument's `clientWrittenAt`): the mark of the invoice's client (clients.mcp_written_at) is
+// read just before create_credit_note, unless the caller passes the one it read (a Storno Claude
+// prepared: null, as such a client is refused). A client Claude changes in between (a parallel
+// call during the owner's Storno, or during one confirmed in the chat) leaves the credit note
+// without an archive copy until the owner saves the client (snapshotError).
 export async function createCreditNote(
   supabase: SupabaseClient,
   invoiceId: string,
-  { cancel, reason }: { cancel: boolean; reason?: string },
+  { cancel, reason, clientWrittenAt }: { cancel: boolean; reason?: string; clientWrittenAt?: string | null },
 ): Promise<{ data: CreatedCreditNote | null; error: PostgrestError | null }> {
+  let writtenAt = clientWrittenAt ?? null
+  if (cancel && clientWrittenAt === undefined) {
+    // The whole client row: a database without clients.mcp_written_at has nothing from Claude.
+    const { data: before, error: readErr } = await supabase.from('documents').select('clients(*)').eq('id', invoiceId).maybeSingle()
+    if (readErr) return { data: null, error: readErr }
+    writtenAt = (before as unknown as { clients?: { mcp_written_at?: string | null } | null } | null)?.clients?.mcp_written_at ?? null
+  }
   const { data, error } = await supabase.rpc('create_credit_note', { p_invoice_id: invoiceId, p_cancel: cancel })
   if (error) return { data: null, error }
   const created = data as Created | null
@@ -47,7 +60,7 @@ export async function createCreditNote(
   // The number is taken; the frozen PDF and the Drive copy follow (a failure is reported and the
   // page offers to create the archive copy), then the credit settles the invoice's open balance.
   try {
-    const outcome = await issueDocument(supabase, creditNoteId)
+    const outcome = await issueDocument(supabase, creditNoteId, { clientWrittenAt: writtenAt })
     result.snapshotError = outcome.snapshotError
     result.driveError = outcome.driveError
   } catch (err) {

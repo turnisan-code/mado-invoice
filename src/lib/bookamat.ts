@@ -340,9 +340,9 @@ const SYNC_DOC_RELATIONS = `document_items(line_type, sort_order, quantity, unit
   payments(date, amount, kind, method), bookamat_bookings(${BOOKING_COLUMNS})`
 const SYNC_DOC_COLS = `id, type, number, status, currency, date, service_date, service_date_end, tax_treatment, discount_type, discount_value,
   ${SYNC_DOC_RELATIONS}, clients(name, company, uid_number), bookamat_pending`
-// The cron's read (opts.unattended): whole rows, so the Claude marks (heldBack below) come from the
-// same read as the payments and the client the bookings are made of, and a database without the
-// columns holds nothing.
+// The cron's read (opts.unattended) and that of a sync Claude prepared (opts.claudeHold): whole rows,
+// so the Claude marks (heldBack, heldSince below) come from the same read as the payments and the
+// client the bookings are made of, and a database without the columns holds nothing.
 const UNATTENDED_DOC_COLS = `*, ${SYNC_DOC_RELATIONS}, clients(*)`
 
 type SyncDoc = {
@@ -380,23 +380,30 @@ const MIN_ATTACH_MS = 10_000
 // answer was lost), then journals each post before sending it. Every write is checked, and the
 // frozen PDF is attached to each booking recorded. `unattended` (the cron): a document with
 // something from a Claude connection the owner has not confirmed (heldBack) is left as it is,
-// 'held', before anything is claimed or booked.
+// 'held', before anything is claimed or booked. `claudeHold` (a sync Claude prepared): the same for
+// a mark set after the action's state was compared before the run (heldSince); detail.hold says
+// whether the client or the payments.
 export async function syncBookamatDocument(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  opts: { adopt?: AdoptBooking[]; loadPdf?: LoadPdf; resolver?: AccountResolver; deadline?: number; unattended?: boolean } = {},
+  opts: {
+    adopt?: AdoptBooking[]; loadPdf?: LoadPdf; resolver?: AccountResolver; deadline?: number; unattended?: boolean
+    claudeHold?: ClaudeHold
+  } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   if (!isBookamatConfigured(settings)) return fail(400, 'not_configured', 'Bookamat is not fully configured')
   const t = settingsT(settings)
   const adopt = opts.adopt ?? []
 
-  const { data, error: docErr } = await supabase.from('documents').select(opts.unattended ? UNATTENDED_DOC_COLS : SYNC_DOC_COLS).eq('id', documentId).maybeSingle()
+  const whole = opts.unattended || !!opts.claudeHold
+  const { data, error: docErr } = await supabase.from('documents').select(whole ? UNATTENDED_DOC_COLS : SYNC_DOC_COLS).eq('id', documentId).maybeSingle()
   if (docErr) return fail(500, 'database', docErr.message)
   const doc = data as unknown as SyncDoc | null
   if (!doc) return fail(404, 'not_found', 'Document not found')
-  const held = opts.unattended ? heldBack(data as unknown as ClaudeMarks) : null
-  if (held) return fail(409, 'held', held)
+  const marks = data as unknown as ClaudeMarks
+  const held = opts.unattended ? heldBack(marks) : opts.claudeHold ? heldSince(marks, opts.claudeHold) : null
+  if (held) return fail(409, 'held', held, { detail: { hold: held === HELD_CLIENT ? 'client' : 'payments' } })
   if ((doc.type !== 'invoice' && doc.type !== 'credit_note') || !doc.number) return fail(400, 'not_issued', 'Only issued invoices and credit notes can be synced')
   if ((doc.currency ?? 'EUR') !== 'EUR') return fail(400, 'not_eur', `${doc.number} is in ${doc.currency}; Bookamat only receives EUR documents`, { detail: { currency: doc.currency ?? '' } })
 
@@ -707,6 +714,16 @@ const HELD_PAYMENTS = 'payments changed from a Claude connection: confirm them o
 type ClaudeMarks = { mcp_payments_at?: string | null; clients: { mcp_written_at?: string | null } | null }
 const heldBack = (row: ClaudeMarks | null): string | null =>
   row?.clients?.mcp_written_at ? HELD_CLIENT : row?.mcp_payments_at ? HELD_PAYMENTS : null
+
+// A sync Claude prepared, as its state was compared before the run: the client had no mark (the
+// action refuses one) and the payments had the mark `paymentsAt` (null: none). A client mark, or a
+// payments mark other than that one, was set while it ran (a parallel call during a run confirmed in
+// the chat, where nothing else holds them), so the client or the rows the bookings are made of are
+// no longer what was approved. A payments mark the owner cleared meanwhile (confirming them in
+// Mado) holds nothing.
+export type ClaudeHold = { paymentsAt: string | null }
+const heldSince = (row: ClaudeMarks | null, { paymentsAt }: ClaudeHold): string | null =>
+  row?.clients?.mcp_written_at ? HELD_CLIENT : row?.mcp_payments_at && row.mcp_payments_at !== paymentsAt ? HELD_PAYMENTS : null
 
 // The daily cron step: paid invoices and refunded credit notes from this and last year that have
 // no booking yet, failed before or have pending bookings, oldest first, documents that failed

@@ -2389,6 +2389,8 @@ export const de = {
       buyer_endpoint: 'Der Kunde hat keine Peppol-ID, und aus seiner UID-Nummer ergibt sich keine — beim Kunden ergänzen.',
       seller_endpoint: 'Die eigene Peppol-ID fehlt — unter Einstellungen → E-Rechnung eintragen.',
       line_amount: 'Ein Positionsbetrag geht nicht auf (Menge × Preis abzüglich Positionsrabatt) — Positionen prüfen und erneut speichern.',
+      client_changed: 'Claude hat den Kunden geändert, und er wurde seither nicht in Mado gespeichert: Die E-Rechnung würde übernehmen, was Claude eingetragen hat. Den Kunden prüfen und in Mado speichern.',
+      payments_changed: 'Claude hat die Zahlungen der Rechnung geändert, und sie wurden seither nicht in Mado bestätigt: Die E-Rechnung würde sie als bereits bezahlt ausweisen. Die Zahlungen prüfen und auf der Seite der Rechnung bestätigen.',
     },
     history: {
       exported: 'Als E-Rechnung exportiert ({format})',
@@ -2806,7 +2808,7 @@ export const de = {
         generic: 'Das hat nicht geklappt. Die Seite neu laden und erneut versuchen.',
         origin: 'Diese Anfrage kam nicht von Mado.',
         unauthorized: 'Zum Freigeben erneut anmelden.',
-        busy: 'Eine andere Aktion läuft noch. In einem Moment erneut versuchen.',
+        busy: 'Eine andere Aktion läuft noch (unter „Alle Freigaben“). Nach ihrem Ende erneut versuchen, spätestens nach zehn Minuten, falls sie unerwartet abgebrochen ist.',
       },
       status: {
         pending: 'Wartet',
@@ -2918,6 +2920,7 @@ export const de = {
         clientChangedReminder: 'Claude hat den Kunden dieser Rechnung angelegt oder geändert, und er wurde seither nicht in Mado gespeichert: Die Mahnung würde Name und Adresse, die Claude eingetragen hat, ohne Freigabe drucken. Den Kunden prüfen und in Mado speichern, dann die Mahnung neu vorbereiten.',
         clientChangedStorno: 'Claude hat den Kunden dieser Rechnung angelegt oder geändert, und er wurde seither nicht in Mado gespeichert: Die Storno-Gutschrift würde mit Name, Adresse und UID-Nr., die Claude eingetragen hat, nummeriert und dauerhaft archiviert. Den Kunden prüfen und in Mado speichern, dann das Storno neu vorbereiten.',
         clientChangedBookamat: 'Claude hat den Kunden dieses Belegs angelegt oder geändert, und er wurde seither nicht in Mado gespeichert: Die Bookamat-Buchungen würden Name und UID-Nr., die Claude eingetragen hat, übernehmen. Den Kunden prüfen und in Mado speichern, dann den Abgleich neu vorbereiten.',
+        paymentsChangedBookamat: 'Claude hat bei diesem Beleg während des Abgleichs eine Zahlung erfasst, geändert oder entfernt, daher wurde der Abgleich dort beendet: Die Buchungen würden Datum, Betrag und Konto aus Zahlungen übernehmen, die niemand freigegeben hat. Die Zahlungen prüfen, dann den Abgleich neu vorbereiten.',
         clientChangedEInvoice: 'Claude hat den Kunden dieses Belegs angelegt oder geändert, und er wurde seither nicht in Mado gespeichert: Die E-Rechnung würde Name, Adresse, UID-Nr. und Auftragsreferenz, die Claude eingetragen hat, ohne Freigabe übernehmen. Den Kunden prüfen und in Mado speichern, dann die E-Mail neu vorbereiten oder sie ohne E-Rechnung senden.',
         paymentsChangedEInvoice: 'Claude hat bei dieser Rechnung eine Zahlung erfasst, geändert oder entfernt, und die Zahlungen wurden seither nicht in Mado bestätigt: Die E-Rechnung würde sie ohne Freigabe als bereits bezahlt ausweisen. Die Zahlungen prüfen und auf der Seite der Rechnung in Mado bestätigen, dann die E-Mail neu vorbereiten oder sie ohne E-Rechnung senden.',
       },

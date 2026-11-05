@@ -126,7 +126,8 @@ export interface ActionKind<A extends Record<string, unknown> = Record<string, u
   // Optional: the fingerprint together with the state it was computed from. Before a run it takes
   // the place of fingerprint(), and execute() gets the state, to compare each document with it
   // again just before the step that numbers or sends it: a run takes seconds per document, and
-  // what changed meanwhile stops it (actions/issue.ts).
+  // what changed meanwhile stops it (actions/issue.ts; a Bookamat sync compares the payments' mark,
+  // actions/bookamat-sync.ts).
   approvedState?(ctx: ServiceContext, args: A): Promise<{ fingerprint: string; state: S }>
   execute(ctx: ServiceContext, args: A, approved?: S): Promise<ActionOutcome>
 }

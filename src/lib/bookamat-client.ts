@@ -9,7 +9,8 @@ import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/type
 
 // Failures the UI words itself (books.errors.<code>, with `detail` as variables). 'bookamat'
 // carries Bookamat's own message: why it refused a booking is the most useful thing to show.
-// 'held' only ever comes back to the cron (autoSyncBookamat), which logs it as held back.
+// 'held' only ever comes back to the cron (autoSyncBookamat), which logs it as held back, and to a
+// sync Claude prepared (src/lib/mcp/actions/bookamat-sync.ts), which words it as a refusal.
 export type BookamatErrorCode =
   | 'not_configured' | 'not_found' | 'not_issued' | 'not_eur' | 'not_settled' | 'nothing_to_book' | 'no_items'
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'

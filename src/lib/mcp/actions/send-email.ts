@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { pdfFilename } from '@/lib/pdf/render'
 import { exportEInvoice } from '@/lib/einvoice/export'
-import { einvoiceFilename } from '@/lib/einvoice/common'
+import { EInvoiceError, einvoiceFilename } from '@/lib/einvoice/common'
 import {
   composeDocumentEmail, documentEmailTemplate, hasPortalLinkToken, sendDocumentEmail,
   type EmailFailure,
@@ -126,8 +126,10 @@ export function emailState(doc: EmailDoc, settings: Settings) {
 // (the buyer block, the UID, the buyer reference, the amount already paid; a credit note's carries
 // no refunds), and the approval page shows neither. Like the archive copy (getIssuedPdf), it waits
 // while a client Claude created or changed is not saved in Mado and while payments Claude recorded,
-// changed or removed on the invoice are not confirmed there: refused when prepared, and again when
-// the state is compared before the run.
+// changed or removed on the invoice are not confirmed there: refused when prepared, again when the
+// state is compared before the run, and once more in the read the e-invoice is built from as it is
+// sent (sendDocumentEmail's claudeHold): a change Claude makes while the email goes out (a parallel
+// call during a run confirmed in the chat) stops it, nothing is sent (emailFailureError).
 export function refuseClaudeEInvoice(ctx: ServiceContext, doc: EmailDoc): void {
   refuseClaudeClient(ctx, doc.clients, 'mcp.approve.refusals.clientChangedEInvoice')
   if (doc.type === 'invoice') refuseClaudePayments(ctx, doc, 'mcp.approve.refusals.paymentsChangedEInvoice')
@@ -155,6 +157,10 @@ function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
 export function emailFailureError(ctx: ServiceContext, failure: EmailFailure): unknown {
   if (failure.stage === 'send') return codedError(failure.failure.code, failure.failure.error)
   if (failure.stage === 'portal_link') return refuse(ctx, 'mcp.approve.result.portalLinkFailed', undefined, 'internal')
+  if (failure.stage === 'einvoice' && failure.error instanceof EInvoiceError) {
+    if (failure.error.code === 'client_changed') return refuse(ctx, 'mcp.approve.refusals.clientChangedEInvoice')
+    if (failure.error.code === 'payments_changed') return refuse(ctx, 'mcp.approve.refusals.paymentsChangedEInvoice')
+  }
   return failure.error
 }
 
@@ -246,7 +252,7 @@ export const sendEmailAction = defineAction<Args>({
     const settings = await ctx.settings()
     const sent = await sendDocumentEmail(ctx.supabase, settings, {
       documentId: args.document_id, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
-      einvoice: args.einvoice, uploadToDrive: args.upload_to_drive, portalOrigin: APP_URL,
+      einvoice: args.einvoice, uploadToDrive: args.upload_to_drive, portalOrigin: APP_URL, claudeHold: true,
     })
     if (!sent.ok) throw emailFailureError(ctx, sent)
     const report: Worded[] = [notice('mcp.approve.result.sent', { to: { list: [...args.to, ...args.cc, ...args.bcc] } })]

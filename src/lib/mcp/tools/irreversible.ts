@@ -41,7 +41,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_issue_and_send',
     title: 'Prepare: issue and email a draft',
-    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A draft for a client Claude created or changed and the owner has not saved in Mado since is not refused: the preview shows the recipient block and VAT ID it is numbered and archived with, and the buyer reference the PDF prints from the client (a credit note: its invoice's first) when the draft has none of its own. An e-invoice is refused for such a client: it is built from the client as it is when sent; attach_einvoice 'none' sends the PDF alone. ${APPROVAL}`,
+    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A draft for a client Claude created or changed and the owner has not saved in Mado since is not refused: the preview shows the recipient block and VAT ID it is numbered and archived with, and the buyer reference the PDF prints from the client (a credit note: its invoice's first) when the draft has none of its own. An e-invoice is refused for such a client: it is built from the client as it is when sent; attach_einvoice 'none' sends the PDF alone. Should Claude change the client or the invoice's payments while it runs, the e-invoice is not built and the email not sent (the document stays issued). ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid().describe('The draft.'),
@@ -59,7 +59,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_email',
     title: 'Prepare: email a document',
-    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. An e-invoice is refused while the client was created or changed from Claude and not saved in Mado since, or while payments Claude recorded, changed or removed on the invoice are not confirmed there: it is built from both as they are when sent; attach_einvoice 'none' sends the frozen PDF alone. ${APPROVAL}`,
+    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. An e-invoice is refused while the client was created or changed from Claude and not saved in Mado since, or while payments Claude recorded, changed or removed on the invoice are not confirmed there: it is built from both as they are when sent; attach_einvoice 'none' sends the frozen PDF alone. Should Claude change either while it runs, nothing is sent. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid(),
@@ -94,7 +94,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_storno',
     title: 'Prepare: Storno',
-    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. Refused while the invoice's client was created or changed from Claude and not saved in Mado since: the credit note is archived with it for good. ${APPROVAL}`,
+    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. Refused while the invoice's client was created or changed from Claude and not saved in Mado since: the credit note is archived with it for good; should Claude change the client while it runs, the credit note stays without an archive copy until the owner saves the client (the result says so). ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
@@ -127,7 +127,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_bookamat_sync',
     title: 'Prepare: Bookamat sync',
-    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. Refused while the document's client was created or changed from Claude and not saved in Mado since: the bookings carry its name and VAT ID. ${APPROVAL}`,
+    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. Refused while the document's client was created or changed from Claude and not saved in Mado since: the bookings carry its name and VAT ID. Should Claude change the client or the payments while it runs, it stops before booking. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({ document_id: z.uuid() }),
     hints: PREPARE,

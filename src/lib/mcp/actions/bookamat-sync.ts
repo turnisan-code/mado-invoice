@@ -5,6 +5,7 @@ import { BookamatError, vatAccounts, type BookamatSettings } from '@/lib/bookama
 import { bookamatPreview, syncBookamatWithAdopt } from '@/lib/services/bookamat-sync'
 import { clip, money, word, type Worded } from './words'
 import { documentUrl } from '../config'
+import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { mayOutlastClient, notice, paymentsState, refuse, refuseClaudeClient } from './common'
@@ -46,8 +47,10 @@ function bookingAccounts(settings: BookamatSettings, preview: Awaited<ReturnType
 
 const argsSchema = z.object({ document_id: z.uuid() })
 type Args = z.output<typeof argsSchema>
+// The payments' mark as the state compared before the run read it (null: none).
+type Approved = { paymentsAt: string | null }
 
-export const bookamatSyncAction = defineAction<Args>({
+export const bookamatSyncAction = defineAction<Args, Approved>({
   kind: 'bookamat_sync',
   argsSchema,
   async prepare(ctx, args) {
@@ -81,9 +84,21 @@ export const bookamatSyncAction = defineAction<Args>({
   async fingerprint(ctx, args) {
     return (await load(ctx, args.document_id)).fingerprint
   },
-  async execute(ctx, args) {
+  async approvedState(ctx, args) {
+    const { preview, fingerprint } = await load(ctx, args.document_id)
+    return { fingerprint, state: { paymentsAt: preview.document.paymentsAt } }
+  },
+  // A run confirmed in the chat runs on Claude's session, where nothing holds the client or the
+  // payments: a change Claude makes to either after the state was compared (a parallel call) stops
+  // the sync before it books (claudeHold, syncBookamatDocument), worded like the refusal.
+  async execute(ctx, args, approved) {
+    if (!approved) throw new McpToolError('internal')
     const settings = await ctx.settings() as unknown as BookamatSettings
-    const result = await syncBookamatWithAdopt(ctx.supabase, settings, args.document_id, { deadline: ctx.deadline ?? undefined })
+    const result = await syncBookamatWithAdopt(ctx.supabase, settings, args.document_id, { deadline: ctx.deadline ?? undefined, claudeHold: approved })
+    if (!result.ok && result.code === 'held') {
+      const key = result.detail?.hold === 'payments' ? 'mcp.approve.refusals.paymentsChangedBookamat' : 'mcp.approve.refusals.clientChangedBookamat'
+      throw refuse(ctx, key, undefined, 'invalid_input', { document_id: args.document_id })
+    }
     if (!result.ok) throw new BookamatError(result.code, result.error, result.status, result.detail ?? {})
     const report: Worded[] = [result.created.length
       ? notice('mcp.approve.result.booked', { bookings: { list: result.created.map(c => `#${c.bookingId} (${c.year})`) } })

@@ -15,10 +15,27 @@ import { toUbl } from './ubl'
 // only built, to learn whether it can be (a preview before sending). A UBL whose PDF could not be
 // had goes without it; `pdfError` says why (the archive's code, e.g. a client or payments Claude
 // changed and the owner has not saved or confirmed, else 'pdf_failed'), so the download can say so.
-export async function exportEInvoice(supabase: SupabaseClient, documentId: string, format: EInvoiceFormat, { pdf: withPdf = true }: { pdf?: boolean } = {}) {
+// `claudeHold` (an email Claude prepared, as it is sent): nothing is built while the client carries
+// Claude's mark (clients.mcp_written_at, EInvoiceError 'client_changed') or an invoice's payments
+// do (documents.mcp_payments_at, 'payments_changed'), read in the very read the XML is built from.
+// The action refused both when it was prepared and when its state was compared before the run
+// (refuseClaudeEInvoice), so a mark seen here was set while it ran: a parallel call during a run
+// confirmed in the chat, where nothing else holds the client or the payments.
+export async function exportEInvoice(
+  supabase: SupabaseClient,
+  documentId: string,
+  format: EInvoiceFormat,
+  { pdf: withPdf = true, claudeHold = false }: { pdf?: boolean; claudeHold?: boolean } = {},
+) {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.clients) throw new Error('Document has no client')
   if (!doc.number) throw new EInvoiceError('not_issued', 'Only issued documents can be e-invoices')
+  if (claudeHold && doc.clients.mcp_written_at) {
+    throw new EInvoiceError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no e-invoice is built from it')
+  }
+  if (claudeHold && doc.type === 'invoice' && doc.mcp_payments_at) {
+    throw new EInvoiceError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no e-invoice is built with them')
+  }
 
   const buyerReference = await fetchBuyerReference(supabase, doc, doc.clients)
 

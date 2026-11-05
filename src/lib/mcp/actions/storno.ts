@@ -131,7 +131,10 @@ export const stornoAction = defineAction<Args>({
     return (await loadStorno(ctx, args.invoice_id)).fingerprint
   },
   async execute(ctx, args) {
-    const { data, error } = await createCreditNote(ctx.supabase, args.invoice_id, { cancel: true, reason: args.reason ?? undefined })
+    // The client had no mark when the state was compared before the run (loadStorno refuses one):
+    // a mark Claude sets after that (a parallel call during a run confirmed in the chat) leaves the
+    // credit note without an archive copy, and the result says so (archiveFailed).
+    const { data, error } = await createCreditNote(ctx.supabase, args.invoice_id, { cancel: true, reason: args.reason ?? undefined, clientWrittenAt: null })
     if (error) throw error
     if (!data) throw new McpToolError('not_found', { details: { invoice_id: args.invoice_id } })
     const report: Worded[] = [notice('mcp.approve.result.storno', { number: data.number ?? '' })]

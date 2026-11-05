@@ -97,7 +97,8 @@ async function recordIssuedTotal(supabase: SupabaseClient, documentId: string): 
 // the archive copy is made from the client as it was when the number was taken: should Claude
 // change it in between, or record a payment on the just-numbered document, there is no copy until
 // the owner saves the client or confirms the payments (getIssuedPdf). `clientWrittenAt`: the
-// client's mark as a run Claude prepared read it when it was approved, compared instead.
+// client's mark as read before the number was taken elsewhere, compared instead: by a run Claude
+// prepared when it was approved, or before a Storno's number (createCreditNote).
 export async function issueDocument(
   supabase: SupabaseClient,
   documentId: string,

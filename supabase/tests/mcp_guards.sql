@@ -1,6 +1,9 @@
 -- Checks the Claude connector's database guards (supabase/migrations/20261105_mcp.sql).
--- Run it in the Supabase SQL editor (postgres role) after the migration; the owner must be in
--- app_users. Everything happens in one transaction that is rolled back, so nothing stays behind.
+-- Run it in the Supabase SQL editor (postgres role) after the migration, while no action runs: once
+-- 20261105_mcp_drafts.sql is applied as well, an action claimed in the last ten minutes refuses the
+-- claims and approvals here (MI047, mcp_actions_one_run), and the script stops on that error. The
+-- owner must be in app_users. Everything happens in one transaction that is rolled back, so nothing
+-- stays behind.
 -- Sessions are simulated with `set local role` and request.jwt.claims:
 --   browser        the owner's browser at aal2, authenticator code entered a minute ago
 --   browser_stale  the same session, code entered an hour ago

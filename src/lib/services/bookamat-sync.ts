@@ -2,7 +2,7 @@
 // sync itself with the frozen PDF attached. Server only (Bookamat credentials, the PDF renderer).
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { BookamatError, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
+import { BookamatError, syncBookamatDocument, type BookamatSettings, type ClaudeHold } from '@/lib/bookamat'
 import {
   BOOKING_COLUMNS, hasMoneyToBook, planBookings, unbookedPlan,
   type AdoptBooking, type BookingRow, type MoneyRow, type PlannedBooking, type SyncFailure, type SyncSuccess,
@@ -15,39 +15,44 @@ import { calcTotals } from '@/lib/utils/document'
 import type { VatRate } from '@/types'
 
 // One sync as the sync route runs it: `adopt` records bookings an earlier attempt created but
-// could not store (its `pending`), instead of booking them again.
+// could not store (its `pending`), instead of booking them again. `claudeHold`: a sync Claude
+// prepared, 'held' when Claude changed the client or the payments since its state was compared
+// (syncBookamatDocument).
 export async function syncBookamat(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  { adopt = [], deadline }: { adopt?: AdoptBooking[]; deadline?: number } = {},
+  { adopt = [], deadline, claudeHold }: { adopt?: AdoptBooking[]; deadline?: number; claudeHold?: ClaudeHold } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   return syncBookamatDocument(supabase, settings, documentId, {
     adopt,
     loadPdf: async id => getIssuedPdf(supabase, id, 'on_demand'),
     ...(deadline ? { deadline } : {}),
+    ...(claudeHold ? { claudeHold } : {}),
   })
 }
 
 // When Bookamat accepted a booking this database could not record, the second call hands it
 // back as `adopt`, so it is recorded instead of booked twice (as the browser's
-// requestBookamatSync and the cron do).
+// requestBookamatSync and the cron do); `claudeHold` holds both calls, as the hand-back books what
+// is still missing too.
 export async function syncBookamatWithAdopt(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  { deadline }: { deadline?: number } = {},
+  { deadline, claudeHold }: { deadline?: number; claudeHold?: ClaudeHold } = {},
 ): Promise<SyncSuccess | SyncFailure> {
-  const first = await syncBookamat(supabase, settings, documentId, { deadline })
+  const first = await syncBookamat(supabase, settings, documentId, { deadline, claudeHold })
   if (first.ok || !first.pending?.length) return first
-  return syncBookamat(supabase, settings, documentId, { adopt: first.pending, deadline })
+  return syncBookamat(supabase, settings, documentId, { adopt: first.pending, deadline, claudeHold })
 }
 
-// The whole client row: the bookings carry its name (their title) and UID (vatin), and a Claude
-// session's mark (clients.mcp_written_at) is read without naming the column.
-const PREVIEW_COLS = `id, type, number, status, currency, date, tax_treatment, discount_type, discount_value,
+// The whole rows: the bookings carry the client's name (their title) and UID (vatin), and a Claude
+// session's marks (clients.mcp_written_at, documents.mcp_payments_at) are read without naming the
+// columns.
+const PREVIEW_COLS = `*,
   document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
-  payments(date, amount, kind, method), clients(*), bookamat_pending, bookamat_bookings(${BOOKING_COLUMNS})`
+  payments(date, amount, kind, method), clients(*), bookamat_bookings(${BOOKING_COLUMNS})`
 
 type PreviewClient = { id: string; name: string; company: string | null; uid_number?: string | null; mcp_written_at?: string | null }
 
@@ -62,6 +67,9 @@ export type BookamatPreviewDoc = {
   clientBooked: { id: string; name: string; company: string | null; uid_number: string | null; mcp_written_at: string | null } | null
   total: number
   payments: MoneyRow[]
+  // When a Claude session last recorded, changed or removed its payments, not confirmed in Mado
+  // since (null: none, or no column).
+  paymentsAt: string | null
   recorded: BookingRow[]
   pending: unknown
 }
@@ -85,7 +93,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
   if (!isBookamatConfigured(settings)) throw new BookamatError('not_configured', 'Bookamat is not fully configured')
   const { data, error } = await supabase.from('documents').select(PREVIEW_COLS).eq('id', documentId).maybeSingle()
   if (error) throw new BookamatError('database', error.message)
-  const doc = data as unknown as (Omit<BookamatPreviewDoc, 'client' | 'clientBooked' | 'total' | 'payments' | 'recorded' | 'pending'> & {
+  const doc = data as unknown as (Omit<BookamatPreviewDoc, 'client' | 'clientBooked' | 'total' | 'payments' | 'paymentsAt' | 'recorded' | 'pending'> & {
     type: string
     number: string | null
     currency: string | null
@@ -97,6 +105,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
     clients: PreviewClient | null
     bookamat_pending: unknown
     bookamat_bookings: BookingRow[] | null
+    mcp_payments_at?: string | null
   }) | null
   if (!doc) throw new BookamatError('not_found', 'Document not found')
   if ((doc.type !== 'invoice' && doc.type !== 'credit_note') || !doc.number) throw new BookamatError('not_issued', 'Only issued invoices and credit notes can be synced')
@@ -136,6 +145,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
         : null,
       total: totals.total,
       payments: rows,
+      paymentsAt: doc.mcp_payments_at ?? null,
       recorded,
       pending: doc.bookamat_pending ?? null,
     },

@@ -2388,6 +2388,8 @@ export const en = {
       buyer_endpoint: 'This client has no Peppol ID, and none follows from its VAT number — add it on the client.',
       seller_endpoint: 'Your own Peppol ID is missing — enter it under Settings → E-invoice.',
       line_amount: 'A line amount does not add up (quantity × price less the line discount) — check the lines and save again.',
+      client_changed: 'Claude changed the client, and it has not been saved in Mado since: the e-invoice would carry what Claude wrote. Check the client and save it in Mado.',
+      payments_changed: 'Claude changed the invoice’s payments, and they have not been confirmed in Mado since: the e-invoice would state them as already paid. Check the payments and confirm them on the invoice’s page.',
     },
     history: {
       exported: 'Exported as an e-invoice ({format})',
@@ -2806,7 +2808,7 @@ export const en = {
         generic: 'That did not work. Reload the page and try again.',
         origin: 'This request did not come from Mado.',
         unauthorized: 'Sign in again to approve.',
-        busy: 'Another action is still running. Try again in a moment.',
+        busy: 'Another action is still running (listed under All approvals). Try again once it has finished, ten minutes at most if it stopped unexpectedly.',
       },
       status: {
         pending: 'Waiting',
@@ -2918,6 +2920,7 @@ export const en = {
         clientChangedReminder: 'Claude created or changed this invoice’s client, and it has not been saved in Mado since: the Mahnung would print the name and address Claude wrote without anyone approving them. Check the client and save it in Mado, then prepare the reminder again.',
         clientChangedStorno: 'Claude created or changed this invoice’s client, and it has not been saved in Mado since: the Storno credit note would be numbered and archived for good with the name, address and VAT ID Claude wrote. Check the client and save it in Mado, then prepare the Storno again.',
         clientChangedBookamat: 'Claude created or changed this document’s client, and it has not been saved in Mado since: the Bookamat bookings would carry the name and VAT ID Claude wrote. Check the client and save it in Mado, then prepare the sync again.',
+        paymentsChangedBookamat: 'Claude recorded, changed or removed a payment on this document while the sync ran, so the sync stopped there: the bookings would take their dates, amounts and accounts from payments nobody approved. Check the payments, then prepare the sync again.',
         clientChangedEInvoice: 'Claude created or changed this document’s client, and it has not been saved in Mado since: the e-invoice would carry the name, address, VAT ID and buyer reference Claude wrote without anyone approving them. Check the client and save it in Mado, then prepare the email again, or send it without the e-invoice.',
         paymentsChangedEInvoice: 'Claude recorded, changed or removed a payment on this invoice, and its payments have not been confirmed in Mado since: the e-invoice would state them as already paid without anyone approving them. Check the payments and confirm them on the invoice’s page in Mado, then prepare the email again, or send it without the e-invoice.',
       },
