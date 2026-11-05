@@ -70,7 +70,8 @@ export async function applyCreditNote(supabase: SupabaseClient, creditNoteId: st
     document_id: inv.id, date, amount, kind: 'credit', method: 'bank', note: cn.number, credit_note_id: cn.id,
   })
   if (insErr?.code === '23505') return none
-  if (insErr) throw new Error(insErr.message)
+  // With its code: a Claude session is refused while an approved action runs on either document (MI046).
+  if (insErr) throw Object.assign(new Error(insErr.message), { code: insErr.code, details: insErr.details })
   await logEvent(supabase, inv.id, 'payment_added', { amount, date, kind: 'credit', credit_note_id: cn.id, credit_note_number: cn.number })
 
   if (amount >= invoiceOpen - 0.005 && PAYABLE.includes(inv.status)) {

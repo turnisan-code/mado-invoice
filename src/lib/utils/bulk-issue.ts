@@ -15,6 +15,8 @@ export interface IssuedNote {
   beforeLatest: LatestIssued | null
   snapshotFailed: boolean
   driveError: { error: string; code?: string } | null
+  // A credit note whose credit could not be applied to its invoice (the lists issue none).
+  creditNotApplied: boolean
   // Time entries and expenses billed on it that no longer sit on one of its lines.
   unlinked: { time: number; expenses: number } | null
 }

@@ -230,6 +230,9 @@ export type DetailDocument = {
   buyer_reference?: string | null
   skonto_percent?: number | null
   skonto_days?: number | null
+  // Claude recorded, changed or removed a payment and the owner has not confirmed them since
+  // (20261105_mcp_drafts.sql); absent before that migration.
+  mcp_payments_at?: string | null
   document_items: (ListItem & { id: string; description: string | null; unit: string | null; service_date: string | null; service_date_end?: string | null; catalogue_item_id: string | null })[] | null
   payments: Payment[] | null
   clients: Record<string, unknown> & { id: string; name: string; company: string | null; uid_number: string | null; country: string | null } | null

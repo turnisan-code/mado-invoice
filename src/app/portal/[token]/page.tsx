@@ -37,8 +37,23 @@ const loadShared = cache(async (token: string) => {
   if (!doc?.number || !doc.clients) return null
   const { data: settings } = await supabase.from('settings').select('*').single()
   if (!settings) return null
-  const [reference, buyerReference] = await Promise.all([fetchCreditReference(supabase, doc), fetchBuyerReference(supabase, doc, doc.clients)])
-  return { doc, client: doc.clients, settings: settings as Settings, reference, buyerReference }
+  // A client a Claude session created or changed, not saved by the owner in Mado since
+  // (clients.mcp_written_at, 20261105_mcp_drafts.sql): what Claude wrote there reaches nobody
+  // unattended, so until then the page leaves out the recipient block and the client's default
+  // buyer reference, and the PDF route only serves a copy stored before (getIssuedPdf). A client
+  // read without the column (that migration not applied) has not been changed by Claude.
+  const clientHeld = !!doc.clients.mcp_written_at
+  // Likewise payments a Claude session recorded, changed or removed on the document, not confirmed
+  // by the owner in Mado since (documents.mcp_payments_at): until then the page shows the issued
+  // total only, without the payments, the balance due, the status they set (paid, overdue) and the
+  // payment details and QR code, so it never asks the client for money by what Claude wrote (a
+  // removed payment would ask again for money paid). The PDF route serves a stored copy only.
+  const paymentsHeld = !!doc.mcp_payments_at
+  const [reference, buyerReference] = await Promise.all([
+    fetchCreditReference(supabase, doc),
+    fetchBuyerReference(supabase, doc, clientHeld ? null : doc.clients),
+  ])
+  return { doc, client: doc.clients, clientHeld, paymentsHeld, settings: settings as Settings, reference, buyerReference }
 })
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
@@ -78,7 +93,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const shared = await loadShared(token)
   if (!shared) notFound()
 
-  const { doc, client, settings, reference, buyerReference } = shared
+  const { doc, client, clientHeld, paymentsHeld, settings, reference, buyerReference } = shared
   const lang = documentLanguage(doc.language)
   const t = documentT(lang)
   const company = settings.company_name || settings.owner_name
@@ -101,7 +116,8 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const kind = documentKind(doc.type, reference?.kind === 'storno')
   const currency = doc.currency ?? 'EUR'
   const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
-  const totals = calcTotals(items, doc.payments ?? [], discount, doc.tax_treatment)
+  const payments = paymentsHeld ? [] : doc.payments ?? []
+  const totals = calcTotals(items, payments, discount, doc.tax_treatment)
   // A final invoice shows the whole service, then what the earlier invoices carried, as on the PDF.
   const deduction = deductionSummary(items, discount, doc.tax_treatment)
   const discountLabel = doc.discount_type === 'percent' && doc.discount_value
@@ -123,10 +139,14 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const dueLabel = doc.type === 'quote' ? t('pdfPortal.validUntil') : doc.type === 'invoice' ? t('pdfPortal.dueDate') : null
   const taxNote = getTaxNote(doc.tax_treatment ?? 'at_vat', lang, settings)
   const paymentTerms = paymentTermsText({ ...doc, language: lang }, totals.total)
-  const paymentLines = summarizePayments(doc.payments ?? [])
+  const paymentLines = summarizePayments(payments)
   const expired = isExpired(doc, today())
+  // An invoice's paid and overdue follow its payments; its Storno's 'cancelled' and a credit note's
+  // status do not.
+  const statusShown = !paymentsHeld || doc.type !== 'invoice' || doc.status === 'cancelled'
+  const overdue = statusShown && doc.status === 'overdue'
 
-  const payable = doc.type === 'invoice' && (doc.status === 'sent' || doc.status === 'overdue') && totals.balance_due > 0 && !!settings.iban?.trim()
+  const payable = !paymentsHeld && doc.type === 'invoice' && (doc.status === 'sent' || doc.status === 'overdue') && totals.balance_due > 0 && !!settings.iban?.trim()
   const beneficiary = epcBeneficiary(settings)
   const qr = payable && currency === 'EUR'
     ? await generateEpcQr({ iban: settings.iban, bic: settings.bic ?? '', name: beneficiary, amountEur: totals.balance_due, reference: doc.number ?? '' })
@@ -159,23 +179,25 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           )}
           {expired
             ? <StatusBadge status="expired" label={t('lifecycle.portal.expired')} className="inline-block" />
-            : <StatusBadge status={doc.status} label={statusLabel(t, doc.status)} className="inline-block" />}
+            : statusShown && <StatusBadge status={doc.status} label={statusLabel(t, doc.status)} className="inline-block" />}
         </div>
       </header>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-        <div>
-          <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">{recipientLabel(t, kind)}</h2>
-          <div className="text-sm text-neutral-700 space-y-0.5 break-words">
-            {client.company && <div className="font-medium">{client.company}</div>}
-            {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
-            <div>{client.address_line1}</div>
-            {client.address_line2 && <div>{client.address_line2}</div>}
-            <div>{[client.zip, client.city].filter(Boolean).join(' ')}</div>
-            <div>{countryName(client.country, lang)}</div>
-            {client.uid_number && <div className="text-neutral-500 text-xs mt-1">{t('pdfPortal.issuer.uid')} {client.uid_number}</div>}
+        {clientHeld ? <div className="hidden sm:block" /> : (
+          <div>
+            <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">{recipientLabel(t, kind)}</h2>
+            <div className="text-sm text-neutral-700 space-y-0.5 break-words">
+              {client.company && <div className="font-medium">{client.company}</div>}
+              {client.name && <div className={client.company ? '' : 'font-medium'}>{client.name}</div>}
+              <div>{client.address_line1}</div>
+              {client.address_line2 && <div>{client.address_line2}</div>}
+              <div>{[client.zip, client.city].filter(Boolean).join(' ')}</div>
+              <div>{countryName(client.country, lang)}</div>
+              {client.uid_number && <div className="text-neutral-500 text-xs mt-1">{t('pdfPortal.issuer.uid')} {client.uid_number}</div>}
+            </div>
           </div>
-        </div>
+        )}
         <dl className="text-sm space-y-2">
           <div className="flex justify-between gap-4">
             <dt className="text-neutral-500">{t('pdfPortal.date')}</dt>
@@ -194,7 +216,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           {doc.due_date && dueLabel && (
             <div className="flex justify-between gap-4">
               <dt className="text-neutral-500">{dueLabel}</dt>
-              <dd className={`font-medium ${doc.status === 'overdue' || expired ? 'text-red-600' : ''}`}>{formatDate(doc.due_date, lang)}</dd>
+              <dd className={`font-medium ${overdue || expired ? 'text-red-600' : ''}`}>{formatDate(doc.due_date, lang)}</dd>
             </div>
           )}
           {buyerReference && (

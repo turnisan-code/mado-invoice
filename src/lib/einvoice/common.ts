@@ -19,12 +19,16 @@ import { isValidBic, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/u
 import type { Client, Document, DocumentItem, InvoiceKind, Language, Payment, Settings, Unit } from '@/types'
 import { decimal } from './xml'
 
+// 'client_changed' and 'payments_changed' only come back to an email Claude prepared (exportEInvoice's
+// claudeHold).
 export type EInvoiceErrorCode =
   | 'not_issued' | 'unsupported_type' | 'currency' | 'client_country'
   | 'buyer_reference' | 'buyer_endpoint' | 'seller_endpoint' | 'line_amount'
+  | 'client_changed' | 'payments_changed'
 
 export const EINVOICE_ERROR_CODES: readonly EInvoiceErrorCode[] = [
   'not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint', 'line_amount',
+  'client_changed', 'payments_changed',
 ]
 
 // A document that cannot become this e-invoice; the UI words the code (einvoice.errors.*).

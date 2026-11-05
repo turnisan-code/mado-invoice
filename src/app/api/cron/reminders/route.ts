@@ -9,8 +9,9 @@ import { markOverdueInvoices } from '@/lib/utils/overdue'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import type { PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, renderReminderPdf } from '@/lib/pdf/reminder'
-import { fillSubject, fillTemplate, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
+import { fillSubject, fillTemplate, templateLang, usesVariable } from '@/lib/templates'
 import { logEvent } from '@/lib/events'
+import { heldBackAddress, unattendedCopies } from '@/lib/services/email-compose'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
@@ -21,9 +22,18 @@ export const maxDuration = 60
 
 type Skipped = { number: string; reason: string }
 
+const HELD_BACK = {
+  written: 'address written by Claude: save the client in Mado to confirm it',
+  unchecked: 'address not plain ASCII on a client with addresses written by Claude: save the client in Mado to confirm it',
+  changed: 'client changed from a Claude connection: save the client in Mado to confirm it',
+  payments: 'payments changed from a Claude connection: confirm them on the invoice in Mado',
+} as const
+
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
 // result in the log. Runs before the reminders, whatever their settings, and every Bookamat call
-// ends by the step's deadline, so the reminders keep more than half of the function's time.
+// ends by the step's deadline, so the reminders keep more than half of the function's time. A
+// document of a client Claude changed, or one whose payments or refunds Claude changed, is held
+// back until the owner confirms it in Mado (autoSyncBookamat), as its reminders are below.
 async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
   if (!isBookamatConfigured(settings)) {
     console.warn('[cron/bookamat] skipped: automatic sync is on, but Bookamat is not fully configured')
@@ -33,7 +43,8 @@ async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, se
     const results = await autoSyncBookamat(supabase, settings, async id => getIssuedPdf(supabase, id, 'on_demand'), { limit: 8, deadline: Date.now() + 25_000 })
     if (!results.length) console.log('[cron/bookamat] nothing to sync')
     for (const r of results) {
-      if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)
+      if (r.held) console.log(`[cron/bookamat] ${r.number} held back: ${r.held}`)
+      else if (r.ok) console.log(`[cron/bookamat] ${r.number}: ${r.bookings?.length ? `booked ${r.bookings.join(', ')}` : 'already in Bookamat'}`)
       else console.error(`[cron/bookamat] ${r.number} failed: ${r.error}`)
     }
     return results
@@ -99,6 +110,30 @@ export async function GET(req: NextRequest) {
     if (!client) { skipped.push({ number: invoice.number, reason: 'no client' }); continue }
     if (client.reminders_opt_out) { skipped.push({ number: invoice.number, reason: 'client is excluded from automatic reminders' }); continue }
     if (!client.email) { skipped.push({ number: invoice.number, reason: 'client has no email address' }); continue }
+    // An address a Claude session wrote onto the client gets no unattended mail until the owner
+    // saves the client in Mado (clients.mcp_recipients), nor does one on such a client the app
+    // cannot compare with the marks for certain (not printable ASCII); CC entries are left out below.
+    const held = heldBackAddress(client)(client.email)
+    if (held) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK[held] })
+      continue
+    }
+    // Nor does a client a Claude session changed (clients.mcp_written_at, until the owner saves it
+    // in Mado): its name, company and address go into the greeting and the Mahnung's address block,
+    // unattended, to the client's real address. A client read without the column (that migration
+    // not applied) has not been changed by Claude.
+    if (client.mcp_written_at) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK.changed })
+      continue
+    }
+    // Nor does an invoice whose payments a Claude session recorded, changed or removed
+    // (documents.mcp_payments_at, until the owner confirms them on the invoice page): removing one
+    // reopens a paid invoice or raises what is open, so the Mahnung would ask the client for money
+    // it paid. An invoice read without the column (that migration not applied) has none.
+    if (invoice.mcp_payments_at) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK.payments })
+      continue
+    }
     if (invoiceTotals(invoice).balance_due <= 0.005) { skipped.push({ number: invoice.number, reason: 'nothing outstanding' }); continue }
     due.push({ invoice, level })
   }
@@ -166,7 +201,10 @@ export async function GET(req: NextRequest) {
     const figures = reminderFigures({ dueDate: invoice.due_date, balance: totals.balance_due, issuer: settings, level, lang })
     const vars = reminderVariables({ doc: invoice, client, issuer: settings, totals, figures, portalLink })
     const subject = fillSubject(tpl.subject, vars)
-    const cc = parseEmailList(client.cc_emails ?? []).emails
+    const { cc, heldBack } = unattendedCopies(client)
+    if (heldBack) {
+      console.log(`[cron/reminders] ${number}: ${heldBack} CC address(es) written by Claude (or not plain ASCII on a client with such addresses) left out; save the client in Mado to confirm them`)
+    }
 
     try {
       await sendGmail(auth, {

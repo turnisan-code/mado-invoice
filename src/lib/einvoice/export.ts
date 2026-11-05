@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { documentLanguage, documentT } from '@/lib/document-labels'
 import { loadPdfDocument, loadSettings } from '@/lib/pdf/render'
-import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { ArchiveError, getIssuedPdf, type ArchiveErrorCode } from '@/lib/pdf/snapshot'
 import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
 import type { EInvoiceFormat } from '@/types'
 import { EInvoiceError, buildEInvoice, einvoiceFilename, withAttachment, type PrecedingInvoice } from './common'
@@ -11,11 +11,31 @@ import { toUbl } from './ubl'
 // Server-only: the e-invoice of an issued invoice or credit note, built from the stored document,
 // with the buyer reference the PDF and the portal print (fetchBuyerReference). Peppol embeds the
 // issued PDF; it is only fetched (and, for a document issued before archive copies existed, stored)
-// once the XML is known to be valid.
-export async function exportEInvoice(supabase: SupabaseClient, documentId: string, format: EInvoiceFormat) {
+// once the XML is known to be valid. With { pdf: false } nothing is fetched or stored: the XML is
+// only built, to learn whether it can be (a preview before sending). A UBL whose PDF could not be
+// had goes without it; `pdfError` says why (the archive's code, e.g. a client or payments Claude
+// changed and the owner has not saved or confirmed, else 'pdf_failed'), so the download can say so.
+// `claudeHold` (an email Claude prepared, as it is sent): nothing is built while the client carries
+// Claude's mark (clients.mcp_written_at, EInvoiceError 'client_changed') or an invoice's payments
+// do (documents.mcp_payments_at, 'payments_changed'), read in the very read the XML is built from.
+// The action refused both when it was prepared and when its state was compared before the run
+// (refuseClaudeEInvoice), so a mark seen here was set while it ran: a parallel call during a run
+// confirmed in the chat, where nothing else holds the client or the payments.
+export async function exportEInvoice(
+  supabase: SupabaseClient,
+  documentId: string,
+  format: EInvoiceFormat,
+  { pdf: withPdf = true, claudeHold = false }: { pdf?: boolean; claudeHold?: boolean } = {},
+) {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.clients) throw new Error('Document has no client')
   if (!doc.number) throw new EInvoiceError('not_issued', 'Only issued documents can be e-invoices')
+  if (claudeHold && doc.clients.mcp_written_at) {
+    throw new EInvoiceError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no e-invoice is built from it')
+  }
+  if (claudeHold && doc.type === 'invoice' && doc.mcp_payments_at) {
+    throw new EInvoiceError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no e-invoice is built with them')
+  }
 
   const buyerReference = await fetchBuyerReference(supabase, doc, doc.clients)
 
@@ -42,14 +62,18 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
 
   let xml: string
   let attached = false
+  let pdfError: ArchiveErrorCode | 'pdf_failed' | null = null
   if (format === 'ubl') {
     toUbl(inv)
     let pdf: { filename: string; base64: string } | null = null
-    try {
-      const issued = await getIssuedPdf(supabase, documentId, 'on_demand')
-      pdf = { filename: issued.filename, base64: issued.buffer.toString('base64') }
-    } catch (err) {
-      console.error(`[einvoice] ${doc.number}: issued PDF unavailable, exported without it:`, err)
+    if (withPdf) {
+      try {
+        const issued = await getIssuedPdf(supabase, documentId, 'on_demand')
+        pdf = { filename: issued.filename, base64: issued.buffer.toString('base64') }
+      } catch (err) {
+        pdfError = err instanceof ArchiveError ? err.code : 'pdf_failed'
+        console.error(`[einvoice] ${doc.number}: issued PDF unavailable, exported without it:`, err)
+      }
     }
     xml = toUbl(withAttachment(inv, pdf))
     attached = !!pdf
@@ -57,5 +81,5 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
     xml = toEbInterface(inv)
   }
 
-  return { xml, filename: einvoiceFilename(doc.number, format), number: doc.number, attached }
+  return { xml, filename: einvoiceFilename(doc.number, format), number: doc.number, attached, pdfError }
 }

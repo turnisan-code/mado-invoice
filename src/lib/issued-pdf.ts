@@ -4,7 +4,7 @@ import type { TFn } from '@/lib/i18n'
 import type { ArchiveErrorCode } from '@/lib/pdf/snapshot'
 import { knownApiError } from '@/lib/api-errors'
 
-const ARCHIVE_ERROR_CODES: readonly ArchiveErrorCode[] = ['not_issued', 'stored_unreadable']
+const ARCHIVE_ERROR_CODES: readonly ArchiveErrorCode[] = ['not_issued', 'stored_unreadable', 'client_changed', 'payments_changed']
 
 // The archive routes answer known failures with a code, worded here in the UI language; the
 // server's own text is never shown.

@@ -5,22 +5,29 @@ import { ISSUER_SETTINGS_COLUMNS, IssueCheckError, issueProblems, type IssueChec
 import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
 import { logEvent } from '@/lib/events'
-import { getIssuedPdf } from './snapshot'
+import { ArchiveError, getIssuedPdf, type ArchiveErrorCode } from './snapshot'
 import { archiveToDrive, type DriveArchive } from './drive'
 import { applyCreditNote } from '@/lib/credits'
 import { loadDepositCheck } from '@/lib/deposits'
+import type { IssueProblem } from '@/types'
 
 export type IssueOutcome = {
   number: string
   pdfPath: string | null
   snapshotError: string | null
+  // Why no archive copy was made, where the app words it (e.g. 'client_changed').
+  snapshotCode: ArchiveErrorCode | null
   drive: DriveArchive | null
   driveError: { error: string; code?: string } | null
+  // An issued credit note whose credit could not be taken off the open balance of the invoice it
+  // corrects: the invoice still shows it as open (and is reminded of it) until it is applied on the
+  // credit note's page.
+  creditNotApplied: boolean
 }
 
-// The checks the builder shows inline, run on the stored document before a number is taken, so
-// every issuance path refuses an incomplete document with readable reasons (IssueCheckError).
-async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
+type IssueCheck = { problems: IssueProblem[]; uiLanguage: unknown }
+
+async function loadIssueCheck(supabase: SupabaseClient, documentId: string): Promise<IssueCheck> {
   const [{ data: doc, error }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents')
       .select('id, type, client_id, language, invoice_kind, converted_from_id, discount_type, discount_value, currency, tax_treatment, service_date, service_date_end, cancels_document_id, clients(uid_number, country), document_items(*)')
@@ -44,7 +51,20 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
     settings,
     deposit: await loadDepositCheck(supabase, doc),
   })
-  if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(settings?.ui_language) ? settings.ui_language : 'en'))
+  return { problems, uiLanguage: settings?.ui_language }
+}
+
+// The checks the builder shows inline, run on the stored document: what stands between it and a
+// number (empty when it may be issued). Throws only when the document or settings cannot be read.
+export async function checkIssuable(supabase: SupabaseClient, documentId: string): Promise<IssueProblem[]> {
+  return (await loadIssueCheck(supabase, documentId)).problems
+}
+
+// Run before a number is taken, so every issuance path refuses an incomplete document with
+// readable reasons (IssueCheckError).
+async function assertIssuable(supabase: SupabaseClient, documentId: string): Promise<void> {
+  const { problems, uiLanguage } = await loadIssueCheck(supabase, documentId)
+  if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(uiLanguage) ? uiLanguage : 'en'))
 }
 
 // The total the frozen PDF prints (before payments), kept so a later edit that changes the amount
@@ -69,34 +89,65 @@ async function recordIssuedTotal(supabase: SupabaseClient, documentId: string): 
 // PDF is frozen in the private bucket and archived to Drive when a folder is configured. Only a
 // failed number assignment throws; archive failures are returned so the caller can report them
 // while the document stays issued (a missing copy is flagged on its page and can be created later).
-export async function issueDocument(supabase: SupabaseClient, documentId: string): Promise<IssueOutcome> {
-  const { data: before, error: lookupErr } = await supabase.from('documents').select('number, type').eq('id', documentId).maybeSingle()
+// `unattended` (the recurring generator): nothing is numbered for a client a Claude session changed
+// and the owner has not saved in Mado since (clients.mcp_written_at): refused with code
+// 'client_changed' just before the number is taken, and should Claude change the client after
+// that, no archive copy is made from it (getIssuedPdf), the invoice stays without one until the
+// owner saves the client (snapshotCode 'client_changed'). The owner's own issuing is not held, but
+// the archive copy is made from the client as it was when the number was taken: should Claude
+// change it in between, or record a payment on the just-numbered document, there is no copy until
+// the owner saves the client or confirms the payments (getIssuedPdf). `clientWrittenAt`: the
+// client's mark as read before the number was taken elsewhere, compared instead: by a run Claude
+// prepared when it was approved, or before a Storno's number (createCreditNote).
+export async function issueDocument(
+  supabase: SupabaseClient,
+  documentId: string,
+  opts: { unattended?: boolean; clientWrittenAt?: string | null } = {},
+): Promise<IssueOutcome> {
+  // The whole client row: a database without clients.mcp_written_at has nothing from Claude.
+  const { data: before, error: lookupErr } = await supabase.from('documents').select('number, type, clients(*)').eq('id', documentId).maybeSingle()
   if (lookupErr) throw new Error(lookupErr.message)
   if (!before) throw new Error('Document not found')
-  if (!before.number) await assertIssuable(supabase, documentId)
+  const row = before as unknown as { number: string | null; type: string; clients?: { mcp_written_at?: string | null } | null }
+  const clientWrittenAt = opts.clientWrittenAt !== undefined ? opts.clientWrittenAt : row.clients?.mcp_written_at ?? null
+  if (opts.unattended && !row.number && row.clients?.mcp_written_at) {
+    throw Object.assign(new Error('The client was changed from a Claude connection and not saved in Mado since; the invoice stays a draft'), { code: 'client_changed' })
+  }
+  if (!row.number) await assertIssuable(supabase, documentId)
 
   const { data: number, error } = await supabase.rpc('issue_document', { p_document_id: documentId })
   // With its code and detail (MI001–MI004 say why), so every caller can word the refusal.
   if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
-  if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
+  if (!row.number) await logEvent(supabase, documentId, 'issued', { number })
   await recordIssuedTotal(supabase, documentId)
-  // An issued credit note takes its amount off the open balance of the invoice it corrects; a
-  // failure leaves it unapplied, and its page offers to apply it.
-  if (!before.number && before.type === 'credit_note') {
-    await applyCreditNote(supabase, documentId).catch(err => console.error(`[issue] credit note ${number} not applied:`, err))
+
+  const outcome: IssueOutcome = {
+    number: number as string, pdfPath: null, snapshotError: null, snapshotCode: null, drive: null, driveError: null, creditNotApplied: false,
   }
 
-  const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, drive: null, driveError: null }
-
-  let issued: Awaited<ReturnType<typeof getIssuedPdf>>
+  let issued: Awaited<ReturnType<typeof getIssuedPdf>> | null = null
   try {
-    issued = await getIssuedPdf(supabase, documentId, 'issue')
+    issued = await getIssuedPdf(supabase, documentId, 'issue', { unattended: opts.unattended, clientWrittenAt })
     outcome.pdfPath = issued.path
   } catch (err) {
     console.error(`[issue] archive copy failed for ${number}:`, err)
     outcome.snapshotError = err instanceof Error ? err.message : String(err)
-    return outcome
+    outcome.snapshotCode = err instanceof ArchiveError ? err.code : null
   }
+
+  // An issued credit note takes its amount off the open balance of the invoice it corrects, after
+  // its archive copy (as a Storno's is): applied from a Claude session, the credit marks the credit
+  // note's payments (payments_mcp_mark), which would hold the copy. A failure leaves it unapplied,
+  // reported with the outcome; its page offers to apply it.
+  if (!row.number && row.type === 'credit_note') {
+    try {
+      await applyCreditNote(supabase, documentId)
+    } catch (err) {
+      console.error(`[issue] credit note ${number} not applied:`, err)
+      outcome.creditNotApplied = true
+    }
+  }
+  if (!issued) return outcome
 
   const { settings, doc } = issued
   if (!settings.drive_folder_id || !settings.gmail_refresh_token) return outcome

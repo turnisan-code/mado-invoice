@@ -182,6 +182,14 @@ export interface Client {
   reminders_opt_out: boolean
   // Further recipients (e.g. an accounting mailbox), prefilled as CC on every email to the client.
   cc_emails: string[]
+  // Addresses a Claude session put on email or cc_emails, kept by the database until the owner
+  // saves the client in Mado (20261105_mcp_drafts.sql); absent before that migration.
+  mcp_recipients?: string[]
+  // When a Claude session last created or changed the client, until the owner saves it in Mado;
+  // meanwhile the reminder cron and its Bookamat step skip its documents, a schedule that issues
+  // automatically creates drafts for it, no archive copy is made from it, the portal leaves its
+  // recipient block out, and the client page says so. Absent before that migration.
+  mcp_written_at?: string | null
   // E-invoicing: the preferred format, the client's Peppol address (empty = derived from its UID),
   // the buyer reference prefilled on its e-invoices and the supplier number it assigned to the studio.
   einvoice_format?: EInvoiceFormat | null
@@ -286,6 +294,11 @@ export interface Document {
   final_invoice_id?: string | null
   // The total it was issued with (src/lib/pdf/issue.ts); null before issuing and for older documents.
   issued_total?: number | null
+  // When a Claude session last recorded, changed or removed a payment row of the invoice or a refund
+  // of the credit note, until the owner confirms its payments on its page (20261105_mcp_drafts.sql);
+  // meanwhile the reminder cron and the automatic Bookamat step skip it, no archive copy is made of
+  // it and the portal shows no payments on it. Absent before that migration.
+  mcp_payments_at?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }

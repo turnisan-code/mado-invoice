@@ -227,6 +227,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         if (res.status === 422 && isIssueProblems(data.problems)) { showProblems(data.problems); return }
         if (!res.ok) { toast.error(apiErrorMessage(t, data, t('messages.api.issue_failed'))); return }
         if (data.snapshotError) toast.error(t('messages.archiveLater'))
+        if (data.creditNotApplied) toast.error(t('messages.creditNotApplied'))
         if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
         const from = status === 'draft' ? 'sent' : status
         if (newStatus !== from) {
@@ -267,6 +268,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         const data = await res.json().catch(() => ({}))
         if (!res.ok) { toast.error(apiErrorMessage(t, data, t('statusBar.stornoFailed'))); return }
         if (data.snapshotError) toast.error(t('messages.archiveLater'))
+        if (data.creditNotApplied) toast.error(t('messages.creditNotApplied'))
         if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
         setConfirm(null)
         toast.success(t('statusBar.invoiceCancelled', { number: data.number ?? '' }))

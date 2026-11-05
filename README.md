@@ -34,7 +34,7 @@ All keys are listed in `.env.example`; on Vercel set the same keys in the projec
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (Project Settings → API). Shipped to the browser. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key. Shipped to the browser; data access is enforced by RLS (`is_app_user()`). |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only. Bypasses RLS for the client portal and the two crons. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only. Bypasses RLS for the client portal, the two crons and the Claude connector (its sign-in at consent, OAuth codes and tokens, connections and request log; Claude's own queries run as the owner under RLS). |
 | `CRON_SECRET` | Bearer token Vercel Cron sends; both cron routes refuse to run without it. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client for Gmail sending and the Drive archive. |
 | `NEXT_PUBLIC_APP_URL` | Public origin, no trailing slash (`http://localhost:3000` locally). Builds the OAuth redirect, links in emails and the Claude connector's URLs. |
@@ -106,7 +106,12 @@ Setup:
 2. Database: run `supabase/migrations/20261105_mcp.sql` and `20261105_mcp_drafts.sql`, then
    `supabase/tests/mcp_guards.sql` and `supabase/tests/mcp_drafts_guards.sql`. Each test rolls
    back on its own; the SQL editor shows the row `all MCP guard checks passed` (`all MCP draft
-   guard checks passed`), or the first failed check as an error (`FAIL …`).
+   guard checks passed`), or the first failed check as an error (`FAIL …`). Where an earlier
+   version of `20261105_mcp_drafts.sql` was applied (one without `clients.mcp_written_at`), the
+   migration treats every client with an address Claude wrote, and every client created since the
+   first Claude connection, as changed by Claude until the owner saves it. A change Claude made
+   under that version to another client's name, company, VAT ID or terms alone left no trace:
+   check and save the clients Claude worked on then.
 3. Vercel: add `MCP_SECRET` (Production) and check that `NEXT_PUBLIC_APP_URL` is exactly the
    production origin without a trailing slash; redeploy. Locally, put both in `.env.local`.
 4. Check the deployment: `curl -si -X POST https://<your-app>/api/mcp` answers 401 with
@@ -128,12 +133,124 @@ Setup:
 Approvals: by default every irreversible action is approved in Mado. Claude shows a link to
 `/mcp/approve/<id>` with the summary; the page shows exactly what will happen and asks for a
 current authenticator code. Pending approvals are also listed at `/mcp/approve` and under Account
-→ Connected apps, where each action kind can be switched to “Confirm in chat” (then the Claude
-app's prompt is the only gate). Loosening these settings (a kind to chat, or the approval code
-off) asks for a current authenticator code; tightening them does not. An email is always approved
-in Mado when it goes to an address that is not on the client record, to an address Claude put on a
-client (until the owner saves that client in Mado), or to an address the owner has never emailed
-from Mado for that client. A prepared action expires after 15 minutes.
+→ Connected apps, where each action kind can be switched to “Confirm in Claude” (then the Claude
+app's prompt is the only gate). Loosening these settings (a kind to “Confirm in Claude”, or the
+approval code off) asks for a current authenticator code; tightening them does not. Whatever a kind
+is set to, these are always approved in Mado:
+
+- an email or reminder to an address that is not on the client record;
+- one to an address Claude wrote onto a client (`create_client`, `update_client`), until the owner
+  saves that client in Mado;
+- one to an address on the client record that the owner has never emailed from Mado for that client;
+- on Claude Code connections (and an own OAuth client, which has Claude Code's shorter time limit):
+  a Bookamat sync, and issuing more than 3 documents at once;
+- deleting the template of a recurring schedule. Claude cannot change what the template of any
+  schedule bills (issuing automatically or creating drafts, active or paused alike: a schedule that
+  creates drafts can be switched to issue them without the template being opened again); the
+  owner edits recurring templates in Mado.
+
+A client Claude created or changed (`create_client`, `update_client`, any field) also stays
+unconfirmed until the owner saves it in Mado, and its page says so: meanwhile the automatic
+reminders skip its invoices, the automatic Bookamat sync skips its documents, and a recurring
+schedule that issues invoices automatically creates its invoices as drafts, each with the reason
+in the cron log (or the warning of “Generate now”), since a Mahnung, a booking or an issued
+invoice would carry the name, recipient block, VAT ID and payment terms Claude wrote. The schedule
+checks the client again just before the number is taken and when the archive copy is rendered: a
+change Claude makes while the invoice is being issued leaves it a draft, or, once numbered,
+without an archive copy until the client is saved (the cron log says which). For the
+same reason no archive copy (the frozen PDF of an issued document that has none yet, e.g. one
+issued before archive copies existed) is rendered from such a client: downloads, emails and the
+portal's PDF of that document fail with a notice until the client is saved (a copy already stored
+at issue whose link to the document was not saved is still used), and the portal page
+leaves the recipient block out. Addresses Claude wrote are skipped by the reminders on their own
+as well (a client whose email Claude wrote gets none, a CC Claude wrote is left out, and until the
+client is saved any address on it that is not plain ASCII, as the app cannot match it against the
+marks for certain). The pages of its issued invoices, credit notes and quotes say so as well, with
+a link to the client. A reminder sent from Gmail, a Storno, a Bookamat sync or an email with an
+e-invoice that Claude prepares is refused for such a client until it is saved: the Mahnung prints
+its name and address, the Storno credit note is archived with its name, address and VAT ID for
+good, the bookings carry its name and VAT ID, the e-invoice its name, address, VAT ID and buyer
+reference, and the approval page shows only its name. A change Claude makes to the client after
+preparing one of these makes the approval page say so, with a link to the client, and the action
+cannot run. A reminder only recorded as sent another way prints nothing of the client, so it is not
+refused, and neither a change to the client nor the owner saving it stops it.
+Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
+client Claude has just created is the usual way; the approval page then shows the recipient block
+and VAT ID the document is numbered and archived with for good, and the buyer reference the PDF
+prints from the client (or a credit note's invoice) when the draft has none of its own, each in
+full, however long. A Peppol UBL downloaded in Mado for a document without an archive copy goes
+without its PDF while such a client is not saved, and the download says why.
+
+An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
+applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
+credit note on which it recorded or removed a refund (`record_refund`, `remove_payment`), stays
+unconfirmed until the owner confirms its payments on its page (“Payments are correct”, “Refunds are
+correct”; the notice shows whatever the status, also on a paid invoice). Confirming covers what the
+page showed: should Claude change the payments again after the page was loaded, nothing is
+confirmed and the page reloads with them; payments already confirmed in another tab or on another
+device are said to be so. Meanwhile the automatic reminders skip the invoice and the automatic
+Bookamat sync skips the document, each with the reason
+in the cron log: removing a payment reopens a paid invoice or raises what is open, so the Mahnung
+would ask the client, unattended, for money it paid, and a booking takes its date, its amount per
+year and its account (bank or Kassa) from those rows, so Claude's payments would become Bookamat
+bookings no one approved (a write-off or Skonto alone makes an invoice paid, so bookable). No
+archive copy is made of such a document either (downloads, emails and the portal's PDF of one that
+has none yet fail with a notice), as the copy keeps the payments up to its issue date for good, and
+its share link shows the issued total only, without the payments, the balance due, a paid or
+overdue status and the payment details. Nor can Claude email such an invoice with an e-invoice
+(`prepare_send_email` is refused, and a change after preparing is shown on the approval page with a
+link to the invoice), as the e-invoice states the payments up to its issue date as already paid. A
+credit note Claude applied to its invoice (`apply_credit_note`) is held the same way as the
+invoice: the credit settles the credit note, and
+the Bookamat sync books a settled credit note's refunds. Where an earlier version of
+`20261105_mcp_drafts.sql` was applied (no mark yet, or invoices only), the migration marks every
+invoice and credit note with a payment or refund recorded or removed from a Claude connection
+once; where any earlier version was applied, also every credit note applied from a Claude
+connection.
+
+While an action approved in Mado runs (issuing takes seconds per draft: the number, the PDF, the
+Drive copy), Claude cannot change the documents it names, the invoice a credit note among them
+corrects, their lines and payments, the advance and partial invoices a final invoice among them
+deducts (no linking or unlinking one, no payment on one), or their clients: the database refuses
+(MI046) until the action has finished, ten minutes after the approval at most. The run also
+compares each draft, with its client, once more just before its number is taken, and an
+issue-and-send the document and client before the email goes out; one that changed after the
+approval stops the run there, what was issued before stays issued and the result lists the rest as
+not issued. An action Claude confirms in chat runs on Claude's own connection, which the database
+cannot tell apart from Claude's other changes, so there that comparison is the check. Once a
+document is numbered (also a Storno credit note), its archive copy is made with the client as it was
+when the action started (the owner's own issuing or Storno: when the number was taken) and only if
+no payment was recorded on it from Claude since: a client Claude changes or a payment it records on
+the document in the meantime (in parallel with an action confirmed in chat) leaves the document
+without a copy until the owner saves the client or confirms the payments, and the result says so.
+Likewise, an email's e-invoice is built as it is sent: should Claude have changed the client, or an
+invoice's payments, since the action started, the email is not sent and the result says why (an
+issue-and-send stays issued). A Bookamat sync stops before it books when Claude changed the client,
+or the payments, since the action started. A reminder compares the invoice its Mahnung is rendered
+from (lines, payments and, from Gmail, the client) with the approved state once more and stops on
+any change, before anything is sent or the level moves.
+
+One action runs at a time, approved in Mado or confirmed in chat. While one runs, Claude's
+confirmation does not start another and an approval in Mado is refused (“Another action is still
+running”; MI047); that action stays prepared, to be confirmed or approved again once the first has
+finished (ten minutes after it started at most, should it have stopped without reporting back).
+Two at once would get in each other's way: one confirmed in chat runs on Claude's own connection,
+where the database refuses what it records while one approved in Mado holds the same invoice (the
+email's sent date, the reminder's level, a credit note's credit), and the automatic reminders would
+then send the same Mahnung again.
+
+Issuing a credit note (also a Storno) applies it to the invoice it corrects; should that fail, the
+toast in Mado, the approval page and Claude's result say so, and the credit note's page offers to
+apply it.
+
+An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
+back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
+
+A quote's status is Claude's to set without an approval in Mado (`set_quote_status`, and
+`convert_quote`, which accepts a sent quote), as the owner's or the client's decision it records:
+the share link shows it at once and no longer takes the client's own answer, and a sent quote
+never becomes sent again. Nothing is numbered, sent, booked or asked for by it. Both tools are
+marked destructive, and their descriptions tell Claude to set a status only on the owner's word.
 
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;
@@ -147,8 +264,8 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 
 | Path | Schedule (UTC) | Does |
 |---|---|---|
-| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules. |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due. |
+| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
+| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 

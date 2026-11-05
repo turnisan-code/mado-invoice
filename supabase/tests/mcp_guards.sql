@@ -1,6 +1,9 @@
 -- Checks the Claude connector's database guards (supabase/migrations/20261105_mcp.sql).
--- Run it in the Supabase SQL editor (postgres role) after the migration; the owner must be in
--- app_users. Everything happens in one transaction that is rolled back, so nothing stays behind.
+-- Run it in the Supabase SQL editor (postgres role) after the migration, while no action runs: once
+-- 20261105_mcp_drafts.sql is applied as well, an action claimed in the last ten minutes refuses the
+-- claims and approvals here (MI047, mcp_actions_one_run), and the script stops on that error. The
+-- owner must be in app_users. Everything happens in one transaction that is rolled back, so nothing
+-- stays behind.
 -- Sessions are simulated with `set local role` and request.jwt.claims:
 --   browser        the owner's browser at aal2, authenticator code entered a minute ago
 --   browser_stale  the same session, code entered an hour ago
@@ -176,6 +179,8 @@ begin
     $q$select public.mcp_create_action('h-x', 'publish', '{}', 'a', 'f', 'l', '{}', false)$q$, '23514');
   perform public.mcp_create_action(public.mcp_test_h('mca_expire'), 'issue', '{}', 'ah', 'fp', 'Issue', '{}', false);
   perform public.mcp_create_action(public.mcp_test_h('mca_other'), 'issue', '{}', 'ah', 'fp', 'Issue', '{}', false);
+  select * into v from public.mcp_create_action(public.mcp_test_h('mca_switch'), 'issue', '{}', 'ah', 'fp', 'Issue', '{}', false);
+  perform public.mcp_test_ok('prepared while issue is confirmed in Claude', v.approval = 'chat');
 
   select * into v from public.mcp_claim_action(public.mcp_test_h('mca_chat'));
   perform public.mcp_test_ok('claim: running via chat', v.status = 'running' and v.claimed_via = 'chat' and v.claimed_at is not null);
@@ -208,6 +213,41 @@ begin
   perform public.mcp_test_ok('claude event: actor from the grant, not from the insert', v_actor = 'claude_ai');
   update public.document_events set actor = null where id = v_event returning actor into v_actor;
   perform public.mcp_test_ok('claude event: the actor cannot be cleared', v_actor = 'claude_ai');
+end $$;
+
+-- ─── A kind switched back to Mado after it was prepared ──────────────────────
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$ begin
+  update public.settings set mcp_confirm_policy = '{"cancel": "app"}' where id is not null;
+  perform public.mcp_test_ok('browser sets issue back to approval in Mado', (select mcp_confirm_policy ->> 'issue' from public.settings) is null);
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$
+declare
+  v       record;
+  v_found boolean;
+begin
+  select * into v from public.mcp_claim_action(public.mcp_test_h('mca_switch'));
+  v_found := found;
+  perform public.mcp_test_ok('claim after the switch: nothing claimed, no error', not v_found);
+  perform public.mcp_test_ok('claim after the switch: the action waits for approval in Mado',
+    (select approval = 'app' and status = 'pending' and claimed_at is null and claimed_via is null
+       from public.mcp_actions where handle_hash = public.mcp_test_h('mca_switch')));
+  perform public.mcp_test_raises('claim after the switch, again (MI041)', format('select public.mcp_claim_action(%L)', public.mcp_test_h('mca_switch')), 'MI041');
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$ begin
+  update public.settings set mcp_confirm_policy = '{"issue": "chat", "cancel": "app"}' where id is not null;
+  perform public.mcp_test_ok('switched back to Claude: the moved action stays in Mado',
+    (select approval = 'app' and status = 'pending' from public.mcp_actions where handle_hash = public.mcp_test_h('mca_switch')));
 end $$;
 
 -- ─── Expiry and a foreign grant ──────────────────────────────────────────────

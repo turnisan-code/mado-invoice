@@ -46,6 +46,8 @@ export function knownApiError(t: TFn, payload: unknown): string | null {
     return worded !== raw ? worded : t('messages.api.google_reauth')
   }
   if (code === 'stored_unreadable') return t('archive.errors.stored_unreadable')
+  if (code === 'client_changed') return t('archive.errors.client_changed')
+  if (code === 'payments_changed') return t('archive.errors.payments_changed')
   const known = API_ERROR_CODES.find(c => c === code)
   return known ? t(`messages.api.${known}` as DictKey, detailVars(p.details)) : null
 }

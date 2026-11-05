@@ -9,6 +9,7 @@ import { controlClass, fieldClass } from '@/components/ui/control'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { toastApiError } from '@/lib/google/toast'
 import { requestErrorMessage } from '@/lib/api-errors'
+import { archiveErrorMessage } from '@/lib/issued-pdf'
 import { nextReminderLevel, reminderTitle } from '@/lib/utils/reminder-templates'
 import { formatDate } from '@/lib/utils/document'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
@@ -145,7 +146,11 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
       download(await mahnung.blob(), draft.attachments[0])
       const copyBlob = copy?.ok ? await copy.blob().catch(() => null) : null
       if (copyBlob) download(copyBlob, draft.attachments[1])
-      else toast.warning(t('dunning.invoiceCopyFailed'))
+      else {
+        // With the archive's reason where it gave one (e.g. a client or payments Claude changed).
+        const reason = copy && !copy.ok ? archiveErrorMessage(t, await copy.json().catch(() => ({})), '') : ''
+        toast.warning([t('dunning.invoiceCopyFailed'), reason].filter(Boolean).join(' '))
+      }
 
       const cc = parseEmailList(fields.cc).emails
       const query = [

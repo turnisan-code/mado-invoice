@@ -10,6 +10,8 @@ import EInvoiceButton from '@/components/layout/EInvoiceButton'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import CreditNoteSettlement from '@/components/layout/CreditNoteSettlement'
+import ClaudePaymentsNotice from '@/components/layout/ClaudePaymentsNotice'
+import ClaudeClientNotice from '@/components/layout/ClaudeClientNotice'
 import { loadCreditNoteSettlement } from '@/lib/credits'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
@@ -38,6 +40,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   const reference = await fetchCreditReference(supabase, doc)
   const settlement = await loadCreditNoteSettlement(supabase, doc)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
+  const client = (clients ?? []).find(c => c.id === doc.client_id)
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
@@ -62,6 +65,11 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           <DeleteDocumentButton id={doc.id} backTo="/credit-notes" docNumber={doc.number} docType="credit_note" />
         </div>
       </div>
+      {/* Refunds a Claude session changed hold the automatic Bookamat sync until confirmed here. */}
+      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="credit_note" seenAt={doc.mcp_payments_at} clientHeld={!!client?.mcp_written_at} />}
+      {/* So does a client Claude changed, until it is saved; the archive copy and the share link's
+          recipient block wait too. */}
+      {doc.number && client?.mcp_written_at && <ClaudeClientNotice clientId={client.id} kind="credit_note" t={t} />}
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           type="credit_note"

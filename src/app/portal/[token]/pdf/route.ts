@@ -23,8 +23,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
   if (isShareExpired(doc.share_expires_at)) return notice(410, t('pdfPortal.portal.expiredTitle'))
 
   // Only ever the frozen copy, the PDF every other copy is: a document issued before archive
-  // copies existed gets it stored now. A stored copy that cannot be read right now is not
-  // replaced by a render of today's data.
+  // copies existed gets it stored now, unless Claude changed its client and the owner has not
+  // saved it in Mado since (then the notice below). A stored copy that cannot be read right now
+  // is not replaced by a render of today's data.
   let buffer: Buffer
   try {
     buffer = (await getIssuedPdf(supabase, doc.id, 'on_demand')).buffer

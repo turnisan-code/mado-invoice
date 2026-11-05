@@ -117,17 +117,24 @@ export interface ActionOutcome {
 // nothing is created); execute() runs after the owner approved, in Mado (cookie client, no
 // deadline) or in Claude's prompt (the grant's client, the tool deadline), always behind a fresh
 // fingerprint() that matches the stored one.
-export interface ActionKind<A extends Record<string, unknown> = Record<string, unknown>> {
+export interface ActionKind<A extends Record<string, unknown> = Record<string, unknown>, S = unknown> {
   kind: McpActionKind
   // Validates the stored arguments again before they are used.
   argsSchema: z.ZodType<A>
   prepare(ctx: ToolContext, args: A): Promise<ActionPreparation>
   fingerprint(ctx: ServiceContext, args: A): Promise<string>
-  execute(ctx: ServiceContext, args: A): Promise<ActionOutcome>
+  // Optional: the fingerprint together with the state it was computed from. Before a run it takes
+  // the place of fingerprint(), and execute() gets the state, to compare each document with it
+  // again just before the step that numbers or sends it: a run takes seconds per document, and
+  // what changed meanwhile stops it (actions/issue.ts; a Bookamat sync compares the payments' mark,
+  // actions/bookamat-sync.ts; a reminder compares the read its Mahnung is rendered from,
+  // actions/send-reminder.ts).
+  approvedState?(ctx: ServiceContext, args: A): Promise<{ fingerprint: string; state: S }>
+  execute(ctx: ServiceContext, args: A, approved?: S): Promise<ActionOutcome>
 }
 
-export type AnyActionKind = ActionKind<Record<string, unknown>>
+export type AnyActionKind = ActionKind<Record<string, unknown>, unknown>
 
-export function defineAction<A extends Record<string, unknown>>(def: ActionKind<A>): AnyActionKind {
+export function defineAction<A extends Record<string, unknown>, S = unknown>(def: ActionKind<A, S>): AnyActionKind {
   return def as unknown as AnyActionKind
 }

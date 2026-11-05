@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/**": ["./public/fonts/*"],
     "/portal/**": ["./public/fonts/*"],
+    // An action approved on /mcp/approve runs in the page's Server Action and renders PDFs.
+    "/mcp/**": ["./public/fonts/*"],
   },
   async headers() {
     return [

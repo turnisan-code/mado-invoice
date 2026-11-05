@@ -88,9 +88,13 @@ export interface GenerateResult {
 }
 
 // Issuing (number, archive copy, Drive) lives in the server-only src/lib/pdf/issue.ts. This module
-// is also imported by client components for its date math, so the route handlers pass it in.
-export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
+// is also imported by client components for its date math, so the route handlers pass it in. It is
+// called with `unattended`: a client a Claude session changed is refused there with code
+// 'client_changed' just before the number is taken, and gets no archive copy (snapshotCode
+// 'client_changed') should it change after that.
+export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string, opts: { unattended: true }) => Promise<{
   snapshotError: string | null
+  snapshotCode?: string | null
   driveError: DriveError | null
 }>
 
@@ -105,6 +109,21 @@ type SourceDocument = Record<string, unknown> & {
 // Same fallback chain as DocumentBuilder: the client's terms, then the settings default.
 function paymentDaysOf(source: SourceDocument, defaultPaymentDays: number | null): number {
   return source.clients?.payment_days ?? defaultPaymentDays ?? 14
+}
+
+// Whether a Claude session changed the client since the owner last saved it in Mado
+// (clients.mcp_written_at, 20261105_mcp_drafts.sql). Issuing numbers what the client record says
+// (the recipient block of the stored PDF, the e-invoice data) and the due date comes from its
+// terms, so a schedule that issues automatically leaves such a client's invoice a draft until the
+// owner has saved the client: no invoice is numbered with data Claude wrote without anyone
+// approving it. Read afresh before each period is issued; a client read without the column (that
+// migration not applied) has not been changed by Claude. A Claude write landing after this read is
+// caught where it would be used: issueDocument checks the mark again just before the number is
+// taken and in the read the archive copy is rendered from (`unattended`).
+async function clientChangedByClaude(supabase: SupabaseClient, clientId: string): Promise<boolean> {
+  const { data, error } = await supabase.from('clients').select('*').eq('id', clientId).maybeSingle()
+  if (error) throw new Error(error.message)
+  return !!(data as { mcp_written_at?: string | null } | null)?.mcp_written_at
 }
 
 // How many days before its own date a period's invoice may move when that date is taken.
@@ -141,7 +160,11 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   throw new Error(`no free date for the invoice of ${period.start} to ${period.end}`)
 }
 
-// 'taken' when another invoice of the schedule already has `date`.
+// 'taken' when another invoice of the schedule already has `date`. What is copied from the template
+// here is what a Claude session may not change on the template of any recurring schedule
+// (documents_mcp_template_guard in 20261105_mcp_drafts.sql): keep both lists alike. What comes
+// from the client record instead (the due date from its terms, the recipient block at issue) is
+// held back by clientChangedByClaude.
 async function insertPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, dueDate: string, period: { start: string; end: string }): Promise<PeriodInvoice | 'taken'> {
   const { data: doc, error } = await supabase.from('documents').insert({
     type: 'invoice',
@@ -206,6 +229,12 @@ function issueMessages({ t, describeError, describeDriveError, formatDate }: Wor
     dateHeld: (date: string, draftDate: string) => t
       ? t('views.recurring.dateHeld', { date: day(date), draftDate: day(draftDate) })
       : `${date}: created as draft dated ${draftDate}, another invoice of this schedule already has ${date}`,
+    clientChanged: (date: string) => t
+      ? t('views.recurring.clientChanged', { date: day(date) })
+      : `${date}: created as draft, not issued: the client was changed from a Claude connection; check it and save it in Mado, then issue the draft`,
+    clientChangedIssued: (date: string) => t
+      ? t('views.recurring.clientChangedIssued', { date: day(date) })
+      : `${date}: issued, but no archive copy was made: the client was changed from a Claude connection while it was issued; check it and save it in Mado, then create the archive copy on the invoice's page`,
   }
 }
 
@@ -253,13 +282,16 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       // Why the invoice stays a draft in 'issue' mode; the log says it in either mode.
       let held = created.date === next ? null : messages.dateHeld(next, created.date)
       let date = created.date
-      // An invoice is dated the day it is issued: a period caught up late is issued with today's
-      // date and the due date from today, and keeps the period as its service period, so it never
-      // gets a number after invoices dated later than it. The period key allows one invoice per
-      // schedule and date, so only one catch-up can take today, and none when today is a period
-      // date of the schedule itself. The others stay drafts at their period's date and are
-      // reported: issued with that date, they would be dated before the day they were issued.
-      if (schedule.mode === 'issue' && next < asOf) {
+      // A client Claude changed: the draft keeps its period's dates (see clientChangedByClaude).
+      // Otherwise an invoice is dated the day it is issued: a period caught up late is issued with
+      // today's date and the due date from today, and keeps the period as its service period, so
+      // it never gets a number after invoices dated later than it. The period key allows one
+      // invoice per schedule and date, so only one catch-up can take today, and none when today is
+      // a period date of the schedule itself. The others stay drafts at their period's date and
+      // are reported: issued with that date, they would be dated before the day they were issued.
+      if (schedule.mode === 'issue' && await clientChangedByClaude(supabase, (source as SourceDocument).client_id)) {
+        held = messages.clientChanged(next)
+      } else if (schedule.mode === 'issue' && next < asOf) {
         const later = advanceDate(next, schedule.interval, schedule.anchor_day)
         if (isUpcomingPeriodDate({ ...schedule, next_date: later }, asOf)) {
           held = messages.dateTaken(next)
@@ -279,11 +311,15 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
         result.errors.push({ scheduleId: schedule.id, message: held })
       } else if (schedule.mode === 'issue') {
         try {
-          const { snapshotError, driveError } = await issue(supabase, created.id)
-          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
+          const { snapshotError, snapshotCode, driveError } = await issue(supabase, created.id, { unattended: true })
+          if (snapshotError) {
+            result.errors.push({ scheduleId: schedule.id, message: snapshotCode === 'client_changed' ? messages.clientChangedIssued(next) : messages.snapshot(next), detail: snapshotError })
+          }
           if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError), detail: driveError.error })
         } catch (err) {
-          result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
+          // A client Claude changed after the check above: the invoice stays a draft, as held.
+          const changed = !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'client_changed'
+          result.errors.push({ scheduleId: schedule.id, message: changed ? messages.clientChanged(next) : messages.issue(next, err) })
           // The draft gets its period's dates back, as a failed bulk issue does.
           if (date !== created.date) {
             const { error: restoreErr } = await supabase.from('documents')

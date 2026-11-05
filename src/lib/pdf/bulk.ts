@@ -53,7 +53,7 @@ export async function startBulkIssue(supabase: SupabaseClient, type: DocumentTyp
 
 // Time entries and expenses billed on the invoice that no longer sit on one of its lines (as the
 // issue dialog's ProjectLinkWarning checks). A failed check reports nothing.
-async function lostEntries(supabase: SupabaseClient, documentId: string): Promise<IssuedNote['unlinked']> {
+export async function lostEntries(supabase: SupabaseClient, documentId: string): Promise<IssuedNote['unlinked']> {
   const billed = (table: 'time_entries' | 'project_expenses') => supabase.from(table).select('document_item_id').eq('invoiced_document_id', documentId)
   const [time, expenses, items] = await Promise.all([
     billed('time_entries'),
@@ -73,7 +73,7 @@ async function lostEntries(supabase: SupabaseClient, documentId: string): Promis
 // documents_recurring_period_key allows one invoice per schedule and date: a recurring draft keeps
 // its date when today belongs to a period its schedule has still to generate, or the daily run
 // would find the day taken. When the schedule cannot be read, the date is kept as well.
-async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, today: string): Promise<boolean> {
+export async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, today: string): Promise<boolean> {
   const { data, error } = await supabase.from('recurring_schedules').select('next_date, interval, anchor_day, end_date').eq('id', scheduleId).maybeSingle()
   if (error) {
     console.error(`[bulk] recurring schedule ${scheduleId} not read:`, error.message)
@@ -82,13 +82,25 @@ async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: string, t
   return !!data && isUpcomingPeriodDate(data as ScheduleDates, today)
 }
 
+// The dates issueBulkDraft gave a draft just before issuing it (moved to today).
+export type MovedDates = { date: string; due_date?: string }
+
 // One draft of the batch: moved to today first when the batch says so (the due date follows the
 // client's terms from today, a credit note keeps its own), then issued (number, archive copy,
 // Drive). A failed issue puts the draft's own dates back and throws as issueDocument does; archive
 // and Drive problems, an order the numbers no longer follow and lost project links come back as notes.
-export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue, d: BulkDraft): Promise<IssuedNote> {
+// `beforeIssue` is the caller's last check just before the number is taken (with the dates the
+// draft was just moved to); what it throws fails the issue the same way. `clientWrittenAt`: the
+// client's mark as an approved run read it (issueDocument).
+export async function issueBulkDraft(
+  supabase: SupabaseClient,
+  batch: BulkIssue,
+  d: BulkDraft,
+  opts: { beforeIssue?: (moved: MovedDates | null) => Promise<void>; clientWrittenAt?: string | null } = {},
+): Promise<IssuedNote> {
   let date = d.date
   let movedFrom: string | null = null
+  let moved: MovedDates | null = null
   let dateKept = false
   if (batch.redate && movesToToday(d.date, batch.today)) {
     if (d.recurring_schedule_id && await todayIsPeriodDate(supabase, d.recurring_schedule_id, batch.today)) {
@@ -102,13 +114,15 @@ export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue,
       else {
         movedFrom = d.date
         date = batch.today
+        moved = { date: batch.today, ...dueDate }
       }
     }
   }
 
   let outcome: IssueOutcome
   try {
-    outcome = await issueDocument(supabase, d.id)
+    await opts.beforeIssue?.(moved)
+    outcome = await issueDocument(supabase, d.id, opts.clientWrittenAt !== undefined ? { clientWrittenAt: opts.clientWrittenAt } : {})
   } catch (err) {
     if (movedFrom) {
       const { error } = await supabase.from('documents').update({ date: movedFrom, due_date: d.due_date }).eq('id', d.id).is('number', null)
@@ -127,6 +141,7 @@ export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue,
     beforeLatest: earlier,
     snapshotFailed: !!outcome.snapshotError,
     driveError: outcome.driveError,
+    creditNotApplied: outcome.creditNotApplied,
     unlinked: batch.type === 'invoice' ? await lostEntries(supabase, d.id) : null,
   }
 }

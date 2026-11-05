@@ -16,8 +16,8 @@ import { Select } from '@/components/ui/select'
 import { CONTROL_HEIGHT, fieldClass } from '@/components/ui/control'
 import { cn } from '@/lib/utils'
 import { calcTotals, formatMoney, addDays, today, getTaxNote } from '@/lib/utils/document'
-import { documentVariables, fillSubject, fillTemplate, parseEmailList, portalUrl, resolveTemplate, templateLang, usesVariable } from '@/lib/templates'
-import { invoiceEmailTemplate } from '@/lib/document-labels'
+import { parseEmailList, portalUrl, templateLang } from '@/lib/templates'
+import { composeDocumentEmail, documentEmailTemplate, templateUsesPortalLink } from '@/lib/services/email-compose'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
@@ -217,6 +217,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     snapshotError: string | null
     drive: { webViewLink: string | null; existing: boolean } | null
     driveError: { error: string; code?: string } | null
+    creditNotApplied?: boolean
   }
 
   async function buildPdfBlob(numOverride?: string, includeQr = false) {
@@ -269,6 +270,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   // the issue, it is only reported (the page then offers to create the archive copy).
   function reportArchive(result: IssueResponse) {
     if (result.snapshotError) toast.error(t('messages.archiveLater'))
+    if (result.creditNotApplied) toast.error(t('messages.creditNotApplied'))
     if (result.driveError) toastApiError(t, result.driveError, t('builder.driveFailedPrefix'))
     else if (result.drive) notifyDriveUpload(t, result.drive.webViewLink, result.drive.existing)
   }
@@ -467,10 +469,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   // The document's template in its own language; {{portal_link}} creates the share link on first use.
   async function buildEmailContent(issued: { id: string; number: string }) {
     if (!client) return null
-    const lang = templateLang(language)
-    const tpl = type === 'invoice' ? invoiceEmailTemplate(settings, form.invoiceKind, lang) : resolveTemplate(settings, type, lang)
+    const tpl = documentEmailTemplate(settings, type, form.invoiceKind, language)
     let portalLink = ''
-    if (usesVariable(tpl.subject, 'portal_link') || usesVariable(tpl.body, 'portal_link')) {
+    if (templateUsesPortalLink(tpl)) {
       try {
         const { token } = await postJson<{ token: string }>(`/api/documents/${issued.id}/share`)
         portalLink = portalUrl(window.location.origin, token)
@@ -478,9 +479,10 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         toast.error(t('dunning.portalLinkFailed'))
       }
     }
-    const vars = documentVariables({
+    return composeDocumentEmail({
+      tpl,
       doc: {
-        type, number: issued.number, date, due_date: dueDate || null, language: lang, currency,
+        type, number: issued.number, date, due_date: dueDate || null, language: templateLang(language), currency,
         skonto_percent: skontoPercent === '' ? null : skontoPercent,
         skonto_days: skontoDays === '' ? null : skontoDays,
       },
@@ -489,7 +491,6 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       totals,
       portalLink,
     })
-    return { subject: fillSubject(tpl.subject, vars), body: fillTemplate(tpl.body, vars) }
   }
 
   function openInEmail() {
