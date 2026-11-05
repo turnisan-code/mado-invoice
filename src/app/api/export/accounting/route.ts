@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { toCsv, csvDate, type CsvValue } from '@/lib/utils/csv'
 import { createZipStream, type ZipEntry } from '@/lib/utils/zip'
@@ -45,11 +46,11 @@ function csvResponse(csv: string, filename: string) {
 // One row per issued document; credit notes carry negative amounts so column sums are the
 // period's turnover. A voided credit note keeps its row (its number stays in the sequence) but no
 // amounts, so the sums agree with the UVA, which ignores it. A cancelled invoice keeps its amounts:
-// its Storno offsets them. Paid/open only exist for invoices: the app records no refunds.
+// its Storno offsets them. Paid/open only exist for invoices (refunds are in the payments CSV).
 async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
   const result = await fetchPaged((from, to) => supabase
     .from('documents')
-    .select(`type, number, date, service_date, service_date_end, status, tax_treatment, discount_type, discount_value, bookamat_booking_id, clients(name, company, uid_number), ${ITEM_COLS}, payments(amount)`)
+    .select(`type, number, date, service_date, service_date_end, status, tax_treatment, discount_type, discount_value, bookamat_booking_id, clients(name, company, uid_number), ${ITEM_COLS}, payments(amount, kind), bookamat_bookings(year, booking_id)`)
     .in('type', ['invoice', 'credit_note'])
     .not('number', 'is', null)
     .gte('date', period.start)
@@ -84,7 +85,7 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
       isInvoice ? (d.status === 'cancelled' ? 0 : totals.balance_due) : null,
       statusLabel(t, d.status),
       t(`taxTreatmentsShort.${d.tax_treatment}` as DictKey),
-      d.bookamat_booking_id ?? '',
+      bookamatIds(d.bookamat_bookings as { year: number; booking_id: string }[] | null, d.bookamat_booking_id),
     ]
   })
   const header = (['type', 'number', 'date', 'servicePeriod', 'client', 'uid', 'net20', 'net13', 'net10', 'net0', 'vat', 'gross', 'paid', 'open', 'status', 'tax', 'bookamat'] as const)
@@ -92,11 +93,19 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
   return { csv: toCsv(header, rows) }
 }
 
+// "123 (2025); 456 (2026)": one Bookamat booking per year of money received.
+function bookamatIds(bookings: { year: number; booking_id: string }[] | null, legacy: string | null): string {
+  if (bookings?.length) return [...bookings].sort((a, b) => a.year - b.year).map(b => `${b.booking_id} (${b.year})`).join('; ')
+  return legacy ?? ''
+}
+
+// Every row that settled or moved money on an invoice or credit note, labelled by kind; a refund
+// paid back on a credit note is negative.
 async function paymentsCsv(supabase: Supabase, period: Period, t: TFn) {
   const result = await fetchPaged((from, to) => supabase
     .from('payments')
-    .select('date, amount, note, kind, method, import_ref, documents!inner(number, type, clients(name, company))')
-    .eq('documents.type', 'invoice')
+    .select('date, amount, note, kind, method, reference, import_ref, documents!inner(number, type, clients(name, company))')
+    .in('documents.type', ['invoice', 'credit_note'])
     .gte('date', period.start)
     .lte('date', period.end)
     .order('date')
@@ -104,21 +113,29 @@ async function paymentsCsv(supabase: Supabase, period: Period, t: TFn) {
     .range(from, to))
   if ('error' in result) return result
 
-  const kindLabel: Record<string, string> = { payment: t('exports.csv.kindPayment'), skonto: t('exports.csv.kindSkonto'), writeoff: t('exports.csv.kindWriteoff') }
+  const kindLabel: Record<string, string> = {
+    payment: t('exports.csv.kindPayment'), skonto: t('exports.csv.kindSkonto'), writeoff: t('exports.csv.kindWriteoff'),
+    credit: t('books.csv.kindCredit'), refund: t('books.csv.kindRefund'), fee: t('books.csv.kindFee'),
+  }
   const rows: CsvValue[][] = result.rows.map(p => {
-    const doc = p.documents as unknown as { number: string | null; clients: ClientRef }
+    const doc = p.documents as unknown as { number: string | null; type: DocumentType; clients: ClientRef }
     return [
       csvDate(p.date),
+      docTypeLabel(t, doc.type),
       doc.number ?? '',
       clientLabel(doc.clients),
       kindLabel[p.kind] ?? p.kind,
       p.method === 'cash' ? t('payments.methodCash') : t('payments.methodBank'),
-      p.amount,
+      p.kind === 'refund' ? -p.amount : p.amount,
+      p.reference ?? '',
       p.note ?? '',
       p.import_ref ?? '',
     ]
   })
-  const header = (['date', 'invoice', 'client', 'kind', 'method', 'amount', 'note', 'importRef'] as const).map(k => t(`exports.csv.${k}`))
+  const header = [
+    t('exports.csv.date'), t('exports.csv.type'), t('books.csv.document'), t('exports.csv.client'), t('exports.csv.kind'),
+    t('exports.csv.method'), t('exports.csv.amount'), t('books.csv.reference'), t('exports.csv.note'), t('exports.csv.importRef'),
+  ]
   return { csv: toCsv(header, rows) }
 }
 
@@ -148,22 +165,25 @@ function fetchAll(supabase: Supabase, table: string) {
 }
 
 const BACKUP_TABLES = ['clients', 'catalogue_items', 'documents', 'document_items', 'payments', 'reminder_log', 'recurring_schedules'] as const
+// Tables that only exist once their migration has run; a backup without them is still complete.
+const OPTIONAL_TABLES = ['document_events', 'bookamat_bookings'] as const
 
 async function backupResponse(supabase: Supabase) {
   const tables: Record<string, unknown[]> = {}
   const settings = await fetchAll(supabase, 'settings')
   if ('error' in settings) return NextResponse.json({ error: settings.error }, { status: 500 })
   // Gmail tokens and the Bookamat key are credentials, not data: they never leave the server.
-  tables.settings = settings.rows.map(s => toPublicSettings(s as unknown as Settings))
+  tables.settings = settings.rows.map(s => ({ ...toPublicSettings(s as unknown as Settings), drive_folder_id: s.drive_folder_id ?? null }))
   for (const table of BACKUP_TABLES) {
     const result = await fetchAll(supabase, table)
     if ('error' in result) return NextResponse.json({ error: `${table}: ${result.error}` }, { status: 500 })
     tables[table] = result.rows
   }
-  // The audit log only exists once its migration has run; a backup without it is still complete.
-  const events = await fetchAll(supabase, 'document_events')
-  if ('rows' in events) tables.document_events = events.rows
-  else if (!MISSING_TABLE.has(events.code ?? '')) return NextResponse.json({ error: `document_events: ${events.error}` }, { status: 500 })
+  for (const table of OPTIONAL_TABLES) {
+    const result = await fetchAll(supabase, table)
+    if ('rows' in result) tables[table] = result.rows
+    else if (!MISSING_TABLE.has(result.code ?? '')) return NextResponse.json({ error: `${table}: ${result.error}` }, { status: 500 })
+  }
 
   const body = JSON.stringify({ format: 'mado-invoice-backup', version: 1, exported_at: new Date().toISOString(), tables }, null, 2)
   return new NextResponse(body, {
@@ -235,9 +255,9 @@ async function pdfZipResponse(supabase: Supabase, period: Period, t: TFn, lang: 
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const params = req.nextUrl.searchParams
   const kind = params.get('kind') as Kind

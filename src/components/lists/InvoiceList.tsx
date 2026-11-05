@@ -3,15 +3,18 @@
 import { useId, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, FileText, Download, CheckCircle, Send, X, Trash2, Repeat, Landmark, FileWarning } from 'lucide-react'
+import { Plus, FileText, Download, CheckCircle, Send, X, Trash2, Repeat, Landmark, FileWarning, BookCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
+import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { displayStatus, statusLabelKey } from '@/lib/status'
+import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
+import type { BookamatState } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
@@ -19,10 +22,11 @@ import {
 } from './ListParts'
 
 const STATUSES = ['outstanding', 'draft', 'sent', 'paid', 'overdue', 'cancelled'] as const
+const BOOKAMAT_FILTERS = ['unsynced', 'failed', 'synced'] as const
 
 type SortKey = 'number' | 'client' | 'date' | 'due_date' | 'total' | 'balance' | 'status'
-const LIST: ListConfig<'status' | 'q' | 'from' | 'to' | 'client', SortKey> = {
-  filters: { status: STATUSES, q: null, from: null, to: null, client: null },
+const LIST: ListConfig<'status' | 'q' | 'from' | 'to' | 'client' | 'bookamat', SortKey> = {
+  filters: { status: STATUSES, q: null, from: null, to: null, client: null, bookamat: BOOKAMAT_FILTERS },
   sortKeys: ['number', 'client', 'date', 'due_date', 'total', 'balance', 'status'],
   defaultSort: { key: 'date', dir: 'desc' },
 }
@@ -44,8 +48,20 @@ export interface Invoice {
   discount_type?: string | null
   discount_value?: number | null
   pdf_path?: string | null
+  bookamat_error?: string | null
+  bookamat_booking_id?: string | null
+  bookamat_bookings?: { year: number; booking_id: string }[] | null
   document_items: DocItem[]
   payments?: { amount: number; kind?: string }[]
+}
+
+type BulkSyncRow = { id: string; number: string; ok: boolean; text: string }
+type BulkSync = { invoices: Invoice[]; skipped: number; done: number; running: boolean; results: BulkSyncRow[] }
+
+const BOOKAMAT_BADGE: Record<Exclude<BookamatState, 'none'>, string> = {
+  synced: 'text-green-700 bg-green-50 dark:bg-green-950/60 dark:text-green-300',
+  unsynced: 'text-neutral-600 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-300',
+  failed: 'text-red-700 bg-red-50 dark:bg-red-950/60 dark:text-red-300',
 }
 
 function docTotals(d: Invoice) {
@@ -79,17 +95,18 @@ function exportCSV(invoices: Invoice[], t: TFn) {
   downloadCsv(`invoices-${today()}.csv`, toCsv(header, rows))
 }
 
-export default function InvoiceList({ invoices, recurringSourceIds = [] }: { invoices: Invoice[]; recurringSourceIds?: string[] }) {
+export default function InvoiceList({ invoices, recurringSourceIds = [], bookamatConfigured = false }: { invoices: Invoice[]; recurringSourceIds?: string[]; bookamatConfigured?: boolean }) {
   const router = useRouter()
   const { t } = useT()
   const uid = useId()
   const list = useListState(LIST)
-  const { status, q, from, to, client } = list.filters
+  const { status, q, from, to, client, bookamat } = list.filters
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkConfirm, setBulkConfirm] = useState<BulkAction | null>(null)
   const [paidDate, setPaidDate] = useState('')
   const [paidMethod, setPaidMethod] = useState<PaymentMethod>('bank')
   const [paidDateInvalid, setPaidDateInvalid] = useState(false)
+  const [bulkSync, setBulkSync] = useState<BulkSync | null>(null)
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const invoiceCount = (count: number) => n(count, t('invoices.countOne', { count }), t('invoices.countOther', { count }))
@@ -131,6 +148,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
     else if (status === 'overdue') rows = rows.filter(d => d.status === 'overdue' || (d.status === 'sent' && !!d.due_date && d.due_date < todayStr))
     else if (status) rows = rows.filter(d => d.status === status)
     if (client) rows = rows.filter(d => d.client_id === client)
+    if (bookamat && bookamatConfigured) rows = rows.filter(d => bookamatState(d) === bookamat)
     if (from) rows = rows.filter(d => !!d.date && d.date >= from)
     if (to) rows = rows.filter(d => !!d.date && d.date <= to)
     if (q) {
@@ -149,15 +167,66 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
       }
     }
     return [...rows].sort((a, b) => compareBy(value(a), value(b), sort.dir))
-  }, [invoices, q, status, client, from, to, sort, todayStr])
+  }, [invoices, q, status, client, bookamat, bookamatConfigured, from, to, sort, todayStr])
 
   const { page, pageCount, pageItems } = paginate(filtered, list.page)
   const selection = useSelection(filtered, pageItems)
 
-  // Partly paid and written-off invoices show that instead of their stored status.
+  // Partly paid and written-off invoices show that instead of their stored status. Dunning fees
+  // and interest are paid on top and never change it.
   const statusBadge = (d: Invoice) => {
-    const shown = displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: d.payments ?? [] }, todayStr)
+    const shown = displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
     return <StatusBadge status={shown} label={t(statusLabelKey(shown))} />
+  }
+
+  const bookamatBadge = (d: Invoice) => {
+    if (!bookamatConfigured) return null
+    const state = bookamatState(d)
+    if (state === 'none') return null
+    const bookings = d.bookamat_bookings ?? []
+    const title = state === 'synced' && bookings.length ? formatBookings(t, bookings) : state === 'failed' ? d.bookamat_error ?? undefined : undefined
+    return (
+      <span title={title} className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${BOOKAMAT_BADGE[state]}`}>
+        <BookCheck size={11} aria-hidden="true" />{t(`books.state.${state}`)}
+      </span>
+    )
+  }
+
+  function openBulkSync() {
+    const chosen = selection.selectedVisible
+    const eligible = chosen.filter(d => { const s = bookamatState(d); return s === 'unsynced' || (s === 'failed' && hasMoneyToBook(d)) })
+    setBulkSync({ invoices: eligible, skipped: chosen.length - eligible.length, done: 0, running: false, results: [] })
+  }
+
+  // One invoice after the other: each sync claims its invoice and attaches the PDF, and Bookamat
+  // throttles parallel calls.
+  async function runBulkSync() {
+    if (!bulkSync) return
+    const results: BulkSyncRow[] = []
+    setBulkSync(b => b && { ...b, running: true })
+    for (const inv of bulkSync.invoices) {
+      const res = await requestBookamatSync(inv.id)
+      const number = inv.number ?? t('common.draft')
+      results.push(res.ok
+        ? {
+            id: inv.id, number, ok: true,
+            text: res.data.pdf.error
+              ? t('books.sync.pdfNotAttached', { bookings: formatBookings(t, res.data.created), error: res.data.pdf.error })
+              : formatBookings(t, res.data.created.length ? res.data.created : res.data.bookings),
+          }
+        : { id: inv.id, number, ok: false, text: bookamatErrorMessage(t, res.payload) })
+      setBulkSync(b => b && { ...b, done: results.length, results: [...results] })
+    }
+    setBulkSync(b => b && { ...b, running: false })
+  }
+
+  function closeBulkSync() {
+    const ran = !!bulkSync?.results.length
+    setBulkSync(null)
+    if (ran) {
+      selection.clear()
+      router.refresh()
+    }
   }
 
   function setFilters(patch: Partial<Record<keyof typeof LIST.filters, string>>) {
@@ -273,6 +342,12 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
           <option value="">{t('lists.allClients')}</option>
           {clientOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        {bookamatConfigured && (
+          <select aria-label={t('books.sync.filterLabel')} value={bookamat} onChange={e => setFilters({ bookamat: e.target.value })} className={inputClass}>
+            <option value="">{t('books.sync.filterAll')}</option>
+            {BOOKAMAT_FILTERS.map(f => <option key={f} value={f}>{t(`books.state.${f}`)}</option>)}
+          </select>
+        )}
         <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
           <input type="date" value={from} max={to || undefined} onChange={e => setFilters({ from: e.target.value })} aria-label={t('lists.fromDate')} className={inputClass} />
           <span>–</span>
@@ -314,6 +389,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                       <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices.openAmount', { amount: formatMoney(balance, doc.currency ?? undefined) })}</p>
                     )}
                     {statusBadge(doc)}
+                    {bookamatBadge(doc)}
                   </div>
                 </Link>
               </div>
@@ -364,7 +440,10 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
-                  {statusBadge(doc)}
+                  <div className="flex flex-col items-start gap-1">
+                    {statusBadge(doc)}
+                    {bookamatBadge(doc)}
+                  </div>
                 </td>
               </ClickableRow>
             ))}
@@ -392,6 +471,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
       <BulkBar count={selectedCount} onClear={selection.clear}>
         <BulkButton tone="blue" icon={Send} onClick={() => askBulk('sent')} busy={bulkLoading && bulkConfirm === 'sent'} disabled={bulkLoading}>{t('lists.markSent')}</BulkButton>
         <BulkButton tone="green" icon={CheckCircle} onClick={() => askBulk('paid')} busy={bulkLoading && bulkConfirm === 'paid'} disabled={bulkLoading}>{t('lists.markPaid')}</BulkButton>
+        {bookamatConfigured && <BulkButton icon={BookCheck} onClick={openBulkSync} disabled={bulkLoading}>{t('books.sync.bulk')}</BulkButton>}
         <BulkButton icon={Download} onClick={() => handleExport(selection.selectedVisible, true)} disabled={bulkLoading}>{t('lists.exportCsv')}</BulkButton>
         <BulkButton tone="red" icon={Trash2} onClick={() => askBulk('delete')} busy={bulkLoading && bulkConfirm === 'delete'} disabled={bulkLoading}>{t('common.delete')}</BulkButton>
       </BulkBar>
@@ -433,6 +513,56 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
           </div>
         )}
       </ConfirmDialog>
+
+      <Dialog
+        open={!!bulkSync}
+        onClose={closeBulkSync}
+        busy={bulkSync?.running}
+        title={!bulkSync ? '' : bulkSync.results.length && !bulkSync.running ? t('books.sync.bulkResultTitle')
+          : n(bulkSync.invoices.length, t('books.sync.bulkTitleOne', { count: bulkSync.invoices.length }), t('books.sync.bulkTitleOther', { count: bulkSync.invoices.length }))}
+        description={!bulkSync ? undefined : bulkSync.invoices.length ? t('books.sync.bulkDesc') : t('books.sync.bulkNone')}
+        panelClassName="max-w-md"
+      >
+        {bulkSync && (
+          <div className="space-y-3">
+            {bulkSync.skipped > 0 && !bulkSync.results.length && (
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{n(bulkSync.skipped, t('books.sync.bulkSkippedOne', { count: bulkSync.skipped }), t('books.sync.bulkSkippedOther', { count: bulkSync.skipped }))}</p>
+            )}
+            {bulkSync.running && (
+              <p role="status" className="text-sm">{t('books.sync.bulkProgress', { done: bulkSync.done, count: bulkSync.invoices.length })}</p>
+            )}
+            {bulkSync.results.length > 0 && (
+              <>
+                {!bulkSync.running && (
+                  <p role="status" className="text-sm font-medium">
+                    {t('books.sync.bulkResultSummary', { ok: bulkSync.results.filter(r => r.ok).length, failed: bulkSync.results.filter(r => !r.ok).length })}
+                  </p>
+                )}
+                <ul className="max-h-64 overflow-y-auto divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
+                  {bulkSync.results.map(r => (
+                    <li key={r.id} className="py-1.5 flex items-start gap-2">
+                      <Link href={`/invoices/${r.id}`} className="font-medium shrink-0 hover:underline">{r.number}</Link>
+                      <span className={`min-w-0 break-words ${r.ok ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{r.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            <div className="flex gap-2 justify-end">
+              {!bulkSync.results.length ? (
+                <>
+                  <Button type="button" variant="outline" onClick={closeBulkSync} disabled={bulkSync.running}>{t('dialogs.cancel')}</Button>
+                  {bulkSync.invoices.length > 0 && (
+                    <Button type="button" onClick={() => void runBulkSync()} disabled={bulkSync.running}>{t('books.sync.bulkStart')}</Button>
+                  )}
+                </>
+              ) : (
+                <Button type="button" onClick={closeBulkSync} disabled={bulkSync.running}>{t('books.sync.bulkClose')}</Button>
+              )}
+            </div>
+          </div>
+        )}
+      </Dialog>
     </div>
   )
 }

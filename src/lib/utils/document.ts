@@ -42,9 +42,15 @@ export function clampPercent(value: number | null | undefined): number {
   return Math.min(100, Math.max(0, value ?? 0))
 }
 
+// Dunning fees and interest paid on top of an invoice (kind 'fee') are money received, but never
+// part of what the invoice asks for: they neither pay it off nor overpay it.
+export function settlesBalance(payment: { kind?: string | null }): boolean {
+  return payment.kind !== 'fee'
+}
+
 export function calcTotals(
   rawItems: CalcItem[],
-  payments: { amount: number }[] = [],
+  payments: { amount: number; kind?: string | null }[] = [],
   discount?: { type: 'percent' | 'fixed'; value: number } | null,
   taxTreatment?: string | null
 ): DocumentTotals {
@@ -117,7 +123,7 @@ export function calcTotals(
   }
   const total_vat = roundCents(vat_groups.reduce((s, g) => s + g.amount, 0))
   const total = roundCents(net - discount_amount + total_vat)
-  const total_paid = roundCents(payments.reduce((s, p) => s + p.amount, 0))
+  const total_paid = roundCents(payments.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
 
   return { subtotal: net, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: roundCents(total - total_paid) }
 }

@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
-import { calcTotals, formatDate, formatMoney } from '@/lib/utils/document'
+import { calcTotals, formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { getT } from '@/lib/i18n/server'
@@ -41,7 +41,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   if (!client) notFound()
 
   // The history list shows the 50 latest documents; the stats aggregate every invoice.
-  const [{ data: documents }, { data: invoices }, { data: settings }] = await Promise.all([
+  const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }] = await Promise.all([
     supabase
       .from('documents')
       .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
@@ -50,10 +50,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .limit(50),
     supabase
       .from('documents')
-      .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)')
+      .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
       .eq('client_id', id)
       .eq('type', 'invoice'),
     supabase.from('settings').select(CLIENT_DEFAULTS_COLUMNS).maybeSingle(),
+    // Money paid back to the client on credit notes.
+    supabase.from('payments').select('amount, documents!inner(client_id)').eq('kind', 'refund').eq('documents.client_id', id),
   ])
 
   const allDocs = documents ?? []
@@ -64,7 +66,10 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
     d.tax_treatment,
   )
-  const totalRevenue = allInvoices.reduce((s, d) => s + docTotals(d).total_paid, 0)
+  // Revenue is money: payments received less refunds. Skonto, write-offs, applied credit notes and
+  // dunning fees are no revenue.
+  const received = allInvoices.reduce((s, d) => s + (d.payments ?? []).filter(p => p.kind === 'payment').reduce((a, p) => a + Number(p.amount), 0), 0)
+  const totalRevenue = roundCents(received - (refunds ?? []).reduce((s, r) => s + Number(r.amount), 0))
   const openBalance = allInvoices
     .filter(d => d.status === 'sent' || d.status === 'overdue')
     .reduce((s, d) => s + docTotals(d).balance_due, 0)

@@ -64,7 +64,8 @@ function split(d: TotalsDoc, gross: number): VatBuckets {
 //    (a credited 10 % line stops counting as 10 % turnover; nothing moves when nothing was paid).
 //  - Money paid back on a credit note (kind 'refund') is deducted at its rates when it was paid.
 // Skonto and write-offs never reach this function: they close a balance without turnover, so
-// partial payments count proportionally across the rates.
+// partial payments count proportionally across the rates. Money beyond what is still to be paid
+// (an overpayment) is no turnover: an invoice never counts more than its own split.
 export function istTurnover(input: {
   start: string
   end: string
@@ -93,8 +94,9 @@ export function istTurnover(input: {
 
     for (const e of events) {
       if (!e.credit || !e.creditNote) {
-        if (inPeriod(e.date)) addTo(out, unit(), e.amount)
-        received += e.amount
+        const counted = Math.min(e.amount, Math.max(0, open - received))
+        if (counted > 0 && inPeriod(e.date)) addTo(out, unit(), counted)
+        received += counted
         continue
       }
       const before = unit()

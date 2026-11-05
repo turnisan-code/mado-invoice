@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { isUuid, requireUser } from '@/lib/auth'
 import { googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { archiveToDrive } from '@/lib/pdf/drive'
@@ -10,19 +10,21 @@ export const maxDuration = 60
 // document is already archived there, the existing file's link is returned.
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  if (!isUuid(id)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const [{ data: doc }, { data: settings }] = await Promise.all([
+  const [{ data: doc, error: docErr }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents').select('id, number').eq('id', id).maybeSingle(),
-    supabase.from('settings').select('drive_folder_id, gmail_refresh_token').single(),
+    supabase.from('settings').select('drive_folder_id, gmail_email, gmail_refresh_token').single(),
   ])
+  if (docErr || settingsErr) return NextResponse.json({ error: (docErr ?? settingsErr)!.message }, { status: 500 })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!doc.number) return NextResponse.json({ error: 'Issue the document before saving it to Drive', code: 'not_issued' }, { status: 400 })
   if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
+  if (!settings.gmail_refresh_token) return googleNotConnected(settings)
   if (!settings.drive_folder_id) return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
-  if (!settings.gmail_refresh_token) return googleNotConnected()
 
   let issued
   try {

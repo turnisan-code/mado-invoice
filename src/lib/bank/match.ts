@@ -13,6 +13,8 @@ export interface OpenInvoice {
   balance: number
   skontoPercent: number | null
   skontoDays: number | null
+  /** Highest dunning level sent: a credit above the balance then most likely includes fees and interest. */
+  reminderLevel: number
 }
 
 export type MatchStatus = 'match' | 'unmatched' | 'debit' | 'imported' | 'nothing_open'

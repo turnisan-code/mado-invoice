@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/auth'
 import { getOAuthClient, OAUTH_STATE_COOKIE } from '@/lib/google/client'
 
 export async function GET() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
 
   const state = randomUUID()
   const url = getOAuthClient().generateAuthUrl({
@@ -32,15 +31,16 @@ export async function GET() {
 }
 
 export async function DELETE() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-  const { data: settings } = await supabase.from('settings').select('id, gmail_access_token, gmail_refresh_token').single()
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
+  const { data: settings, error: settingsErr } = await supabase.from('settings').select('id, gmail_access_token, gmail_refresh_token').single()
+  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
 
   // Revoking either token invalidates the whole grant; a failure here only means Google
-  // already forgot it (or is unreachable), so the local disconnect proceeds regardless.
+  // already forgot it (or is unreachable), so the local disconnect proceeds regardless. The Drive
+  // folder belongs to that account and goes with it.
   const token = settings.gmail_refresh_token ?? settings.gmail_access_token
   if (token) await getOAuthClient().revokeToken(token).catch(() => undefined)
 
@@ -51,6 +51,10 @@ export async function DELETE() {
     gmail_token_expiry: null,
     gmail_connected_at: null,
     gmail_scopes: null,
+    drive_folder_id: null,
+    drive_folder_name: null,
+    google_last_error: null,
+    google_last_error_at: null,
   }).eq('id', settings.id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

@@ -1,6 +1,6 @@
 import { google, type Auth } from 'googleapis'
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/auth'
 import { getOAuthClient, googleErrorMessage, OAUTH_STATE_COOKIE } from '@/lib/google/client'
 
 function clearState(res: NextResponse) {
@@ -9,9 +9,9 @@ function clearState(res: NextResponse) {
 }
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const state = req.nextUrl.searchParams.get('state')
   const expectedState = req.cookies.get(OAUTH_STATE_COOKIE.name)?.value
@@ -42,8 +42,11 @@ export async function GET(req: NextRequest) {
     return failed()
   }
 
-  const { data: settings } = await supabase.from('settings').select('id').single()
-  if (!settings) return failed()
+  const { data: settings, error: settingsErr } = await supabase.from('settings').select('id').single()
+  if (settingsErr || !settings) {
+    console.error('[gmail/callback] settings not loaded:', settingsErr?.message)
+    return failed()
+  }
 
   const { error } = await supabase.from('settings').update({
     gmail_email: email,
@@ -52,6 +55,8 @@ export async function GET(req: NextRequest) {
     gmail_token_expiry: tokens.expiry_date,
     gmail_connected_at: new Date().toISOString(),
     gmail_scopes: tokens.scope ?? null,
+    google_last_error: null,
+    google_last_error_at: null,
   }).eq('id', settings.id)
   if (error) {
     console.error('[gmail/callback] could not store tokens:', error.message)
