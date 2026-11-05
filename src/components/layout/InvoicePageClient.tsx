@@ -1,11 +1,11 @@
 'use client'
 
-import { useRef } from 'react'
-import DocumentBuilder, { type DocumentBuilderHandle } from '@/components/forms/DocumentBuilder'
+import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import ReminderButton from '@/components/layout/ReminderButton'
 import { formatDate } from '@/lib/utils/document'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
+import { fetchIssuedPdf, blobToBase64 } from '@/lib/issued-pdf'
 import type { Client, CatalogueItem, Document, Currency, Payment, ReminderLogEntry } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { useT } from '@/lib/i18n/client'
@@ -30,19 +30,18 @@ export default function InvoicePageClient({
   type, settings, clients, catalogue, document, total, payments, currency,
   bookamatConfigured, bookamatBookingId, reminderSentAt, reminderLevel, reminderLog,
 }: Props) {
-  const builderRef = useRef<DocumentBuilderHandle>(null)
   const { t, lang } = useT()
 
-  async function generatePdfBase64(): Promise<{ base64: string; filename: string } | null> {
-    if (!builderRef.current) return null
-    const result = await builderRef.current.buildPdfBlob(document.number ?? undefined, true)
-    if (!result) return null
-    const base64 = await new Promise<string>((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve((reader.result as string).split(',')[1])
-      reader.readAsDataURL(result.blob)
-    })
-    return { base64, filename: `${result.number}.pdf` }
+  // Bookamat attaches the stored issued copy; a reminder attaches it only while nothing is paid,
+  // otherwise a render that shows the payments and asks for the open balance.
+  async function issuedPdfBase64(purpose: 'archive' | 'reminder'): Promise<{ base64: string; filename: string } | null> {
+    if (!document.number) return null
+    try {
+      return { base64: await blobToBase64(await fetchIssuedPdf(document.id, t, purpose)), filename: `${document.number}.pdf` }
+    } catch (err) {
+      console.warn('Issued PDF unavailable:', err)
+      return null
+    }
   }
 
   const gmailConfigured = settings.gmail_connected
@@ -52,7 +51,6 @@ export default function InvoicePageClient({
     <>
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
-          ref={builderRef}
           type={type}
           settings={settings}
           clients={clients}
@@ -72,7 +70,7 @@ export default function InvoicePageClient({
         skontoDays={document.skonto_days ?? null}
         bookamatConfigured={bookamatConfigured}
         bookamatBookingId={bookamatBookingId}
-        generatePdfForBookamat={generatePdfBase64}
+        generatePdfForBookamat={() => issuedPdfBase64('archive')}
       />
       {(showReminder || reminderLog.length > 0) && (
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-3">
@@ -85,7 +83,7 @@ export default function InvoicePageClient({
                 reminderLevel={reminderLevel}
                 maxLevel={settings.reminder_max_level}
                 gmailConfigured={gmailConfigured}
-                generatePdf={generatePdfBase64}
+                generatePdf={() => issuedPdfBase64('reminder')}
               />
             )}
           </div>

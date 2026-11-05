@@ -1,6 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
+import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
 import { calcTotals, today } from '@/lib/utils/document'
+
+// Issuing renders, stores and archives each draft's PDF in turn.
+export const maxDuration = 60
 
 // Which current statuses may move to the requested one. Paid/cancelled invoices are left alone;
 // cancelling an issued invoice needs a Storno (per-document flow), so it is not offered here.
@@ -31,10 +35,11 @@ export async function PATCH(req: Request) {
   if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
   const invoices = docs ?? []
 
-  // Drafts get a number assigned (sequentially) first; issue_document also sets them to 'sent'.
+  // Drafts get a number assigned (sequentially) first, plus their archive copy; issuing also sets them to 'sent'.
   for (const d of invoices.filter(d => !d.number)) {
-    const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: d.id })
-    if (issueErr) return NextResponse.json({ error: issueErr.message }, { status: 500 })
+    try { await issueDocument(supabase, d.id) } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+    }
   }
 
   if (body.status === 'paid') {

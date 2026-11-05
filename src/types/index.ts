@@ -208,6 +208,19 @@ export interface ReminderLogEntry {
   subject: string | null
 }
 
+export type DocumentEventType =
+  | 'issued' | 'emailed' | 'mailto_opened' | 'reminder_sent' | 'status_changed'
+  | 'payment_added' | 'payment_removed' | 'storno_created' | 'archived' | 'drive_archived'
+  | 'portal_viewed' | 'portal_responded' | 'bookamat_synced' | 'converted'
+
+export interface DocumentEvent {
+  id: string
+  document_id: string
+  created_at: string
+  type: DocumentEventType
+  detail: Record<string, unknown>
+}
+
 export interface DocumentTotals {
   subtotal: number
   discount_amount: number

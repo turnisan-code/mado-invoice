@@ -5,6 +5,7 @@ import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
 import ConvertToInvoiceButton from '@/components/layout/ConvertToInvoiceButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import DocumentHistory from '@/components/layout/DocumentHistory'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import { toPublicSettings } from '@/lib/public-settings'
@@ -44,7 +45,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
-          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} />}
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
           {!['accepted', 'rejected', 'cancelled'].includes(doc.status) && (
@@ -63,6 +64,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           document={docWithItems}
         />
       </div>
+      <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )
 }

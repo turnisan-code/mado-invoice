@@ -6,6 +6,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import DocumentHistory from '@/components/layout/DocumentHistory'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
@@ -46,7 +47,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
-          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} />}
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
           <DuplicateDocumentButton docId={doc.id} docType="credit_note" backTo="/credit-notes" />
@@ -63,6 +64,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           reference={reference}
         />
       </div>
+      <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )
 }

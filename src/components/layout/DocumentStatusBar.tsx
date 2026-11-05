@@ -6,6 +6,9 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toastApiError } from '@/lib/google/toast'
+import { logEvent } from '@/lib/events'
+import { flushPendingEdits } from '@/lib/issued-pdf'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 
@@ -89,6 +92,8 @@ export default function DocumentStatusBar({ document: doc }: Props) {
     busyRef.current = true
     setBusy(true)
     try {
+      // Issuing renders the frozen PDF from the database, so the builder's pending edits go first.
+      if (needsNumber(newStatus) || (recordsPayment(newStatus) && !doc.number)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',
@@ -111,13 +116,23 @@ export default function DocumentStatusBar({ document: doc }: Props) {
         const data = await res.json().catch(() => ({}))
         if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
+        await logEvent(supabase, doc.id, 'status_changed', { from: status, to: newStatus })
       } else {
+        // Issuing (number, archive copy, Drive) runs on the server and moves a draft to 'sent'.
+        let from = status
         if (needsNumber(newStatus)) {
-          const { error: issueErr } = await supabase.rpc('issue_document', { p_document_id: doc.id })
-          if (issueErr) { toast.error(issueErr.message); return }
+          const res = await fetch(`/api/documents/${doc.id}/issue`, { method: 'POST' })
+          const data = await res.json().catch(() => ({}))
+          if (!res.ok) { toast.error(data.error ?? t('common.unknownError')); return }
+          if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
+          if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
+          if (from === 'draft') from = 'sent'
         }
-        const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-        if (error) { toast.error(error.message); return }
+        if (newStatus !== from) {
+          const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
+          if (error) { toast.error(error.message); return }
+          await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
+        }
       }
       setStatus(newStatus)
       setOpen(false)

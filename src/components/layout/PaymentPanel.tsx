@@ -12,6 +12,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { Currency, PaymentKind, PaymentMethod } from '@/types'
 import { useT } from '@/lib/i18n/client'
+import { logEvent } from '@/lib/events'
 
 interface Payment {
   id: string
@@ -96,11 +97,13 @@ export default function PaymentPanel({
 
     const next = [...payments, data]
     setPayments(next)
+    await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method })
 
     const newTotal = next.reduce((s, p) => s + p.amount, 0)
     const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
     if (newTotal >= total - 0.005) {
       await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId)
+      if (status !== 'paid') await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
       toast.success(t('payments.recordedAndPaid', { label }))
       if (!bookamatId && bookamatConfigured) {
         setShowBookamatPrompt(true)
@@ -135,12 +138,15 @@ export default function PaymentPanel({
     setRemoving(true)
     const { error } = await supabase.from('payments').delete().eq('id', id)
     if (error) { toast.error(error.message); setRemoving(false); return }
+    const removed = payments.find(p => p.id === id)
+    if (removed) await logEvent(supabase, documentId, 'payment_removed', { amount: removed.amount, date: removed.date, kind: removed.kind, method: removed.method })
     const next = payments.filter(p => p.id !== id)
     setPayments(next)
 
     const newTotal = next.reduce((s, p) => s + p.amount, 0)
     if (status === 'paid' && newTotal < total - 0.005) {
       await supabase.from('documents').update({ status: 'sent' }).eq('id', documentId)
+      await logEvent(supabase, documentId, 'status_changed', { from: 'paid', to: 'sent' })
     }
 
     setRemoving(false)
@@ -165,8 +171,7 @@ export default function PaymentPanel({
     setSyncingBookamat(true)
     setShowBookamatPrompt(false)
 
-    // Generate PDF FIRST — before any state changes that could re-render
-    // DocumentBuilder and kill the react-pdf worker mid-generation
+    // The stored issued copy is what Bookamat keeps as the receipt.
     let pdfResult: { base64: string; filename: string } | null = null
     if (generatePdfForBookamat) {
       try {

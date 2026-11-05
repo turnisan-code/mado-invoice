@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateDueSchedules } from '@/lib/utils/recurring'
 import { today } from '@/lib/utils/document'
+import { issueDocument } from '@/lib/pdf/issue'
 
 export const maxDuration = 60
 
@@ -17,7 +18,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!schedule) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 })
   if (!schedule.active) return NextResponse.json({ error: 'Schedule is paused or ended', code: 'inactive' }, { status: 409 })
 
-  const { generated, errors } = await generateDueSchedules(supabase, today(), { scheduleId: id, force: true })
+  const { generated, errors } = await generateDueSchedules(supabase, today(), { scheduleId: id, force: true, issue: issueDocument })
   if (!generated.length) {
     // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.
     if (errors.some(e => e.code === 'template_cancelled')) return NextResponse.json({ error: 'Template invoice is cancelled', code: 'template_cancelled' }, { status: 409 })
