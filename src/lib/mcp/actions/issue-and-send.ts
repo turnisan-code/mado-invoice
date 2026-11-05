@@ -1,6 +1,7 @@
 // Issuing one draft and emailing it with a single approval. Issuing comes first; the email goes
-// out with the frozen PDF of the number that was approved. When sending fails after the number was
-// taken, the document stays issued and the result says so.
+// out with the frozen PDF of the number that was approved, and only while the document and its
+// client are still as approved (the e-invoice is built from them as it is sent). When sending
+// fails after the number was taken, the document stays issued and the result says so.
 import { z } from 'zod'
 import { pdfFilename } from '@/lib/pdf/render'
 import { einvoiceFilename } from '@/lib/einvoice/common'
@@ -12,7 +13,9 @@ import { McpToolError } from '../errors'
 import { fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
 import { checkAddresses, emailArgs, gmailConnected, mayOutlastClient, newRecipients, notice, refuse, storedError } from './common'
-import { issueNotices, issueOutcome, loadIssueState, previewIssue, runIssue, withLinks } from './issue'
+import {
+  approvedDrafts, issueNotices, issueOutcome, loadIssueState, previewIssue, runIssue, stillApproved, withLinks, type ApprovedDrafts,
+} from './issue'
 import {
   clientEInvoice, composeFor, emailFailureError, emailNotices, emailState, loadEmailDoc, recipients, type EmailInput,
 } from './send-email'
@@ -51,7 +54,7 @@ export async function resolveIssueAndSend(ctx: ToolContext, input: EmailInput & 
   }
 }
 
-export const issueAndSendAction = defineAction<Args>({
+export const issueAndSendAction = defineAction<Args, ApprovedDrafts>({
   kind: 'issue_and_send',
   argsSchema,
   async prepare(ctx, args) {
@@ -93,8 +96,13 @@ export const issueAndSendAction = defineAction<Args>({
   async fingerprint(ctx, args) {
     return (await loadState(ctx, args)).fingerprint
   },
-  async execute(ctx, args) {
-    const { run, drafts } = await runIssue(ctx, [args.document_id], args.redate_to_today)
+  async approvedState(ctx, args) {
+    const { issue, fingerprint } = await loadState(ctx, args)
+    return { fingerprint, state: approvedDrafts(issue.drafts) }
+  },
+  async execute(ctx, args, approved) {
+    if (!approved) throw new McpToolError('internal')
+    const { run, drafts } = await runIssue(ctx, [args.document_id], args.redate_to_today, approved)
     const issued = issueOutcome(ctx, run, drafts)
     const number = run.notes[0].number
     const all = [...args.to, ...args.cc, ...args.bcc]
@@ -104,6 +112,8 @@ export const issueAndSendAction = defineAction<Args>({
     if (number !== args.expected_number) {
       const changed = notice('mcp.approve.result.numberChanged', { number, expected: args.expected_number })
       emailError = { code: 'number_changed', message: word(ctx.t, 'en', changed), worded: changed }
+    } else if (!await stillApproved(ctx, approved, args.document_id, { issued: true })) {
+      emailError = storedError(refuse(ctx, 'mcp.approve.refusals.changedBeforeSend', undefined, 'state_changed', { document_id: args.document_id }), ctx.t)
     } else {
       const sent = await sendDocumentEmail(ctx.supabase, await ctx.settings(), {
         documentId: args.document_id, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,

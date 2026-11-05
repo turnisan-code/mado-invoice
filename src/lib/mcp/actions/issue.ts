@@ -5,10 +5,11 @@ import {
   IssueRefusal, issueMany, issuePreview, latestIssuedOf, loadIssueDrafts, numberingOf, startIssueBatches,
   type IssueDraftRow, type IssuePreview, type IssueRun,
 } from '@/lib/services/issue'
+import type { MovedDates } from '@/lib/pdf/bulk'
 import type { DocumentType } from '@/types'
 import { documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { cents, fingerprintOf } from '../fingerprint'
+import { canonicalJson, cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ActionOutcome, type ServiceContext, type ToolContext } from '../types'
 import { itemsState, mayOutlastClient, notice, paymentsState, refuse, storedError } from './common'
 import { clip, entries, money, word, type Worded } from './words'
@@ -101,6 +102,7 @@ export function issueOutcome<D extends IssueDraftRow>(ctx: ServiceContext, run: 
   }
   const failed = run.failed ? { document_id: run.failed.draft.id, error: storedError(run.failed.error, ctx.t) } : null
   const notIssued = drafts.length - run.notes.length
+  const issuedIds = new Set(run.notes.map(n => n.id))
   if (failed) {
     warnings.push(notice(notIssued === 1 ? 'mcp.approve.result.issueFailedOne' : 'mcp.approve.result.issueFailed', { count: notIssued, error: { error: failed.error } }))
   } else if (run.stopped.length) {
@@ -119,16 +121,61 @@ export function issueOutcome<D extends IssueDraftRow>(ctx: ServiceContext, run: 
         }
       }),
       failed,
-      not_issued: [...(failed ? [failed.document_id] : []), ...run.stopped.map(d => d.id)],
+      // The failed draft first, then the ones after it (never tried) or cut off by the deadline.
+      not_issued: [...(failed ? [failed.document_id] : []), ...drafts.filter(d => !issuedIds.has(d.id) && d.id !== failed?.document_id).map(d => d.id)],
     },
   }
 }
 
-export async function runIssue(ctx: ServiceContext, ids: readonly string[], redate: boolean) {
-  const drafts = await loadIssueDrafts(ctx.supabase, ids)
+// The drafts as the check just before the run read them (approvedState: the fingerprint matched),
+// by id.
+export type ApprovedDrafts = ReadonlyMap<string, IssueDraftRow>
+
+export const approvedDrafts = (drafts: readonly IssueDraftRow[]): ApprovedDrafts => new Map(drafts.map(d => [d.id, d]))
+
+// What issuing changes on the document itself: left out where it is compared after its number
+// was taken.
+const ISSUING_CHANGES = ['number', 'status', 'date', 'due_date'] as const
+
+// Whether the document, with its client, lines and payments, is still as that check read it.
+// `moved`: the dates the run itself just gave it; `issued`: compared after its number was taken.
+export async function stillApproved(
+  ctx: ServiceContext,
+  approved: ApprovedDrafts,
+  id: string,
+  opts: { moved?: MovedDates | null; issued?: boolean } = {},
+): Promise<boolean> {
+  const was = approved.get(id)
+  const [now] = await loadIssueDrafts(ctx.supabase, [id])
+  if (!was || !now) return false
+  const state = (d: IssueDraftRow): string => {
+    const s: Record<string, unknown> = draftState(d)
+    if (opts.issued) for (const key of ISSUING_CHANGES) delete s[key]
+    return canonicalJson(s)
+  }
+  return state(now) === state({ ...was, ...opts.moved })
+}
+
+// Issues the drafts as approved. A batch takes seconds per draft (number, PDF, storage, Drive) and
+// a draft later in it is still an unnumbered draft meanwhile, so each is compared with the approved
+// state once more just before its number is taken; a change stops the run there (state_changed)
+// and what was issued before stays issued. While a run approved in Mado lasts, the database also
+// refuses Claude's writes to the drafts and their clients (MI046); a run Claude confirmed in the
+// chat runs on Claude's own session, so there this check is what holds it.
+export async function runIssue(ctx: ServiceContext, ids: readonly string[], redate: boolean, approved: ApprovedDrafts | undefined) {
+  if (!approved) throw new McpToolError('internal')
+  const drafts = ids.map(id => approved.get(id)).filter((d): d is IssueDraftRow => !!d)
+  if (drafts.length !== ids.length) throw new McpToolError('state_changed')
   const started = await startIssueBatches(ctx.supabase, drafts.map(d => d.type), redate, today())
   if ('error' in started) throw started.error
-  const run = await issueMany(ctx.supabase, started.batches, drafts, { deadline: ctx.deadline })
+  const run = await issueMany(ctx.supabase, started.batches, drafts, {
+    deadline: ctx.deadline,
+    beforeIssue: async (d, moved) => {
+      if (!await stillApproved(ctx, approved, d.id, { moved })) {
+        throw refuse(ctx, 'mcp.approve.refusals.changedSinceApproval', undefined, 'state_changed', { document_id: d.id })
+      }
+    },
+  })
   return { run, drafts }
 }
 
@@ -138,7 +185,7 @@ const argsSchema = z.object({
 })
 type Args = z.output<typeof argsSchema>
 
-export const issueAction = defineAction<Args>({
+export const issueAction = defineAction<Args, ApprovedDrafts>({
   kind: 'issue',
   argsSchema,
   async prepare(ctx: ToolContext, args) {
@@ -158,8 +205,12 @@ export const issueAction = defineAction<Args>({
   async fingerprint(ctx, args) {
     return (await loadIssueState(ctx, args.document_ids, args.redate_to_today)).fingerprint
   },
-  async execute(ctx, args) {
-    const { run, drafts } = await runIssue(ctx, args.document_ids, args.redate_to_today)
+  async approvedState(ctx, args) {
+    const state = await loadIssueState(ctx, args.document_ids, args.redate_to_today)
+    return { fingerprint: state.fingerprint, state: approvedDrafts(state.drafts) }
+  },
+  async execute(ctx, args, approved) {
+    const { run, drafts } = await runIssue(ctx, args.document_ids, args.redate_to_today, approved)
     const outcome = issueOutcome(ctx, run, drafts)
     return { ...outcome, summary: outcome.report.map(w => word(ctx.t, 'en', w)).join(' '), data: { ...outcome.data, report: outcome.report } }
   },

@@ -69,11 +69,15 @@ export type IssuedPdf = {
 // document (documents.mcp_payments_at): the copy keeps the payments dated up to the issue day
 // (asIssued), so a payment Claude dated that day, or one it removed, would be frozen into it. It
 // fails closed like an unreadable copy; a stored copy is still served. A row read without the
-// columns (that migration not applied) has nothing from Claude.
+// columns (that migration not applied) has nothing from Claude. `unattended` (the recurring
+// generator issuing a period invoice nobody looked at): the same holds at issue, checked in the very
+// read the copy is rendered from, so a client Claude changes after the generator's own check is
+// not frozen into it either.
 export async function getIssuedPdf(
   supabase: SupabaseClient,
   documentId: string,
   source: 'issue' | 'on_demand' | 'manual',
+  opts: { unattended?: boolean } = {},
 ): Promise<IssuedPdf> {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.number) throw new ArchiveError('not_issued', 'Only issued documents have an archive copy')
@@ -87,10 +91,11 @@ export async function getIssuedPdf(
     }
   }
 
-  if (source !== 'issue' && doc.clients?.mcp_written_at) {
+  const held = source !== 'issue' || !!opts.unattended
+  if (held && doc.clients?.mcp_written_at) {
     throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
   }
-  if (source !== 'issue' && doc.mcp_payments_at) {
+  if (held && doc.mcp_payments_at) {
     throw new ArchiveError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no archive copy is made with them')
   }
   const path = doc.pdf_path ?? storageKey(doc.date, doc.number)

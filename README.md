@@ -154,7 +154,10 @@ unconfirmed until the owner saves it in Mado, and its page says so: meanwhile th
 reminders skip its invoices, the automatic Bookamat sync skips its documents, and a recurring
 schedule that issues invoices automatically creates its invoices as drafts, each with the reason
 in the cron log (or the warning of “Generate now”), since a Mahnung, a booking or an issued
-invoice would carry the name, recipient block, VAT ID and payment terms Claude wrote. For the
+invoice would carry the name, recipient block, VAT ID and payment terms Claude wrote. The schedule
+checks the client again just before the number is taken and when the archive copy is rendered: a
+change Claude makes while the invoice is being issued leaves it a draft, or, once numbered,
+without an archive copy until the client is saved (the cron log says which). For the
 same reason no archive copy (the frozen PDF of an issued document that has none yet, e.g. one
 issued before archive copies existed) is made from such a client: downloads, emails and the
 portal's PDF of that document fail with a notice until the client is saved, and the portal page
@@ -176,9 +179,23 @@ bookings no one approved (a write-off or Skonto alone makes an invoice paid, so 
 archive copy is made of such a document either (downloads, emails and the portal's PDF of one that
 has none yet fail with a notice), as the copy keeps the payments up to its issue date for good, and
 its share link shows the issued total only, without the payments, the balance due, a paid or
-overdue status and the payment details. Where an earlier version of `20261105_mcp_drafts.sql` was
-applied (no mark yet, or invoices only), the migration marks every invoice and credit note with a
-payment or refund recorded or removed from a Claude connection once.
+overdue status and the payment details. A credit note Claude applied to its invoice
+(`apply_credit_note`) is held the same way as the invoice: the credit settles the credit note, and
+the Bookamat sync books a settled credit note's refunds. Where an earlier version of
+`20261105_mcp_drafts.sql` was applied (no mark yet, or invoices only), the migration marks every
+invoice and credit note with a payment or refund recorded or removed from a Claude connection
+once; where any earlier version was applied, also every credit note applied from a Claude
+connection.
+
+While an action approved in Mado runs (issuing takes seconds per draft: the number, the PDF, the
+Drive copy), Claude cannot change the documents it names, their lines and payments, or their
+clients: the database refuses (MI046) until the action has finished, ten minutes after the
+approval at most. The run also compares each draft, with its client, once more just before its
+number is taken, and an issue-and-send the document and client before the email goes out; one that
+changed after the approval stops the run there, what was issued before stays issued and the result
+lists the rest as not issued. An action Claude confirms in chat runs on Claude's own connection,
+which the database cannot tell apart from Claude's other changes, so there that comparison is the
+check.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
@@ -195,7 +212,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 
 | Path | Schedule (UTC) | Does |
 |---|---|---|
-| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts. |
+| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
 | `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.

@@ -82,13 +82,24 @@ export async function todayIsPeriodDate(supabase: SupabaseClient, scheduleId: st
   return !!data && isUpcomingPeriodDate(data as ScheduleDates, today)
 }
 
+// The dates issueBulkDraft gave a draft just before issuing it (moved to today).
+export type MovedDates = { date: string; due_date?: string }
+
 // One draft of the batch: moved to today first when the batch says so (the due date follows the
 // client's terms from today, a credit note keeps its own), then issued (number, archive copy,
 // Drive). A failed issue puts the draft's own dates back and throws as issueDocument does; archive
 // and Drive problems, an order the numbers no longer follow and lost project links come back as notes.
-export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue, d: BulkDraft): Promise<IssuedNote> {
+// `beforeIssue` is the caller's last check just before the number is taken (with the dates the
+// draft was just moved to); what it throws fails the issue the same way.
+export async function issueBulkDraft(
+  supabase: SupabaseClient,
+  batch: BulkIssue,
+  d: BulkDraft,
+  opts: { beforeIssue?: (moved: MovedDates | null) => Promise<void> } = {},
+): Promise<IssuedNote> {
   let date = d.date
   let movedFrom: string | null = null
+  let moved: MovedDates | null = null
   let dateKept = false
   if (batch.redate && movesToToday(d.date, batch.today)) {
     if (d.recurring_schedule_id && await todayIsPeriodDate(supabase, d.recurring_schedule_id, batch.today)) {
@@ -102,12 +113,14 @@ export async function issueBulkDraft(supabase: SupabaseClient, batch: BulkIssue,
       else {
         movedFrom = d.date
         date = batch.today
+        moved = { date: batch.today, ...dueDate }
       }
     }
   }
 
   let outcome: IssueOutcome
   try {
+    await opts.beforeIssue?.(moved)
     outcome = await issueDocument(supabase, d.id)
   } catch (err) {
     if (movedFrom) {

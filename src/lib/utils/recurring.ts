@@ -88,9 +88,13 @@ export interface GenerateResult {
 }
 
 // Issuing (number, archive copy, Drive) lives in the server-only src/lib/pdf/issue.ts. This module
-// is also imported by client components for its date math, so the route handlers pass it in.
-export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string) => Promise<{
+// is also imported by client components for its date math, so the route handlers pass it in. It is
+// called with `unattended`: a client a Claude session changed is refused there with code
+// 'client_changed' just before the number is taken, and gets no archive copy (snapshotCode
+// 'client_changed') should it change after that.
+export type IssueDocumentFn = (supabase: SupabaseClient, documentId: string, opts: { unattended: true }) => Promise<{
   snapshotError: string | null
+  snapshotCode?: string | null
   driveError: DriveError | null
 }>
 
@@ -113,7 +117,9 @@ function paymentDaysOf(source: SourceDocument, defaultPaymentDays: number | null
 // terms, so a schedule that issues automatically leaves such a client's invoice a draft until the
 // owner has saved the client: no invoice is numbered with data Claude wrote without anyone
 // approving it. Read afresh before each period is issued; a client read without the column (that
-// migration not applied) has not been changed by Claude.
+// migration not applied) has not been changed by Claude. A Claude write landing after this read is
+// caught where it would be used: issueDocument checks the mark again just before the number is
+// taken and in the read the archive copy is rendered from (`unattended`).
 async function clientChangedByClaude(supabase: SupabaseClient, clientId: string): Promise<boolean> {
   const { data, error } = await supabase.from('clients').select('*').eq('id', clientId).maybeSingle()
   if (error) throw new Error(error.message)
@@ -226,6 +232,9 @@ function issueMessages({ t, describeError, describeDriveError, formatDate }: Wor
     clientChanged: (date: string) => t
       ? t('views.recurring.clientChanged', { date: day(date) })
       : `${date}: created as draft, not issued: the client was changed from a Claude connection; check it and save it in Mado, then issue the draft`,
+    clientChangedIssued: (date: string) => t
+      ? t('views.recurring.clientChangedIssued', { date: day(date) })
+      : `${date}: issued, but no archive copy was made: the client was changed from a Claude connection while it was issued; check it and save it in Mado, then create the archive copy on the invoice's page`,
   }
 }
 
@@ -302,11 +311,15 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
         result.errors.push({ scheduleId: schedule.id, message: held })
       } else if (schedule.mode === 'issue') {
         try {
-          const { snapshotError, driveError } = await issue(supabase, created.id)
-          if (snapshotError) result.errors.push({ scheduleId: schedule.id, message: messages.snapshot(next), detail: snapshotError })
+          const { snapshotError, snapshotCode, driveError } = await issue(supabase, created.id, { unattended: true })
+          if (snapshotError) {
+            result.errors.push({ scheduleId: schedule.id, message: snapshotCode === 'client_changed' ? messages.clientChangedIssued(next) : messages.snapshot(next), detail: snapshotError })
+          }
           if (driveError) result.errors.push({ scheduleId: schedule.id, message: messages.drive(next, driveError), detail: driveError.error })
         } catch (err) {
-          result.errors.push({ scheduleId: schedule.id, message: messages.issue(next, err) })
+          // A client Claude changed after the check above: the invoice stays a draft, as held.
+          const changed = !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'client_changed'
+          result.errors.push({ scheduleId: schedule.id, message: changed ? messages.clientChanged(next) : messages.issue(next, err) })
           // The draft gets its period's dates back, as a failed bulk issue does.
           if (date !== created.date) {
             const { error: restoreErr } = await supabase.from('documents')

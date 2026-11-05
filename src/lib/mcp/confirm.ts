@@ -145,15 +145,20 @@ async function finish(supabase: SupabaseClient, id: string, ok: boolean, result:
 }
 
 // A claimed action (status 'running', this session's claim): arguments and fingerprint checked
-// again, then run, and the outcome recorded. Whatever happens, the row is finished.
+// again, then run, and the outcome recorded. Whatever happens, the row is finished. The claim is
+// committed first, so a Claude write before it changes the fingerprint and one after it is
+// refused by the database while an action approved in Mado runs (MI046,
+// 20261105_mcp_drafts.sql); the state checked here goes to execute(), which compares each document
+// with it again before numbering or sending it (approvedState in types.ts).
 export async function runClaimed(ctx: ServiceContext, row: McpAction): Promise<RunResult> {
   try {
     const def = actionKind(row.kind)
     if (!def) throw new McpToolError('internal')
     const args = def.argsSchema.parse(row.args)
     if (argsHash(args) !== row.args_hash) throw new McpToolError('state_changed')
-    if (await def.fingerprint(ctx, args) !== row.fingerprint) throw new McpToolError('state_changed')
-    const outcome = await def.execute(ctx, args)
+    const checked = def.approvedState ? await def.approvedState(ctx, args) : { fingerprint: await def.fingerprint(ctx, args), state: undefined }
+    if (checked.fingerprint !== row.fingerprint) throw new McpToolError('state_changed')
+    const outcome = await def.execute(ctx, args, checked.state)
     await finish(ctx.supabase, row.id, true, { summary: outcome.summary, data: outcome.data, ...(outcome.warnings?.length ? { warnings: outcome.warnings } : {}) }, null)
     return { ok: true, outcome }
   } catch (thrown) {

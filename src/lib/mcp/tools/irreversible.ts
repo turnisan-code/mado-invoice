@@ -23,7 +23,7 @@ const einvoice = z.enum(['ebinterface', 'ubl', 'none']).optional()
 const subject = z.string().max(MAX_SUBJECT).optional().describe('Default: the email template filled in for this document.')
 const body = z.string().max(MAX_BODY).optional().describe('Default: the email template filled in for this document. {{portal_link}} becomes the client-portal link when it is sent.')
 
-const APPROVAL = "Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status. If approval is 'chat' instead, ask the owner, then call confirm_action with the same confirmation_id, action and label."
+const APPROVAL = "Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status. If approval is 'chat' instead, ask the owner, then call confirm_action with the same confirmation_id, action and label. While an action approved in Mado runs, the documents it names, their lines and payments and their clients cannot be changed from Claude (MI046), and a draft or client that changed after the approval stops the run: wait until get_action_status says it finished."
 
 export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({

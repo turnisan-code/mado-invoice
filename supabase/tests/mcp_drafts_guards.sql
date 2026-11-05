@@ -3,7 +3,8 @@
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
 -- until the owner saves the client there; a client it changed keeps mcp_written_at until then, and
 -- an invoice or credit note whose payments or refunds it changed keeps mcp_payments_at until the
--- owner confirms them.
+-- owner confirms them (an applied credit marks the credit note too), and while an action the owner
+-- approved runs it writes none of what the run reads (MI046).
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
@@ -60,6 +61,15 @@ declare
   v_paid    uuid;
   v_pay     uuid;
   v_cn      uuid;
+  v_cinv    uuid;
+  v_ccn     uuid;
+  v_rclient uuid;
+  v_rdraft  uuid;
+  v_rinv    uuid;
+  v_rcninv  uuid;
+  v_rcn     uuid;
+  v_sdraft  uuid;
+  v_cdraft  uuid;
   v_base    jsonb;
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
@@ -103,6 +113,35 @@ begin
   insert into public.documents (type, client_id, number, status, converted_from_id) values ('credit_note', v_other, 'MCP-GUARD-TEST-CN-1', 'sent', v_paid) returning id into v_cn;
   insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
   values (v_cn, 0, 'item', 'Credited line', 1, 'hour', 100, 20);
+  -- An issued invoice and an issued credit note of it, not applied yet.
+  insert into public.documents (type, client_id, number, status) values ('invoice', v_other, 'MCP-GUARD-TEST-4', 'sent') returning id into v_cinv;
+  insert into public.documents (type, client_id, number, status, converted_from_id) values ('credit_note', v_other, 'MCP-GUARD-TEST-CN-2', 'sent', v_cinv) returning id into v_ccn;
+  insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
+  values (v_cinv, 0, 'item', 'Invoiced line', 1, 'hour', 100, 20),
+         (v_ccn, 0, 'item', 'Credited line', 1, 'hour', 50, 20);
+
+  -- Actions the owner approved, running on the owner's session: an issue of a draft (its client is
+  -- held with it), a reminder of an issued invoice (its id upper-case in the arguments) and a
+  -- Bookamat sync of an issued credit note, all for one client. Holding nothing: a run approved
+  -- eleven minutes ago (died with its function) and one Claude confirmed in the chat.
+  insert into public.clients (name) values ('MCP draft guard test, approved run') returning id into v_rclient;
+  insert into public.documents (type, client_id) values ('invoice', v_rclient) returning id into v_rdraft;
+  insert into public.documents (type, client_id, number, status) values ('invoice', v_rclient, 'MCP-GUARD-TEST-5', 'sent') returning id into v_rinv;
+  insert into public.documents (type, client_id, number, status) values ('invoice', v_rclient, 'MCP-GUARD-TEST-6', 'sent') returning id into v_rcninv;
+  insert into public.documents (type, client_id, number, status, converted_from_id) values ('credit_note', v_rclient, 'MCP-GUARD-TEST-CN-3', 'sent', v_rcninv) returning id into v_rcn;
+  insert into public.documents (type, client_id) values ('invoice', v_other) returning id into v_sdraft;
+  insert into public.documents (type, client_id) values ('invoice', v_other) returning id into v_cdraft;
+  insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
+  values (v_rdraft, 0, 'item', 'Approved line', 2, 'hour', 100, 20),
+         (v_rinv, 0, 'item', 'Reminded line', 1, 'hour', 100, 20),
+         (v_rcninv, 0, 'item', 'Corrected line', 1, 'hour', 100, 20),
+         (v_rcn, 0, 'item', 'Credited line', 1, 'hour', 100, 20);
+  insert into public.mcp_actions (handle_hash, grant_id, kind, args, args_hash, fingerprint, label, approval, status, expires_at, claimed_at, claimed_via, claimed_session)
+  values ('h-run-issue', v_grant, 'issue', jsonb_build_object('document_ids', jsonb_build_array(v_rdraft), 'redate_to_today', true), 'ah', 'fp', 'Issue', 'app', 'running', now() + interval '15 minutes', now(), 'app', v_browser),
+         ('h-run-remind', v_grant, 'send_reminder', jsonb_build_object('invoice_id', upper(v_rinv::text), 'mode', 'manual'), 'ah', 'fp', 'Remind', 'app', 'running', now() + interval '15 minutes', now(), 'app', v_browser),
+         ('h-run-sync', v_grant, 'bookamat_sync', jsonb_build_object('document_id', v_rcn), 'ah', 'fp', 'Sync', 'app', 'running', now() + interval '15 minutes', now(), 'app', v_browser),
+         ('h-run-stale', v_grant, 'issue', jsonb_build_object('document_ids', jsonb_build_array(v_sdraft), 'redate_to_today', true), 'ah', 'fp', 'Issue', 'app', 'running', now() + interval '15 minutes', now() - interval '11 minutes', 'app', v_browser),
+         ('h-run-chat', v_grant, 'issue', jsonb_build_object('document_ids', jsonb_build_array(v_cdraft), 'redate_to_today', true), 'ah', 'fp', 'Issue', 'chat', 'running', now() + interval '15 minutes', now(), 'chat', v_claude);
 
   -- A client as an earlier version of mcp_address_set (lower()) left it: Claude wrote the email and
   -- the mark has the earlier, glibc lower() form. The trigger is bypassed to store that mark.
@@ -123,6 +162,15 @@ begin
   perform set_config('mcp_test.paid', v_paid::text, true);
   perform set_config('mcp_test.payment', v_pay::text, true);
   perform set_config('mcp_test.credit_note', v_cn::text, true);
+  perform set_config('mcp_test.credit_invoice', v_cinv::text, true);
+  perform set_config('mcp_test.credit_cn', v_ccn::text, true);
+  perform set_config('mcp_test.run_client', v_rclient::text, true);
+  perform set_config('mcp_test.run_draft', v_rdraft::text, true);
+  perform set_config('mcp_test.run_invoice', v_rinv::text, true);
+  perform set_config('mcp_test.run_cn_invoice', v_rcninv::text, true);
+  perform set_config('mcp_test.run_credit_note', v_rcn::text, true);
+  perform set_config('mcp_test.stale_run_draft', v_sdraft::text, true);
+  perform set_config('mcp_test.chat_run_draft', v_cdraft::text, true);
   perform set_config('mcp_test.browser', (v_base || jsonb_build_object('session_id', v_browser,
     'amr', jsonb_build_array(jsonb_build_object('method', 'totp', 'timestamp', v_now - 60))))::text, true);
   perform set_config('mcp_test.claude', (v_base || jsonb_build_object('session_id', v_claude,
@@ -252,6 +300,50 @@ begin
   perform public.mcp_drafts_test_ok('claude records a refund on a credit note: mcp_payments_at set', v_at is not null);
   update public.documents set mcp_payments_at = null where id = v_cn returning mcp_payments_at into v_at;
   perform public.mcp_drafts_test_ok('claude cannot clear a credit note''s mcp_payments_at', v_at is not null);
+  -- An applied credit settles the credit note it names, and a settled credit note's refunds are
+  -- booked: the credit note is marked as well as the invoice.
+  insert into public.payments (document_id, date, amount, kind, method, note, credit_note_id)
+  values (current_setting('mcp_test.credit_invoice')::uuid, current_date, 60, 'credit', 'bank', 'MCP-GUARD-TEST-CN-2', current_setting('mcp_test.credit_cn')::uuid);
+  perform public.mcp_drafts_test_ok('claude applies a credit note: the invoice and the credit note get mcp_payments_at',
+    (select bool_and(mcp_payments_at is not null) and count(*) = 2 from public.documents
+     where id in (current_setting('mcp_test.credit_invoice')::uuid, current_setting('mcp_test.credit_cn')::uuid)));
+end $$;
+
+-- ─── Claude: while an action the owner approved runs ─────────────────────────
+do $$
+declare
+  v_rdraft  uuid := current_setting('mcp_test.run_draft')::uuid;
+  v_rclient uuid := current_setting('mcp_test.run_client')::uuid;
+  v_rinv    uuid := current_setting('mcp_test.run_invoice')::uuid;
+  v_rcninv  uuid := current_setting('mcp_test.run_cn_invoice')::uuid;
+  v_rcn     uuid := current_setting('mcp_test.run_credit_note')::uuid;
+begin
+  perform public.mcp_drafts_test_raises('claude cannot change a draft an approved issue runs on (MI046)',
+    format($q$update public.documents set notes = 'Pay to another account' where id = %L$q$, v_rdraft), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot replace its lines (MI046)',
+    format($q$select public.replace_document_items(%L, '[]'::jsonb)$q$, v_rdraft), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot add a line to it (MI046)',
+    format($q$insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit_price, vat_rate) values (%L, 1, 'item', 'Extra', 40, 250, 20)$q$, v_rdraft), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot change its client (MI046)',
+    format($q$update public.clients set company = 'ACME Treuhand (neu)', address_line1 = 'Postfach 9' where id = %L$q$, v_rclient), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot record a payment on an invoice an approved reminder runs on, named upper-case (MI046)',
+    format($q$insert into public.payments (document_id, date, amount, kind, method) values (%L, current_date, 120, 'payment', 'bank')$q$, v_rinv), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot apply a credit note an approved Bookamat sync runs on (MI046)',
+    format($q$insert into public.payments (document_id, date, amount, kind, method, credit_note_id) values (%L, current_date, 120, 'credit', 'bank', %L)$q$, v_rcninv, v_rcn), 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot record a refund on it (MI046)',
+    format($q$insert into public.payments (document_id, date, amount, kind, method) values (%L, current_date, 10, 'refund', 'bank')$q$, v_rcn), 'MI046');
+  perform public.mcp_drafts_test_ok('what the approved runs read is as the owner approved it',
+    (select notes is null from public.documents where id = v_rdraft)
+    and (select count(*) = 1 and bool_and(description = 'Approved line' and quantity = 2) from public.document_items where document_id = v_rdraft)
+    and (select company is null and address_line1 is null from public.clients where id = v_rclient)
+    and not exists (select 1 from public.payments where document_id in (v_rinv, v_rcninv, v_rcn)));
+
+  update public.documents set notes = 'Claude' where id = current_setting('mcp_test.stale_run_draft')::uuid;
+  perform public.mcp_drafts_test_ok('a run claimed more than ten minutes ago holds nothing',
+    (select notes = 'Claude' from public.documents where id = current_setting('mcp_test.stale_run_draft')::uuid));
+  update public.documents set notes = 'Claude' where id = current_setting('mcp_test.chat_run_draft')::uuid;
+  perform public.mcp_drafts_test_ok('a run Claude confirmed in the chat holds nothing (Claude''s own session runs it)',
+    (select notes = 'Claude' from public.documents where id = current_setting('mcp_test.chat_run_draft')::uuid));
 end $$;
 
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
@@ -345,6 +437,22 @@ begin
   delete from public.payments where document_id = current_setting('mcp_test.credit_note')::uuid and kind = 'refund';
   perform public.mcp_drafts_test_ok('browser: a refund the owner removes sets no mcp_payments_at',
     (select mcp_payments_at is null from public.documents where id = current_setting('mcp_test.credit_note')::uuid));
+  update public.documents set mcp_payments_at = null where id = current_setting('mcp_test.credit_cn')::uuid returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('browser: the owner confirms the applied credit note, mcp_payments_at cleared', v_at is null);
+  delete from public.payments where credit_note_id = current_setting('mcp_test.credit_cn')::uuid and kind = 'credit';
+  perform public.mcp_drafts_test_ok('browser: a credit the owner removes marks neither document again',
+    (select mcp_payments_at is null from public.documents where id = current_setting('mcp_test.credit_cn')::uuid));
+
+  -- The approved actions run on the owner's session: it is not held.
+  update public.documents set notes = 'Owner edit' where id = current_setting('mcp_test.run_draft')::uuid;
+  insert into public.document_items (document_id, sort_order, line_type, description) values (current_setting('mcp_test.run_draft')::uuid, 1, 'text', 'Owner note');
+  update public.clients set company = 'Owner Co' where id = current_setting('mcp_test.run_client')::uuid;
+  insert into public.payments (document_id, date, amount, kind, method) values (current_setting('mcp_test.run_invoice')::uuid, current_date, 10, 'payment', 'bank');
+  perform public.mcp_drafts_test_ok('browser: the owner''s session, which runs the approved actions, is not held',
+    (select notes = 'Owner edit' from public.documents where id = current_setting('mcp_test.run_draft')::uuid)
+    and (select count(*) = 2 from public.document_items where document_id = current_setting('mcp_test.run_draft')::uuid)
+    and (select company = 'Owner Co' from public.clients where id = current_setting('mcp_test.run_client')::uuid)
+    and exists (select 1 from public.payments where document_id = current_setting('mcp_test.run_invoice')::uuid));
   insert into public.document_items (document_id, sort_order, line_type, description)
   values (current_setting('mcp_test.issued')::uuid, 1, 'text', 'Owner note');
   perform public.mcp_drafts_test_ok('browser still writes an issued document''s lines',

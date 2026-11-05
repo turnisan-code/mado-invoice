@@ -133,8 +133,9 @@ const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes 
 // changes or removes on an invoice, or a refund on a credit note, holds the document's automatic
 // reminders and its automatic Bookamat sync until the owner confirms its payments on its page in
 // Mado (src/app/api/cron/reminders/route.ts, autoSyncBookamat); meanwhile no archive copy is made
-// of it (getIssuedPdf) and its share link shows no payments.
-const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice, or a refund on a credit note, holds its automatic reminders and its automatic Bookamat sync until the owner confirms its payments on its page in Mado, so no Mahnung or Bookamat booking is made unattended from payments Claude wrote; meanwhile no archive copy (frozen PDF) is made of it and its share link shows no payments, balance or payment details.'
+// of it (getIssuedPdf) and its share link shows no payments. An applied credit marks the credit
+// note it names as well: it settles the credit note, whose refunds are then booked.
+const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice, or a refund on a credit note, holds its automatic reminders and its automatic Bookamat sync until the owner confirms its payments on its page in Mado (an applied credit holds the credit note as well), so no Mahnung or Bookamat booking is made unattended from payments Claude wrote; meanwhile no archive copy (frozen PDF) is made of it and its share link shows no payments, balance or payment details.'
 // What the mark holds for the document as it is now: reminders only while an invoice is open (the
 // reminder cron looks at no other), the Bookamat sync always (it books paid invoices, cancelled
 // ones and refunded credit notes).
@@ -147,8 +148,9 @@ function paymentsHeld(type: string, status: string) {
     data: { ...(reminders ? { reminders_held: true } : {}), bookamat_sync_held: true },
   }
 }
-// apply_credit_note: the credit goes onto the invoice, which is marked.
-const INVOICE_PAYMENTS_HELD = 'Until the owner confirms the invoice\'s payments in Mado, its automatic reminders and the automatic Bookamat sync skip it; tell the owner.'
+// apply_credit_note: the credit goes onto the invoice, and both the invoice and the credit note it
+// names are marked (the credit settles the credit note, whose refunds are then booked).
+const CREDIT_HELD = 'Until the owner confirms the payments of the invoice and of the credit note on their pages in Mado, the invoice\'s automatic reminders and the automatic Bookamat sync of both skip them; tell the owner.'
 
 // The schedules that issue automatically for a client Claude has just changed: they now create
 // drafts. Only for the reply; a failed lookup leaves the note out.
@@ -652,11 +654,11 @@ const applyCreditNoteTool = defineTool({
       const result = await applyCreditNote(ctx.supabase, args.credit_note_id)
       return {
         summary: result.applied
-          ? `Applied ${money(result.applied)} to ${result.invoiceNumber}. ${INVOICE_PAYMENTS_HELD}`
+          ? `Applied ${money(result.applied)} to ${result.invoiceNumber}. ${CREDIT_HELD}`
           : 'Nothing to apply: the credit note is applied already, not issued, or its invoice has nothing open.',
         data: {
           credit_note_id: args.credit_note_id, applied: result.applied, invoice_id: result.invoiceId, invoice_number: result.invoiceNumber,
-          ...(result.applied ? { reminders_held: true, bookamat_sync_held: true } : {}),
+          ...(result.applied ? { reminders_held: true, bookamat_sync_held: true, credit_note_bookamat_sync_held: true } : {}),
         },
       }
     }
@@ -674,9 +676,9 @@ const applyCreditNoteTool = defineTool({
     }
     return {
       summary: applied.length || failed.length
-        ? `Applied ${applied.length} credit note(s).${failed.length ? ` Not applied: ${failed.join(', ')}.` : ''}${applied.length ? ' Until the owner confirms the payments of those invoices in Mado, their automatic reminders and the automatic Bookamat sync skip them; tell the owner.' : ''}`
+        ? `Applied ${applied.length} credit note(s).${failed.length ? ` Not applied: ${failed.join(', ')}.` : ''}${applied.length ? ' Until the owner confirms the payments of those invoices and credit notes on their pages in Mado, the invoices\' automatic reminders and the automatic Bookamat sync of both skip them; tell the owner.' : ''}`
         : 'Every issued credit note is applied already.',
-      data: { applied, failed, ...(applied.length ? { reminders_held: true, bookamat_sync_held: true } : {}) },
+      data: { applied, failed, ...(applied.length ? { reminders_held: true, bookamat_sync_held: true, credit_note_bookamat_sync_held: true } : {}) },
     }
   },
 })
