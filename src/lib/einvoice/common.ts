@@ -6,11 +6,12 @@
 import type { TFn } from '@/lib/i18n'
 import { isDeductionLine, type DepositKind } from '@/lib/deposits'
 import { docTitle, documentKind, documentLanguage } from '@/lib/document-labels'
+import { paymentTermsText } from '@/lib/templates'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { countryName, toCountryCode } from '@/lib/utils/country'
 import {
   calcTotals, clampPercent, discountAmount, formatDate, getTaxNote, lineAmount, lineSummary, orderItems,
-  paymentTermsSentence, roundCents, skontoAmount, skontoDeadline, viennaDate,
+  roundCents, skontoAmount, skontoDeadline, viennaDate,
 } from '@/lib/utils/document'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary } from '@/lib/utils/epc-qr'
@@ -542,9 +543,10 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
 
   const payable = roundCents(taxInclusive - prepaid)
   // BR-CO-25: an amount due needs a due date or payment terms; without either it is due on receipt.
+  // The sentence is the one the PDF, the portal and the email print.
   const paymentTerms = kind === 'invoice'
-    ? paymentTermsSentence({ type: kind, date: doc.date, due_date: doc.due_date, skonto_percent: doc.skonto_percent, skonto_days: doc.skonto_days, currency: 'EUR' }, totals.total, lang)
-      ?? (payable > 0 ? t('einvoice.xml.payableOnReceipt') : null)
+    ? paymentTermsText({ type: kind, number: doc.number, date: doc.date, due_date: doc.due_date, language: lang, currency: 'EUR', skonto_percent: doc.skonto_percent, skonto_days: doc.skonto_days }, totals.total)
+      || (payable > 0 ? t('einvoice.xml.payableOnReceipt') : null)
     : reference ? t('einvoice.xml.creditTerms', { number: reference.number }) : t('einvoice.xml.creditTermsPlain')
 
   const footer = carried.length ? carried.join('\n') : null

@@ -51,3 +51,10 @@ export function apiErrorMessage(t: TFn, payload: unknown, fallback?: string): st
 export function requestErrorMessage(t: TFn, err: unknown): string {
   return err instanceof TypeError ? t('messages.network') : t('messages.generic')
 }
+
+// A Supabase call from the browser. Offline it does not throw: it answers with an error without a
+// code whose text is the failed fetch's ("TypeError: Failed to fetch"), worded as no connection.
+export function dbErrorMessage(t: TFn, error: { code?: string | null; message: string; details?: string | null }): string {
+  if (!error.code && /^(TypeError|FetchError|AbortError):/.test(error.message)) return t('messages.network')
+  return lifecycleErrorMessage(error, t)
+}

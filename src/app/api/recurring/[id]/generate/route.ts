@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { apiError, databaseError, isUuid, requireUser } from '@/lib/auth'
 import { generateDueSchedules } from '@/lib/utils/recurring'
-import { today } from '@/lib/utils/document'
+import { formatDate, today } from '@/lib/utils/document'
 import { issueDocument } from '@/lib/pdf/issue'
 import { getT } from '@/lib/i18n/server'
 import { asDbError, lifecycleErrorMessage } from '@/lib/status'
+import { knownApiError } from '@/lib/api-errors'
 import { IssueCheckError, issueProblemMessage } from '@/lib/utils/issue-checks'
 
 export const maxDuration = 60
@@ -24,14 +25,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!schedule) return apiError(404, 'not_found', 'Schedule not found')
   if (!schedule.active) return apiError(409, 'inactive', 'Schedule is paused or ended')
 
-  const { t } = await getT()
+  const { t, lang } = await getT()
   const { generated, errors } = await generateDueSchedules(supabase, today(), {
-    scheduleId: id, force: true, issue: issueDocument, t,
+    scheduleId: id, force: true, issue: issueDocument, t, formatDate: date => formatDate(date, lang),
     describeError: err => {
       if (err instanceof IssueCheckError) return err.problems.map(p => issueProblemMessage(p, t)).join(' ')
       console.error('[recurring/generate] issue failed:', err)
       return lifecycleErrorMessage(asDbError(err), t)
     },
+    describeDriveError: driveError => knownApiError(t, driveError) ?? t('messages.api.google_failed'),
   })
   if (!generated.length) {
     // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.
@@ -42,6 +44,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     }
     return NextResponse.json({ documentId: null, generated: 0 })
   }
+  // The warning is worded; each error's raw cause (`detail`) is only logged.
+  if (errors.length) console.error('[recurring/generate] generated with problems:', errors)
   const newest = generated[generated.length - 1]
   return NextResponse.json({
     documentId: newest.documentId,

@@ -11,6 +11,7 @@ import { Select } from '@/components/ui/select'
 import { formatMoney } from '@/lib/utils/document'
 import { catalogueName, cataloguePrice, type RateMap } from '@/lib/utils/catalogue'
 import { useT } from '@/lib/i18n/client'
+import { dbErrorMessage } from '@/lib/api-errors'
 import type { DictKey } from '@/lib/i18n'
 import type { CatalogueItem, Language, Unit, VatRate } from '@/types'
 import { AutoTextarea } from './AutoTextarea'
@@ -88,7 +89,11 @@ export function CatalogueField({ value, language, items, rates, invalid, classNa
       active: true,
     }
     const { data, error } = await createClient().from('catalogue_items').insert(payload).select().single()
-    if (error) { toast.error(error.message); return }
+    if (error) {
+      console.error('[editor] catalogue item not created:', error.code, error.message)
+      toast.error(dbErrorMessage(t, error))
+      return
+    }
     onItemCreated(data)
     pick(data)
     setAdding(false)

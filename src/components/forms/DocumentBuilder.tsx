@@ -25,7 +25,6 @@ import { preparePdfFonts } from '@/components/pdf/fonts'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { EINVOICE_ERROR_CODES } from '@/lib/einvoice/common'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
-import { numberingErrorMessage } from '@/lib/utils/numbering'
 import { issueProblems, missingIssuerFields, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import type { Client, CatalogueItem, DocumentType, IssueProblem, Language, TaxTreatment } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
@@ -259,7 +258,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       return { blob, number: docData.number }
     } catch (err) {
       console.error('PDF generation failed:', err)
-      toast.error(t('builder.pdfFailed', { error: err instanceof Error ? err.message : String(err) }))
+      toast.error(t('messages.api.pdf_failed'))
       return null
     }
   }
@@ -288,10 +287,17 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
         try {
           id = await editor.persist(f, 'issue')
         } catch (e) {
-          toast.error(errorMessage(e, t('common.unknownError')))
+          toast.error(errorMessage(e, t))
           return null
         }
-        const res = await fetch(`/api/documents/${id}/issue`, { method: 'POST' })
+        let res: Response
+        try {
+          res = await fetch(`/api/documents/${id}/issue`, { method: 'POST' })
+        } catch (e) {
+          console.error('[editor] issue request failed:', e)
+          toast.error(requestErrorMessage(t, e))
+          return null
+        }
         const data = await res.json().catch(() => ({}))
         if (res.status === 422 && Array.isArray(data.problems)) {
           setServerProblems({ key: savedKeyRef.current, problems: data.problems as IssueProblem[] })
@@ -300,7 +306,8 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
           return null
         }
         if (!res.ok) {
-          toast.error(numberingErrorMessage({ code: data.code, message: typeof data.error === 'string' && data.error ? data.error : res.statusText, details: data.details }, t))
+          console.error('[editor] issue refused:', res.status, data.code, data.error)
+          toast.error(apiErrorMessage(t, data, t('messages.api.issue_failed')))
           return null
         }
         const result = data as IssueResponse
@@ -318,13 +325,23 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     if (!doc?.number) return
     const { id } = doc
     setSaving(true)
+    // Resolves with the worded reason when the server refused.
     void serialized(async () => {
       const res = await fetch(`/api/documents/${id}/snapshot`, { method: 'POST' })
+      if (res.ok) return null
       const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(archiveErrorMessage(t, data, res.statusText))
+      console.error('[editor] archive copy failed:', res.status, data.code, data.error)
+      return archiveErrorMessage(t, data, t('messages.generic'))
     })
-      .then(() => { toast.success(t('builder.issuedArchived')); router.refresh() })
-      .catch(e => toast.error(t('builder.snapshotFailed', { error: errorMessage(e, t('common.unknownError')) })))
+      .then(problem => {
+        if (problem) { toast.error(t('builder.snapshotFailed', { error: problem })); return }
+        toast.success(t('builder.issuedArchived'))
+        router.refresh()
+      })
+      .catch(e => {
+        console.error('[editor] archive copy failed:', e)
+        toast.error(t('builder.snapshotFailed', { error: requestErrorMessage(t, e) }))
+      })
       .finally(() => setSaving(false))
   }
 
@@ -333,7 +350,9 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     try {
       return await fetchIssuedPdf(issued.id, t)
     } catch (e) {
-      toast.error(t('archive.pdfFailed', { error: errorMessage(e, t('common.unknownError')) }))
+      // fetchIssuedPdf words what the server answered; a request that failed is worded here.
+      console.error('[editor] issued PDF not loaded:', e)
+      toast.error(t('archive.pdfFailed', { error: e instanceof Error && !(e instanceof TypeError) ? e.message : requestErrorMessage(t, e) }))
       return null
     }
   }

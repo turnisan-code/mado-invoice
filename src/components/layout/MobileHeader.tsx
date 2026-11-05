@@ -12,15 +12,17 @@ import { createClient } from '@/lib/supabase/client'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n/client'
+import { rememberUiLang } from '@/app/auth/ui-lang'
 
 export default function MobileHeader() {
   const [moreOpen, setMoreOpen] = useState(false)
   const pathname = usePathname()
   const { resolvedTheme, setTheme } = useTheme()
-  const { t } = useT()
+  const { t, lang } = useT()
 
   async function signOut() {
     setMoreOpen(false)
+    rememberUiLang(lang)
     await createClient().auth.signOut()
     window.location.assign('/login')
   }

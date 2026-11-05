@@ -2,14 +2,22 @@
 
 import { useState } from 'react'
 import { Check, Copy } from 'lucide-react'
+import { toast } from 'sonner'
 
-export default function CopyButton({ value, label, copiedLabel }: { value: string; label: string; copiedLabel: string }) {
+// The labels come from the page, in the document's language.
+export default function CopyButton({ value, label, copiedLabel, failedLabel }: { value: string; label: string; copiedLabel: string; failedLabel: string }) {
   const [copied, setCopied] = useState(false)
 
-  async function copy() {
+  // Without clipboard access (plain http, a refused permission) the value shown next to the
+  // button is selected for copying by hand, and the hint says so.
+  async function copy(event: React.MouseEvent<HTMLButtonElement>) {
+    const shown = event.currentTarget.previousElementSibling
     try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable')
       await navigator.clipboard.writeText(value)
     } catch {
+      if (shown) window.getSelection()?.selectAllChildren(shown)
+      toast.error(failedLabel)
       return
     }
     setCopied(true)
