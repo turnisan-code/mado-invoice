@@ -111,7 +111,7 @@ function codedError(e: CodedError, t: TFn): ToolError {
       case 'MI031': return { code, message: t('projects.invoice.nothing') }
       case 'MI032': return { code, message: t('projects.invoice.changed') }
       case 'MI033': return { code, message: t('projects.form.deleteBilled') }
-      // The template of a schedule that issues automatically (the tools name the schedule).
+      // The template of a recurring schedule (the tools name the schedule).
       case 'MI045': return { code, message: lifecycleErrorMessage({ code, message, details }, t), details: { ...(details ? { schedule_id: details } : {}), recurring_url: appUrl('/recurring') } }
       default: return { code, message: lifecycleErrorMessage({ code, message, details }, t), ...(details ? { details: { detail: details } } : {}) }
     }

@@ -1,7 +1,7 @@
 // Reversible writes (scope mado:write): drafts, clients, payments, projects and time, in the order
 // tools/list shows them. Drafts only: every document edit refuses a document that has a number or
 // is not a draft; issued documents are corrected with a credit note or a Storno. The template of a
-// recurring schedule that issues automatically is never edited here (MI045, src/lib/mcp/recurring.ts).
+// recurring schedule is never edited here (MI045, src/lib/mcp/recurring.ts).
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { initialForm, linesFromItems, type FormState } from '@/components/forms/builder/model'
@@ -34,7 +34,7 @@ import {
   MAX_AMOUNT, MAX_LINES, newLines, replaceLines, type LineInput,
 } from '../draft-form'
 import { McpToolError } from '../errors'
-import { issueSchedulesOfClient, refuseIssueTemplate, type IssueSchedule } from '../recurring'
+import { issueSchedulesOfClient, refuseScheduleTemplate, type TemplateSchedule } from '../recurring'
 import { defineTool, type AnyToolDef, type ToolContext } from '../types'
 
 const WRITE = { readOnlyHint: false, openWorldHint: false } as const
@@ -118,16 +118,18 @@ const suggestion = (v: ClientValues) => suggestTaxTreatment(v.country, isValidVa
 
 // clients.mcp_recipients (20261105_mcp_drafts.sql): an address a Claude session writes onto a
 // client is marked until the owner saves the client in Mado; an email naming it is approved in
-// Mado whatever the confirmation policy says, and the automatic reminders leave it out.
-const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado, and automatic reminders skip it (a client whose email Claude wrote gets none; a CC Claude wrote is left out; until then they also skip any address on that client that is not plain ASCII).'
+// Mado whatever the confirmation policy says.
+const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado.'
 
-// clients.mcp_written_at (20261105_mcp_drafts.sql): a client a Claude session changed gets no
-// invoice numbered automatically until the owner saves it in Mado (src/lib/utils/recurring.ts).
-const AUTO_ISSUE_NOTE = 'Until the owner saves the client in Mado, a recurring schedule that issues invoices automatically for this client creates them as drafts instead: an invoice numbered without approval never carries client data Claude wrote.'
+// clients.mcp_written_at (20261105_mcp_drafts.sql): nothing goes out unattended for a client a
+// Claude session created or changed until the owner saves it in Mado: the reminder cron skips its
+// invoices (src/app/api/cron/reminders/route.ts), and a schedule that issues automatically creates
+// its invoices as drafts (src/lib/utils/recurring.ts).
+const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, and a recurring schedule that issues invoices automatically for it creates them as drafts instead, so no reminder or invoice numbered without approval carries client data Claude wrote (name, company, address, terms).'
 
 // The schedules that issue automatically for a client Claude has just changed: they now create
 // drafts. Only for the reply; a failed lookup leaves the note out.
-async function heldSchedules(supabase: SupabaseClient, client: Client): Promise<IssueSchedule[]> {
+async function heldSchedules(supabase: SupabaseClient, client: Client): Promise<TemplateSchedule[]> {
   if (!client.mcp_written_at) return []
   try {
     return await issueSchedulesOfClient(supabase, client.id)
@@ -150,18 +152,24 @@ async function duplicatesOf(supabase: SupabaseClient, email: string | null, uid:
   return found.map(d => ({ id: d.client.id, client: clientWithNumber(d.client), reasons: d.reasons }))
 }
 
-function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}, written: string[] = [], held: IssueSchedule[] = []) {
+function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}, written: string[] = [], held: TemplateSchedule[] = []) {
+  // Set by the database for every write of a Claude session that changes the client.
+  const changed = !!client.mcp_written_at
+  const schedules = held.length
+    ? `, and ${held.length === 1 ? 'the schedule' : 'the schedules'} ${held.map(h => `"${h.name}"`).join(', ')}, which ${held.length === 1 ? 'issues' : 'issue'} invoices for it automatically, ${held.length === 1 ? 'creates' : 'create'} drafts instead`
+    : ''
   return {
     summary: [
       `${lead} ${clientWithNumber(client)}.`,
-      written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado and automatic reminders skip these addresses.` : '',
-      held.length ? `Until the owner saves this client in Mado, ${held.length === 1 ? 'the schedule' : 'the schedules'} ${held.map(h => `"${h.name}"`).join(', ')}, which ${held.length === 1 ? 'issues' : 'issue'} invoices for it automatically, ${held.length === 1 ? 'creates' : 'create'} drafts instead; tell the owner.` : '',
+      written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado.` : '',
+      changed ? `Until the owner saves this client in Mado, automatic reminders skip its invoices${schedules}; tell the owner.` : '',
     ].filter(Boolean).join(' '),
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
       cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
       language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
       ...(written.length ? { approved_in_mado: written } : {}),
+      ...(changed ? { reminders_held: true } : {}),
       ...(held.length ? { auto_issue_held: held.map(h => ({ schedule_id: h.id, name: h.name, app_url: appUrl('/recurring') })) } : {}),
     },
   }
@@ -170,7 +178,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
 const createClient = defineTool({
   name: 'create_client',
   title: 'Create client',
-  description: `Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client). ${RECIPIENTS_NOTE} ${AUTO_ISSUE_NOTE}`,
+  description: `Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client). ${RECIPIENTS_NOTE} ${UNATTENDED_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ ...clientFields, country: clientFields.country.unwrap(), allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: false, idempotentHint: false },
@@ -193,7 +201,7 @@ const createClient = defineTool({
 const updateClient = defineTool({
   name: 'update_client',
   title: 'Update client',
-  description: `Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. A new email or CC list applies to every later email to the client, from Mado too. An email address or VAT ID another client has is refused unless allow_duplicate is true. ${RECIPIENTS_NOTE} ${AUTO_ISSUE_NOTE}`,
+  description: `Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. A new email or CC list applies to every later email to the client, from Mado too. An email address or VAT ID another client has is refused unless allow_duplicate is true. ${RECIPIENTS_NOTE} ${UNATTENDED_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ id, patch: clientPatch, allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -257,7 +265,7 @@ const createDocument = defineTool({
 const updateDocument = defineTool({
   name: 'update_document',
   title: 'Update draft',
-  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited. If the owner has the draft open in Mado's editor, its next autosave writes the editor's version back; ask them to close it first. The template of a recurring schedule that issues invoices automatically (get_document shows recurring_template) is refused: ask the owner to edit it in Mado.",
+  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited. If the owner has the draft open in Mado's editor, its next autosave writes the editor's version back; ask them to close it first. The template of a recurring schedule (get_document shows recurring_template), whatever its mode, is refused: ask the owner to edit it in Mado.",
   scope: 'mado:write',
   inputSchema: z.object({
     id,
@@ -278,7 +286,7 @@ const updateDocument = defineTool({
     if (error) throw error
     if (!doc) throw notFound()
     if (doc.number || doc.status !== 'draft') throw new McpToolError('draft_only')
-    await refuseIssueTemplate(ctx.supabase, doc.id)
+    await refuseScheduleTemplate(ctx.supabase, doc.id)
     const header = args.header ?? {}
     if (header.invoice_kind && doc.type !== 'invoice') throw invalid('Only invoices have a kind.')
     const ids = [...new Set([doc.client_id as string, header.client_id].filter((v): v is string => !!v))]
@@ -396,7 +404,7 @@ const setQuoteStatus = defineTool({
 const linkDeposit = defineTool({
   name: 'link_deposit',
   title: 'Link deposit',
-  description: "Deduct an issued advance or partial invoice of the same client on a final-invoice DRAFT (linked: true; the draft becomes a final invoice), or stop deducting it (linked: false). The draft's deduction lines are rewritten. A draft that is the template of a recurring schedule issuing invoices automatically is refused.",
+  description: "Deduct an issued advance or partial invoice of the same client on a final-invoice DRAFT (linked: true; the draft becomes a final invoice), or stop deducting it (linked: false). The draft's deduction lines are rewritten. A draft that is the template of a recurring schedule is refused.",
   scope: 'mado:write',
   inputSchema: z.object({ final_invoice_id: id, invoice_id: id, linked: z.boolean() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -408,7 +416,7 @@ const linkDeposit = defineTool({
     if (!final || !deposit) throw notFound()
     if (final.type !== 'invoice') throw invalid(ctx.t('deposits.errors.invalidLink'))
     if (final.number || final.status !== 'draft') throw new McpToolError('draft_only')
-    await refuseIssueTemplate(ctx.supabase, final.id)
+    await refuseScheduleTemplate(ctx.supabase, final.id)
     if (args.linked && (deposit.type !== 'invoice' || !deposit.number || deposit.status === 'cancelled' || !['advance', 'partial'].includes(deposit.invoice_kind) || deposit.client_id !== final.client_id)) {
       throw invalid(ctx.t('deposits.errors.invalidLink'))
     }

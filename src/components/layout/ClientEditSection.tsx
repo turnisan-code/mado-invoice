@@ -16,8 +16,22 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
   const [editing, setEditing] = useState(false)
   const { t } = useT()
 
+  // A client a Claude session created or changed (clients.mcp_written_at, 20261105_mcp_drafts.sql):
+  // the reminder cron skips its invoices and schedules that issue automatically create drafts for
+  // it until the owner saves it here (the client form clears the mark).
+  const claudeNotice = client.mcp_written_at ? (
+    <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+      {t('clients.changedByClaude')}
+    </p>
+  ) : null
+
   if (editing) {
-    return <ClientForm client={client} defaults={defaults} countries={countries} onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
+    return (
+      <>
+        {claudeNotice}
+        <ClientForm client={client} defaults={defaults} countries={countries} onSaved={() => setEditing(false)} onCancel={() => setEditing(false)} />
+      </>
+    )
   }
 
   const ownSkonto = client.skonto_percent != null || client.skonto_days != null
@@ -49,6 +63,8 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
           <Pencil size={11} /> {t('clients.edit')}
         </button>
       </div>
+
+      {claudeNotice}
 
       {/* Contact */}
       <div className="space-y-2.5">

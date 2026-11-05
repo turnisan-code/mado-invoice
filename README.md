@@ -135,20 +135,24 @@ is set to, these are always approved in Mado:
 
 - an email or reminder to an address that is not on the client record;
 - one to an address Claude wrote onto a client (`create_client`, `update_client`), until the owner
-  saves that client in Mado; the automatic reminders skip such addresses too (a client whose email
-  Claude wrote gets none, a CC Claude wrote is left out; until then they also skip any address on
-  that client that is not plain ASCII, as the app cannot match it against the marks for certain);
+  saves that client in Mado;
 - one to an address on the client record that the owner has never emailed from Mado for that client;
 - on Claude Code connections (and an own OAuth client, which has Claude Code's shorter time limit):
   a Bookamat sync, and issuing more than 3 documents at once;
-- deleting the template of a recurring schedule that issues invoices automatically. Claude cannot
-  change what such a template bills (active or paused schedule alike); the owner edits it in Mado.
+- deleting the template of a recurring schedule. Claude cannot change what the template of any
+  schedule bills (issuing automatically or creating drafts, active or paused alike: a schedule that
+  creates drafts can be switched to issue them without the template being opened again); the
+  owner edits recurring templates in Mado.
 
-A client Claude created or changed (`create_client`, `update_client`) also stays unconfirmed until
-the owner saves it in Mado: meanwhile a recurring schedule that issues invoices automatically
-creates that client's invoices as drafts, with the reason in the cron log (or the warning of
-“Generate now”), since an issued invoice would carry the recipient block and payment terms Claude
-wrote.
+A client Claude created or changed (`create_client`, `update_client`, any field) also stays
+unconfirmed until the owner saves it in Mado, and its page says so: meanwhile the automatic
+reminders skip its invoices, and a recurring schedule that issues invoices automatically creates
+its invoices as drafts, each with the reason in the cron log (or the warning of “Generate now”),
+since a Mahnung or an issued invoice would carry the name, recipient block and payment terms
+Claude wrote. Addresses Claude wrote are skipped by the reminders on their own as well (a client
+whose email Claude wrote gets none, a CC Claude wrote is left out, and until the client is saved
+any address on it that is not plain ASCII, as the app cannot match it against the marks for
+certain).
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
@@ -166,7 +170,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 | Path | Schedule (UTC) | Does |
 |---|---|---|
 | `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts. |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due. |
+| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets none, nor does an address Claude wrote. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 

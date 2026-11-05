@@ -25,6 +25,7 @@ type Skipped = { number: string; reason: string }
 const HELD_BACK = {
   written: 'address written by Claude: save the client in Mado to confirm it',
   unchecked: 'address not plain ASCII on a client with addresses written by Claude: save the client in Mado to confirm it',
+  changed: 'client changed from a Claude connection: save the client in Mado to confirm it',
 } as const
 
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
@@ -111,6 +112,14 @@ export async function GET(req: NextRequest) {
     const held = heldBackAddress(client)(client.email)
     if (held) {
       skipped.push({ number: invoice.number, reason: HELD_BACK[held] })
+      continue
+    }
+    // Nor does a client a Claude session changed (clients.mcp_written_at, until the owner saves it
+    // in Mado): its name, company and address go into the greeting and the Mahnung's address block,
+    // unattended, to the client's real address. A client read without the column (that migration
+    // not applied) has not been changed by Claude.
+    if (client.mcp_written_at) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK.changed })
       continue
     }
     if (invoiceTotals(invoice).balance_due <= 0.005) { skipped.push({ number: invoice.number, reason: 'nothing outstanding' }); continue }

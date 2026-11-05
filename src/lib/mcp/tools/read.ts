@@ -151,7 +151,7 @@ const searchDocuments = defineTool({
 const getDocument = defineTool({
   name: 'get_document',
   title: 'Get document',
-  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. recurring_template: the recurring schedule it is the template of; when that schedule issues invoices automatically (locked: true), Claude cannot change the document and deleting it is approved in Mado: ask the owner to edit it there. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
+  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. recurring_template: the recurring schedule it is the template of (locked: true); whatever the schedule\'s mode, Claude cannot change the document and deleting it is approved in Mado: ask the owner to edit it there. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({ id: uuid('Document id') }),
   hints: READ,
@@ -272,8 +272,8 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
     }
   }
 
-  // The template of a recurring schedule: what the cron copies from it. One that issues
-  // automatically is locked for Claude (MI045, src/lib/mcp/recurring.ts).
+  // The template of a recurring schedule: what the cron copies from it. Locked for Claude whatever
+  // the schedule's mode (MI045, src/lib/mcp/recurring.ts).
   const { data: schedule, error: scheduleErr } = await supabase.from('recurring_schedules')
     .select('id, name, mode, active, next_date, end_date').eq('source_document_id', doc.id).maybeSingle()
   if (scheduleErr) throw scheduleErr
@@ -282,8 +282,8 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
     name: schedule.name as string,
     mode: schedule.mode as string,
     state: schedule.active ? 'active' : schedule.end_date && schedule.next_date > schedule.end_date ? 'ended' : 'paused',
-    locked: schedule.mode === 'issue',
-    ...(schedule.mode === 'issue' ? { note: 'This schedule issues invoices automatically, so Claude cannot change its template, and deleting it is approved in Mado; ask the owner to edit it there.' } : {}),
+    locked: true,
+    note: 'Claude cannot change the template of a recurring schedule, whatever its mode, and deleting it is approved in Mado; ask the owner to edit it there.',
     app_url: appUrl('/recurring'),
   }
 
@@ -684,7 +684,7 @@ async function clientsChangedByClaude(supabase: SupabaseClient, templateIds: rea
 const listRecurring = defineTool({
   name: 'list_recurring',
   title: 'Recurring schedules',
-  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. A schedule that issues invoices automatically (mode 'issue', template_locked: true, active or paused) numbers what it copies from its template without an approval, so Claude cannot change that template and deleting it is approved in Mado: ask the owner to edit it there. held_until_client_saved: true when Claude changed the template's client and the owner has not saved it in Mado since; until then the schedule creates drafts instead of issuing.",
+  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. Claude cannot change the template of any schedule (template_locked: true), whatever its mode, active or paused: a schedule in 'issue' mode numbers what it copies from its template without an approval, and one in 'draft' mode can be switched to 'issue' in Mado. Deleting a template is approved in Mado; ask the owner to edit templates there. held_until_client_saved: true when Claude changed the template's client and the owner has not saved it in Mado since; until then the schedule creates drafts instead of issuing.",
   scope: 'mado:read',
   inputSchema: z.object({}),
   hints: READ,
@@ -696,7 +696,7 @@ const listRecurring = defineTool({
       data: {
         schedules: rows.map(s => ({
           id: s.id, name: s.name, interval: s.interval, anchor_day: s.anchor_day, next_date: s.next_date, end_date: s.end_date,
-          mode: s.mode, in_advance: s.in_advance, template_locked: s.mode === 'issue',
+          mode: s.mode, in_advance: s.in_advance, template_locked: true,
           ...(s.mode === 'issue' ? { held_until_client_saved: held.has(s.source_document_id) } : {}),
           state: s.active ? 'active' : s.end_date && s.next_date > s.end_date ? 'ended' : 'paused',
           last_generated_at: s.last_generated_at,

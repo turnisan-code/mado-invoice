@@ -1,7 +1,8 @@
 // Permanent deletes: a draft (with its lines, payments, history, reminders and a recurring
 // schedule it is the template of), a client without documents or projects, a project without
-// billed entries (with its unbilled ones). The template of a schedule that issues automatically
-// is deleted only with the owner's approval in Mado: a Claude session cannot delete it (MI045).
+// billed entries (with its unbilled ones). The template of a recurring schedule, whatever its
+// mode, is deleted only with the owner's approval in Mado: a Claude session cannot delete it
+// (MI045).
 import { z } from 'zod'
 import { deleteClient, deleteDraft, deleteProject } from '@/lib/services/lifecycle'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -10,7 +11,7 @@ import type { DocumentType } from '@/types'
 import { clientUrl, documentUrl, projectUrl } from '../config'
 import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
-import { issueSchedules } from '../recurring'
+import { templateSchedules } from '../recurring'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, ITEMS_STATE_EMBED, itemsState, notice } from './common'
 import { clip, entries, money, word, type Worded } from './words'
@@ -48,9 +49,9 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
       expenses: await idsWhere(ctx, 'project_expenses', { invoiced_document_id: id }),
       deposits: await idsWhere(ctx, 'documents', { final_invoice_id: id }),
     }
-    // A schedule that issues automatically numbers what it copies from this draft: only the owner
+    // The template of a recurring schedule (MI045, src/lib/mcp/recurring.ts): only the owner
     // deletes it, in Mado.
-    const issueTemplate = (await issueSchedules(ctx.supabase, [id])).map(s => s.id)
+    const scheduleTemplate = (await templateSchedules(ctx.supabase, [id])).map(s => s.id)
     const client = clip(clientDisplayName(doc.clients))
     const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
     const notices: Worded[] = [notice('mcp.approve.notices.deleteDraft')]
@@ -66,9 +67,9 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
       state: {
         number: doc.number, status: doc.status, type: doc.type, client_id: doc.client_id, client, currency: doc.currency ?? 'EUR',
         tax_treatment: doc.tax_treatment, discount: { type: doc.discount_type, value: cents(doc.discount_value) },
-        items: itemsState(doc.document_items), gross: cents(gross), cascades, issue_template: issueTemplate,
+        items: itemsState(doc.document_items), gross: cents(gross), cascades, schedule_template: scheduleTemplate,
       },
-      forceApp: issueTemplate.length > 0,
+      forceApp: scheduleTemplate.length > 0,
     }
   }
 

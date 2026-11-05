@@ -1,5 +1,5 @@
 -- Checks the guards of supabase/migrations/20261105_mcp_drafts.sql: a Claude session writes the
--- lines of drafts only (MI044), leaves the template of a schedule that issues automatically as it
+-- lines of drafts only (MI044), leaves the template of a recurring schedule of either mode as it
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
 -- until the owner saves the client there; a client it changed keeps mcp_written_at until then.
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
@@ -144,7 +144,7 @@ begin
     (select count(*) = 1 and bool_and(description = 'Issued line') from public.document_items where document_id = v_issued));
 end $$;
 
--- ─── Claude: templates of schedules that issue automatically ─────────────────
+-- ─── Claude: templates of recurring schedules ────────────────────────────────
 do $$
 declare
   v_tpl    uuid := current_setting('mcp_test.tpl')::uuid;
@@ -186,11 +186,19 @@ begin
   perform public.mcp_drafts_test_ok('claude still records a reminder on an issued template',
     (select reminder_level = 1 and notes = 'Template' from public.documents where id = v_tpl_is));
 
-  update public.documents set notes = 'Edited by Claude' where id = v_tpl_dr;
-  insert into public.document_items (document_id, sort_order, line_type, description) values (v_tpl_dr, 1, 'text', 'Note');
-  perform public.mcp_drafts_test_ok('a draft-mode schedule''s template stays editable',
-    (select notes = 'Edited by Claude' from public.documents where id = v_tpl_dr)
-    and (select count(*) = 2 from public.document_items where document_id = v_tpl_dr));
+  -- A schedule that creates drafts can be switched to issue them in Mado without the template
+  -- being opened again: its template is locked for Claude as well.
+  perform public.mcp_drafts_test_raises('claude cannot change a draft-mode schedule''s template notes (MI045)',
+    format($q$update public.documents set notes = 'Edited by Claude' where id = %L$q$, v_tpl_dr), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot add a line to a draft-mode schedule''s template (MI045)',
+    format($q$insert into public.document_items (document_id, sort_order, line_type, description) values (%L, 1, 'text', 'Note')$q$, v_tpl_dr), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot replace a draft-mode schedule''s template lines (MI045)',
+    format($q$select public.replace_document_items(%L, '[]'::jsonb)$q$, v_tpl_dr), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot delete a draft-mode schedule''s template (MI045)',
+    format($q$delete from public.documents where id = %L$q$, v_tpl_dr), 'MI045');
+  perform public.mcp_drafts_test_ok('the draft-mode schedule''s template is as the owner left it',
+    (select notes = 'Template' from public.documents where id = v_tpl_dr)
+    and (select count(*) = 1 and bool_and(description = 'Retainer') from public.document_items where document_id = v_tpl_dr));
 end $$;
 
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
@@ -282,6 +290,14 @@ begin
   perform public.mcp_drafts_test_ok('browser still edits the template of an issue schedule',
     (select notes = 'Owner edit' from public.documents where id = current_setting('mcp_test.tpl')::uuid)
     and (select count(*) = 2 from public.document_items where document_id = current_setting('mcp_test.tpl')::uuid));
+  update public.documents set notes = 'Owner edit' where id = current_setting('mcp_test.tpl_draft')::uuid;
+  perform public.mcp_drafts_test_ok('browser still edits the template of a draft-mode schedule',
+    (select notes = 'Owner edit' from public.documents where id = current_setting('mcp_test.tpl_draft')::uuid));
+  -- A template delete approved in Mado runs on the owner's session; its schedule goes with it.
+  delete from public.documents where id = current_setting('mcp_test.tpl_draft')::uuid;
+  perform public.mcp_drafts_test_ok('browser still deletes a template, with its schedule',
+    not exists (select 1 from public.documents where id = current_setting('mcp_test.tpl_draft')::uuid)
+    and not exists (select 1 from public.recurring_schedules where source_document_id = current_setting('mcp_test.tpl_draft')::uuid));
 
   update public.clients set phone = '+43 1 234' where id = v_client returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('browser: another field saved, the marks stay', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));

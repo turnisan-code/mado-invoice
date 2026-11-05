@@ -4,21 +4,24 @@
 --     refused, whichever path writes it (replace_document_items, a final invoice's deduction
 --     lines). replace_document_items locks the document first, so a draft issued while Claude
 --     saves it keeps the lines it was issued with. The browser is not affected.
---   * The template of a recurring schedule that issues automatically (mode 'issue', active or
---     paused): a Claude session neither changes what the recurring cron copies from it nor deletes
---     it (documents_mcp_template_guard, document_items_mcp_guard, MI045), so it cannot prime an
---     invoice the cron numbers without anyone approving it. The browser is not affected.
+--   * The template of a recurring schedule, whatever its mode, active or paused: a Claude session
+--     neither changes what the recurring cron copies from it nor deletes it
+--     (documents_mcp_template_guard, document_items_mcp_guard, MI045), so it cannot prime an
+--     invoice the cron numbers without anyone approving it, also not through a schedule that
+--     creates drafts and is switched to issue them later. The browser is not affected.
 --   * clients.mcp_recipients: the addresses a Claude session put on a client's email or CC list,
 --     until the owner saves that client in Mado. They never count as on the client record: an
 --     action whose arguments name one of them is approved in Mado whatever the policy says
 --     (mcp_actions_recipients), so Claude cannot write an address onto a client and then send
 --     there with only the chat prompt as the gate. The reminder cron skips them too.
 --   * clients.mcp_written_at: when a Claude session last changed the client, until the owner saves
---     it in Mado. Meanwhile a schedule that issues automatically creates the client's invoices as
---     drafts (src/lib/utils/recurring.ts): issuing would number what Claude wrote there (the
---     recipient block, the payment terms) without anyone approving it.
+--     it in Mado. Meanwhile the reminder cron skips the client's invoices
+--     (src/app/api/cron/reminders/route.ts) and a schedule that issues automatically creates its
+--     invoices as drafts (src/lib/utils/recurring.ts): a Mahnung or an issued invoice would carry
+--     what Claude wrote there (the name, the recipient block, the payment terms) without anyone
+--     approving it.
 -- Error codes: MI044 = only a draft's lines can be changed from a Claude connection, MI045 = the
--- template of a schedule that issues automatically cannot be changed or deleted from one.
+-- template of a recurring schedule cannot be changed or deleted from one.
 -- Mirrored in supabase/schema.sql; supabase/tests/mcp_drafts_guards.sql checks the guards and
 -- rolls back. Idempotent — safe to re-run.
 
@@ -43,10 +46,10 @@ begin
     end if;
     if exists (
       select 1 from public.recurring_schedules r
-      where r.source_document_id in (v_old, v_new) and r.mode = 'issue'
+      where r.source_document_id in (v_old, v_new)
     ) then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
@@ -59,12 +62,14 @@ create trigger document_items_mcp_guard
   before insert or update or delete on public.document_items
   for each row execute function public.document_items_mcp_guard();
 
--- ─── Templates of schedules that issue automatically ─────────────────────────
+-- ─── Templates of recurring schedules ────────────────────────────────────────
 -- What the recurring cron copies into every period's invoice (insertPeriodInvoice in
 -- src/lib/utils/recurring.ts: the client, language, tax treatment, notes, discount, Skonto and
--- the lines) stays as the owner left it while a schedule in 'issue' mode, active or paused, uses
--- the document as its template; nor can a Claude session delete such a template. Paying,
--- reminding, issuing, cancelling or a Storno of the template change none of it and stay possible.
+-- the lines) stays as the owner left it while a schedule of either mode, active or paused, uses
+-- the document as its template: one that creates drafts can be switched to issue them in Mado
+-- without the template being opened again. Nor can a Claude session delete such a template.
+-- Paying, reminding, issuing, cancelling or a Storno of the template change none of it and stay
+-- possible.
 -- The client record the template names (its terms give the due date, its address the recipient
 -- block) stays writable; the cron leaves the invoice a draft while clients.mcp_written_at is set.
 create or replace function public.documents_mcp_template_guard()
@@ -74,16 +79,16 @@ set search_path = ''
 as $$
 begin
   if public.is_mcp_session() and exists (
-    select 1 from public.recurring_schedules r where r.source_document_id = old.id and r.mode = 'issue'
+    select 1 from public.recurring_schedules r where r.source_document_id = old.id
   ) then
     if tg_op = 'DELETE' then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
     if (new.client_id, new.language, new.tax_treatment, new.notes, new.discount_type, new.discount_value, new.skonto_percent, new.skonto_days)
        is distinct from (old.client_id, old.language, old.tax_treatment, old.notes, old.discount_type, old.discount_value, old.skonto_percent, old.skonto_days) then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;

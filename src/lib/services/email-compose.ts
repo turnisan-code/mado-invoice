@@ -91,12 +91,6 @@ export function heldBackAddress(client: { mcp_recipients?: readonly string[] | n
   }
 }
 
-// Whether an address value counts as written by Claude for unattended mail (see heldBackAddress).
-export function claudeWrittenAddresses(client: { mcp_recipients?: readonly string[] | null } | null | undefined): (value: string | null | undefined) => boolean {
-  const held = heldBackAddress(client)
-  return value => held(value) !== null
-}
-
 // The client's CC addresses that may get unattended mail (the reminder cron): the valid ones, less
 // those heldBackAddress holds back, and how many were held back. A printable-ASCII entry is
 // checked address by address (each is one part of it as the database split it); any other entry

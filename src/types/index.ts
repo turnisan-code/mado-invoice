@@ -185,8 +185,9 @@ export interface Client {
   // Addresses a Claude session put on email or cc_emails, kept by the database until the owner
   // saves the client in Mado (20261105_mcp_drafts.sql); absent before that migration.
   mcp_recipients?: string[]
-  // When a Claude session last changed the client, until the owner saves it in Mado; a schedule
-  // that issues automatically creates drafts for it meanwhile. Absent before that migration.
+  // When a Claude session last changed the client, until the owner saves it in Mado; meanwhile the
+  // reminder cron skips its invoices and a schedule that issues automatically creates drafts for
+  // it, and the client page says so. Absent before that migration.
   mcp_written_at?: string | null
   // E-invoicing: the preferred format, the client's Peppol address (empty = derived from its UID),
   // the buyer reference prefilled on its e-invoices and the supplier number it assigned to the studio.

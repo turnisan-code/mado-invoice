@@ -193,8 +193,9 @@ create table clients (
   -- cc_emails, until the owner saves the client in Mado; an email to one of them is approved in
   -- Mado (clients_mcp_recipients, mcp_actions_recipients).
   mcp_recipients  text[] not null default '{}',
-  -- When a Claude session last changed the client, until the owner saves it in Mado; a recurring
-  -- schedule that issues automatically creates drafts for it meanwhile (src/lib/utils/recurring.ts).
+  -- When a Claude session last changed the client, until the owner saves it in Mado; meanwhile the
+  -- reminder cron skips its invoices and a recurring schedule that issues automatically creates
+  -- drafts for it (src/lib/utils/recurring.ts).
   mcp_written_at  timestamptz
 );
 
@@ -2124,12 +2125,13 @@ revoke execute on function public.mcp_calls_prune() from public, anon, authentic
 -- 20261105_mcp_drafts.sql. A Claude session writes the lines of drafts only (MI044), whichever
 -- path writes them; replace_document_items locks the document first, so a draft issued while
 -- Claude saves it keeps the lines it was issued with. It neither changes what the recurring cron
--- copies from the template of a schedule in 'issue' mode (active or paused) nor deletes such a
--- template (MI045). Addresses a Claude session put on a client (clients.mcp_recipients) never
--- count as on the client record until the owner saves the client in Mado: an action whose
+-- copies from the template of a recurring schedule (either mode, active or paused) nor deletes
+-- such a template (MI045). Addresses a Claude session put on a client (clients.mcp_recipients)
+-- never count as on the client record until the owner saves the client in Mado: an action whose
 -- arguments name one is approved in Mado whatever the policy says, and the reminder cron skips them.
--- A client a Claude session changed (clients.mcp_written_at) gets drafts, not issued invoices, from
--- a schedule that issues automatically until the owner saves it in Mado.
+-- A client a Claude session changed (clients.mcp_written_at) gets no automatic reminders, and
+-- drafts, not issued invoices, from a schedule that issues automatically, until the owner saves it
+-- in Mado.
 create or replace function public.document_items_mcp_guard()
 returns trigger
 language plpgsql security definer
@@ -2150,10 +2152,10 @@ begin
     end if;
     if exists (
       select 1 from public.recurring_schedules r
-      where r.source_document_id in (v_old, v_new) and r.mode = 'issue'
+      where r.source_document_id in (v_old, v_new)
     ) then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
@@ -2166,12 +2168,14 @@ create trigger document_items_mcp_guard
   before insert or update or delete on public.document_items
   for each row execute function public.document_items_mcp_guard();
 
--- ─── Templates of schedules that issue automatically ─────────────────────────
+-- ─── Templates of recurring schedules ────────────────────────────────────────
 -- What the recurring cron copies into every period's invoice (insertPeriodInvoice in
 -- src/lib/utils/recurring.ts: the client, language, tax treatment, notes, discount, Skonto and
--- the lines) stays as the owner left it while a schedule in 'issue' mode, active or paused, uses
--- the document as its template; nor can a Claude session delete such a template. Paying,
--- reminding, issuing, cancelling or a Storno of the template change none of it and stay possible.
+-- the lines) stays as the owner left it while a schedule of either mode, active or paused, uses
+-- the document as its template: one that creates drafts can be switched to issue them in Mado
+-- without the template being opened again. Nor can a Claude session delete such a template.
+-- Paying, reminding, issuing, cancelling or a Storno of the template change none of it and stay
+-- possible.
 -- The client record the template names (its terms give the due date, its address the recipient
 -- block) stays writable; the cron leaves the invoice a draft while clients.mcp_written_at is set.
 create or replace function public.documents_mcp_template_guard()
@@ -2181,16 +2185,16 @@ set search_path = ''
 as $$
 begin
   if public.is_mcp_session() and exists (
-    select 1 from public.recurring_schedules r where r.source_document_id = old.id and r.mode = 'issue'
+    select 1 from public.recurring_schedules r where r.source_document_id = old.id
   ) then
     if tg_op = 'DELETE' then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
     if (new.client_id, new.language, new.tax_treatment, new.notes, new.discount_type, new.discount_value, new.skonto_percent, new.skonto_days)
        is distinct from (old.client_id, old.language, old.tax_treatment, old.notes, old.discount_type, old.discount_value, old.skonto_percent, old.skonto_days) then
       raise exception using errcode = 'MI045',
-        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+        message = 'The template of a recurring schedule cannot be changed or deleted from a Claude connection.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
