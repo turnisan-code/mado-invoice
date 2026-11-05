@@ -1,120 +1,137 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
-import { formatMoney, formatDate, orderItems, paymentTermsSentence } from '@/lib/utils/document'
+import { clampPercent, formatDate, lineAmount, orderItems, paymentTermsSentence, sectionSummary } from '@/lib/utils/document'
+import { clientDisplayName } from '@/lib/utils/clients'
+import { countryName } from '@/lib/utils/country'
+import {
+  docNumberLabel, docTitle, documentKind, documentT, formatPercent, formatQuantity, formatSignedMoney,
+  issuerBlocks, recipientLabel, servicePeriod, unitLabel,
+} from '@/lib/document-labels'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
-import { countryName } from '@/lib/utils/country'
 import type { DocReference } from '@/lib/utils/document-reference'
+import { PDF_FONT_FAMILY, preparePdfFonts, registerPdfFonts } from './fonts'
+
+const inBrowser = typeof window !== 'undefined'
+if (inBrowser) registerPdfFonts('/fonts')
+
+const PAGE_X = 52
+// The footer is fixed to every page, so the body's bottom padding is derived from its height:
+// border gap + title + the longest column, each line at FOOTER_LINE, plus air above it.
+const FOOTER_BOTTOM = 26
+const FOOTER_PAD_TOP = 8
+const FOOTER_FONT = 7.5
+const FOOTER_LINE = FOOTER_FONT * 1.4
+const FOOTER_TITLE_GAP = 2
+const FOOTER_AIR = 18
+// A long bank name or street takes a second line (then an ellipsis). A column is about 127pt on
+// invoices, which holds a little over 30 characters; counting from 30 errs towards more room.
+const FOOTER_MAX_LINES = 2
+const FOOTER_LINE_CHARS = 30
+
+function bodyPaddingBottom(footerLines: number) {
+  return FOOTER_BOTTOM + FOOTER_PAD_TOP + FOOTER_LINE + FOOTER_TITLE_GAP + footerLines * FOOTER_LINE + FOOTER_AIR
+}
+
+// Footer entries wrap at spaces and are never hyphenated: an inserted hyphen would change an
+// e-mail address or IBAN. A long entry without spaces (e-mail, web address) breaks after @ or /
+// or before a dot instead.
+function footerEntry(line: string): string[] {
+  if (line.length <= FOOTER_LINE_CHARS || /\s/.test(line)) return [line]
+  const head = line.slice(0, FOOTER_LINE_CHARS)
+  const cut = Math.max(head.lastIndexOf('@') + 1, head.lastIndexOf('/') + 1, head.lastIndexOf('.'))
+  return cut > 0 ? [line.slice(0, cut), line.slice(cut)] : [line]
+}
+
+function footerLineCount(lines: string[]) {
+  return lines.flatMap(footerEntry).reduce((sum, line) => sum + Math.min(FOOTER_MAX_LINES, Math.ceil(line.length / FOOTER_LINE_CHARS)), 0)
+}
+
+const noHyphenation = (word: string) => [word]
+
+// An item row moves to the next page as a whole when it fits on one; a row taller than a page has
+// to wrap, or react-pdf draws it past the page bottom. A page holds about 50 lines, the narrowest
+// description column about 45 characters of ordinary text per line, and 20 estimated lines still
+// fit when wide letters make the real count twice that.
+const KEEP_ROW_LINES = 20
+const ROW_LINE_CHARS = 45
+
+function keepRowTogether(description: string) {
+  const lines = description.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / ROW_LINE_CHARS)), 0)
+  return lines <= KEEP_ROW_LINES
+}
+
+const GREY = '#6b6b6b'
+const LIGHT = '#9b9b9b'
+const RULE = '#d4d4d4'
 
 const s = StyleSheet.create({
-  page: { fontFamily: 'Helvetica', fontSize: 9, color: '#1a1a1a', paddingHorizontal: 52, paddingTop: 48, paddingBottom: 100, backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column' },
+  page: { fontFamily: PDF_FONT_FAMILY, fontSize: 9, color: '#1a1a1a', paddingHorizontal: PAGE_X, paddingTop: 48, backgroundColor: '#ffffff' },
+  runningHeader: { position: 'absolute', top: 24, left: PAGE_X, right: PAGE_X, fontSize: 7.5, color: LIGHT },
+  draftStamp: { position: 'absolute', top: 340, left: 0, right: 0, textAlign: 'center', fontSize: 96, fontWeight: 'bold', color: '#efefef', transform: 'rotate(-30deg)' },
 
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 40 },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
   logo: { width: 130, height: 52, objectFit: 'contain', objectPositionX: 0 },
-  logoFallback: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: '#1a1a1a', maxWidth: 160 },
-  docTitle: { fontSize: 22, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
-  metaLine: { fontSize: 9, color: '#4b4b4b', marginBottom: 2 },
-  qrBelowTotals: { width: 72, height: 72, marginTop: 14, alignSelf: 'flex-end' },
+  logoFallback: { fontSize: 18, fontWeight: 'bold', maxWidth: 220 },
+  titleBlock: { maxWidth: 260 },
+  docTitle: { fontSize: 22, fontWeight: 'bold', lineHeight: 1.2, marginBottom: 6 },
+  metaLine: { fontSize: 9, color: '#4b4b4b' },
 
-  billedSection: { marginBottom: 32 },
-  billedLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
-  billedText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.6 },
+  senderLine: { fontSize: 6.5, color: LIGHT, marginBottom: 6, alignSelf: 'flex-start', borderBottomWidth: 0.5, borderBottomColor: RULE, paddingBottom: 1 },
+  recipientSection: { marginBottom: 28 },
+  recipientLabel: { fontSize: 8, fontWeight: 'bold', marginBottom: 4 },
+  recipientText: { fontSize: 9, color: '#4b4b4b', lineHeight: 1.5 },
 
-  tableHeader: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a1a1a', borderBottomWidth: 1, borderBottomColor: '#1a1a1a', paddingVertical: 6, marginBottom: 0 },
-  tableHeaderText: { fontSize: 8, fontFamily: 'Helvetica-Bold' },
-  tableRow: { flexDirection: 'row', paddingVertical: 7, borderBottomWidth: 0.5, borderBottomColor: '#d4d4d4' },
-  colDesc: { flex: 1 },
-  colDescDate: { fontSize: 7.5, color: '#9b9b9b', marginTop: 2 },
-  colQty: { width: 40, textAlign: 'right' },
-  colRate: { width: 88, textAlign: 'right' },
-  colAmount: { width: 72, textAlign: 'right' },
+  tableHeader: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#1a1a1a', borderBottomWidth: 1, borderBottomColor: '#1a1a1a', paddingVertical: 5 },
+  tableHeaderText: { fontSize: 8, fontWeight: 'bold' },
+  tableRow: { flexDirection: 'row', paddingVertical: 6, borderBottomWidth: 0.5, borderBottomColor: RULE },
+  colDesc: { flex: 1, paddingRight: 8 },
+  colDescSub: { fontSize: 7.5, color: LIGHT, marginTop: 1 },
+  colQty: { width: 64, textAlign: 'right' },
+  colPrice: { width: 76, textAlign: 'right' },
+  colVat: { width: 38, textAlign: 'right' },
+  colAmount: { width: 76, textAlign: 'right' },
 
-  headingRow: { paddingVertical: 8, paddingTop: 12 },
-  headingText: { fontFamily: 'Helvetica-Bold', fontSize: 9.5 },
+  headingRow: { paddingTop: 11, paddingBottom: 5 },
+  headingText: { fontWeight: 'bold', fontSize: 9.5 },
   textRow: { paddingVertical: 4 },
   textRowText: { fontSize: 8.5, color: '#4b4b4b' },
-  separatorRow: { borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginVertical: 6 },
-  subtotalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 5, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginTop: 2 },
-  subtotalLabel: { fontSize: 7.5, color: '#9b9b9b', marginRight: 8, textTransform: 'uppercase' },
-  subtotalValue: { width: 72, textAlign: 'right', fontFamily: 'Helvetica-Bold', fontSize: 8.5 },
+  separatorRow: { borderTopWidth: 0.5, borderTopColor: RULE, marginVertical: 6 },
+  subtotalRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: RULE },
+  subtotalLabel: { fontSize: 7.5, color: LIGHT, marginRight: 8, textTransform: 'uppercase' },
+  subtotalValue: { width: 76, textAlign: 'right', fontWeight: 'bold', fontSize: 8.5 },
+  struck: { color: LIGHT, textDecoration: 'line-through' },
 
-  bottomDivider: { borderTopWidth: 1, borderTopColor: '#1a1a1a', marginTop: 28, marginBottom: 18 },
+  bottomDivider: { borderTopWidth: 1, borderTopColor: '#1a1a1a', marginTop: 24, marginBottom: 14 },
   bottomRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  dueDateLabel: { fontSize: 8, color: '#6b6b6b', marginBottom: 3 },
-  dueDateValue: { fontSize: 9, fontFamily: 'Helvetica-Bold' },
+  dueLabel: { fontSize: 8, color: GREY, marginBottom: 2 },
+  dueValue: { fontSize: 9, fontWeight: 'bold' },
+  qr: { width: 84, height: 84, marginTop: 12 },
+  qrCaption: { fontSize: 7, color: GREY, width: 160, marginTop: 2 },
 
-  totalsBlock: { width: 210 },
-  totalsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  totalsLabel: { color: '#6b6b6b' },
-  totalsDivider: { borderTopWidth: 0.5, borderTopColor: '#d4d4d4', marginVertical: 4 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
-  totalLabel: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  totalValue: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
+  totalsBlock: { width: 230 },
+  totalsRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
+  totalsLabel: { color: GREY },
+  totalsDivider: { borderTopWidth: 0.5, borderTopColor: RULE, marginVertical: 4 },
+  totalText: { fontWeight: 'bold', fontSize: 10 },
 
   paymentTerms: { marginTop: 14, fontSize: 8.5, color: '#4b4b4b' },
-  taxNote: { marginTop: 16, fontSize: 8, color: '#6b6b6b', fontStyle: 'italic' },
-  notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
-  footerNote: { marginTop: 16, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.6 },
+  taxNote: { marginTop: 14, fontSize: 8, color: GREY, fontStyle: 'italic' },
+  notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.5 },
 
-  footer: { position: 'absolute', bottom: 36, left: 52, right: 52, borderTopWidth: 0.5, borderTopColor: '#d4d4d4', paddingTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  footerTitle: { fontSize: 10, fontFamily: 'Helvetica-Bold', marginBottom: 5 },
-  footerText: { fontSize: 8, color: '#4b4b4b', lineHeight: 1.7 },
-  footerPage: { fontSize: 8, color: '#9b9b9b' },
+  footer: { position: 'absolute', bottom: FOOTER_BOTTOM, left: PAGE_X, right: PAGE_X, borderTopWidth: 0.5, borderTopColor: RULE, paddingTop: FOOTER_PAD_TOP, flexDirection: 'row' },
+  footerCol: { flex: 1, paddingRight: 10 },
+  footerTitle: { fontSize: FOOTER_FONT, lineHeight: 1.4, fontWeight: 'bold', marginBottom: FOOTER_TITLE_GAP },
+  footerText: { fontSize: FOOTER_FONT, lineHeight: 1.4, color: '#4b4b4b', maxLines: FOOTER_MAX_LINES, textOverflow: 'ellipsis' },
+  footerPage: { width: 80, fontSize: FOOTER_FONT, color: LIGHT, textAlign: 'right' },
 })
-
-const LABELS: Record<string, Record<'de' | 'en', string>> = {
-  invoice:       { de: 'Rechnung',             en: 'Invoice' },
-  quote:         { de: 'Angebot',              en: 'Quote' },
-  credit_note:   { de: 'Gutschrift',           en: 'Credit Note' },
-  bill_to:       { de: 'Rechnungsempfänger',   en: 'Billed to' },
-  invoice_no:    { de: 'Rechnungsnummer:',     en: 'Invoice No.' },
-  quote_no:      { de: 'Angebotsnummer:',      en: 'Quote No.' },
-  date_label:    { de: 'Datum:',               en: 'Date:' },
-  due_label:     { de: 'Fälligkeitsdatum:',    en: 'Due Date:' },
-  valid_label:   { de: 'Gültig bis:',          en: 'Valid Until:' },
-  service_label: { de: 'Leistungsdatum:',      en: 'Service Date:' },
-  period_label:  { de: 'Leistungszeitraum:',   en: 'Service period:' },
-  credit_note_no:{ de: 'Gutschriftsnummer:',   en: 'Credit Note No.' },
-  storno:        { de: 'Stornorechnung',       en: 'Cancellation Invoice' },
-  storno_no:     { de: 'Storno-Nr.:',          en: 'Cancellation No.' },
-  storno_ref:    { de: 'Storno zu Rechnung',   en: 'Cancels invoice' },
-  dated:         { de: 'vom',                  en: 'dated' },
-  section_sub:   { de: 'Zwischensumme',        en: 'Subtotal' },
-  net:           { de: 'Netto',                en: 'Net' },
-  net_of:        { de: 'davon Netto',          en: 'Net at' },
-  vat:           { de: 'USt.',                 en: 'VAT' },
-  description:   { de: 'Beschreibung',         en: 'Description' },
-  qty:           { de: 'Menge',                en: 'Qty' },
-  rate:          { de: 'Preis',                en: 'Rate' },
-  amount:        { de: 'Betrag',               en: 'Amount' },
-  subtotal:      { de: 'Nettobetrag',          en: 'Sub-Total' },
-  discount:      { de: 'Rabatt',               en: 'Discount' },
-  grand_total:   { de: 'Gesamtbetrag',         en: 'Total' },
-  contact:       { de: 'Kontakt',              en: 'Contact' },
-  payment:       { de: 'Zahlungsinformationen', en: 'Payment Info' },
-  uid:           { de: 'UID-Nr.',              en: 'VAT Reg.' },
-}
-
-function L(key: string, lang: 'de' | 'en'): string {
-  return LABELS[key]?.[lang] ?? key
-}
-
-const UNIT_LABELS: Record<string, Record<'de' | 'en', string>> = {
-  hour:    { de: 'Std.',     en: 'hr' },
-  day:     { de: 'Tag',      en: 'day' },
-  flat:    { de: 'pauschal', en: 'flat' },
-  piece:   { de: 'Stk.',     en: 'pc' },
-  month:   { de: 'Monat',    en: 'month' },
-  session: { de: 'Session',  en: 'session' },
-}
-
-function replaceVars(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
-}
 
 interface DocItem {
   line_type?: LineType
+  sort_order?: number | null
   description: string
   service_date: string | null
+  // Per-line end date; optional because older rows and callers do not carry it.
+  service_date_end?: string | null
   quantity: number | null
   unit: Unit | null
   unit_price: number | null
@@ -151,39 +168,56 @@ interface Props {
   qrCodeDataUri?: string | null
 }
 
-function calcSectionSubtotal(items: DocItem[], upToIdx: number): number {
-  let sum = 0
-  for (let i = upToIdx - 1; i >= 0; i--) {
-    const item = items[i]
-    if ((item.line_type ?? 'item') === 'subtotal') break
-    if ((item.line_type ?? 'item') === 'item' && item.quantity != null && item.unit_price != null) {
-      sum += item.quantity * item.unit_price
-    }
-  }
-  return sum
+function replaceVars(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
 }
 
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
-  const lang = doc.language as 'de' | 'en'
-  const fmt = (n: number) => formatMoney(n, doc.currency)
-  const isStorno = doc.type === 'credit_note' && !!doc.reference
-  const title = isStorno ? L('storno', lang) : L(doc.type, lang)
-  const noLabel = doc.type === 'quote' ? L('quote_no', lang)
-    : isStorno ? L('storno_no', lang)
-    : doc.type === 'credit_note' ? L('credit_note_no', lang)
-    : L('invoice_no', lang)
+  // The builder renders with pdf().toBlob(), which loads the fonts after this runs; the server
+  // awaits preparePdfFonts() in render.ts. A font that fails to load fails the render itself.
+  if (inBrowser) preparePdfFonts().catch(() => {})
+  const lang: Language = doc.language === 'en' ? 'en' : 'de'
+  const t = documentT(lang)
+  const refKind = doc.reference ? (doc.reference.kind ?? 'storno') : null
+  const kind = documentKind(doc.type, refKind === 'storno')
+  const title = docTitle(t, kind)
+  // The builder previews an unnumbered document as 'DRAFT'.
+  const draft = !doc.number || doc.number === 'DRAFT'
+  const number = draft ? t('pdfPortal.draft') : doc.number
+  // Credit notes are stored with positive amounts and print as credits.
+  const sign = doc.type === 'credit_note' ? -1 : 1
+  const money = (n: number) => formatSignedMoney(sign * n, doc.currency)
+  const pct = (n: number) => formatPercent(t, n, lang)
+
+  const items = orderItems(doc.items)
+  const vatApplies = doc.tax_treatment === 'at_vat'
+  const lineRates = new Set(items.filter(i => (i.line_type ?? 'item') === 'item' && i.vat_rate != null).map(i => i.vat_rate))
+  const showVatColumn = vatApplies && lineRates.size > 1
+
+  const issuer = issuerBlocks(settings, t, lang)
+  const bankLines = doc.type === 'invoice' ? issuer.bank : []
+  const footerColumns = [
+    { title: t('pdfPortal.issuer.address'), lines: issuer.address },
+    { title: t('pdfPortal.issuer.contact'), lines: issuer.contact },
+    { title: t('pdfPortal.issuer.bank'), lines: bankLines },
+  ].filter(c => c.lines.length)
+  const paddingBottom = bodyPaddingBottom(Math.max(1, ...footerColumns.map(c => footerLineCount(c.lines))))
+
+  const senderLine = [settings.company_name || settings.owner_name, settings.address_line1, [settings.zip, settings.city].filter(Boolean).join(' ')]
+    .map(v => v?.trim()).filter(Boolean).join(' · ')
+  const docPeriod = servicePeriod(doc.service_date, doc.service_date_end, lang)
+  const dueLabel = doc.type === 'quote' ? t('pdfPortal.validUntil') : doc.type === 'invoice' ? t('pdfPortal.dueDate') : null
 
   const footerVars: Record<string, string> = {
-    invoice_number: doc.number,
-    date: doc.date,
-    due_date: doc.due_date ?? '',
-    client: client.company ?? client.name,
-    subtotal: fmt(doc.totals.subtotal),
-    vat: fmt(doc.totals.total_vat),
-    total: fmt(doc.totals.total),
-    balance_due: fmt(doc.totals.balance_due),
+    invoice_number: number,
+    date: formatDate(doc.date, lang),
+    due_date: doc.due_date ? formatDate(doc.due_date, lang) : '',
+    client: clientDisplayName(client),
+    subtotal: money(doc.totals.subtotal),
+    vat: money(doc.totals.total_vat),
+    total: money(doc.totals.total),
+    balance_due: money(doc.totals.balance_due),
   }
-
   const rawFooter = doc.type === 'quote'
     ? (lang === 'de' ? settings.quote_footer_de : settings.quote_footer_en)
     : doc.type === 'credit_note'
@@ -193,216 +227,210 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
 
   return (
-    <Document>
-      <Page size="A4" style={s.page}>
+    <Document title={`${title} ${number}`} author={settings.company_name || settings.owner_name} language={lang}>
+      <Page size="A4" style={[s.page, { paddingBottom }]}>
+        {draft && <Text fixed style={s.draftStamp}>{t('pdfPortal.draft').toUpperCase()}</Text>}
+        <Text fixed style={s.runningHeader} render={({ pageNumber }) => (pageNumber > 1 ? `${title} ${number}` : '')} />
 
-        {/* Top row */}
         <View style={s.topRow}>
           <View>
             {settings.logo_url
+              // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt
               ? <Image src={settings.logo_url} style={s.logo} />
-              : <Text style={s.logoFallback}>{settings.company_name}</Text>
-            }
+              : <Text style={s.logoFallback}>{settings.company_name || settings.owner_name}</Text>}
           </View>
-          <View>
+          <View style={s.titleBlock}>
             <Text style={s.docTitle}>{title}</Text>
-            <Text style={s.metaLine}>{noLabel} {doc.number}</Text>
-            <Text style={s.metaLine}>{L('date_label', lang)} {formatDate(doc.date, lang)}</Text>
-            {isStorno && !!doc.reference && (
-              <Text style={s.metaLine}>{L('storno_ref', lang)} {doc.reference.number} {L('dated', lang)} {formatDate(doc.reference.date, lang)}</Text>
-            )}
-            {!!doc.service_date && (
+            <Text style={s.metaLine}>{docNumberLabel(t, kind)}: {number}</Text>
+            <Text style={s.metaLine}>{t('pdfPortal.date')}: {formatDate(doc.date, lang)}</Text>
+            {docPeriod && (
               <Text style={s.metaLine}>
-                {doc.service_date_end && doc.service_date_end !== doc.service_date
-                  ? `${L('period_label', lang)} ${formatDate(doc.service_date, lang)} – ${formatDate(doc.service_date_end, lang)}`
-                  : `${L('service_label', lang)} ${formatDate(doc.service_date, lang)}`}
+                {docPeriod.isPeriod ? t('pdfPortal.servicePeriod') : t('pdfPortal.serviceDate')}: {docPeriod.text}
+              </Text>
+            )}
+            {doc.reference && (
+              <Text style={s.metaLine}>
+                {t(refKind === 'storno' ? 'pdfPortal.stornoOf' : 'pdfPortal.correctionOf', { number: doc.reference.number, date: formatDate(doc.reference.date, lang) })}
               </Text>
             )}
           </View>
         </View>
 
-        {/* Billed to */}
-        <View style={s.billedSection}>
-          <Text style={s.billedLabel}>{L('bill_to', lang)}</Text>
-          <Text style={s.billedText}>
-            {client.company ? `${client.company}\n` : ''}{client.name ? `${client.name}\n` : ''}
-            {client.address_line1}{'\n'}
-            {client.address_line2 ? `${client.address_line2}\n` : ''}
-            {client.zip} {client.city}{'\n'}
-            {countryName(client.country, lang)}
-            {client.uid_number ? `\n${L('uid', lang)}: ${client.uid_number}` : ''}
+        <View style={s.recipientSection}>
+          {!!senderLine && <Text style={s.senderLine}>{senderLine}</Text>}
+          <Text style={s.recipientLabel}>{recipientLabel(t, kind)}</Text>
+          <Text style={s.recipientText}>
+            {[
+              client.company,
+              client.name,
+              client.address_line1,
+              client.address_line2,
+              [client.zip, client.city].filter(Boolean).join(' '),
+              countryName(client.country, lang),
+              client.uid_number ? `${t('pdfPortal.issuer.uid')} ${client.uid_number}` : null,
+            ].map(v => v?.trim()).filter(Boolean).join('\n')}
           </Text>
         </View>
 
-        {/* Table header */}
-        <View style={s.tableHeader}>
-          <Text style={[s.tableHeaderText, s.colDesc]}>{L('description', lang)}</Text>
-          <Text style={[s.tableHeaderText, s.colQty]}>{L('qty', lang)}</Text>
-          <Text style={[s.tableHeaderText, s.colRate]}>{L('rate', lang)}</Text>
-          <Text style={[s.tableHeaderText, s.colAmount]}>{L('amount', lang)}</Text>
-        </View>
-
-        {/* Line items */}
-        {orderItems(doc.items).map((item, i) => {
-          const lt = item.line_type ?? 'item'
-
-          if (lt === 'page_break') return <View key={i} break />
-          if (lt === 'separator') return <View key={i} style={s.separatorRow} />
-
-          if (lt === 'heading') {
-            return (
-              <View key={i} style={s.headingRow}>
-                <Text style={s.headingText}>{item.description}</Text>
-              </View>
-            )
-          }
-
-          if (lt === 'text') {
-            return (
-              <View key={i} style={s.textRow}>
-                <Text style={s.textRowText}>{item.description}</Text>
-              </View>
-            )
-          }
-
-          if (lt === 'subtotal') {
-            const gross = calcSectionSubtotal(orderItems(doc.items), i)
-            const discAmt = item.discount_type && item.discount_value && item.discount_value > 0
-              ? item.discount_type === 'percent' ? gross * (item.discount_value / 100) : Math.min(item.discount_value, gross)
-              : 0
-            const net = gross - discAmt
-            return (
-              <View key={i}>
-                <View style={s.subtotalRow}>
-                  <Text style={s.subtotalLabel}>{L('section_sub', lang)}</Text>
-                  <Text style={[s.subtotalValue, discAmt > 0 ? { color: '#9b9b9b', textDecoration: 'line-through' } as never : {}]}>{fmt(gross)}</Text>
-                </View>
-                {discAmt > 0 && (
-                  <>
-                    <View style={s.subtotalRow}>
-                      <Text style={s.subtotalLabel}>
-                        {item.discount_type === 'percent' ? `${L('discount', lang)} (${item.discount_value}%)` : L('discount', lang)}
-                      </Text>
-                      <Text style={s.subtotalValue}>-{fmt(discAmt)}</Text>
-                    </View>
-                    <View style={s.subtotalRow}>
-                      <Text style={[s.subtotalLabel, { fontFamily: 'Helvetica-Bold' }]}>{L('net', lang)}</Text>
-                      <Text style={[s.subtotalValue, { fontFamily: 'Helvetica-Bold' }]}>{fmt(net)}</Text>
-                    </View>
-                  </>
-                )}
-              </View>
-            )
-          }
-
-          if (item.quantity == null || item.unit_price == null || item.unit == null) return false
-          return (
-            <View key={i} style={s.tableRow}>
-              <View style={s.colDesc}>
-                <Text>{item.description}</Text>
-                {!!item.service_date && (
-                  <Text style={s.colDescDate}>{formatDate(item.service_date, lang)}</Text>
-                )}
-              </View>
-              <Text style={s.colQty}>{item.quantity}</Text>
-              <Text style={s.colRate}>{fmt(item.unit_price)}/{UNIT_LABELS[item.unit]?.[lang] ?? item.unit}</Text>
-              <Text style={s.colAmount}>{fmt(item.quantity * item.unit_price)}</Text>
-            </View>
-          )
-        })}
-
-        {/* Divider + due date + totals — wrap={false} keeps this whole block on one page */}
-        <View wrap={false}>
-        <View style={s.bottomDivider} />
-        <View style={s.bottomRow}>
-          <View>
-            {!!doc.due_date && doc.type !== 'credit_note' && (
-              <View>
-                <Text style={s.dueDateLabel}>{doc.type === 'quote' ? L('valid_label', lang) : L('due_label', lang)}</Text>
-                <Text style={s.dueDateValue}>{formatDate(doc.due_date, lang)}</Text>
-              </View>
-            )}
+        <View>
+          <View style={s.tableHeader} fixed>
+            <Text style={[s.tableHeaderText, s.colDesc]}>{t('pdfPortal.columns.description')}</Text>
+            <Text style={[s.tableHeaderText, s.colQty]}>{t('pdfPortal.columns.quantity')}</Text>
+            <Text style={[s.tableHeaderText, s.colPrice]}>{t('pdfPortal.columns.unitPrice')}</Text>
+            {showVatColumn && <Text style={[s.tableHeaderText, s.colVat]}>{t('pdfPortal.columns.vat')}</Text>}
+            <Text style={[s.tableHeaderText, s.colAmount]}>{t('pdfPortal.columns.amount')}</Text>
           </View>
-          <View style={s.totalsBlock}>
-            <View style={s.totalsRow}>
-              <Text style={s.totalsLabel}>{L('subtotal', lang)}</Text>
-              <Text>{fmt(doc.totals.subtotal)}</Text>
-            </View>
-            {doc.totals.discount_amount > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>
-                  {L('discount', lang)}{doc.discount_type === 'percent' && doc.discount_value ? ` (${doc.discount_value}%)` : ''}
-                </Text>
-                <Text>-{fmt(doc.totals.discount_amount)}</Text>
-              </View>
-            )}
-            {/* §11 UStG: with several rates the net amount per rate must be stated, not just the tax */}
-            {doc.tax_treatment === 'at_vat' && doc.totals.vat_groups.map(g => (
-              <View key={g.rate}>
-                {doc.totals.vat_groups.length > 1 && (
-                  <View style={s.totalsRow}>
-                    <Text style={s.totalsLabel}>{L('net_of', lang)} {g.rate}%</Text>
-                    <Text>{fmt(g.base)}</Text>
+
+          {items.map((item, i) => {
+            const lt = item.line_type ?? 'item'
+
+            if (lt === 'page_break') return <View key={i} break />
+            if (lt === 'separator') return <View key={i} style={s.separatorRow} />
+
+            if (lt === 'heading') {
+              return (
+                <View key={i} style={s.headingRow} wrap={false} minPresenceAhead={36}>
+                  <Text style={s.headingText}>{item.description}</Text>
+                </View>
+              )
+            }
+
+            if (lt === 'text') {
+              return (
+                <View key={i} style={s.textRow}>
+                  <Text style={s.textRowText}>{item.description}</Text>
+                </View>
+              )
+            }
+
+            if (lt === 'subtotal') {
+              const sec = sectionSummary(items, i)
+              return (
+                <View key={i} wrap={false}>
+                  <View style={s.subtotalRow}>
+                    <Text style={s.subtotalLabel}>{t('pdfPortal.section.subtotal')}</Text>
+                    <Text style={[s.subtotalValue, ...(sec.discount > 0 ? [s.struck] : [])]}>{money(sec.gross)}</Text>
                   </View>
-                )}
-                <View style={s.totalsRow}>
-                  <Text style={s.totalsLabel}>{L('vat', lang)} {g.rate}%</Text>
-                  <Text>{fmt(g.amount)}</Text>
+                  {sec.discount > 0 && (
+                    <>
+                      <View style={s.subtotalRow}>
+                        <Text style={s.subtotalLabel}>
+                          {sec.percent != null ? t('pdfPortal.section.discountPercent', { percent: pct(sec.percent) }) : t('pdfPortal.section.discount')}
+                        </Text>
+                        <Text style={s.subtotalValue}>{money(-sec.discount)}</Text>
+                      </View>
+                      <View style={s.subtotalRow}>
+                        <Text style={[s.subtotalLabel, { fontWeight: 'bold' }]}>{t('pdfPortal.section.net')}</Text>
+                        <Text style={s.subtotalValue}>{money(sec.net)}</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
-              </View>
-            ))}
-            <View style={s.totalsDivider} />
-            <View style={s.totalRow}>
-              <Text style={s.totalLabel}>{L('grand_total', lang)}</Text>
-              <Text style={s.totalValue}>{fmt(doc.totals.total)}</Text>
-            </View>
-            {doc.totals.total_paid > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>{lang === 'de' ? 'Offen' : 'Balance due'}</Text>
-                <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(doc.totals.balance_due)}</Text>
-              </View>
-            )}
-            {!!qrCodeDataUri && (
-              <Image src={qrCodeDataUri} style={s.qrBelowTotals} />
-            )}
-          </View>
-        </View>
-        {!!paymentTerms && <Text style={s.paymentTerms}>{paymentTerms}</Text>}
+              )
+            }
 
-        </View>{/* end wrap={false} bottom block */}
+            if (item.quantity == null || item.unit_price == null) return null
+            const period = servicePeriod(item.service_date, item.service_date_end, lang)
+            return (
+              <View key={i} style={s.tableRow} wrap={!keepRowTogether(item.description)}>
+                <View style={s.colDesc}>
+                  <Text>{item.description}</Text>
+                  {period && <Text style={s.colDescSub}>{period.text}</Text>}
+                </View>
+                <Text style={s.colQty}>
+                  {formatQuantity(item.quantity, lang)}{item.unit ? ` ${unitLabel(t, item.unit, item.quantity)}` : ''}
+                </Text>
+                <Text style={s.colPrice}>{formatSignedMoney(item.unit_price, doc.currency)}</Text>
+                {showVatColumn && <Text style={s.colVat}>{item.vat_rate != null ? pct(item.vat_rate) : ''}</Text>}
+                <Text style={s.colAmount}>{money(lineAmount(item))}</Text>
+              </View>
+            )
+          })}
+        </View>
+
+        <View wrap={false}>
+          <View style={s.bottomDivider} />
+          <View style={s.bottomRow}>
+            <View>
+              {!!doc.due_date && dueLabel && (
+                <>
+                  <Text style={s.dueLabel}>{dueLabel}</Text>
+                  <Text style={s.dueValue}>{formatDate(doc.due_date, lang)}</Text>
+                </>
+              )}
+              {!!qrCodeDataUri && (
+                <>
+                  {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
+                  <Image src={qrCodeDataUri} style={s.qr} />
+                  <Text style={s.qrCaption}>{t('pdfPortal.payment.qrCaption')}</Text>
+                </>
+              )}
+            </View>
+            <View style={s.totalsBlock}>
+              <View style={s.totalsRow}>
+                <Text style={s.totalsLabel}>{t('pdfPortal.totals.net')}</Text>
+                <Text>{money(doc.totals.subtotal)}</Text>
+              </View>
+              {doc.totals.discount_amount > 0 && (
+                <View style={s.totalsRow}>
+                  <Text style={s.totalsLabel}>
+                    {doc.discount_type === 'percent' && doc.discount_value
+                      ? t('pdfPortal.totals.discountPercent', { percent: pct(clampPercent(doc.discount_value)) })
+                      : t('pdfPortal.totals.discount')}
+                  </Text>
+                  <Text>{money(-doc.totals.discount_amount)}</Text>
+                </View>
+              )}
+              {/* § 11 UStG: the net amount (Entgelt) per rate, then the tax on it */}
+              {vatApplies && doc.totals.vat_groups.map(g => (
+                <View key={g.rate}>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
+                    <Text>{money(g.base)}</Text>
+                  </View>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.vatAtRate', { rate: pct(g.rate) })}</Text>
+                    <Text>{money(g.amount)}</Text>
+                  </View>
+                </View>
+              ))}
+              <View style={s.totalsDivider} />
+              <View style={s.totalsRow}>
+                <Text style={s.totalText}>{doc.type === 'credit_note' ? t('pdfPortal.totals.creditTotal') : t('pdfPortal.totals.total')}</Text>
+                <Text style={s.totalText}>{money(doc.totals.total)}</Text>
+              </View>
+              {doc.type === 'invoice' && doc.totals.total_paid > 0 && (
+                <>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.paid')}</Text>
+                    <Text>{money(-doc.totals.total_paid)}</Text>
+                  </View>
+                  <View style={s.totalsRow}>
+                    <Text style={[s.totalsLabel, { fontWeight: 'bold' }]}>{t('pdfPortal.totals.balanceDue')}</Text>
+                    <Text style={{ fontWeight: 'bold' }}>{money(doc.totals.balance_due)}</Text>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+          {!!paymentTerms && <Text style={s.paymentTerms}>{paymentTerms}</Text>}
+        </View>
 
         {!!doc.tax_note && <Text style={s.taxNote}>{doc.tax_note}</Text>}
         {!!doc.notes && <Text style={s.notes}>{doc.notes}</Text>}
-        {!!footerText && <Text style={s.footerNote}>{footerText}</Text>}
+        {!!footerText && <Text style={s.notes}>{footerText}</Text>}
 
-        {/* Footer */}
         <View style={s.footer} fixed>
-          <View>
-            <Text style={s.footerTitle}>{L('contact', lang)}</Text>
-            <Text style={s.footerText}>
-              {[
-                settings.company_name,
-                `${settings.address_line1}, ${settings.zip} ${settings.city}`,
-                settings.phone,
-                settings.email,
-                settings.uid_number ? `${L('uid', lang)} ${settings.uid_number}` : null,
-              ].filter(Boolean).join('\n')}
-            </Text>
-          </View>
-          <View>
-            <Text style={s.footerTitle}>{L('payment', lang)}</Text>
-            <Text style={s.footerText}>
-              {settings.company_name}{'\n'}
-              {settings.bank_name ? `${settings.bank_name}\n` : ''}
-              {'IBAN: '}{settings.iban}{'\n'}
-              {'BIC: '}{settings.bic}
-            </Text>
-          </View>
-          <View style={{ alignItems: 'flex-end', justifyContent: 'flex-end' }}>
-            <Text style={s.footerPage} render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`} />
-          </View>
+          {footerColumns.map(col => (
+            <View key={col.title} style={s.footerCol}>
+              <Text style={s.footerTitle}>{col.title}</Text>
+              {col.lines.flatMap(footerEntry).map((line, i) => (
+                <Text key={i} style={s.footerText} hyphenationCallback={noHyphenation}>{line}</Text>
+              ))}
+            </View>
+          ))}
+          <Text style={s.footerPage} render={({ pageNumber, totalPages }) => t('pdfPortal.page', { page: pageNumber, pages: totalPages })} />
         </View>
-
       </Page>
     </Document>
   )

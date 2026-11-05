@@ -33,6 +33,8 @@ create table settings (
   iban                        text not null default '',
   bic                         text not null default '',
   bank_name                   text,
+  -- Name the account is held in (EPC QR beneficiary, PDF payment block); empty = company_name.
+  bank_account_holder         text,
   invoice_prefix              text not null default 'R',
   quote_prefix                text not null default 'A',
   credit_note_prefix          text not null default 'G',
@@ -267,6 +269,11 @@ create table documents (
   skonto_percent      numeric,
   skonto_days         integer,
   share_token         uuid unique,
+  -- The share link stops working after this (NULL = never); new links get 90 days.
+  share_expires_at    timestamptz,
+  -- First time the client opened the current share link (cleared on rotate/revoke; the owner's
+  -- own visits are not counted).
+  portal_viewed_at    timestamptz,
   drive_file_id       text
 );
 

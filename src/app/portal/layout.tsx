@@ -1,8 +1,10 @@
-// Force light mode for the client-facing portal — no dark theme.
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+}
+
+// The portal is always light: ThemeProvider forces the theme on /portal, so this only sets the canvas.
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="light" style={{ colorScheme: 'light', background: '#f5f5f5', color: '#171717', minHeight: '100vh' }}>
-      {children}
-    </div>
-  )
+  return <div className="min-h-screen bg-neutral-100 text-neutral-900">{children}</div>
 }

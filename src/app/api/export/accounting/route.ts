@@ -6,7 +6,8 @@ import { createZipStream, type ZipEntry } from '@/lib/utils/zip'
 import { toPublicSettings } from '@/lib/public-settings'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey, TFn } from '@/lib/i18n'
-import type { Settings } from '@/types'
+import type { DocumentType, Settings } from '@/types'
+import { docTypeLabel, statusLabel } from '@/lib/document-labels'
 import { parsePeriod, periodLabel, periodSlug, MAX_PDFS, MAX_YEAR, MIN_YEAR, type Period } from '@/app/(app)/reports/period'
 import { fetchZmRows } from '@/app/(app)/reports/zm'
 
@@ -70,7 +71,7 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
     const amount = (n: number) => voided ? null : (isInvoice ? n : -n)
     const client = d.clients as unknown as ClientRef
     return [
-      t(`docTypes.${d.type}` as DictKey),
+      docTypeLabel(t, d.type as DocumentType),
       d.number,
       csvDate(d.date),
       servicePeriod(d.service_date, d.service_date_end),
@@ -81,7 +82,7 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
       amount(totals.total),
       isInvoice ? totals.total_paid : null,
       isInvoice ? (d.status === 'cancelled' ? 0 : totals.balance_due) : null,
-      t(`status.${d.status}` as DictKey),
+      statusLabel(t, d.status),
       t(`taxTreatmentsShort.${d.tax_treatment}` as DictKey),
       d.bookamat_booking_id ?? '',
     ]

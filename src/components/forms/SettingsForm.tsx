@@ -234,6 +234,7 @@ export default function SettingsForm({ settings }: Props) {
 
   // ── Banking state ────────────────────────────────────────────────────────────
   const [banking, setBanking] = useState({
+    bank_account_holder: settings?.bank_account_holder ?? '',
     iban:      settings?.iban ?? '',
     bic:       settings?.bic ?? '',
     bank_name: settings?.bank_name ?? '',
@@ -467,6 +468,7 @@ export default function SettingsForm({ settings }: Props) {
     if (errors.iban || errors.bic) return
     setSaving('banking')
     const { error } = await supabase.from('settings').update({
+      bank_account_holder: banking.bank_account_holder.trim() || null,
       iban,
       bic,
       bank_name: banking.bank_name || null,
@@ -985,6 +987,14 @@ export default function SettingsForm({ settings }: Props) {
             saving={saving === 'banking'}
             onSave={saveBankingSection}
           >
+            <div className="space-y-1.5">
+              <label className={lbl} htmlFor={`${uid}-banking-holder`}>{t('pdfPortal.settings.accountHolder')}</label>
+              <input id={`${uid}-banking-holder`} className={inp} value={banking.bank_account_holder} autoComplete="off"
+                aria-describedby={`${uid}-banking-holder-hint`}
+                onChange={e => { setBanking(b => ({ ...b, bank_account_holder: e.target.value })); markDirty('banking') }}
+                placeholder={settings?.company_name || settings?.owner_name || ''} />
+              <p id={`${uid}-banking-holder-hint`} className="text-xs text-neutral-500 dark:text-neutral-400">{t('pdfPortal.settings.accountHolderHint')}</p>
+            </div>
             <div className="space-y-1.5">
               <label className={lbl} htmlFor={`${uid}-banking-iban`}>{t('settings.banking.iban')}</label>
               <input id={`${uid}-banking-iban`} className={inp} value={banking.iban} aria-invalid={!!bankingErrors.iban || undefined}
