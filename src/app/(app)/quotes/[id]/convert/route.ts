@@ -17,6 +17,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const { t } = await getT()
 
   const { data, error } = await supabase.rpc('convert_quote_to_invoice', { p_quote_id: id })
+  // MI019: the quote has advance invoices, so its invoice is the final invoice that deducts them.
+  if (error?.code === 'MI019') return NextResponse.json({ error: t('deposits.errors.useFinal'), code: error.code }, { status: 409 })
   if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI016' ? 409 : 500 })
   const result = data as Converted | null
   if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })

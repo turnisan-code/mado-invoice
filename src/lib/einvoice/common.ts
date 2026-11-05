@@ -4,6 +4,7 @@
 // allowances per VAT category. Pure (no I/O), so ebinterface.ts and ubl.ts only lay this out and
 // node can check it directly.
 import type { TFn } from '@/lib/i18n'
+import { isDeductionLine, type DepositKind } from '@/lib/deposits'
 import { docTitle, documentKind, documentLanguage } from '@/lib/document-labels'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { countryName, toCountryCode } from '@/lib/utils/country'
@@ -14,7 +15,7 @@ import {
 import type { DocReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary } from '@/lib/utils/epc-qr'
 import { isValidBic, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
-import type { Client, Document, DocumentItem, Language, Payment, Settings, Unit } from '@/types'
+import type { Client, Document, DocumentItem, InvoiceKind, Language, Payment, Settings, Unit } from '@/types'
 import { decimal } from './xml'
 
 export type EInvoiceErrorCode =
@@ -103,8 +104,12 @@ export interface EInvoiceTax {
   exemptionReason: string | null
 }
 
+// An advance or partial invoice a final invoice deducts (BG-3 / RelatedDocument).
+export interface PrecedingInvoice { number: string; date: string; kind: DepositKind }
+
 export interface EInvoice {
   kind: 'invoice' | 'credit_note'
+  invoiceKind: InvoiceKind
   title: string
   number: string
   issueDate: string
@@ -118,6 +123,8 @@ export interface EInvoice {
   // The studio's number for the client (K-0001).
   clientNumber: string | null
   reference: { kind: 'storno' | 'correction'; number: string; date: string; text: string } | null
+  // A final invoice: the invoices its deduction lines take off, each line negative per VAT rate.
+  preceding: (PrecedingInvoice & { text: string })[]
   // Service date or period of the whole document; lines may carry their own.
   delivery: Period | null
   seller: EInvoiceParty
@@ -148,13 +155,14 @@ export interface EInvoice {
 type SourceItem = Pick<DocumentItem, 'line_type' | 'description' | 'quantity' | 'unit' | 'unit_price' | 'vat_rate' | 'service_date' | 'service_date_end' | 'discount_type' | 'discount_value'> & { sort_order?: number | null }
 
 export interface EInvoiceSource {
-  doc: Pick<Document, 'type' | 'number' | 'date' | 'due_date' | 'service_date' | 'service_date_end' | 'currency' | 'tax_treatment' | 'language' | 'notes' | 'discount_type' | 'discount_value' | 'skonto_percent' | 'skonto_days' | 'issued_at' | 'cancels_document_id'>
+  doc: Pick<Document, 'type' | 'invoice_kind' | 'number' | 'date' | 'due_date' | 'service_date' | 'service_date_end' | 'currency' | 'tax_treatment' | 'language' | 'notes' | 'discount_type' | 'discount_value' | 'skonto_percent' | 'skonto_days' | 'issued_at' | 'cancels_document_id'>
   items: SourceItem[]
   payments: Pick<Payment, 'date' | 'amount'>[]
   client: Pick<Client, 'name' | 'company' | 'client_number' | 'address_line1' | 'address_line2' | 'zip' | 'city' | 'country' | 'email' | 'phone' | 'uid_number' | 'peppol_scheme' | 'peppol_id' | 'supplier_number'>
   settings: Pick<Settings, 'company_name' | 'owner_name' | 'address_line1' | 'address_line2' | 'zip' | 'city' | 'country' | 'email' | 'phone' | 'uid_number' | 'iban' | 'bic' | 'bank_name' | 'bank_account_holder' | 'peppol_scheme' | 'peppol_id' | 'tax_note_reverse_charge_de' | 'tax_note_reverse_charge_en' | 'tax_note_non_eu_de' | 'tax_note_non_eu_en'>
   reference: DocReference | null
   buyerReference: string | null
+  preceding?: PrecedingInvoice[]
   // In the document's language.
   t: TFn
 }
@@ -296,7 +304,9 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
   type DraftSection = { texts: string[]; heading: string | null; lines: EInvoiceLine[]; discount: { type: string; value: number | null } | null }
   const drafts: DraftSection[] = [{ texts: [], heading: null, lines: [], discount: null }]
   const lines: EInvoiceLine[] = []
-  for (const item of items) {
+  // A final invoice's deductions: negative lines after the others, outside every discount.
+  const deductions = items.filter(isDeductionLine)
+  for (const item of items.filter(i => !isDeductionLine(i))) {
     const section = drafts[drafts.length - 1]
     const type = item.line_type ?? 'item'
     if (type === 'subtotal') {
@@ -340,6 +350,32 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
     }
   }
 
+  const deductionLines: EInvoiceLine[] = deductions.flatMap(item => {
+    if (item.quantity == null || item.unit_price == null || item.vat_rate == null) return []
+    const name = textLines(item.description)[0] ?? '—'
+    const line: EInvoiceLine = {
+      position: lines.length + 1,
+      name,
+      descriptionLines: [name],
+      quantity: item.unit_price < 0 ? -item.quantity : item.quantity,
+      unitCode: UNIT_CODES.flat,
+      unitPrice: Math.abs(item.unit_price),
+      gross: lineAmount(item),
+      discount: 0,
+      discountPercent: null,
+      discountReason: null,
+      net: lineAmount(item),
+      tax: taxKeyFor(treatment, item.vat_rate),
+      period: null,
+    }
+    if (roundCents(Number(decimal(line.quantity)) * Number(decimal(line.unitPrice))) !== line.net) {
+      throw new EInvoiceError('line_amount', `Line ${line.position}: ${decimal(line.quantity)} × ${decimal(line.unitPrice)} does not give the printed ${line.net}`)
+    }
+    lines.push(line)
+    return [line]
+  })
+  const deductedNet = roundCents(deductionLines.reduce((s, l) => s + l.net, 0))
+
   // Text of sections without lines goes to the next section with lines, or below the last one.
   const sections: EInvoiceSection[] = []
   let carried: string[] = []
@@ -349,6 +385,7 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
     carried = []
     sections.push({ header: header.length ? header.join('\n') : null, lines: d.lines })
   }
+  if (deductionLines.length) sections.push({ header: null, lines: deductionLines })
 
   // VAT categories in the order calcTotals prints its rates.
   const groups = totals.vat_groups.map(g => ({ key: taxKeyFor(treatment, g.rate), base: g.base, amount: g.amount }))
@@ -383,8 +420,9 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
       ideal,
     })
   }
-  if (totals.discount_amount > 0 && totals.subtotal > 0) {
-    const docScale = (totals.subtotal - totals.discount_amount) / totals.subtotal
+  const scopeNet = roundCents(totals.subtotal - deductedNet)
+  if (totals.discount_amount > 0 && scopeNet > 0) {
+    const docScale = (scopeNet - totals.discount_amount) / scopeNet
     rows.push({
       reason: t('pdfPortal.totals.discount'),
       target: totals.discount_amount,
@@ -509,7 +547,8 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
 
   return {
     kind,
-    title: docTitle(t, documentKind(kind, isStorno)),
+    invoiceKind: kind === 'invoice' ? doc.invoice_kind ?? 'standard' : 'standard',
+    title: docTitle(t, documentKind(kind, isStorno), kind === 'invoice' ? doc.invoice_kind : null),
     number: doc.number,
     issueDate: doc.date,
     dueDate: kind === 'invoice' ? doc.due_date : null,
@@ -520,6 +559,7 @@ export function buildEInvoice(src: EInvoiceSource): EInvoice {
     supplierNumber: clean(client.supplier_number),
     clientNumber: clean(client.client_number),
     reference,
+    preceding: (src.preceding ?? []).map(p => ({ ...p, text: `${t(`deposits.title.${p.kind}`)} ${p.number}` })),
     delivery: periodOf(doc.service_date, doc.service_date_end),
     seller,
     buyer,

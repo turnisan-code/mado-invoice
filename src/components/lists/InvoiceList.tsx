@@ -14,7 +14,8 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
 import { displayStatus, statusLabelKey } from '@/lib/status'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
-import type { BookamatState } from '@/types'
+import { invoiceKindBadge } from '@/lib/document-labels'
+import type { BookamatState, InvoiceKind } from '@/types'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
@@ -51,6 +52,7 @@ export interface Invoice {
   bookamat_error?: string | null
   bookamat_booking_id?: string | null
   bookamat_bookings?: { year: number; booking_id: string }[] | null
+  invoice_kind?: InvoiceKind | null
   document_items: DocItem[]
   payments?: { amount: number; kind?: string }[]
 }
@@ -126,6 +128,11 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
   )
   const markers = (doc: Invoice) => (
     <>
+      {doc.invoice_kind && doc.invoice_kind !== 'standard' && (
+        <span className="ml-1.5 inline-flex align-middle text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+          {invoiceKindBadge(t, doc.invoice_kind)}
+        </span>
+      )}
       {doc.number && !doc.pdf_path && <span className="ml-1.5">{noArchiveMarker}</span>}
       {recurring.has(doc.id) && <span className="ml-1.5">{recurringBadge}</span>}
     </>

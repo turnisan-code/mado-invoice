@@ -130,6 +130,28 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       return { text: d.action === 'accepted' ? t('lifecycle.history.portalAccepted') : d.action === 'rejected' ? t('lifecycle.history.portalRejected') : t('archive.events.portal_responded') }
     case 'einvoice_exported':
       return { text: t('einvoice.history.exported', { format: t(d.format === 'ubl' ? 'einvoice.formats.ubl' : 'einvoice.formats.ebinterface') }) }
+    case 'deposit_created': {
+      const id = str(d.to_id)
+      const amount = num(d.amount)
+      return {
+        text: amount != null ? t('deposits.history.created', { amount: formatMoney(amount, currency) }) : t('deposits.history.createdPlain'),
+        link: id ? { href: `/invoices/${id}`, label: t('deposits.history.openInvoice') } : undefined,
+      }
+    }
+    case 'deposit_linked':
+    case 'deposit_released': {
+      const finalId = str(d.final_id)
+      const invoiceId = str(d.invoice_id)
+      const released = { storno: 'releasedStorno', cancelled: 'releasedCancelled', deleted: 'releasedDeleted', self_cancelled: 'releasedSelf' } as const
+      const number = str(d.invoice_number) ?? ''
+      const text = event.type === 'deposit_linked'
+        ? invoiceId ? t('deposits.history.linkedInvoice', { number }) : t('deposits.history.linked')
+        : invoiceId ? t('deposits.history.releasedInvoice', { number })
+        : t(`deposits.history.${released[str(d.reason) as keyof typeof released] ?? 'releasedRemoved'}`, { number: str(d.final_number) ?? '' })
+      const link = invoiceId ? { href: `/invoices/${invoiceId}`, label: t('deposits.history.openInvoice') }
+        : finalId ? { href: `/invoices/${finalId}`, label: t('deposits.history.openFinal') } : undefined
+      return { text, link }
+    }
     default:
       return { text: t(`archive.events.${event.type}`) }
   }

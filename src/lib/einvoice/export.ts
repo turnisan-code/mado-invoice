@@ -4,7 +4,7 @@ import { loadPdfDocument, loadSettings } from '@/lib/pdf/render'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import { fetchCreditReference } from '@/lib/utils/document-reference'
 import type { EInvoiceFormat } from '@/types'
-import { EInvoiceError, buildEInvoice, einvoiceFilename, withAttachment } from './common'
+import { EInvoiceError, buildEInvoice, einvoiceFilename, withAttachment, type PrecedingInvoice } from './common'
 import { toEbInterface } from './ebinterface'
 import { toUbl } from './ubl'
 
@@ -28,6 +28,15 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
     buyerReference ??= doc.clients.buyer_reference?.trim() || null
   }
 
+  // A final invoice references the advance and partial invoices it deducts.
+  let preceding: PrecedingInvoice[] = []
+  if (doc.type === 'invoice' && doc.invoice_kind === 'final') {
+    const { data, error } = await supabase.from('documents').select('number, date, invoice_kind')
+      .eq('final_invoice_id', doc.id).not('number', 'is', null).order('date').order('number')
+    if (error) throw new Error(error.message)
+    preceding = (data ?? []).map(d => ({ number: d.number as string, date: d.date as string, kind: d.invoice_kind === 'partial' ? 'partial' : 'advance' }))
+  }
+
   const inv = buildEInvoice({
     doc,
     items: doc.document_items ?? [],
@@ -36,6 +45,7 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
     settings,
     reference: await fetchCreditReference(supabase, doc),
     buyerReference,
+    preceding,
     t: documentT(documentLanguage(doc.language)),
   })
 

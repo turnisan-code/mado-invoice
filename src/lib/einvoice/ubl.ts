@@ -12,6 +12,10 @@ const NS = {
 export const PEPPOL_CUSTOMIZATION_ID = 'urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0'
 export const PEPPOL_PROFILE_ID = 'urn:fdc:peppol.eu:2017:poacc:billing:01:1.0'
 
+// UNCL 1001: 386 prepayment invoice (an advance invoice). A partial invoice stays 380: 326 is
+// reserved for German supplier and buyer (PEPPOL-EN16931-P0112). A final invoice is a 380 that
+// deducts its advance invoices as negative lines per VAT category and references them (BG-3).
+const PREPAYMENT_INVOICE = '386'
 // UNCL 4461: SEPA credit transfer. UNCL 5189: discount.
 const SEPA_CREDIT_TRANSFER = '58'
 const DISCOUNT_REASON = '95'
@@ -86,7 +90,7 @@ export function toUbl(inv: EInvoice): string {
     txt('cbc:ID', inv.number),
     txt('cbc:IssueDate', inv.issueDate),
     !credit && txt('cbc:DueDate', inv.dueDate),
-    credit ? txt('cbc:CreditNoteTypeCode', '381') : txt('cbc:InvoiceTypeCode', '380'),
+    credit ? txt('cbc:CreditNoteTypeCode', '381') : txt('cbc:InvoiceTypeCode', inv.invoiceKind === 'advance' ? PREPAYMENT_INVOICE : '380'),
     // PEPPOL-EN16931-R002: at most one note.
     txt('cbc:Note', inv.note),
     txt('cbc:DocumentCurrencyCode', inv.currency),
@@ -96,6 +100,9 @@ export function toUbl(inv: EInvoice): string {
     inv.reference ? el('cac:BillingReference', null,
       el('cac:InvoiceDocumentReference', null, txt('cbc:ID', inv.reference.number), txt('cbc:IssueDate', inv.reference.date)),
     ) : null,
+    inv.preceding.map(p => el('cac:BillingReference', null,
+      el('cac:InvoiceDocumentReference', null, txt('cbc:ID', p.number), txt('cbc:IssueDate', p.date)),
+    )),
     inv.attachment ? el('cac:AdditionalDocumentReference', null,
       txt('cbc:ID', inv.number),
       txt('cbc:DocumentDescription', inv.attachment.description),

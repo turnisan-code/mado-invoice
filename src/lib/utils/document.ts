@@ -150,11 +150,26 @@ export function calcTotals(
     largest.base = roundCents(largest.base + baseDrift)
     largest.amount = roundCents(largest.base * (largest.rate / 100))
   }
+  // A final invoice's deduction lines (src/lib/deposits.ts) come off after every discount, each
+  // with the VAT the earlier invoice carried on it, so what remains per rate is exactly the full
+  // amount less those invoices. Netto includes them; the document discount never touches them.
+  let deducted = 0
+  for (const d of items) {
+    if (d.line_type !== 'deduction' || d.quantity == null || d.unit_price == null || d.vat_rate == null) continue
+    const base = lineAmount(d)
+    const rate: VatRate = vatApplies ? (d.vat_rate as VatRate) : 0
+    deducted = roundCents(deducted + base)
+    let g = vat_groups.find(x => x.rate === rate)
+    if (!g) vat_groups = [...vat_groups, g = { rate, base: 0, amount: 0 }].sort((a, b) => b.rate - a.rate)
+    g.base = roundCents(g.base + base)
+    g.amount = roundCents(g.amount + roundCents(base * (rate / 100)))
+  }
+
   const total_vat = roundCents(vat_groups.reduce((s, g) => s + g.amount, 0))
-  const total = roundCents(net - discount_amount + total_vat)
+  const total = roundCents(net - discount_amount + deducted + total_vat)
   const total_paid = roundCents(payments.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
 
-  return { subtotal: net, discount_amount, vat_groups, total_vat, total, total_paid, balance_due: roundCents(total - total_paid) }
+  return { subtotal: roundCents(net + deducted), discount_amount, vat_groups, total_vat, total, total_paid, balance_due: roundCents(total - total_paid) }
 }
 
 type TaxNoteSettings = Pick<Settings, 'tax_note_reverse_charge_de' | 'tax_note_reverse_charge_en' | 'tax_note_non_eu_de' | 'tax_note_non_eu_en'>

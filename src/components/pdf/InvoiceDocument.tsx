@@ -7,7 +7,8 @@ import {
   docNumberLabel, docTitle, documentKind, documentT, formatPercent, formatQuantity, formatSignedMoney,
   issuerBlocks, recipientLabel, servicePeriod, unitLabel,
 } from '@/lib/document-labels'
-import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
+import { deductionSummary, discountOf } from '@/lib/deposits'
+import type { Settings, Client, DocumentType, InvoiceKind, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { PDF_FONT_FAMILY, preparePdfFonts, registerPdfFonts } from './fonts'
@@ -115,6 +116,11 @@ const s = StyleSheet.create({
   totalsDivider: { borderTopWidth: 0.5, borderTopColor: RULE, marginVertical: 4 },
   totalText: { fontWeight: 'bold', fontSize: 10 },
 
+  deductionBox: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 18 },
+  deductionBlock: { width: 300 },
+  deductionLabel: { flex: 1, paddingRight: 8, color: GREY },
+  deductionPart: { fontSize: 7.5, color: LIGHT, marginTop: 1 },
+
   paymentTerms: { marginTop: 14, fontSize: 8.5, color: '#4b4b4b' },
   taxNote: { marginTop: 14, fontSize: 8, color: GREY, fontStyle: 'italic' },
   notes: { marginTop: 10, fontSize: 8.5, color: '#4b4b4b', lineHeight: 1.5 },
@@ -148,6 +154,7 @@ interface DocData {
   service_date_end?: string | null
   due_date: string | null
   type: DocumentType
+  invoice_kind?: InvoiceKind | null
   language: Language
   currency: Currency
   tax_treatment: TaxTreatment
@@ -179,7 +186,13 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const t = documentT(lang)
   const refKind = doc.reference ? (doc.reference.kind ?? 'storno') : null
   const kind = documentKind(doc.type, refKind === 'storno')
-  const title = docTitle(t, kind)
+  const title = docTitle(t, kind, doc.invoice_kind)
+  // An advance invoice states when the service is expected; a final invoice deducts the earlier ones.
+  const advance = doc.type === 'invoice' && doc.invoice_kind === 'advance'
+  const deduction = deductionSummary(doc.items, discountOf(doc), doc.tax_treatment)
+  const discountLabel = doc.discount_type === 'percent' && doc.discount_value
+    ? t('pdfPortal.totals.discountPercent', { percent: formatPercent(t, clampPercent(doc.discount_value), lang) })
+    : t('pdfPortal.totals.discount')
   // The builder previews an unnumbered document as 'DRAFT'.
   const draft = !doc.number || doc.number === 'DRAFT'
   const number = draft ? t('pdfPortal.draft') : doc.number
@@ -245,7 +258,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <Text style={s.metaLine}>{t('pdfPortal.date')}: {formatDate(doc.date, lang)}</Text>
             {docPeriod && (
               <Text style={s.metaLine}>
-                {docPeriod.isPeriod ? t('pdfPortal.servicePeriod') : t('pdfPortal.serviceDate')}: {docPeriod.text}
+                {advance
+                  ? t(docPeriod.isPeriod ? 'deposits.doc.expectedServicePeriod' : 'deposits.doc.expectedServiceDate')
+                  : docPeriod.isPeriod ? t('pdfPortal.servicePeriod') : t('pdfPortal.serviceDate')}: {docPeriod.text}
               </Text>
             )}
             {doc.reference && (
@@ -285,6 +300,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             const lt = item.line_type ?? 'item'
 
             if (lt === 'page_break') return <View key={i} break />
+            if (lt === 'deduction') return null
             if (lt === 'separator') return <View key={i} style={s.separatorRow} />
 
             if (lt === 'heading') {
@@ -357,6 +373,63 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
           })}
         </View>
 
+        {deduction && (
+          <View style={s.deductionBox} wrap={false}>
+            <View style={s.deductionBlock}>
+              {/* The document discount applies to the whole service, so it is shown here, not below. */}
+              {deduction.full.discount_amount > 0 && (
+                <>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.net')}</Text>
+                    <Text>{money(deduction.full.subtotal)}</Text>
+                  </View>
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{discountLabel}</Text>
+                    <Text>{money(-deduction.full.discount_amount)}</Text>
+                  </View>
+                </>
+              )}
+              <View style={s.totalsRow}>
+                <Text style={s.totalsLabel}>{t('deposits.doc.fullNet')}</Text>
+                <Text>{money(deduction.full.subtotal - deduction.full.discount_amount)}</Text>
+              </View>
+              {vatApplies && deduction.full.vat_groups.map(g => (
+                <View key={g.rate}>
+                  {deduction.full.vat_groups.length > 1 && (
+                    <View style={s.totalsRow}>
+                      <Text style={s.totalsLabel}>{t('pdfPortal.totals.netAtRate', { rate: pct(g.rate) })}</Text>
+                      <Text>{money(g.base)}</Text>
+                    </View>
+                  )}
+                  <View style={s.totalsRow}>
+                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.vatAtRate', { rate: pct(g.rate) })}</Text>
+                    <Text>{money(g.amount)}</Text>
+                  </View>
+                </View>
+              ))}
+              <View style={s.totalsRow}>
+                <Text style={{ fontWeight: 'bold' }}>{t('deposits.doc.fullTotal')}</Text>
+                <Text style={{ fontWeight: 'bold' }}>{money(deduction.full.total)}</Text>
+              </View>
+              {deduction.rows.map((row, i) => (
+                <View key={i} style={{ marginTop: 4 }}>
+                  <View style={s.totalsRow}>
+                    <Text style={s.deductionLabel}>{row.label}</Text>
+                    <Text>{money(-row.gross)}</Text>
+                  </View>
+                  {row.parts.map(p => (
+                    <Text key={p.rate} style={s.deductionPart}>
+                      {vatApplies
+                        ? t('deposits.doc.lessPart', { net: money(p.net), rate: pct(p.rate), vat: money(p.vat) })
+                        : t('deposits.doc.lessPartNoVat', { net: money(p.net) })}
+                    </Text>
+                  ))}
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         <View wrap={false}>
           <View style={s.bottomDivider} />
           <View style={s.bottomRow}>
@@ -378,9 +451,9 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             <View style={s.totalsBlock}>
               <View style={s.totalsRow}>
                 <Text style={s.totalsLabel}>{t('pdfPortal.totals.net')}</Text>
-                <Text>{money(doc.totals.subtotal)}</Text>
+                <Text>{money(deduction ? doc.totals.subtotal - doc.totals.discount_amount : doc.totals.subtotal)}</Text>
               </View>
-              {doc.totals.discount_amount > 0 && (
+              {doc.totals.discount_amount > 0 && !deduction && (
                 <View style={s.totalsRow}>
                   <Text style={s.totalsLabel}>
                     {doc.discount_type === 'percent' && doc.discount_value
@@ -405,7 +478,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               ))}
               <View style={s.totalsDivider} />
               <View style={s.totalsRow}>
-                <Text style={s.totalText}>{doc.type === 'credit_note' ? t('pdfPortal.totals.creditTotal') : t('pdfPortal.totals.total')}</Text>
+                <Text style={s.totalText}>{doc.type === 'credit_note' ? t('pdfPortal.totals.creditTotal') : deduction ? t('deposits.doc.remaining') : t('pdfPortal.totals.total')}</Text>
                 <Text style={s.totalText}>{money(doc.totals.total)}</Text>
               </View>
               {doc.type === 'invoice' && doc.totals.total_paid > 0 && (

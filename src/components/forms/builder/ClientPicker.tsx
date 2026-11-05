@@ -12,13 +12,15 @@ const INVALID_CLS = 'border-red-400 dark:border-red-500'
 
 // Searchable client combobox: active clients first, then leads, then inactive ones; the last
 // entry creates a new client from what was typed.
-export function ClientPicker({ id, clients, value, onChange, onCreate, invalid }: {
+export function ClientPicker({ id, clients, value, onChange, onCreate, invalid, disabled, describedBy }: {
   id: string
   clients: Client[]
   value: string
   onChange: (id: string) => void
   onCreate: (name: string) => void
   invalid?: boolean
+  disabled?: boolean
+  describedBy?: string
 }) {
   const { t } = useT()
   const [query, setQuery] = useState('')
@@ -69,15 +71,17 @@ export function ClientPicker({ id, clients, value, onChange, onCreate, invalid }
         aria-autocomplete="list"
         aria-activedescendant={active ? `${listId}-${active.id}` : createActive ? `${listId}-new` : undefined}
         aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        disabled={disabled}
         value={open ? query : clientLabel(selected)}
         placeholder={open ? t('issueChecks.searchClients') : t('builder.selectClientPlaceholder')}
         onFocus={() => { setOpen(true); setHighlight(0) }}
         onClick={() => setOpen(true)}
         onChange={e => { setQuery(e.target.value); setOpen(true); setHighlight(0) }}
         onKeyDown={onKeyDown}
-        className={`${SELECT_CLS} ${invalid ? INVALID_CLS : ''}`}
+        className={`${SELECT_CLS} ${invalid ? INVALID_CLS : ''} disabled:opacity-60`}
       />
-      {open && (
+      {open && !disabled && (
         <div id={listId} role="listbox" aria-label={t('builder.client')}
           className="absolute z-30 left-0 right-0 mt-1 max-h-72 overflow-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-lg py-1">
           {groups.map(g => (

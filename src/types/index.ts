@@ -8,7 +8,12 @@ export type DocumentType = 'invoice' | 'quote' | 'credit_note'
 export type DocumentStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'accepted' | 'rejected' | 'cancelled'
 export type VatRate = 0 | 10 | 13 | 20
 export type Unit = 'hour' | 'day' | 'flat' | 'piece' | 'month' | 'session'
-export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break'
+// 'deduction': on a final invoice, what an earlier advance or partial invoice already carried, one
+// negative line per VAT rate (src/lib/deposits.ts); never edited by hand.
+export type LineType = 'item' | 'heading' | 'text' | 'separator' | 'subtotal' | 'page_break' | 'deduction'
+// Invoices only: an Anzahlungsrechnung (money before the service), a Teilrechnung (a completed part
+// of it) or the Schlussrechnung that deducts them.
+export type InvoiceKind = 'standard' | 'advance' | 'partial' | 'final'
 // 'payment' is money received; 'skonto' and 'writeoff' close a balance without a transfer;
 // 'credit' is an issued credit note applied to its invoice; 'refund' is money paid back on a credit note;
 // 'fee' is dunning fees and interest paid on top of an invoice (money, but no turnover and no balance).
@@ -23,6 +28,8 @@ export type IssueProblem =
   | { code: 'noClient' | 'noItems' | 'currencyNotEur' | 'reverseChargeNoUid' | 'clientCountryMissing' | 'noServiceDate' | 'negativeTotal' }
   | { code: 'periodStartMissing' | 'periodEndBeforeStart'; index?: number; position?: number }
   | { code: 'blankDescription' | 'badQuantity' | 'missingPrice' | 'badDiscount'; index: number; position: number }
+  | { code: 'depositZero' | 'deductionExceedsTotal' | 'deductionsOutdated' | 'advanceDraftPending' | 'creditNoteDeductions' }
+  | { code: 'advanceOpen' | 'advanceSettledElsewhere' | 'advanceNotDeducted' | 'quoteInvoiced'; number: string }
 
 export interface Settings {
   id: string
@@ -236,6 +243,9 @@ export interface Document {
   pdf_path?: string | null
   // The buyer's reference (Auftragsreferenz / order number) its e-invoices carry.
   buyer_reference?: string | null
+  invoice_kind?: InvoiceKind
+  // On an advance or partial invoice: the final invoice that deducts it.
+  final_invoice_id?: string | null
   items?: DocumentItem[]
   payments?: Payment[]
 }
@@ -321,6 +331,7 @@ export type DocumentEventType =
   | 'issued' | 'emailed' | 'mailto_opened' | 'reminder_sent' | 'status_changed'
   | 'payment_added' | 'payment_removed' | 'storno_created' | 'archived' | 'drive_archived'
   | 'portal_viewed' | 'portal_responded' | 'bookamat_synced' | 'converted' | 'einvoice_exported'
+  | 'deposit_created' | 'deposit_linked' | 'deposit_released'
 
 export interface DocumentEvent {
   id: string

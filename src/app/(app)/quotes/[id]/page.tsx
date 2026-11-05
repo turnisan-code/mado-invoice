@@ -2,7 +2,6 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import DocumentStatusBar from '@/components/layout/DocumentStatusBar'
-import ConvertDocumentButton from '@/components/layout/ConvertDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import DocumentHistory from '@/components/layout/DocumentHistory'
@@ -11,24 +10,22 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import { toPublicSettings } from '@/lib/public-settings'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import { formatDate } from '@/lib/utils/document'
-import { buttonVariants } from '@/components/ui/button'
 import Link from 'next/link'
-import { ArrowLeft, FileText } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
 import MarkResponsesRead from './MarkResponsesRead'
+import { QuoteDepositList, QuoteInvoicingActions } from './QuoteDeposits'
 
 export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
   const { t, lang } = await getT()
 
-  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { data: invoice }, { count: unreadResponses }] = await Promise.all([
+  const [{ data: doc }, { data: settings }, { data: clients }, { data: catalogue }, { count: unreadResponses }] = await Promise.all([
     supabase.from('documents').select('*, document_items(*), payments(*)').eq('id', id).eq('type', 'quote').single(),
     supabase.from('settings').select('*').single(),
     supabase.from('clients').select('*').order('name'),
     supabase.from('catalogue_items').select('*').eq('active', true).order('sort_order'),
-    // Once converted, the quote links to its invoice instead of offering a second conversion.
-    supabase.from('documents').select('id, number').eq('converted_from_id', id).eq('type', 'invoice').order('created_at').limit(1).maybeSingle(),
     supabase.from('document_events').select('id', { count: 'exact', head: true }).eq('document_id', id).eq('type', 'portal_responded').is('read_at', null),
   ])
 
@@ -55,14 +52,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} number={doc.number} kind="quote" language={doc.language} initialToken={doc.share_token ?? null} driveReady={publicSettings.drive_configured} />}
-          {invoice ? (
-            <Link href={`/invoices/${invoice.id}`} title={t('lifecycle.convert.openInvoiceTitle')} className={`${buttonVariants({ variant: 'outline', size: 'sm' })} flex items-center gap-1.5`}>
-              <FileText size={14} />
-              <span className="sr-only sm:not-sr-only">{invoice.number ? t('lifecycle.convert.openInvoice', { number: invoice.number }) : t('lifecycle.convert.openInvoiceDraft')}</span>
-            </Link>
-          ) : (doc.status === 'sent' || doc.status === 'accepted') && (
-            <ConvertDocumentButton kind="invoice" sourceId={doc.id} />
-          )}
+          {/* Once converted, the quote links to its invoice instead of offering a second conversion. */}
+          <QuoteInvoicingActions quote={doc} />
           <DuplicateDocumentButton docId={doc.id} docType="quote" backTo="/quotes" />
           <DeleteDocumentButton id={doc.id} backTo="/quotes" docNumber={doc.number} docType="quote" />
         </div>
@@ -76,6 +67,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           document={docWithItems}
         />
       </div>
+      <QuoteDepositList quote={doc} />
       <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
       {!!unreadResponses && <MarkResponsesRead documentId={doc.id} />}
     </div>
