@@ -1,6 +1,7 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
 import { clampPercent, formatDate, lineAmount, orderItems, paymentTermsSentence, sectionSummary } from '@/lib/utils/document'
-import { clientDisplayName } from '@/lib/utils/clients'
+import { documentVariables, fillTemplate, templateMoney } from '@/lib/templates'
+import { paymentLineLabel, summarizePayments, type SummaryPayment } from '@/lib/payment-summary'
 import { countryName } from '@/lib/utils/country'
 import {
   docNumberLabel, docTitle, documentKind, documentT, formatPercent, formatQuantity, formatSignedMoney,
@@ -159,6 +160,8 @@ interface DocData {
   items: DocItem[]
   totals: DocumentTotals
   reference?: DocReference | null
+  // The rows behind totals.total_paid; without them the summary is a single 'Paid' row.
+  payments?: SummaryPayment[]
 }
 
 interface Props {
@@ -166,10 +169,6 @@ interface Props {
   client: Client
   document: DocData
   qrCodeDataUri?: string | null
-}
-
-function replaceVars(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? `{{${key}}}`)
 }
 
 export default function InvoiceDocument({ settings, client, document: doc, qrCodeDataUri }: Props) {
@@ -208,23 +207,24 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
   const docPeriod = servicePeriod(doc.service_date, doc.service_date_end, lang)
   const dueLabel = doc.type === 'quote' ? t('pdfPortal.validUntil') : doc.type === 'invoice' ? t('pdfPortal.dueDate') : null
 
-  const footerVars: Record<string, string> = {
-    invoice_number: number,
-    date: formatDate(doc.date, lang),
-    due_date: doc.due_date ? formatDate(doc.due_date, lang) : '',
-    client: clientDisplayName(client),
-    subtotal: money(doc.totals.subtotal),
-    vat: money(doc.totals.total_vat),
-    total: money(doc.totals.total),
-    balance_due: money(doc.totals.balance_due),
-  }
   const rawFooter = doc.type === 'quote'
     ? (lang === 'de' ? settings.quote_footer_de : settings.quote_footer_en)
     : doc.type === 'credit_note'
     ? (lang === 'de' ? settings.credit_note_footer_de : settings.credit_note_footer_en)
     : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
-  const footerText = rawFooter ? replaceVars(rawFooter, footerVars) : null
+  // The same variables (and formatting) as the document's email, plus {{vat}}.
+  const footerText = rawFooter
+    ? fillTemplate(rawFooter, documentVariables({
+        doc: { ...doc, number, language: lang },
+        client,
+        issuer: settings,
+        totals: doc.totals,
+      }), { vat: templateMoney(doc.totals.total_vat, lang, doc.currency) })
+    : null
   const paymentTerms = paymentTermsSentence(doc, doc.totals.total, lang)
+  const paymentLines = doc.payments
+    ? summarizePayments(doc.payments)
+    : [{ kind: 'paid' as const, amount: doc.totals.total_paid, creditNoteNumber: null }]
 
   return (
     <Document title={`${title} ${number}`} author={settings.company_name || settings.owner_name} language={lang}>
@@ -410,10 +410,12 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
               </View>
               {doc.type === 'invoice' && doc.totals.total_paid > 0 && (
                 <>
-                  <View style={s.totalsRow}>
-                    <Text style={s.totalsLabel}>{t('pdfPortal.totals.paid')}</Text>
-                    <Text>{money(-doc.totals.total_paid)}</Text>
-                  </View>
+                  {paymentLines.map((line, i) => (
+                    <View key={i} style={s.totalsRow}>
+                      <Text style={s.totalsLabel}>{paymentLineLabel(t, line)}</Text>
+                      <Text>{money(-line.amount)}</Text>
+                    </View>
+                  ))}
                   <View style={s.totalsRow}>
                     <Text style={[s.totalsLabel, { fontWeight: 'bold' }]}>{t('pdfPortal.totals.balanceDue')}</Text>
                     <Text style={{ fontWeight: 'bold' }}>{money(doc.totals.balance_due)}</Text>

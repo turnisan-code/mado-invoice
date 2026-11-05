@@ -4,6 +4,7 @@
 import type { DisplayStatus, DocumentStatus, DocumentType, PaymentKind, PaymentState } from '@/types'
 import type { DictKey, TFn } from '@/lib/i18n'
 import { numberingErrorMessage } from '@/lib/utils/numbering'
+import { settlesBalance } from '@/lib/utils/document'
 
 export const DOCUMENT_STATUSES: Record<DocumentType, readonly DocumentStatus[]> = {
   invoice: ['draft', 'sent', 'overdue', 'paid', 'cancelled'],
@@ -77,9 +78,11 @@ type PaymentRow = { amount: number; kind?: PaymentKind | string | null }
 
 const sum = (rows: PaymentRow[]) => Math.round(rows.reduce((s, p) => s + p.amount, 0) * 100) / 100
 
-// Every kind closes the balance (money, Skonto, write-off, an applied credit note).
+// Every kind but 'fee' closes the balance (money, Skonto, write-off, an applied credit note);
+// dunning fees paid on top never count as paying or overpaying the invoice.
 export function paymentState(total: number, payments: PaymentRow[]): PaymentState {
   if (total <= 0.005) return 'nothing_due'
+  payments = payments.filter(settlesBalance)
   const settled = sum(payments)
   const balance = Math.round((total - settled) * 100) / 100
   if (settled <= 0.005) return 'unpaid'

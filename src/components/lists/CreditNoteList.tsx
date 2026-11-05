@@ -8,6 +8,7 @@ import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
+import { creditNoteSettled, displayStatus, statusLabelKey } from '@/lib/status'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -36,10 +37,18 @@ export interface CreditNote {
   discount_type?: string | null
   discount_value?: number | null
   document_items: DocItem[]
+  payments?: { amount: number; kind: string }[] | null
+  // Sum of the 'credit' rows that apply this credit note to its invoice.
+  applied?: number
 }
 
 function docTotal(d: CreditNote) {
   return calcTotals(d.document_items, [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
+}
+
+function isSettled(d: CreditNote) {
+  const refunded = (d.payments ?? []).filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0)
+  return creditNoteSettled(docTotal(d), d.applied ?? 0, refunded)
 }
 
 const clientLabel = (d: CreditNote) => d.clients?.company ?? d.clients?.name ?? ''
@@ -66,6 +75,11 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
 
   const statusLabel = (s: string) => t(`status.${s}` as DictKey)
   const docCount = (count: number) => n(count, t('creditNotes.countOne', { count }), t('creditNotes.countOther', { count }))
+  const todayStr = today()
+  const badge = (d: CreditNote) => {
+    const shown = displayStatus({ type: 'credit_note', status: d.status, creditSettled: isSettled(d) }, todayStr)
+    return <StatusBadge status={shown} label={t(statusLabelKey(shown))} />
+  }
 
   const filtered = useMemo(() => {
     let rows = docs
@@ -150,7 +164,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
-                    <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                    {badge(doc)}
                   </div>
                 </Link>
               </div>
@@ -188,7 +202,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
-                  <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                  {badge(doc)}
                 </td>
               </ClickableRow>
             ))}

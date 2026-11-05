@@ -157,6 +157,17 @@ export function toUbl(inv: EInvoice): string {
       txt(quantityName, decimal(line.quantity), { unitCode: line.unitCode }),
       txt('cbc:LineExtensionAmount', amount(line.net), money),
       period('cac:InvoicePeriod', line.period),
+      // The line's own discount (BG-27), so quantity × price less it is the net (PEPPOL-EN16931-R120);
+      // a line charge (BG-28) where it shrinks a credit line. No VAT category on line level.
+      line.discount !== 0 && el('cac:AllowanceCharge', null,
+        txt('cbc:ChargeIndicator', line.discount < 0 ? 'true' : 'false'),
+        line.discount > 0 && txt('cbc:AllowanceChargeReasonCode', DISCOUNT_REASON),
+        txt('cbc:AllowanceChargeReason', line.discountReason),
+        line.discountPercent != null && txt('cbc:MultiplierFactorNumeric', decimal(line.discountPercent, 2)),
+        txt('cbc:Amount', amount(Math.abs(line.discount)), money),
+        // PEPPOL-EN16931-R041/R042: a base amount only together with its percentage.
+        line.discountPercent != null && txt('cbc:BaseAmount', amount(line.gross), money),
+      ),
       el('cac:Item', null,
         txt('cbc:Description', line.descriptionLines.slice(1).join('\n')),
         txt('cbc:Name', line.name),

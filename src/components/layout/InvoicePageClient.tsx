@@ -4,10 +4,9 @@ import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import ReminderButton from '@/components/layout/ReminderButton'
 import EInvoiceButton from '@/components/layout/EInvoiceButton'
-import { formatDate, roundCents, today } from '@/lib/utils/document'
+import { formatDate, roundCents, settlesBalance, today } from '@/lib/utils/document'
 import { canRemind } from '@/lib/status'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
-import { fetchIssuedPdf, blobToBase64 } from '@/lib/issued-pdf'
 import type { Client, CatalogueItem, Document, Currency, Payment, ReminderLogEntry } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { useT } from '@/lib/i18n/client'
@@ -34,20 +33,8 @@ export default function InvoicePageClient({
 }: Props) {
   const { t, lang } = useT()
 
-  // Bookamat attaches the stored issued copy; a reminder attaches it only while nothing is paid,
-  // otherwise a render that shows the payments and asks for the open balance.
-  async function issuedPdfBase64(purpose: 'archive' | 'reminder'): Promise<{ base64: string; filename: string } | null> {
-    if (!document.number) return null
-    try {
-      return { base64: await blobToBase64(await fetchIssuedPdf(document.id, t, purpose)), filename: `${document.number}.pdf` }
-    } catch (err) {
-      console.warn('Issued PDF unavailable:', err)
-      return null
-    }
-  }
-
   const gmailConfigured = settings.gmail_connected
-  const balance = roundCents(total - payments.reduce((s, p) => s + p.amount, 0))
+  const balance = roundCents(total - payments.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
   const showReminder = canRemind(document, balance, today())
 
   return (
@@ -78,7 +65,6 @@ export default function InvoicePageClient({
         skontoDays={document.skonto_days ?? null}
         bookamatConfigured={bookamatConfigured}
         bookamatBookingId={bookamatBookingId}
-        generatePdfForBookamat={() => issuedPdfBase64('archive')}
       />
       {(showReminder || reminderLog.length > 0) && (
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-6 space-y-3">

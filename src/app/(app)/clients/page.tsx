@@ -12,7 +12,7 @@ export default async function ClientsPage() {
     supabase.from('documents').select('client_id, date').eq('type', 'invoice').in('status', ['sent', 'paid', 'overdue']).order('date', { ascending: false }),
     supabase
       .from('documents')
-      .select('client_id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)')
+      .select('client_id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
       .eq('type', 'invoice')
       .in('status', ['sent', 'overdue']),
   ])

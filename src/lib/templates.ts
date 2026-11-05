@@ -65,17 +65,18 @@ export function usesVariable(template: string | null | undefined, name: Template
 // One pass over the template: a substituted value is never scanned again, so a client called
 // "{{iban}}" stays literal. Unknown tokens stay visible so a typo shows up in the preview. A line
 // whose tokens all resolve to '' (e.g. "Mahnspesen: {{fee}}" on a Zahlungserinnerung) is dropped,
-// so one template serves documents with and without Skonto, fees or a portal link.
-export function fillTemplate(template: string, vars: TemplateVars): string {
+// so one template serves documents with and without Skonto, fees or a portal link. extra holds
+// variables only one caller offers (the PDF footer's {{vat}}); they count like the others.
+export function fillTemplate(template: string, vars: TemplateVars, extra: Readonly<Record<string, string>> = {}): string {
   const lines: string[] = []
   let dropped = false
   for (const line of template.replace(/\r\n?/g, '\n').split('\n')) {
     let tokens = 0
     let empty = 0
     const filled = line.replace(TOKEN, (raw, name: string) => {
-      if (!isVariable(name)) return raw
+      const value = isVariable(name) ? vars[name] ?? '' : Object.hasOwn(extra, name) ? extra[name] : null
+      if (value == null) return raw
       tokens++
-      const value = vars[name] ?? ''
       if (!value) empty++
       return value
     })

@@ -2,9 +2,10 @@ import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/render
 import { makeT, n } from '@/lib/i18n'
 import { templateDate, templateMoney, templatePercent, senderName, formatIban } from '@/lib/templates'
 import { countryName } from '@/lib/utils/country'
+import { paymentLineLabel } from '@/lib/payment-summary'
 import type { ReminderFigures } from '@/lib/utils/reminder-templates'
 import type { SecretSettingsKey } from '@/lib/public-settings'
-import type { Client, Language, Settings } from '@/types'
+import type { Client, Language, PaymentSummaryLine, Settings } from '@/types'
 import { PDF_FONT_FAMILY } from './fonts'
 import { epcBeneficiary } from '@/lib/utils/epc-qr'
 
@@ -63,11 +64,13 @@ interface Props {
   client: Client
   invoice: ReminderInvoice
   totals: { total: number; total_paid: number }
+  // What totals.total_paid is made of (summarizePayments).
+  payments: PaymentSummaryLine[]
   figures: ReminderFigures
   qrCodeDataUri?: string | null
 }
 
-export default function ReminderDocument({ settings, client, invoice, totals, figures, qrCodeDataUri }: Props) {
+export default function ReminderDocument({ settings, client, invoice, totals, payments, figures, qrCodeDataUri }: Props) {
   const lang = invoice.language
   const t = makeT(lang)
   const money = (amount: number) => templateMoney(amount, lang, invoice.currency)
@@ -82,6 +85,7 @@ export default function ReminderDocument({ settings, client, invoice, totals, fi
         <View style={s.topRow}>
           <View>
             {settings.logo_url
+              // eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt
               ? <Image src={settings.logo_url} style={s.logo} />
               : <Text style={s.logoFallback}>{sender}</Text>}
           </View>
@@ -118,12 +122,12 @@ export default function ReminderDocument({ settings, client, invoice, totals, fi
             </View>
             <Text style={s.rowValue}>{money(totals.total)}</Text>
           </View>
-          {totals.total_paid > 0 && (
-            <View style={s.row}>
-              <Text style={s.rowLabel}>{t('dunning.pdf.paid')}</Text>
-              <Text style={s.rowValue}>-{money(totals.total_paid)}</Text>
+          {totals.total_paid > 0 && payments.map((line, i) => (
+            <View key={i} style={s.row}>
+              <Text style={s.rowLabel}>{line.kind === 'paid' ? t('dunning.pdf.paid') : paymentLineLabel(t, line)}</Text>
+              <Text style={s.rowValue}>-{money(line.amount)}</Text>
             </View>
-          )}
+          ))}
           {(figures.fee > 0 || figures.interest > 0 || totals.total_paid > 0) && (
             <View style={s.row}>
               <Text style={s.rowLabel}>{t('dunning.pdf.open')}</Text>
@@ -157,6 +161,7 @@ export default function ReminderDocument({ settings, client, invoice, totals, fi
           </Text>
           {!!qrCodeDataUri && (
             <View style={s.qrBox}>
+              {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
               <Image src={qrCodeDataUri} style={s.qr} />
               <Text style={s.qrCaption}>{t('dunning.pdf.scan')}</Text>
             </View>

@@ -5,6 +5,7 @@ import { calcTotals } from '@/lib/utils/document'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { reminderFigures, type ReminderFigures } from '@/lib/utils/reminder-templates'
 import { templateLang } from '@/lib/templates'
+import { summarizePayments } from '@/lib/payment-summary'
 import type { DocumentTotals, Settings } from '@/types'
 import type { PdfDocument } from './render'
 import { preparePdfFonts, registerPdfFonts } from '@/components/pdf/fonts'
@@ -57,6 +58,7 @@ export async function renderReminderPdf(
     client: doc.clients,
     invoice: { number: doc.number, date: doc.date, due_date: doc.due_date, currency, language: lang },
     totals: { total: totals.total, total_paid: totals.total_paid },
+    payments: summarizePayments(doc.payments ?? []),
     figures,
     qrCodeDataUri,
   }

@@ -748,7 +748,6 @@ export const de = {
     title: 'Freigabelink',
     description: 'Jeder mit diesem Link kann den Beleg ansehen und das PDF herunterladen. Kein Login nötig.',
     urlLabel: 'Freigabelink-URL',
-    alsoDrive: 'Auch in Google Drive speichern',
     revokeQuestion: 'Diesen Link widerrufen? Wer ihn hat, verliert den Zugriff auf den Beleg.',
     keepLink: 'Link behalten',
     revoking: 'Widerrufen…',
@@ -937,6 +936,33 @@ export const de = {
     settings: {
       accountHolder: 'Kontoinhaber',
       accountHolderHint: 'Name, auf den das Konto lautet, wie ihn die Bank führt. Wird als Empfänger im Zahlungs-QR-Code und auf Rechnungen gedruckt; leer = Firmenname.',
+    },
+  },
+  docs: {
+    history: {
+      reminderManual: '{title} manuell erfasst',
+      reminderManualTo: '{title} an {to} manuell erfasst',
+      reminderMailto: '{title} im E-Mail-Programm für {to} geöffnet',
+      reminderMailtoPlain: '{title} im E-Mail-Programm geöffnet',
+      mailtoPlain: 'Im E-Mail-Programm geöffnet',
+      cc: 'CC: {list}',
+      bcc: 'BCC: {list}',
+      booking: 'Buchung {id}',
+      bookingYear: 'Buchungsjahr {year}',
+    },
+    // Gedruckt (PDF, Portal, Mahnung): in der Sprache des Belegs.
+    payments: {
+      creditNote: 'Gutschrift {number}',
+      creditNotePlain: 'Gutschrift',
+      skonto: 'Skonto',
+      writeoff: 'Abgeschrieben',
+    },
+    footer: {
+      vat: 'USt.-Betrag',
+      emptyLines: 'Eine Zeile, deren Variablen alle leer sind (z. B. das Fälligkeitsdatum auf einer Gutschrift), entfällt.',
+    },
+    share: {
+      saveToDrive: 'In Google Drive speichern',
     },
   },
   reminders: {
@@ -1731,6 +1757,7 @@ export const de = {
       buyer_reference: 'Peppol braucht eine Auftragsreferenz oder Bestellnummer.',
       buyer_endpoint: 'Der Kunde hat keine Peppol-ID, und aus seiner UID-Nummer ergibt sich keine — beim Kunden ergänzen.',
       seller_endpoint: 'Die eigene Peppol-ID fehlt — unter Einstellungen → E-Rechnung eintragen.',
+      line_amount: 'Ein Positionsbetrag geht nicht auf (Menge × Preis abzüglich Positionsrabatt) — Positionen prüfen und erneut speichern.',
     },
     history: {
       exported: 'Als E-Rechnung exportiert ({format})',

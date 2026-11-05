@@ -746,7 +746,6 @@ export const en = {
     title: 'Share link',
     description: 'Anyone with this link can view the document and download the PDF. No login required.',
     urlLabel: 'Share link URL',
-    alsoDrive: 'Also save to Google Drive',
     revokeQuestion: 'Revoke this link? Anyone who has it loses access to the document.',
     keepLink: 'Keep link',
     revoking: 'Revoking…',
@@ -935,6 +934,33 @@ export const en = {
     settings: {
       accountHolder: 'Account holder',
       accountHolderHint: 'The name the account is held in, as your bank shows it. Printed as the beneficiary of the payment QR code and on invoices; empty = company name.',
+    },
+  },
+  docs: {
+    history: {
+      reminderManual: '{title} recorded manually',
+      reminderManualTo: '{title} to {to} recorded manually',
+      reminderMailto: '{title} opened in the email app for {to}',
+      reminderMailtoPlain: '{title} opened in the email app',
+      mailtoPlain: 'Opened in the email app',
+      cc: 'CC: {list}',
+      bcc: 'BCC: {list}',
+      booking: 'Booking {id}',
+      bookingYear: 'Booking year {year}',
+    },
+    // Printed (PDF, portal, Mahnung): in the document's language.
+    payments: {
+      creditNote: 'Credit note {number}',
+      creditNotePlain: 'Credit note',
+      skonto: 'Early payment discount',
+      writeoff: 'Written off',
+    },
+    footer: {
+      vat: 'VAT amount',
+      emptyLines: 'A line whose variables are all empty (e.g. the due date on a credit note) is left out.',
+    },
+    share: {
+      saveToDrive: 'Save to Google Drive',
     },
   },
   reminders: {
@@ -1729,6 +1755,7 @@ export const en = {
       buyer_reference: 'Peppol needs a buyer reference or order number.',
       buyer_endpoint: 'This client has no Peppol ID, and none follows from its VAT number — add it on the client.',
       seller_endpoint: 'Your own Peppol ID is missing — enter it under Settings → E-invoice.',
+      line_amount: 'A line amount does not add up (quantity × price less the line discount) — check the lines and save again.',
     },
     history: {
       exported: 'Exported as an e-invoice ({format})',
