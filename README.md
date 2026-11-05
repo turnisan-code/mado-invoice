@@ -226,7 +226,9 @@ without a copy until the owner saves the client or confirms the payments, and th
 Likewise, an email's e-invoice is built as it is sent: should Claude have changed the client, or an
 invoice's payments, since the action started, the email is not sent and the result says why (an
 issue-and-send stays issued). A Bookamat sync stops before it books when Claude changed the client,
-or the payments, since the action started.
+or the payments, since the action started. A reminder compares the invoice its Mahnung is rendered
+from (lines, payments and, from Gmail, the client) with the approved state once more and stops on
+any change, before anything is sent or the level moves.
 
 One action runs at a time, approved in Mado or confirmed in chat. While one runs, Claude's
 confirmation does not start another and an approval in Mado is refused (“Another action is still
