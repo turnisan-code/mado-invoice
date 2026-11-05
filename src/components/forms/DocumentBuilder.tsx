@@ -17,6 +17,7 @@ import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
 import { generateEpcQr } from '@/lib/utils/epc-qr'
+import { catalogueLineText } from '@/lib/utils/catalogue'
 import type { Client, CatalogueItem, Document, DocumentItem, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
@@ -277,7 +278,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
   function pickCatalogueItem(item: CatalogueItem, lineId: string) {
     updateLine(lineId, {
-      description: catalogueName(item),
+      description: catalogueLineText(item, language),
       unit_price: item.default_price,
       unit: item.unit as Unit,
       vat_rate: item.vat_rate as VatRate,

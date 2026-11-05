@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation'
 import ClientEditSection from '@/components/layout/ClientEditSection'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
-import { calcTotals, formatMoney } from '@/lib/utils/document'
+import { calcTotals, formatDate, formatMoney } from '@/lib/utils/document'
+import { countryName, countryOptions } from '@/lib/utils/country'
+import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
 
@@ -32,14 +34,14 @@ const typeRoute: Record<string, string> = {
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
-  const { t } = await getT()
+  const { t, lang } = await getT()
   const statusLabel = (status: string) => t(`status.${status}` as DictKey)
 
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
   if (!client) notFound()
 
   // The history list shows the 50 latest documents; the stats aggregate every invoice.
-  const [{ data: documents }, { data: invoices }] = await Promise.all([
+  const [{ data: documents }, { data: invoices }, { data: settings }] = await Promise.all([
     supabase
       .from('documents')
       .select('id, type, number, date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
@@ -51,6 +53,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)')
       .eq('client_id', id)
       .eq('type', 'invoice'),
+    supabase.from('settings').select(CLIENT_DEFAULTS_COLUMNS).maybeSingle(),
   ])
 
   const allDocs = documents ?? []
@@ -67,7 +70,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     .reduce((s, d) => s + docTotals(d).balance_due, 0)
   const invoiceCount = allInvoices.length
 
-  const displayName = client.name || client.company || ''
+  const displayName = clientDisplayName(client)
+  const subtitle = [client.client_number, client.company && client.name ? client.name : null].filter(Boolean).join(' · ')
   const initials = displayName.split(' ').map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()
 
   return (
@@ -82,8 +86,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             <span className="text-sm font-semibold text-white dark:text-neutral-900">{initials}</span>
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold leading-tight">{client.company || client.name}</h1>
-            {client.company && client.name && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{client.name}</p>}
+            <h1 className="text-xl font-semibold leading-tight break-words">{displayName}</h1>
+            {subtitle && <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5">{subtitle}</p>}
           </div>
           <span className={`text-xs px-2.5 py-1 rounded-full font-medium ml-auto shrink-0 ${statusColor[client.status] ?? 'text-neutral-500 bg-neutral-100'}`}>
             {statusLabel(client.status)}
@@ -113,7 +117,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
         {/* Client details */}
         <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-5">
-          <ClientEditSection client={client} />
+          <ClientEditSection client={client} countryLabel={countryName(client.country, lang)} defaults={toClientDefaults(settings)} countries={countryOptions(lang)} />
         </div>
 
         {/* Documents */}
@@ -150,7 +154,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     <div className="text-sm font-medium">
                       {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500 font-normal">{t('common.draft')}</span>}
                     </div>
-                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {doc.date}</div>
+                    <div className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
                   </div>
                   <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${docStatusColor[doc.status] ?? ''}`}>

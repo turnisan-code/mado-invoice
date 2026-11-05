@@ -2,6 +2,7 @@ import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/render
 import { formatMoney, formatDate, orderItems, paymentTermsSentence } from '@/lib/utils/document'
 import type { Settings, Client, DocumentType, Language, TaxTreatment, Currency, Unit, VatRate, LineType, DocumentTotals } from '@/types'
 import type { SecretSettingsKey } from '@/lib/public-settings'
+import { countryName } from '@/lib/utils/country'
 import type { DocReference } from '@/lib/utils/document-reference'
 
 const s = StyleSheet.create({
@@ -228,7 +229,7 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
             {client.address_line1}{'\n'}
             {client.address_line2 ? `${client.address_line2}\n` : ''}
             {client.zip} {client.city}{'\n'}
-            {client.country}
+            {countryName(client.country, lang)}
             {client.uid_number ? `\n${L('uid', lang)}: ${client.uid_number}` : ''}
           </Text>
         </View>

@@ -33,9 +33,16 @@ export interface Settings {
   next_invoice_number: number
   next_quote_number: number
   next_credit_note_number: number
+  next_client_number: number
   invoice_number_format: string
   quote_number_format: string
   credit_note_number_format: string
+  invoice_counter_year: number | null
+  quote_counter_year: number | null
+  credit_note_counter_year: number | null
+  invoice_number_reset_yearly: boolean
+  quote_number_reset_yearly: boolean
+  credit_note_number_reset_yearly: boolean
   default_payment_days: number
   default_language: Language
   default_vat_rate: VatRate
@@ -103,6 +110,7 @@ export interface Settings {
 export interface Client {
   id: string
   created_at: string
+  client_number: string | null
   name: string
   company: string | null
   address_line1: string
@@ -116,17 +124,34 @@ export interface Client {
   tax_treatment: TaxTreatment
   language: Language
   currency: Currency
-  payment_days: number
+  // null = settings.default_payment_days
+  payment_days: number | null
   status: ClientStatus
   tags: string[]
   notes: string | null
   reminders_opt_out: boolean
 }
 
+// Settings values a new client starts with.
+export interface ClientDefaults {
+  country: string
+  tax_treatment: TaxTreatment
+  language: Language
+  payment_days: number
+}
+
+export interface CountryOption {
+  code: string
+  name: string
+  eu: boolean
+}
+
 export interface CatalogueItem {
   id: string
   name_de: string
   name_en: string
+  description_de: string | null
+  description_en: string | null
   default_price: number
   unit: Unit
   vat_rate: VatRate

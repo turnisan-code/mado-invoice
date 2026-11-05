@@ -39,9 +39,19 @@ create table settings (
   next_invoice_number         integer not null default 1,
   next_quote_number           integer not null default 1,
   next_credit_note_number     integer not null default 1,
+  -- Next client number (K-0001); the clients trigger takes it.
+  next_client_number          integer not null default 1,
   invoice_number_format       text not null default '{prefix}-{YYYY}-{NNN}',
   quote_number_format         text not null default '{prefix}-{YYYY}-{NNN}',
   credit_note_number_format   text not null default '{prefix}-{YYYY}-{NNN}',
+  -- Year each counter belongs to; with *_number_reset_yearly on and a {YYYY}/{YY} format,
+  -- the first document of a later year restarts the counter at 1.
+  invoice_counter_year            integer,
+  quote_counter_year              integer,
+  credit_note_counter_year        integer,
+  invoice_number_reset_yearly     boolean not null default false,
+  quote_number_reset_yearly       boolean not null default false,
+  credit_note_number_reset_yearly boolean not null default false,
   default_payment_days        integer not null default 14,
   default_language            text not null default 'de',
   default_vat_rate            integer not null default 20 check (default_vat_rate in (0,10,13,20)),
@@ -114,27 +124,32 @@ create table settings (
   ui_language                 text not null default 'en' check (ui_language in ('de','en'))
 );
 
--- The app and next_document_number read "the" settings row; it must exist.
+-- The app and next_document_number read "the" settings row; it must exist, and only once.
 insert into settings (id) values (uuid_generate_v4());
+create unique index settings_singleton on settings ((true));
 
 -- ─── Clients ─────────────────────────────────────────────────────────────────
 create table clients (
   id            uuid primary key default uuid_generate_v4(),
   created_at    timestamptz not null default now(),
+  -- K-0001, assigned by the clients_assign_number trigger.
+  client_number text unique,
   name          text not null,
   company       text,
   address_line1 text not null default '',
   address_line2 text,
   zip           text not null default '',
   city          text not null default '',
+  -- ISO 3166-1 alpha-2 code; free text only on rows the code migration could not map.
   country       text not null default '',
   email         text not null default '',
   phone         text,
   uid_number    text,
   tax_treatment text not null default 'at_vat' check (tax_treatment in ('at_vat','eu_reverse_charge','non_eu')),
   language      text not null default 'de' check (language in ('de','en')),
-  currency      text not null default 'EUR' check (currency in ('EUR','USD','GBP')),
-  payment_days  integer not null default 14,
+  currency      text not null default 'EUR' constraint clients_currency_check check (currency = 'EUR'),
+  -- NULL = settings.default_payment_days.
+  payment_days  integer constraint clients_payment_days_check check (payment_days is null or payment_days between 0 and 365),
   status        text not null default 'active' check (status in ('active','inactive','lead')),
   tags          text[] not null default '{}',
   notes         text,
@@ -142,11 +157,43 @@ create table clients (
   reminders_opt_out boolean not null default false
 );
 
+create or replace function format_client_number(n integer)
+returns text language sql immutable as $$
+  select 'K-' || lpad(n::text, greatest(4, length(n::text)), '0')
+$$;
+
+-- Every insert path gets the next number; a number typed in by hand is kept.
+create or replace function assign_client_number()
+returns trigger language plpgsql as $$
+declare
+  s settings%rowtype;
+  n integer;
+begin
+  if nullif(btrim(new.client_number), '') is not null then return new; end if;
+  select * into s from settings limit 1 for update;
+  if s.id is null then raise exception 'settings row missing'; end if;
+  n := s.next_client_number;
+  while exists (select 1 from clients where client_number = format_client_number(n)) loop
+    n := n + 1;
+  end loop;
+  new.client_number := format_client_number(n);
+  update settings set next_client_number = n + 1 where id = s.id;
+  return new;
+end;
+$$;
+
+create trigger clients_assign_number
+  before insert on clients
+  for each row execute function assign_client_number();
+
 -- ─── Service catalogue ───────────────────────────────────────────────────────
 create table catalogue_items (
   id            uuid primary key default uuid_generate_v4(),
   name_de       text not null,
   name_en       text not null,
+  -- Longer text prefilled under the name when the item is picked.
+  description_de text,
+  description_en text,
   default_price numeric(10,2) not null default 0,
   unit          text not null default 'day'
                 constraint catalogue_items_unit_check
@@ -166,6 +213,15 @@ insert into catalogue_items (name_de, name_en, default_price, unit, vat_rate, ca
   ('Mixing',                   'Mixing',                    0, 'flat',  20, 'Production',  60),
   ('Mastering',                'Mastering',                 0, 'flat',  20, 'Production',  70),
   ('Mikrofon Miete',           'Microphone Rental',         0, 'day',   20, 'Equipment',   80);
+
+-- Writes only sort_order, in one statement, in the order of p_ids.
+create or replace function reorder_catalogue_items(p_ids uuid[])
+returns void language sql as $$
+  update catalogue_items c
+  set sort_order = (x.ord::integer - 1) * 10
+  from unnest(p_ids) with ordinality as x(id, ord)
+  where c.id = x.id
+$$;
 
 -- ─── Documents ───────────────────────────────────────────────────────────────
 create table documents (
@@ -320,7 +376,8 @@ create unique index documents_recurring_period_key
   where recurring_schedule_id is not null;
 
 -- ─── Numbering ───────────────────────────────────────────────────────────────
--- Longer counter tokens are replaced first so {N} cannot eat part of {NNN}.
+-- Longer counter tokens are replaced first so {N} cannot eat part of {NNN}; a counter longer
+-- than its token is printed in full instead of being cut (lpad truncates).
 create or replace function format_document_number(fmt text, prefix text, num integer, d date)
 returns text language sql immutable as $$
   select replace(replace(replace(replace(replace(replace(replace(replace(
@@ -329,48 +386,96 @@ returns text language sql immutable as $$
     '{YYYY}',   to_char(d, 'YYYY')),
     '{YY}',     to_char(d, 'YY')),
     '{MM}',     to_char(d, 'MM')),
-    '{NNNN}',   lpad(num::text, 4, '0')),
-    '{NNN}',    lpad(num::text, 3, '0')),
-    '{NN}',     lpad(num::text, 2, '0')),
+    '{NNNN}',   lpad(num::text, greatest(4, length(num::text)), '0')),
+    '{NNN}',    lpad(num::text, greatest(3, length(num::text)), '0')),
+    '{NN}',     lpad(num::text, greatest(2, length(num::text)), '0')),
     '{N}',      num::text)
 $$;
 
--- Locks the settings row so two concurrent calls can never hand out the same number.
-create or replace function next_document_number(doc_type text)
+-- Takes the next number for doc_type, formatted with doc_date (default: today in Vienna).
+-- Locks the settings row, so concurrent calls never hand out the same number. With the yearly
+-- restart on and a {YYYY}/{YY} format, the first document of a new year starts again at 1.
+-- A number that already exists (e.g. after the counter was lowered by hand) is skipped.
+-- Error codes: MI002 = the date lies in a numbering year that has already been closed (detail:
+-- the open year), MI003 = the format has no counter token. The app maps them to its dictionaries.
+create or replace function next_document_number(doc_type text, doc_date date default null)
 returns text language plpgsql as $$
 declare
-  s   settings%rowtype;
-  num integer;
+  s      settings%rowtype;
+  d      date := coalesce(doc_date, (now() at time zone 'Europe/Vienna')::date);
+  y      integer := extract(year from d)::integer;
+  fmt    text;
+  prefix text;
+  num    integer;
+  cy     integer;
+  yearly boolean;
+  result text;
+  tries  integer := 0;
 begin
   select * into s from settings limit 1 for update;
   if s.id is null then raise exception 'settings row missing'; end if;
+
   if doc_type = 'invoice' then
-    num := s.next_invoice_number;
-    update settings set next_invoice_number = next_invoice_number + 1 where id = s.id;
-    return format_document_number(s.invoice_number_format, s.invoice_prefix, num, current_date);
+    fmt := s.invoice_number_format; prefix := s.invoice_prefix; num := s.next_invoice_number;
+    cy := s.invoice_counter_year; yearly := s.invoice_number_reset_yearly;
   elsif doc_type = 'quote' then
-    num := s.next_quote_number;
-    update settings set next_quote_number = next_quote_number + 1 where id = s.id;
-    return format_document_number(s.quote_number_format, s.quote_prefix, num, current_date);
+    fmt := s.quote_number_format; prefix := s.quote_prefix; num := s.next_quote_number;
+    cy := s.quote_counter_year; yearly := s.quote_number_reset_yearly;
+  elsif doc_type = 'credit_note' then
+    fmt := s.credit_note_number_format; prefix := s.credit_note_prefix; num := s.next_credit_note_number;
+    cy := s.credit_note_counter_year; yearly := s.credit_note_number_reset_yearly;
   else
-    num := s.next_credit_note_number;
-    update settings set next_credit_note_number = next_credit_note_number + 1 where id = s.id;
-    return format_document_number(s.credit_note_number_format, s.credit_note_prefix, num, current_date);
+    raise exception 'unknown document type %', doc_type;
   end if;
+
+  if fmt !~ '\{N{1,4}\}' then
+    raise exception using errcode = 'MI003',
+      message = format('The %s number format "%s" has no counter token ({N}, {NN}, {NNN} or {NNNN}). Fix it in Settings → Numbering.', doc_type, fmt);
+  end if;
+
+  if yearly and fmt ~ '\{YY(YY)?\}' and cy is not null then
+    if y > cy then
+      num := 1;
+    elsif y < cy then
+      raise exception using errcode = 'MI002',
+        message = format('Numbering for %s has already started, so a document dated %s can no longer be numbered. Date it in %s or later and put the earlier period in the service date.', cy, d, cy),
+        detail = cy::text;
+    end if;
+  end if;
+
+  loop
+    result := format_document_number(fmt, prefix, num, d);
+    exit when not exists (select 1 from documents where number = result);
+    num := num + 1;
+    tries := tries + 1;
+    if tries > 100000 then raise exception 'no free document number after %', result; end if;
+  end loop;
+
+  if doc_type = 'invoice' then
+    update settings set next_invoice_number = num + 1, invoice_counter_year = greatest(coalesce(cy, y), y) where id = s.id;
+  elsif doc_type = 'quote' then
+    update settings set next_quote_number = num + 1, quote_counter_year = greatest(coalesce(cy, y), y) where id = s.id;
+  else
+    update settings set next_credit_note_number = num + 1, credit_note_counter_year = greatest(coalesce(cy, y), y) where id = s.id;
+  end if;
+  return result;
 end;
 $$;
 
--- Issues a document in one transaction: assigns the next number for its own type (year/month
--- tokens come from the document date). A failure anywhere rolls the counter back, so no number
--- is ever burned. Idempotent for already numbered documents. Issuing keeps an already reached
--- status (e.g. a deposit recorded before issuing left the invoice 'paid'); only drafts move to
--- 'sent'. Cancelled documents cannot be issued.
+-- Issues a document in one transaction: assigns the next number for its own type, formatted
+-- with the document date. A failure anywhere rolls the counter back, so no number is ever
+-- burned. Idempotent for already numbered documents. Issuing keeps an already reached status
+-- (e.g. a deposit recorded before issuing left the invoice 'paid'); only drafts move to 'sent'.
+-- Cancelled documents cannot be issued. issued_at records when the number was assigned.
+-- Error code MI001 = the document date is more than one day in the future (Vienna time).
+-- (issued_at belongs to the frozen-copy columns of 20261020_snapshot.sql.)
+alter table documents add column if not exists issued_at timestamptz;
+
 create or replace function issue_document(p_document_id uuid)
 returns text language plpgsql as $$
 declare
   d      documents%rowtype;
-  s      settings%rowtype;
-  num    integer;
+  today  date := (now() at time zone 'Europe/Vienna')::date;
   result text;
 begin
   select * into d from documents where id = p_document_id for update;
@@ -381,22 +486,12 @@ begin
     return d.number;
   end if;
 
-  select * into s from settings limit 1 for update;
-  if s.id is null then raise exception 'settings row missing'; end if;
-
-  if d.type = 'invoice' then
-    num := s.next_invoice_number;
-    update settings set next_invoice_number = next_invoice_number + 1 where id = s.id;
-    result := format_document_number(s.invoice_number_format, s.invoice_prefix, num, coalesce(d.date, current_date));
-  elsif d.type = 'quote' then
-    num := s.next_quote_number;
-    update settings set next_quote_number = next_quote_number + 1 where id = s.id;
-    result := format_document_number(s.quote_number_format, s.quote_prefix, num, coalesce(d.date, current_date));
-  else
-    num := s.next_credit_note_number;
-    update settings set next_credit_note_number = next_credit_note_number + 1 where id = s.id;
-    result := format_document_number(s.credit_note_number_format, s.credit_note_prefix, num, coalesce(d.date, current_date));
+  if d.date > today + 1 then
+    raise exception using errcode = 'MI001',
+      message = format('The document date %s is in the future. A document can be issued at most one day ahead (today is %s).', d.date, today);
   end if;
+
+  result := next_document_number(d.type, coalesce(d.date, today));
 
   update documents
   set number = result,
@@ -435,6 +530,14 @@ begin
   )
   order by x.sort_order;
 end;
+$$;
+
+-- How many document lines use each catalogue item, for the counts on the catalogue page.
+create or replace function catalogue_usage()
+returns table (catalogue_item_id uuid, uses bigint) language sql stable as $$
+  select catalogue_item_id, count(*) from document_items
+  where catalogue_item_id is not null
+  group by catalogue_item_id
 $$;
 
 -- ─── Row Level Security ──────────────────────────────────────────────────────

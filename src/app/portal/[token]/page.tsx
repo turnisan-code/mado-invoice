@@ -4,6 +4,7 @@ import QuoteActions from './QuoteActions'
 import { createServiceClient } from '@/lib/supabase/service'
 import { calcTotals, formatMoney, formatDate, calcSectionSubtotal, orderItems, paymentTermsSentence } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
+import { countryName } from '@/lib/utils/country'
 import { Download } from 'lucide-react'
 import type { Settings, Client, DocumentItem, Payment, DocumentType, Language } from '@/types'
 
@@ -127,7 +128,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
                 <div>{client.address_line1}</div>
                 {client.address_line2 && <div>{client.address_line2}</div>}
                 <div>{client.zip} {client.city}</div>
-                <div>{client.country}</div>
+                <div>{countryName(client.country, lang)}</div>
                 {client.uid_number && <div className="text-neutral-500 text-xs mt-1">{t('uid', lang)}: {client.uid_number}</div>}
               </div>
             </div>
