@@ -116,6 +116,13 @@ export function issueTotal(input: Pick<IssueCheckInput, 'items' | 'taxTreatment'
   return calcTotals(lines, [], null, input.taxTreatment).total
 }
 
+// Time entries and expenses billed on an invoice whose line is gone (a link lost before line ids
+// were kept): the invoice may bill less than their projects show as billed, so issuing warns.
+export function unlinkedEntries<T extends { document_item_id: string | null }>(billed: readonly T[], lineIds: readonly string[]): T[] {
+  const lines = new Set(lineIds)
+  return billed.filter(e => !e.document_item_id || !lines.has(e.document_item_id))
+}
+
 export function issueProblemMessage(p: IssueProblem, t: TFn): string {
   switch (p.code) {
     case 'settingsIncomplete':

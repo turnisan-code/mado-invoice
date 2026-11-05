@@ -53,7 +53,21 @@ export const VAT_RATES: VatRate[] = [0, 10, 13, 20]
 export const AUTOSAVE_DELAY = 2000
 export const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
 
-export function makeId() { return Math.random().toString(36).slice(2) }
+// Line ids are UUIDs: replace_document_items stores a new line under the id the editor gave it
+// and updates that row on every later save, so what is billed on a line stays linked to it.
+export function makeId(): string {
+  const c = globalThis.crypto
+  if (typeof c?.randomUUID === 'function') return c.randomUUID()
+  const b = new Uint8Array(16)
+  if (typeof c?.getRandomValues === 'function') c.getRandomValues(b)
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256)
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function blankLine(settings: Pick<Settings, 'default_unit' | 'default_vat_rate'>): LineItem {
   return { id: makeId(), line_type: 'item', description: '', service_date: null, service_date_end: null, quantity: 1, unit: settings.default_unit ?? 'flat', unit_price: 0, vat_rate: settings.default_vat_rate ?? 20, catalogue_item_id: null, discount_type: null, discount_value: 0 }
@@ -111,7 +125,7 @@ export function clientChangeTerms(
 
 export function linesFromItems(items: DocumentItem[]): LineItem[] {
   return orderItems(items).map(i => ({
-    id: makeId(),
+    id: i.id && UUID.test(i.id) ? i.id : makeId(),
     line_type: (i.line_type ?? 'item') as LineType,
     description: i.description,
     service_date: i.service_date ?? null,
@@ -177,9 +191,10 @@ export function docFields(type: DocumentType, f: FormState) {
   }
 }
 
-// Item lines carry their own discount, subtotal lines the section's; other lines none. A final
+// What a save stores per line, without its id: the saved and content keys compare these. Item
+// lines carry their own discount, subtotal lines the section's; other lines none. A final
 // invoice's deduction lines keep their amount and rate.
-export function itemsPayload(lines: LineItem[]) {
+export function lineValues(lines: LineItem[]) {
   return lines.map((l, i) => {
     const item = l.line_type === 'item'
     const amounts = item || l.line_type === 'deduction'
@@ -201,9 +216,39 @@ export function itemsPayload(lines: LineItem[]) {
   })
 }
 
+// What replace_document_items receives: every line with its id, so the row (and the time entries
+// and expenses billed on it) is kept. An id that is no UUID (a device backup from before ids were
+// kept) goes as null and becomes a new row; such a save frees no project entries.
+export function itemsPayload(lines: LineItem[]) {
+  return lineValues(lines).map((values, i) => ({ id: UUID.test(lines[i].id) ? lines[i].id : null, ...values }))
+}
+
+// The content replace_document_items compares to move a removed row's entries to a new row.
+function twinKey(l: LineItem): string {
+  const v = lineValues([l])[0]
+  return JSON.stringify([v.line_type, v.description, v.quantity, v.unit, v.unit_price, v.vat_rate, v.service_date, v.service_date_end])
+}
+
+// A device backup from before line ids were kept has ids that are no UUIDs. A restored line with
+// the same content as an open line takes that line's id, so its row and what is billed on it stay.
+// When every open line found its twin, the other restored lines are new and get ids of their own;
+// otherwise they keep theirs and save as new rows without freeing anything, since an open line
+// without a twin may have been edited rather than removed.
+export function adoptLineIds(restored: LineItem[], open: LineItem[]): LineItem[] {
+  if (restored.every(l => UUID.test(l.id))) return restored
+  const used = new Set(restored.filter(l => UUID.test(l.id)).map(l => l.id))
+  const free = open.filter(l => UUID.test(l.id) && !used.has(l.id))
+  const lines = restored.map(l => {
+    if (UUID.test(l.id)) return l
+    const k = free.findIndex(o => twinKey(o) === twinKey(l))
+    return k < 0 ? l : { ...l, id: free.splice(k, 1)[0].id }
+  })
+  return free.length ? lines : lines.map(l => UUID.test(l.id) ? l : { ...l, id: makeId() })
+}
+
 // Exactly what a save writes, so a document reloaded from the database has the key it was saved with.
 export function savedKeyOf(type: DocumentType, f: FormState): string {
-  return JSON.stringify([docFields(type, f), itemsPayload(f.lines)])
+  return JSON.stringify([docFields(type, f), lineValues(f.lines)])
 }
 
 // The key of what the database holds once `f` is autosaved: an empty date leaves the stored one
@@ -215,7 +260,7 @@ export function storedKeyOf(type: DocumentType, f: FormState, storedDate: string
 // What the user wrote beyond the client and what follows from it (language, tax, due date,
 // Skonto): a new document is only created once there is something worth keeping.
 export function contentKeyOf(f: FormState): string {
-  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.buyerReference, itemsPayload(f.lines)])
+  return JSON.stringify([f.date, f.serviceDate, f.serviceDateEnd, f.notes, f.notesInternal, f.discountType, f.discountValue, f.buyerReference, lineValues(f.lines)])
 }
 
 type NumberingKey<T extends DocumentType> =

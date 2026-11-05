@@ -468,6 +468,27 @@ export async function writeDeductions(supabase: SupabaseClient, finalId: string)
   if (insErr) throw new Error(insErr.message)
 }
 
+// What a final invoice deducts for an advance invoice depends on the money received on it and
+// paid back on its credit notes; once that final invoice is issued (and not cancelled) the money
+// stays as it is (payments_deposit_guard, MI022). Partial invoices are deducted in full whatever
+// was paid, so their payments stay free.
+export function moneyLocked(
+  invoice: { invoice_kind?: string | null; final_invoice_id?: string | null },
+  final: { number: string | null; status: string } | null,
+): boolean {
+  return invoice.invoice_kind === 'advance' && !!invoice.final_invoice_id && !!final?.number && final.status !== 'cancelled'
+}
+
+// The final invoice that fixes the money received on this invoice, or null.
+export async function loadMoneyLock(supabase: SupabaseClient, invoiceId: string): Promise<{ id: string; number: string } | null> {
+  const { data, error } = await supabase.from('documents').select('invoice_kind, final_invoice_id').eq('id', invoiceId).maybeSingle()
+  if (error) throw new Error(error.message)
+  if (!data?.final_invoice_id) return null
+  const { data: final, error: finalErr } = await supabase.from('documents').select('id, number, status').eq('id', data.final_invoice_id).maybeSingle()
+  if (finalErr) throw new Error(finalErr.message)
+  return final && moneyLocked(data, final) ? { id: final.id as string, number: final.number as string } : null
+}
+
 // Links an issued advance or partial invoice to a draft final invoice, which becomes one.
 // 'taken' when another final invoice deducts it already.
 export async function linkDeposit(supabase: SupabaseClient, finalId: string, invoiceId: string): Promise<'ok' | 'taken'> {

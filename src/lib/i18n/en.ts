@@ -806,7 +806,6 @@ export const en = {
       lineOne: '{count} line',
       lineOther: '{count} lines',
       noRate: 'Some hours have no rate — set an hourly rate on the project or on the entries.',
-      removeHint: 'To leave an entry off this invoice later, mark it unbilled on the project page before removing its line — otherwise it stays billed.',
       nothing: 'Nothing unbilled to invoice.',
       nothingSelected: 'Select at least one entry.',
       create: 'Create draft invoice',
@@ -870,6 +869,36 @@ export const en = {
         payment: 'Payment info',
         uid: 'VAT Reg.',
       },
+    },
+  },
+  records: {
+    history: {
+      projectInvoiced: 'Created from project {project}: {entries}',
+      projectInvoicedPlain: 'Created from a project: {entries}',
+      released: {
+        line_removed: 'Unbilled again: {entries} — removed from the draft',
+        storno: 'Unbilled again: {entries} — the invoice was cancelled',
+        cancelled: 'Unbilled again: {entries} — the draft was cancelled',
+        manual: 'Marked unbilled on the project page: {entries}',
+      },
+      timeOne: '{count} time entry',
+      timeOther: '{count} time entries',
+      expenseOne: '{count} expense',
+      expenseOther: '{count} expenses',
+      both: '{time} and {expenses}',
+      openProject: 'Open project',
+    },
+    issue: {
+      unlinked: 'Billed on this invoice but no longer on any of its lines: {entries}. The invoice may bill less than the project shows as billed — check the lines, or mark these entries unbilled on the project page.',
+      openProject: 'Open {project}',
+    },
+    projects: {
+      removeHint: 'Removing a line from the draft later makes its entries unbilled again.',
+    },
+    deposits: {
+      moneyLocked: 'The money received on the advance invoice is deducted on an issued final invoice. Change payments and refunds only once that final invoice is cancelled with a Storno.',
+      paymentsLocked: 'Final invoice {number} deducts the money received here. Cancel it with a Storno before removing a payment.',
+      refundsLocked: 'Final invoice {number} deducts the money received on {invoice}. Cancel it with a Storno before recording or removing a refund here.',
     },
   },
   clients: {

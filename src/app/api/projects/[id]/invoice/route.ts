@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { logEvent } from '@/lib/events'
 import type { createClient } from '@/lib/supabase/server'
 import { buildInvoiceLines, INVOICE_GROUPINGS } from '@/lib/projects'
 import type { InvoiceGrouping, Project, ProjectExpense, TimeEntry, VatRate } from '@/types'
@@ -85,5 +86,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     console.error('[projects/invoice]', error)
     return NextResponse.json({ error: error.message, code: 'failed' }, { status: 500 })
   }
+  await logEvent(supabase, documentId as string, 'project_invoiced', {
+    project_id: id, project_name: (project as Project).name, time_entries: entries.length, expenses: expenses.length,
+  })
   return NextResponse.json({ documentId })
 }

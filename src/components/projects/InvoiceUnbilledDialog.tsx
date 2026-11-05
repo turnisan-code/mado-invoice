@@ -141,7 +141,7 @@ export default function InvoiceUnbilledDialog({ project, clientName, entries, ex
             <AlertTriangle size={14} className="shrink-0 mt-px" /> {t('projects.invoice.noRate')}
           </p>
         )}
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('projects.invoice.removeHint')}</p>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('records.projects.removeHint')}</p>
 
         <div className="flex gap-2 justify-end">
           <Button type="button" variant="outline" onClick={onClose} disabled={creating}>{t('common.cancel')}</Button>
