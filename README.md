@@ -164,13 +164,20 @@ portal's PDF of that document fail with a notice until the client is saved, and 
 leaves the recipient block out. Addresses Claude wrote are skipped by the reminders on their own
 as well (a client whose email Claude wrote gets none, a CC Claude wrote is left out, and until the
 client is saved any address on it that is not plain ASCII, as the app cannot match it against the
-marks for certain).
+marks for certain). The pages of its issued invoices, credit notes and quotes say so as well, with
+a link to the client. A reminder sent from Gmail, a Storno or a Bookamat sync that Claude prepares
+is refused for such a client until it is saved: the Mahnung prints its name and address, the Storno
+credit note is archived with its name, address and VAT ID for good, the bookings carry its name and
+VAT ID, and the approval page shows only its name. A change Claude makes to the client after
+preparing one of these makes the approval page say it changed, and the action cannot run.
 
 An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
 applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
 credit note on which it recorded or removed a refund (`record_refund`, `remove_payment`), stays
 unconfirmed until the owner confirms its payments on its page (“Payments are correct”, “Refunds are
-correct”; the notice shows whatever the status, also on a paid invoice). Meanwhile the automatic
+correct”; the notice shows whatever the status, also on a paid invoice). Confirming covers what the
+page showed: should Claude change the payments again after the page was loaded, nothing is
+confirmed and the page reloads with them. Meanwhile the automatic
 reminders skip the invoice and the automatic Bookamat sync skips the document, each with the reason
 in the cron log: removing a payment reopens a paid invoice or raises what is open, so the Mahnung
 would ask the client, unattended, for money it paid, and a booking takes its date, its amount per
@@ -199,6 +206,12 @@ check.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
+
+A quote's status is Claude's to set without an approval in Mado (`set_quote_status`, and
+`convert_quote`, which accepts a sent quote), as the owner's or the client's decision it records:
+the share link shows it at once and no longer takes the client's own answer, and a sent quote
+never becomes sent again. Nothing is numbered, sent, booked or asked for by it. Both tools are
+marked destructive, and their descriptions tell Claude to set a status only on the owner's word.
 
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;

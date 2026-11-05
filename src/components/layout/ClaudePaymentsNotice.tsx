@@ -14,17 +14,24 @@ import { dbErrorMessage } from '@/lib/api-errors'
 // the invoice, the automatic Bookamat step the document, and no archive copy is made of it, until
 // the owner has checked the payments and confirms them here, whatever its status (a paid invoice
 // is what the Bookamat step books). Confirming clears the mark; a Claude session cannot
-// (documents_mcp_payments_guard).
-export default function ClaudePaymentsNotice({ documentId, kind }: { documentId: string; kind: 'invoice' | 'credit_note' }) {
+// (documents_mcp_payments_guard). Only the mark the page was rendered with (`seenAt`, read with the
+// payments it lists) is cleared: a later change from Claude moves it forward, and that one the
+// owner has not seen, so the page reloads instead.
+export default function ClaudePaymentsNotice({ documentId, kind, seenAt }: { documentId: string; kind: 'invoice' | 'credit_note'; seenAt: string }) {
   const [busy, setBusy] = useState(false)
   const router = useRouter()
   const { t } = useT()
 
   async function confirm() {
     setBusy(true)
-    const { error } = await createClient().from('documents').update({ mcp_payments_at: null }).eq('id', documentId)
+    const { data, error } = await createClient().from('documents').update({ mcp_payments_at: null }).eq('id', documentId).eq('mcp_payments_at', seenAt).select('id')
     setBusy(false)
     if (error) { toast.error(dbErrorMessage(t, error)); return }
+    if (!data?.length) {
+      toast.error(t(kind === 'invoice' ? 'payments.claudeChanged.changedAgain' : 'payments.claudeChanged.changedAgainCreditNote'))
+      router.refresh()
+      return
+    }
     toast.success(t(kind === 'invoice' ? 'payments.claudeChanged.confirmed' : 'payments.claudeChanged.confirmedCreditNote'))
     router.refresh()
   }

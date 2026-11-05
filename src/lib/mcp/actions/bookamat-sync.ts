@@ -7,7 +7,7 @@ import { clip, money, word, type Worded } from './words'
 import { documentUrl } from '../config'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
-import { mayOutlastClient, notice, paymentsState, refuse } from './common'
+import { mayOutlastClient, notice, paymentsState, refuse, refuseClaudeClient } from './common'
 
 const ACCOUNT_KEYS = [
   'bookamat_username', 'bookamat_country', 'bookamat_bank_account_id', 'bookamat_cash_account_id', 'bookamat_cost_account_id',
@@ -19,8 +19,12 @@ async function load(ctx: ServiceContext, documentId: string) {
   const settings = await ctx.settings() as unknown as BookamatSettings
   const preview = await bookamatPreview(ctx.supabase, settings, documentId)
   const d = preview.document
+  // The bookings carry the client's name and UID, as the automatic sync's hold says.
+  refuseClaudeClient(ctx, d.clientBooked, 'mcp.approve.refusals.clientChangedBookamat')
   const fingerprint = fingerprintOf({
     document: { id: d.id, type: d.type, number: d.number, status: d.status, total: cents(d.total) },
+    // As the bookings carry it, and Claude's mark (a write after prepare is a change).
+    client: d.clientBooked,
     payments: paymentsState(d.payments as unknown as Record<string, unknown>[]),
     recorded: [...d.recorded].map(r => ({ year: r.year, booking_id: String(r.booking_id), amount: cents(r.amount), kind: r.kind })).sort((a, b) => a.year - b.year || a.kind.localeCompare(b.kind)),
     pending: d.pending ?? null,

@@ -9,12 +9,14 @@ import { documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
-import { codedError, itemsState, notice, paymentsState } from './common'
+import { claudeWrittenAt, codedError, itemsState, notice, paymentsState, printedClient, refuseClaudeClient } from './common'
 import { clip, entries, money, word, type Worded } from './words'
 
 const INVOICE_COLUMNS = [
   'id', 'type', 'number', 'status', 'date', 'currency', 'tax_treatment', 'discount_type', 'discount_value', 'invoice_kind', 'final_invoice_id',
-  'clients(name, company)',
+  // The whole row: the Storno credit note is numbered and archived with the client as it prints,
+  // and Claude's mark is read without naming the column (claudeWrittenAt).
+  'clients(*)',
   'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)',
   'payments(id, date, amount, kind, method)',
 ].join(', ')
@@ -31,7 +33,7 @@ type Invoice = {
   discount_value: number | null
   invoice_kind: string | null
   final_invoice_id: string | null
-  clients: { name: string; company: string | null } | null
+  clients: { id: string; name: string; company: string | null } | null
   document_items: Record<string, unknown>[] | null
   payments: { id: string; date: string; amount: number; kind: string | null; method: string | null }[] | null
 }
@@ -61,6 +63,8 @@ async function loadStorno(ctx: ServiceContext, invoiceId: string) {
     final = f as Final | null
     if (final?.number && final.status !== 'cancelled') throw codedError('MI020')
   }
+  // The credit note's archive copy keeps the recipient block and UID for good.
+  refuseClaudeClient(ctx, invoice.clients, 'mcp.approve.refusals.clientChangedStorno')
   const day = today()
   const discount = invoice.discount_type && invoice.discount_value ? { type: invoice.discount_type, value: invoice.discount_value } : null
   const total = calcTotals((invoice.document_items ?? []) as Parameters<typeof calcTotals>[0], [], discount, invoice.tax_treatment).total
@@ -77,6 +81,8 @@ async function loadStorno(ctx: ServiceContext, invoiceId: string) {
       final, tax_treatment: invoice.tax_treatment, discount_type: invoice.discount_type, discount_value: cents(invoice.discount_value),
       items: itemsState(invoice.document_items), payments: paymentsState(invoice.payments),
     },
+    // As the credit note prints it, and Claude's mark (a write after prepare is a change).
+    client: { ...printedClient(invoice.clients), mcp_written_at: claudeWrittenAt(invoice.clients) },
     numbering: numberingOf(settings, 'credit_note'),
     released,
   })

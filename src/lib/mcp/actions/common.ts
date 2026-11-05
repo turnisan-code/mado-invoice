@@ -3,10 +3,11 @@
 import { z } from 'zod'
 import type { DictKey, TFn, TranslateVars } from '@/lib/i18n'
 import { clientAddresses } from '@/lib/services/email-compose'
+import { PRINTED_CLIENT_COLUMNS } from '@/lib/services/issue'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
 import { orderItems } from '@/lib/utils/document'
 import type { Settings } from '@/types'
-import { LONG_ACTION_DOCUMENTS, TOOL_DEADLINE_MS } from '../config'
+import { clientUrl, LONG_ACTION_DOCUMENTS, TOOL_DEADLINE_MS } from '../config'
 import { McpToolError, toToolError, type McpErrorCode } from '../errors'
 import { cents } from '../fingerprint'
 import type { ServiceContext, ToolContext } from '../types'
@@ -116,6 +117,33 @@ export async function newRecipients(
   if (!client || !listed.length) return { foreign, unconfirmed: [] }
   const emailed = await ownerEmailed(ctx, client.id)
   return { foreign, unconfirmed: listed.filter(a => !emailed.has(a.trim().toLowerCase())) }
+}
+
+// ─── Clients Claude wrote ────────────────────────────────────────────────────
+
+// The client as documents print it (PRINTED_CLIENT_COLUMNS: the recipient block, the UID, the
+// e-invoice data), for a fingerprint.
+export function printedClient(client: object | null | undefined): Record<string, unknown> | null {
+  if (!client) return null
+  const row = client as Record<string, unknown>
+  return Object.fromEntries(PRINTED_CLIENT_COLUMNS.split(', ').map(k => [k, row[k] ?? null]))
+}
+
+// When a Claude session last created or changed the client, until the owner saves it in Mado
+// (clients.mcp_written_at, 20261105_mcp_drafts.sql). Read from the whole row (clients(*)), never
+// named: a database without the column has nothing from Claude.
+export function claudeWrittenAt(client: object | null | undefined): string | null {
+  return (client as { mcp_written_at?: string | null } | null | undefined)?.mcp_written_at ?? null
+}
+
+// A reminder, a Storno or a Bookamat sync prints or books the client as it is when it runs, and
+// the approval page shows only its name. Like the crons (the reminders, the Bookamat step, the
+// archive copy), they wait while a client Claude created or changed is not saved in Mado: refused
+// when prepared, and a Claude write to the client after that is refused again when the state is
+// compared before the run (the approval page then says it changed).
+export function refuseClaudeClient(ctx: ServiceContext, client: { id?: string | null } | null | undefined, key: DictKey): void {
+  if (!claudeWrittenAt(client)) return
+  throw refuse(ctx, key, undefined, 'invalid_input', client?.id ? { client_id: client.id, client_url: clientUrl(client.id) } : undefined)
 }
 
 // ─── Fingerprint rows ────────────────────────────────────────────────────────

@@ -126,8 +126,9 @@ const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on 
 // invoices and its Bookamat step the client's documents (src/app/api/cron/reminders/route.ts,
 // autoSyncBookamat), a schedule that issues automatically creates its invoices as drafts
 // (src/lib/utils/recurring.ts), no archive copy is rendered from it (getIssuedPdf) and the portal
-// leaves its recipient block out.
-const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms).'
+// leaves its recipient block out. A reminder sent from Gmail, a Storno or a Bookamat sync for its
+// documents is refused when prepared (refuseClaudeClient, actions/common.ts).
+const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms). For the same reason prepare_send_reminder (gmail), prepare_storno and prepare_bookamat_sync refuse its documents until then.'
 
 // documents.mcp_payments_at (20261105_mcp_drafts.sql): a payment row a Claude session records,
 // changes or removes on an invoice, or a refund on a credit note, holds the document's automatic
@@ -194,7 +195,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
       cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
       language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
       ...(written.length ? { approved_in_mado: written } : {}),
-      ...(changed ? { reminders_held: true, bookamat_sync_held: true } : {}),
+      ...(changed ? { reminders_held: true, bookamat_sync_held: true, prepare_refused: ['send_reminder', 'storno', 'bookamat_sync'] } : {}),
       ...(held.length ? { auto_issue_held: held.map(h => ({ schedule_id: h.id, name: h.name, app_url: appUrl('/recurring') })) } : {}),
     },
   }
@@ -372,7 +373,7 @@ const duplicateDocumentTool = defineTool({
 const convertQuoteTool = defineTool({
   name: 'convert_quote',
   title: 'Convert quote',
-  description: "Make an invoice DRAFT from a sent or accepted quote: 'invoice' (all of it), 'advance' (an Anzahlungsrechnung for mode 'percent' or 'amount' gross of value), or 'final' (the Schlussrechnung that deducts the quote's issued advance and partial invoices). A sent quote becomes accepted, which cannot be undone. For 'invoice' and 'final' a second call returns the draft made before.",
+  description: "Make an invoice DRAFT from a sent or accepted quote: 'invoice' (all of it), 'advance' (an Anzahlungsrechnung for mode 'percent' or 'amount' gross of value), or 'final' (the Schlussrechnung that deducts the quote's issued advance and partial invoices). A sent quote becomes accepted, which cannot be undone: its share link shows it accepted at once and no longer takes the client's own answer, so convert only on the owner's word. For 'invoice' and 'final' a second call returns the draft made before.",
   scope: 'mado:write',
   inputSchema: z.object({
     quote_id: id,
@@ -408,7 +409,7 @@ const convertQuoteTool = defineTool({
 const setQuoteStatus = defineTool({
   name: 'set_quote_status',
   title: 'Set quote status',
-  description: 'Mark a sent quote accepted or rejected (an accepted one rejected, or the other way round). Cancelling is prepare_cancel.',
+  description: "Mark a sent quote accepted or rejected (an accepted one rejected, or the other way round): what the client or the owner decided. A sent quote never becomes sent again, and its share link shows the new status at once and no longer takes the client's own answer, so set it only on the owner's word. Cancelling is prepare_cancel.",
   scope: 'mado:write',
   inputSchema: z.object({ id, status: z.enum(['accepted', 'rejected']) }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -420,7 +421,9 @@ const setQuoteStatus = defineTool({
     const result = await setDocumentStatus(ctx.supabase, args.id, args.status, { type: doc.type, status: doc.status })
     if (result.error) throw result.error
     return {
-      summary: result.changed ? `Quote ${doc.number ?? '(draft)'} marked ${args.status} (was ${result.from}).` : `The quote is ${args.status} already.`,
+      summary: result.changed
+        ? `Quote ${doc.number ?? '(draft)'} marked ${args.status} (was ${result.from}).${result.from === 'sent' ? " A share link to it shows this now and no longer takes the client's answer." : ''}`
+        : `The quote is ${args.status} already.`,
       data: { id: args.id, number: doc.number, status: args.status, previous_status: result.from, changed: result.changed },
     }
   },

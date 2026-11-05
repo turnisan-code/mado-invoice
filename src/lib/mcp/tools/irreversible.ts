@@ -77,7 +77,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_reminder',
     title: 'Prepare: payment reminder',
-    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. Recipients (gmail) default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
+    description: `Prepare a payment reminder for an overdue issued invoice with an open balance: the next level, the amounts (balance, fee, interest), recipients, text and attachments (the reminder PDF and the frozen invoice). mode 'manual' sends nothing and only records a reminder sent another way; either way the invoice's reminder level rises for good. Recipients (gmail) default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A gmail reminder is refused while the client was created or changed from Claude and not saved in Mado since: the Mahnung prints it. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
@@ -94,7 +94,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_storno',
     title: 'Prepare: Storno',
-    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. ${APPROVAL}`,
+    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. Refused while the invoice's client was created or changed from Claude and not saved in Mado since: the credit note is archived with it for good. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
@@ -127,7 +127,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_bookamat_sync',
     title: 'Prepare: Bookamat sync',
-    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. ${APPROVAL}`,
+    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. Refused while the document's client was created or changed from Claude and not saved in Mado since: the bookings carry its name and VAT ID. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({ document_id: z.uuid() }),
     hints: PREPARE,

@@ -17,7 +17,7 @@ import { APP_URL, documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
 import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
-import { checkAddresses, codedError, emailArgs, gmailConnected, itemsState, newRecipients, notice, paymentsState, refuse, uniqueAddresses } from './common'
+import { checkAddresses, codedError, emailArgs, gmailConnected, itemsState, newRecipients, notice, paymentsState, printedClient, refuse, uniqueAddresses } from './common'
 import { clip, money, word, type Worded } from './words'
 
 const EMAIL_DOC_COLUMNS = [
@@ -119,7 +119,6 @@ export function emailState(doc: EmailDoc, settings: Settings) {
 // What a document email depends on: where it goes and from where, the document's state, and the
 // content the e-invoice is built from when one is attached (with the client as it prints).
 function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
-  const client = doc.clients
   return {
     document: { id: doc.id, type: doc.type, number: doc.number, status: doc.status, currency: doc.currency, issued_total: cents(doc.issued_total), total: docTotals(doc, false).total },
     ...emailState(doc, settings),
@@ -127,7 +126,7 @@ function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
       date: doc.date, due_date: doc.due_date, tax_treatment: doc.tax_treatment, discount_type: doc.discount_type, discount_value: cents(doc.discount_value),
       service_date: doc.service_date, service_date_end: doc.service_date_end, buyer_reference: doc.buyer_reference, notes: doc.notes,
       items: itemsState(doc.document_items), payments: paymentsState(doc.payments),
-      client: client ? Object.fromEntries(PRINTED_CLIENT_COLUMNS.split(', ').map(k => [k, client[k as keyof PrintedClient] ?? null])) : null,
+      client: printedClient(doc.clients),
     } : null,
   }
 }

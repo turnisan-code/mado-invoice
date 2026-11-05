@@ -7,6 +7,7 @@ import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
+import ClaudeClientNotice from '@/components/layout/ClaudeClientNotice'
 import { toPublicSettings } from '@/lib/public-settings'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import { formatDate } from '@/lib/utils/document'
@@ -34,6 +35,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
 
   const publicSettings = toPublicSettings(settings)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
+  const client = (clients ?? []).find(c => c.id === doc.client_id)
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
@@ -58,6 +60,9 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <DeleteDocumentButton id={doc.id} backTo="/quotes" docNumber={doc.number} docType="quote" />
         </div>
       </div>
+      {/* A client Claude changed: no archive copy is made from it and the share link leaves out the
+          recipient block until it is saved. */}
+      {doc.number && client?.mcp_written_at && <ClaudeClientNotice clientId={client.id} kind="quote" t={t} />}
       <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
         <DocumentBuilder
           type="quote"

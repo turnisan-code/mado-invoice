@@ -10,6 +10,7 @@ import DocumentHistory from '@/components/layout/DocumentHistory'
 import ConvertDocumentButton from '@/components/layout/ConvertDocumentButton'
 import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
 import ClaudePaymentsNotice from '@/components/layout/ClaudePaymentsNotice'
+import ClaudeClientNotice from '@/components/layout/ClaudeClientNotice'
 import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { toPublicSettings } from '@/lib/public-settings'
@@ -105,7 +106,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       )}
       {/* Payments a Claude session changed hold the automatic reminders and Bookamat sync until
           confirmed here, also on a paid or cancelled invoice. */}
-      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="invoice" />}
+      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="invoice" seenAt={doc.mcp_payments_at} />}
+      {/* So does a client Claude changed (the whole row is read: a database without the column has
+          no mark), and the archive copy and the share link's recipient block wait too. */}
+      {doc.number && client?.mcp_written_at && <ClaudeClientNotice clientId={client.id} kind="invoice" t={t} />}
       <InvoicePageClient
         type="invoice"
         settings={publicSettings}

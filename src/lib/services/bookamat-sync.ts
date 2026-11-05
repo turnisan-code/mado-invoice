@@ -43,9 +43,13 @@ export async function syncBookamatWithAdopt(
   return syncBookamat(supabase, settings, documentId, { adopt: first.pending, deadline })
 }
 
+// The whole client row: the bookings carry its name (their title) and UID (vatin), and a Claude
+// session's mark (clients.mcp_written_at) is read without naming the column.
 const PREVIEW_COLS = `id, type, number, status, currency, date, tax_treatment, discount_type, discount_value,
   document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
-  payments(date, amount, kind, method), clients(name, company), bookamat_pending, bookamat_bookings(${BOOKING_COLUMNS})`
+  payments(date, amount, kind, method), clients(*), bookamat_pending, bookamat_bookings(${BOOKING_COLUMNS})`
+
+type PreviewClient = { id: string; name: string; company: string | null; uid_number?: string | null; mcp_written_at?: string | null }
 
 export type BookamatPreviewDoc = {
   id: string
@@ -53,6 +57,9 @@ export type BookamatPreviewDoc = {
   number: string
   status: string
   client: string
+  // What the bookings carry of the client (syncBookamatDocument: the title, the vatin), and when a
+  // Claude session last created or changed it (null: not since the owner saved it, or no column).
+  clientBooked: { id: string; name: string; company: string | null; uid_number: string | null; mcp_written_at: string | null } | null
   total: number
   payments: MoneyRow[]
   recorded: BookingRow[]
@@ -78,7 +85,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
   if (!isBookamatConfigured(settings)) throw new BookamatError('not_configured', 'Bookamat is not fully configured')
   const { data, error } = await supabase.from('documents').select(PREVIEW_COLS).eq('id', documentId).maybeSingle()
   if (error) throw new BookamatError('database', error.message)
-  const doc = data as unknown as (Omit<BookamatPreviewDoc, 'client' | 'total' | 'payments' | 'recorded' | 'pending'> & {
+  const doc = data as unknown as (Omit<BookamatPreviewDoc, 'client' | 'clientBooked' | 'total' | 'payments' | 'recorded' | 'pending'> & {
     type: string
     number: string | null
     currency: string | null
@@ -87,7 +94,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
     discount_value: number | null
     document_items: Parameters<typeof calcTotals>[0] | null
     payments: MoneyRow[] | null
-    clients: { name: string; company: string | null } | null
+    clients: PreviewClient | null
     bookamat_pending: unknown
     bookamat_bookings: BookingRow[] | null
   }) | null
@@ -124,6 +131,9 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
       number: doc.number,
       status: doc.status,
       client: clientDisplayName(doc.clients),
+      clientBooked: doc.clients
+        ? { id: doc.clients.id, name: doc.clients.name, company: doc.clients.company ?? null, uid_number: doc.clients.uid_number ?? null, mcp_written_at: doc.clients.mcp_written_at ?? null }
+        : null,
       total: totals.total,
       payments: rows,
       recorded,

@@ -14,15 +14,21 @@ import { APP_URL, documentUrl } from '../config'
 import { McpToolError } from '../errors'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
 import {
-  addressList, checkAddresses, codedError, emailArgs, gmailConnected, itemsState, MAX_COPIES, MAX_RECIPIENTS, newRecipients, notice, paymentsState,
-  refuse, uniqueAddresses,
+  addressList, checkAddresses, claudeWrittenAt, codedError, emailArgs, gmailConnected, itemsState, MAX_COPIES, MAX_RECIPIENTS, newRecipients, notice,
+  paymentsState, printedClient, refuse, refuseClaudeClient, uniqueAddresses,
 } from './common'
 import { emailNotices } from './send-email'
 import { clip, money, word, type Worded } from './words'
 
-async function loadInvoice(ctx: ServiceContext, id: string): Promise<LoadedReminder> {
+// A reminder sent from Gmail carries the Mahnung, which prints the client as it is when it is sent:
+// not for a client Claude created or changed and the owner has not saved in Mado since (as the
+// reminder cron skips it). One only recorded as sent another way prints nothing.
+async function loadInvoice(ctx: ServiceContext, id: string, mode: 'gmail' | 'manual'): Promise<LoadedReminder> {
   const loaded = await loadReminderInvoice(ctx.supabase, id)
-  if (loaded.ok) return loaded
+  if (loaded.ok) {
+    if (mode === 'gmail') refuseClaudeClient(ctx, loaded.invoice.clients, 'mcp.approve.refusals.clientChangedReminder')
+    return loaded
+  }
   if (loaded.reason === 'settings' || loaded.reason === 'database') throw loaded.error ?? new McpToolError('internal')
   if (loaded.reason === 'not_found') throw new McpToolError('not_found', { details: { invoice_id: id } })
   // nothing_outstanding, not_remindable: worded as the reminder dialog words them.
@@ -38,7 +44,8 @@ function reminderState({ invoice, settings }: LoadedReminder) {
       discount_value: cents(invoice.discount_value), items: itemsState(invoice.document_items as unknown as Record<string, unknown>[]),
       payments: paymentsState(invoice.payments as unknown as Record<string, unknown>[]),
     },
-    client: { email: invoice.clients?.email ?? null, cc_emails: invoice.clients?.cc_emails ?? [] },
+    // As the Mahnung prints it, the copies, and Claude's mark (a write after prepare is a change).
+    client: { ...printedClient(invoice.clients), cc_emails: invoice.clients?.cc_emails ?? [], mcp_written_at: claudeWrittenAt(invoice.clients) },
     settings: {
       max_level: settings.reminder_max_level ?? null, fee: cents(settings.reminder_fee), interest: cents(settings.reminder_interest_rate),
       grace_days: settings.reminder_grace_days ?? null, sender: settings.gmail_email ?? null, connected: !!settings.gmail_refresh_token,
@@ -67,7 +74,7 @@ export type ReminderInput = { invoice_id: string; mode: 'gmail' | 'manual'; to?:
 // subject or text counts as not given, so the template's text is what the owner approves).
 // Manual: only what is recorded (who it went to, the subject), nothing is sent.
 export async function resolveSendReminder(ctx: ToolContext, input: ReminderInput): Promise<Args> {
-  const loaded = await loadInvoice(ctx, input.invoice_id)
+  const loaded = await loadInvoice(ctx, input.invoice_id, input.mode)
   const { invoice, settings } = loaded
   if (input.mode === 'manual') {
     return { invoice_id: invoice.id, mode: 'manual', to: uniqueAddresses(input.to ?? []), cc: uniqueAddresses(input.cc ?? []), bcc: uniqueAddresses(input.bcc ?? []), subject: input.subject ?? '', body: '' }
@@ -94,7 +101,7 @@ export const sendReminderAction = defineAction<Args>({
   kind: 'send_reminder',
   argsSchema,
   async prepare(ctx, args) {
-    const loaded = await loadInvoice(ctx, args.invoice_id)
+    const loaded = await loadInvoice(ctx, args.invoice_id, args.mode)
     const { invoice, settings } = loaded
     const number = invoice.number!
     const level = reminderLevel(invoice, settings)
@@ -139,10 +146,10 @@ export const sendReminderAction = defineAction<Args>({
     }
   },
   async fingerprint(ctx, args) {
-    return fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id)))
+    return fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id, args.mode)))
   },
   async execute(ctx, args) {
-    const loaded = await loadInvoice(ctx, args.invoice_id)
+    const loaded = await loadInvoice(ctx, args.invoice_id, args.mode)
     const sent = await sendReminder(ctx.supabase, loaded, {
       mode: args.mode, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
       portalOrigin: APP_URL, fillPortalLink: true,
