@@ -1,66 +1,11 @@
-import type { Settings } from '@/types'
-import { addDays, formatDate, formatMoney, roundCents, today } from './document'
-
-export interface ReminderContext {
-  invoiceNumber: string
-  clientName: string
-  amount: string      // what is still owed (balance due)
-  total: string       // invoice total
-  dueDate: string
-  date: string
-  daysOverdue: number
-  iban: string
-  sender: string
-  company: string
-  owner: string
-  level: number
-  reminderTitle: string
-  fee: string         // Mahnspesen, '' below level 2 or when not configured
-  interest: string    // Verzugszinsen, '' when zero
-  newDeadline: string // Nachfrist: today + grace days
-}
-
-// Single-pass replacement prevents chained injection (e.g. a client name
-// containing "{{iban}}" being substituted again in a later pass).
-// A line whose placeholders all resolve to '' (e.g. "Mahnspesen: {{fee}}" on a
-// Zahlungserinnerung) is dropped, so one template serves every dunning level.
-export function fillTemplate(template: string, ctx: ReminderContext): string {
-  const map: Record<string, string> = {
-    invoice_number: ctx.invoiceNumber,
-    client:         ctx.clientName,
-    amount:         ctx.amount,
-    total:          ctx.total,
-    balance_due:    ctx.amount,
-    due_date:       ctx.dueDate,
-    date:           ctx.date,
-    days_overdue:   String(ctx.daysOverdue),
-    iban:           ctx.iban,
-    sender:         ctx.sender,
-    company:        ctx.company,
-    owner:          ctx.owner,
-    reminder_title: ctx.reminderTitle,
-    level:          String(ctx.level),
-    fee:            ctx.fee,
-    interest:       ctx.interest,
-    new_deadline:   ctx.newDeadline,
-  }
-  const lines: string[] = []
-  let dropped = false
-  for (const line of template.split('\n')) {
-    let placeholders = 0
-    let empty = 0
-    const filled = line.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-      if (!(key in map)) return `{{${key}}}`
-      placeholders++
-      if (map[key] === '') empty++
-      return map[key]
-    })
-    if (placeholders > 0 && placeholders === empty) { dropped = true; continue }
-    lines.push(filled)
-  }
-  const out = lines.join('\n')
-  return dropped ? out.replace(/\n{3,}/g, '\n\n') : out
-}
+import type { Language, Settings } from '@/types'
+import { makeT } from '@/lib/i18n'
+import type { NamedClient } from './clients'
+import { addDays, roundCents, today as viennaToday } from './document'
+import {
+  documentVariables, resolveTemplate, templateDate, templateLang, templateMoney,
+  type TemplateDocument, type TemplateIssuer, type TemplateText, type TemplateVars,
+} from '@/lib/templates'
 
 function ordinal(n: number): string {
   const mod100 = n % 100
@@ -70,9 +15,10 @@ function ordinal(n: number): string {
 }
 
 // Level 1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung, …
-export function reminderTitle(level: number, lang: 'de' | 'en'): string {
-  if (level <= 1) return lang === 'de' ? 'Zahlungserinnerung' : 'Payment reminder'
-  return lang === 'de' ? `${level - 1}. Mahnung` : `${ordinal(level - 1)} dunning notice`
+export function reminderTitle(level: number, lang: Language): string {
+  const t = makeT(lang)
+  if (level <= 1) return t('dunning.titles.reminder')
+  return t('dunning.titles.dunning', { n: level - 1, ordinal: ordinal(level - 1) })
 }
 
 // The level the next reminder carries: one above the current one, never above the configured maximum
@@ -86,41 +32,70 @@ export function daysBetween(fromIsoDate: string, toIsoDate: string): number {
   return Math.floor((Date.parse(toIsoDate) - Date.parse(fromIsoDate)) / 86400000)
 }
 
-type ReminderSettings = Pick<Settings,
-  'iban' | 'company_name' | 'owner_name' | 'reminder_fee' | 'reminder_interest_rate' | 'reminder_grace_days'
->
+export type ReminderIssuer = TemplateIssuer & Pick<Settings, 'reminder_grace_days'>
 
-export function buildReminderContext({ invoice, client, settings, totals, level, lang }: {
-  invoice: { number: string; date: string | null; due_date: string | null; currency?: string | null }
-  client: { name: string; company: string | null }
-  settings: ReminderSettings
-  totals: { total: number; balance_due: number }
+export interface ReminderFigures {
   level: number
-  lang: 'de' | 'en'
-}): ReminderContext {
-  const currency = invoice.currency ?? 'EUR'
-  const now = today()
-  const daysOverdue = invoice.due_date ? Math.max(0, daysBetween(invoice.due_date, now)) : 0
-  const fee = level >= 2 ? roundCents(Number(settings.reminder_fee) || 0) : 0
-  const rate = Number(settings.reminder_interest_rate) || 0
-  const interest = roundCents(totals.balance_due * (rate / 100) * daysOverdue / 365)
+  title: string
+  issuedOn: string
+  daysOverdue: number
+  balance: number
+  fee: number
+  interestRate: number
+  interest: number
+  totalDue: number
+  newDeadline: string
+}
+
+// What a reminder asks for on `issuedOn`: the open balance, Mahnspesen from the 1. Mahnung on,
+// Verzugszinsen on the balance for the days past the due date, and a new deadline after the grace period.
+export function reminderFigures({ dueDate, balance, issuer, level, lang, issuedOn = viennaToday() }: {
+  dueDate: string | null
+  balance: number
+  issuer: Pick<Settings, 'reminder_fee' | 'reminder_interest_rate' | 'reminder_grace_days'>
+  level: number
+  lang: Language
+  issuedOn?: string
+}): ReminderFigures {
+  const daysOverdue = dueDate ? Math.max(0, daysBetween(dueDate, issuedOn)) : 0
+  const fee = level >= 2 ? roundCents(Math.max(0, Number(issuer.reminder_fee) || 0)) : 0
+  const interestRate = Math.max(0, Number(issuer.reminder_interest_rate) || 0)
+  const interest = roundCents(balance * (interestRate / 100) * daysOverdue / 365)
   return {
-    invoiceNumber: invoice.number,
-    clientName: client.company ?? client.name,
-    amount: formatMoney(totals.balance_due, currency),
-    total: formatMoney(totals.total, currency),
-    dueDate: invoice.due_date ? formatDate(invoice.due_date, lang) : '',
-    date: invoice.date ? formatDate(invoice.date, lang) : '',
-    daysOverdue,
-    iban: settings.iban ?? '',
-    sender: settings.company_name ?? settings.owner_name ?? '',
-    company: settings.company_name ?? '',
-    owner: settings.owner_name ?? '',
     level,
-    reminderTitle: reminderTitle(level, lang),
-    fee: fee > 0 ? formatMoney(fee, currency) : '',
-    interest: interest > 0 ? formatMoney(interest, currency) : '',
-    newDeadline: formatDate(addDays(now, Number(settings.reminder_grace_days) || 0), lang),
+    title: reminderTitle(level, lang),
+    issuedOn,
+    daysOverdue,
+    balance,
+    fee,
+    interestRate,
+    interest,
+    totalDue: roundCents(balance + fee + interest),
+    newDeadline: addDays(issuedOn, Math.max(0, Number(issuer.reminder_grace_days) || 0)),
+  }
+}
+
+export function reminderVariables({ doc, client, issuer, totals, figures, portalLink = '' }: {
+  doc: TemplateDocument
+  client: NamedClient | null | undefined
+  issuer: TemplateIssuer
+  totals: { subtotal: number; total: number; balance_due: number }
+  figures: ReminderFigures
+  portalLink?: string
+}): TemplateVars {
+  const lang = templateLang(doc.language)
+  const money = (amount: number) => templateMoney(amount, lang, doc.currency ?? 'EUR')
+  const extra = figures.fee + figures.interest
+  return {
+    ...documentVariables({ doc, client, issuer, totals, portalLink }),
+    reminder_title: figures.title,
+    level: String(figures.level),
+    amount: money(figures.balance),
+    days_overdue: String(figures.daysOverdue),
+    new_deadline: templateDate(figures.newDeadline, lang),
+    fee: figures.fee > 0 ? money(figures.fee) : '',
+    interest: figures.interest > 0 ? money(figures.interest) : '',
+    total_due: extra > 0 ? money(figures.totalDue) : '',
   }
 }
 
@@ -128,40 +103,6 @@ type ReminderTemplateSettings = Pick<Settings,
   'email_subject_reminder_de' | 'email_body_reminder_de' | 'email_subject_reminder_en' | 'email_body_reminder_en'
 >
 
-export function reminderTemplates(settings: ReminderTemplateSettings, lang: 'de' | 'en'): { subject: string; body: string } {
-  return lang === 'en'
-    ? { subject: settings.email_subject_reminder_en || DEFAULT_SUBJECT_EN, body: settings.email_body_reminder_en || DEFAULT_BODY_EN }
-    : { subject: settings.email_subject_reminder_de || DEFAULT_SUBJECT_DE, body: settings.email_body_reminder_de || DEFAULT_BODY_DE }
+export function reminderTemplates(settings: ReminderTemplateSettings, lang: Language, level: number): TemplateText {
+  return resolveTemplate(settings, 'reminder', lang, level)
 }
-
-export const DEFAULT_SUBJECT_DE = '{{reminder_title}}: Rechnung {{invoice_number}}'
-export const DEFAULT_BODY_DE = `Sehr geehrte(r) {{client}},
-
-wir möchten Sie daran erinnern, dass Rechnung {{invoice_number}} über {{amount}} am {{due_date}} fällig war und nun seit {{days_overdue}} Tagen überfällig ist.
-
-Bitte überweisen Sie den offenen Betrag bis spätestens {{new_deadline}} auf folgende Bankverbindung:
-IBAN: {{iban}}
-
-Mahnspesen: {{fee}}
-Verzugszinsen: {{interest}}
-
-Sollte sich Ihre Zahlung mit diesem Schreiben überschnitten haben, betrachten Sie es bitte als gegenstandslos.
-
-Mit freundlichen Grüßen,
-{{sender}}`
-
-export const DEFAULT_SUBJECT_EN = '{{reminder_title}}: Invoice {{invoice_number}}'
-export const DEFAULT_BODY_EN = `Dear {{client}},
-
-This is a reminder that invoice {{invoice_number}} for {{amount}} was due on {{due_date}} and is now {{days_overdue}} days overdue.
-
-Please transfer the outstanding amount by {{new_deadline}} to:
-IBAN: {{iban}}
-
-Reminder fee: {{fee}}
-Late payment interest: {{interest}}
-
-If your payment has crossed with this message, please disregard it.
-
-Best regards,
-{{sender}}`

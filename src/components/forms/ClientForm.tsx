@@ -18,6 +18,7 @@ import { X } from 'lucide-react'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { isCountryCode, suggestTaxTreatment, toCountryCode } from '@/lib/utils/country'
 import { clientDisplayName } from '@/lib/utils/clients'
+import { parseEmailList } from '@/lib/templates'
 import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/types'
 import type { TFn } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
@@ -57,6 +58,10 @@ function makeSchema(t: TFn) {
     tags: z.array(z.string()),
     notes: z.string(),
     reminders_opt_out: z.boolean(),
+    cc_emails: z.string().superRefine((v, ctx) => {
+      const { invalid } = parseEmailList(v)
+      if (invalid.length) ctx.addIssue({ code: 'custom', message: t('dunning.invalidAddresses', { list: invalid.join(', ') }) })
+    }),
   }).refine(v => v.name.trim() || v.company.trim(), { path: ['name'], message: t('clients.form.nameRequired') })
 }
 
@@ -82,6 +87,7 @@ function toValues(client: Client | undefined, defaults: ClientDefaults): Values 
     tags: client?.tags ?? [],
     notes: client?.notes ?? '',
     reminders_opt_out: client?.reminders_opt_out ?? false,
+    cc_emails: (client?.cc_emails ?? []).join(', '),
   }
 }
 
@@ -105,6 +111,7 @@ function toPayload(v: Values) {
     tags: v.tags,
     notes: v.notes.trim() || null,
     reminders_opt_out: v.reminders_opt_out,
+    cc_emails: parseEmailList(v.cc_emails).emails,
   }
 }
 
@@ -311,6 +318,9 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           <Input id={id('phone')} type="tel" autoComplete="tel" {...register('phone')} />
         </Field>
       </div>
+      <Field id={id('cc_emails')} label={t('dunning.clientCc')} error={errorOf('cc_emails')} hint={t('dunning.clientCcHint')}>
+        <Input id={id('cc_emails')} inputMode="email" autoComplete="off" {...register('cc_emails')} aria-invalid={!!errors.cc_emails || undefined} />
+      </Field>
       <Field id={id('uid_number')} label={t('clients.form.uid')} error={errorOf('uid_number')}>
         <Input
           id={id('uid_number')}

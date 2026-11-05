@@ -143,6 +143,8 @@ export interface Client {
   tags: string[]
   notes: string | null
   reminders_opt_out: boolean
+  // Further recipients (e.g. an accounting mailbox), prefilled as CC on every email to the client.
+  cc_emails: string[]
 }
 
 // Settings values a new client starts with.
@@ -270,6 +272,21 @@ export interface DocumentEvent {
   created_at: string
   type: DocumentEventType
   detail: Record<string, unknown>
+}
+
+export type EmailTemplateKind = 'invoice' | 'quote' | 'credit_note' | 'reminder'
+
+// What the reminder dialog shows before anything is sent or recorded.
+export interface ReminderDraft {
+  level: number
+  title: string
+  number: string
+  to: string
+  cc: string[]
+  subject: string
+  body: string
+  attachments: string[]
+  gmail: boolean
 }
 
 export interface DocumentTotals {

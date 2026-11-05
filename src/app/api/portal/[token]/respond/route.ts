@@ -5,7 +5,8 @@ import { logEvent } from '@/lib/events'
 import { formatDate, today } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { isExpired } from '@/lib/status'
-import { sendReminderEmail } from '@/lib/utils/reminder'
+import { sendGmail } from '@/lib/utils/reminder'
+import { isShareExpired } from '@/lib/share'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { isUiLang, makeT } from '@/lib/i18n'
 
@@ -27,8 +28,7 @@ async function notifyOwner(supabase: SupabaseClient, quote: QuoteRow, action: Ac
     const vars = { client: clientDisplayName(quote.clients) || '—', number: quote.number ?? '', date: formatDate(today(), lang) }
     const accepted = action === 'accepted'
     try {
-      await sendReminderEmail({
-        auth: getAuthorizedGoogle(settings, supabase),
+      await sendGmail(getAuthorizedGoogle(settings, supabase), {
         from: settings.gmail_email,
         to: settings.email || settings.gmail_email,
         subject: t(accepted ? 'lifecycle.responses.emailSubjectAccepted' : 'lifecycle.responses.emailSubjectRejected', vars),
@@ -62,11 +62,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
 
   const { data: doc } = await supabase
     .from('documents')
-    .select('id, type, status, number, due_date, language, clients(name, company)')
+    .select('id, type, status, number, due_date, language, share_expires_at, clients(name, company)')
     .eq('share_token', token)
     .single()
 
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  // An expired share link no longer opens the portal, so it cannot answer the quote either.
+  if (isShareExpired(doc.share_expires_at)) return NextResponse.json({ error: 'Link expired', code: 'link_expired' }, { status: 410 })
   if (doc.type !== 'quote') return NextResponse.json({ error: 'Not a quote' }, { status: 400 })
 
   // The client's page is in the quote's language; 'expired' and 'answered' are final answers the

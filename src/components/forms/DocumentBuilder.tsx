@@ -14,10 +14,11 @@ import { Separator } from '@/components/ui/separator'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Dialog, ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { calcTotals, formatMoney, formatDate, addDays, today, getTaxNote, orderItems, sectionSummary, clampPercent } from '@/lib/utils/document'
+import { documentVariables, fillSubject, fillTemplate, parseEmailList, portalUrl, resolveTemplate, templateLang, usesVariable } from '@/lib/templates'
 import type { DocReference } from '@/lib/utils/document-reference'
 import { pdf } from '@react-pdf/renderer'
 import InvoiceDocument from '@/components/pdf/InvoiceDocument'
-import { generateEpcQr } from '@/lib/utils/epc-qr'
+import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { catalogueLineText } from '@/lib/utils/catalogue'
 import { clientLabel } from '@/lib/utils/clients'
 import { formatDocumentNumber, nextCounter, numberingErrorMessage } from '@/lib/utils/numbering'
@@ -186,13 +187,17 @@ function clampDiscount(kind: 'percent' | 'fixed' | null, value: number, base: nu
   return Math.min(Math.max(0, value), Math.max(0, base))
 }
 
-const typeLabel: Record<DocumentType, { de: string; en: string }> = {
-  invoice: { de: 'Rechnung', en: 'Invoice' },
-  quote: { de: 'Angebot', en: 'Quote' },
-  credit_note: { de: 'Gutschrift', en: 'Credit Note' },
-}
-
 const PATHS: Record<DocumentType, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
+
+async function postJson<T = Record<string, unknown>>(url: string, body?: object): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error ?? res.statusText)
+  return data as T
+}
 
 function errorMessage(e: unknown, fallback: string) {
   return e instanceof Error ? e.message : fallback
@@ -362,7 +367,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
   const listboxId = `${uid}-catalogue`
   const [activeDateLine, setActiveDateLine] = useState<string | null>(null)
   const [datePop, setDatePop] = useState<{ top?: number; bottom?: number; right: number } | null>(null)
-  const [gmailPreview, setGmailPreview] = useState<{ to: string; subject: string; body: string; pdfBase64: string; filename: string; documentId: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
+  const [gmailPreview, setGmailPreview] = useState<{ to: string; cc: string; bcc: string; subject: string; body: string; pdfBase64: string; filename: string; documentId: string; newDocId?: string; uploadToDrive: boolean; driveArchived: boolean } | null>(null)
   const [gmailSending, setGmailSending] = useState(false)
   const [autoSaving, setAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
@@ -835,12 +840,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
 
     // Generate EPC QR only for final PDFs (save/send), not preview
     let qrCodeDataUri: string | null = null
-    if (includeQr && type === 'invoice' && settings.iban && totals.balance_due > 0) {
+    // EUR only, with the account holder as beneficiary, exactly as the issued PDF (render.ts).
+    if (includeQr && type === 'invoice' && currency === 'EUR' && settings.iban && totals.balance_due > 0) {
       qrCodeDataUri = await generateEpcQr({
         bic: settings.bic ?? '',
-        name: settings.company_name,
+        name: epcBeneficiary(settings),
         iban: settings.iban,
-        amountEur: currency === 'EUR' ? totals.balance_due : undefined,
+        amountEur: totals.balance_due,
         reference: docData.number,
       })
     }
@@ -1060,53 +1066,45 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     })
   }
 
-  function buildEmailContent(numOverride?: string) {
+  // The document's template in its own language; {{portal_link}} creates the share link on first use.
+  async function buildEmailContent(issued: { id: string; number: string }) {
     if (!client) return null
-    const num = numOverride ?? doc?.number ?? 'DRAFT'
-    const lang = language as 'de' | 'en'
-    const typeKey = type === 'credit_note' ? 'credit_note' : type
-
-    const vars: Record<string, string> = {
-      invoice_number: num,
-      client: client.company ?? client.name,
-      total: formatMoney(totals.total, currency),
-      balance_due: formatMoney(totals.balance_due, currency),
-      subtotal: formatMoney(totals.subtotal, currency),
-      due_date: dueDate ?? '',
-      date,
-      company: settings.company_name,
-      owner: settings.owner_name,
+    const lang = templateLang(language)
+    const tpl = resolveTemplate(settings, type, lang)
+    let portalLink = ''
+    if (usesVariable(tpl.subject, 'portal_link') || usesVariable(tpl.body, 'portal_link')) {
+      try {
+        const { token } = await postJson<{ token: string }>(`/api/documents/${issued.id}/share`)
+        portalLink = portalUrl(window.location.origin, token)
+      } catch {
+        toast.error(t('dunning.portalLinkFailed'))
+      }
     }
-    function sub(tpl: string) {
-      return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? `{{${k}}}`)
-    }
-
-    const subjectKey = `email_subject_${typeKey}_${lang}` as keyof typeof settings
-    const bodyKey    = `email_body_${typeKey}_${lang}`    as keyof typeof settings
-
-    const defaultSubject = lang === 'de'
-      ? `${typeLabel[type].de} ${num} – ${settings.company_name}`
-      : `${typeLabel[type].en} ${num} – ${settings.company_name}`
-    const defaultBody = lang === 'de'
-      ? `Guten Tag,\n\nanbei übermittle ich Ihnen ${typeLabel[type].de} ${num}.\n\nBei Fragen stehe ich Ihnen gerne zur Verfügung.\n\nMit freundlichen Grüßen\n${settings.owner_name}`
-      : `Dear ${client.name || client.company},\n\nPlease find attached ${typeLabel[type].en} ${num}.\n\nDo not hesitate to contact me if you have any questions.\n\nKind regards,\n${settings.owner_name}`
-
-    const subject = settings[subjectKey] ? sub(settings[subjectKey] as string) : defaultSubject
-    const body    = settings[bodyKey]    ? sub(settings[bodyKey]    as string) : defaultBody
-
-    return { subject, body, num }
+    const vars = documentVariables({
+      doc: {
+        type, number: issued.number, date, due_date: dueDate || null, language: lang, currency,
+        skonto_percent: skontoPercent === '' ? null : skontoPercent,
+        skonto_days: skontoDays === '' ? null : skontoDays,
+      },
+      client,
+      issuer: settings,
+      totals,
+      portalLink,
+    })
+    return { subject: fillSubject(tpl.subject, vars), body: fillTemplate(tpl.body, vars) }
   }
 
   function openInEmail() {
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = latest.current.buildEmailContent(issued.number)
+      const content = await latest.current.buildEmailContent(issued)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       triggerDownload(blob, `${issued.number}.pdf`)
+      const cc = parseEmailList(client.cc_emails).emails
       Object.assign(document.createElement('a'), {
-        href: `mailto:${client.email}?subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`,
+        href: `mailto:${client.email}?${cc.length ? `cc=${encodeURIComponent(cc.join(','))}&` : ''}subject=${encodeURIComponent(content.subject)}&body=${encodeURIComponent(content.body)}`,
       }).click()
       await logEvent(supabase, issued.id, 'mailto_opened', { to: client.email, subject: content.subject })
       afterIssue(issued)
@@ -1117,12 +1115,13 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
-      const content = latest.current.buildEmailContent(issued.number)
+      const content = await latest.current.buildEmailContent(issued)
       const blob = await issuedPdf(issued)
       if (!content || !blob) { afterIssue(issued); return }
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
       setGmailPreview({
-        to: client.email, subject: content.subject, body: content.body,
+        to: client.email, cc: parseEmailList(client.cc_emails).emails.join(', '), bcc: '',
+        subject: content.subject, body: content.body,
         pdfBase64: await blobToBase64(blob), filename: `${issued.number}.pdf`,
         documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
         uploadToDrive: !!settings.drive_folder_id && !driveArchived, driveArchived,
@@ -1421,6 +1420,30 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
                   className="w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400"
                 />
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(['cc', 'bcc'] as const).map(field => {
+                  const invalid = parseEmailList(gmailPreview[field]).invalid
+                  return (
+                    <div key={field} className="space-y-1 min-w-0">
+                      <label htmlFor={`${uid}-gmail-${field}`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t(`dunning.${field}`)}</label>
+                      <input
+                        id={`${uid}-gmail-${field}`}
+                        type="text"
+                        inputMode="email"
+                        autoComplete="off"
+                        value={gmailPreview[field]}
+                        onChange={e => setGmailPreview(p => p ? { ...p, [field]: e.target.value } : p)}
+                        aria-invalid={invalid.length > 0 || undefined}
+                        aria-describedby={`${uid}-gmail-${field}-hint`}
+                        className="w-full text-base md:text-sm px-3 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 aria-invalid:border-red-500"
+                      />
+                      <p id={`${uid}-gmail-${field}-hint`} className={`text-xs ${invalid.length ? 'text-red-600 dark:text-red-400' : 'text-neutral-500 dark:text-neutral-400'}`}>
+                        {invalid.length ? t('dunning.invalidAddresses', { list: invalid.join(', ') }) : t('dunning.addressesHint')}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
               <div className="space-y-1">
                 <label htmlFor={`${uid}-gmail-subject`} className="text-xs font-medium text-neutral-500 dark:text-neutral-400">{t('builder.subject')}</label>
                 <input
@@ -1457,7 +1480,7 @@ export default function DocumentBuilder({ type, settings, clients, catalogue, do
             ))}
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={closeGmailPreview} disabled={gmailSending}>{t('common.cancel')}</Button>
-              <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending}>
+              <Button type="button" onClick={confirmSendViaGmail} disabled={gmailSending || parseEmailList([gmailPreview.cc, gmailPreview.bcc]).invalid.length > 0}>
                 {gmailSending ? t('common.sending') : t('common.send')}
               </Button>
             </div>
