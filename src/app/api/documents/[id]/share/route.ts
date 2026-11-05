@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 import { apiError, databaseError, invalidJson, isUuid, readJsonObject, requireUser, type AuthResult } from '@/lib/auth'
-import { shareExpiry } from '@/lib/share'
+import { isShareExpired, shareExpiry } from '@/lib/share'
 
 type ShareRow = { share_token: string | null; share_expires_at: string | null; portal_viewed_at: string | null; number: string | null }
 
@@ -36,7 +36,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json(shareState(loaded.row))
 }
 
-// Returns the active link, creating one (valid SHARE_LINK_DAYS) when there is none.
+// Returns a working link: the active one, an expired one extended by SHARE_LINK_DAYS (the editor
+// puts it into an email), or a new one valid SHARE_LINK_DAYS when there is none.
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const auth = await authorize(id)
@@ -45,15 +46,23 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if ('response' in loaded) return loaded.response
   const { row } = loaded
   if (!row.number) return apiError(400, 'not_issued', 'Only issued documents can be shared')
-  if (row.share_token) return NextResponse.json(shareState(row))
+  if (row.share_token && !isShareExpired(row.share_expires_at)) return NextResponse.json(shareState(row))
 
-  // Conditional, so two concurrent requests cannot hand out two different links.
-  const { data, error } = await auth.supabase
-    .from('documents')
-    .update({ share_token: randomUUID(), share_expires_at: shareExpiry() })
-    .eq('id', id)
-    .is('share_token', null)
-    .select(SHARE_COLUMNS)
+  // Conditional, so two concurrent requests cannot hand out two different links, and a link
+  // rotated meanwhile is not extended in its place.
+  const { data, error } = row.share_token
+    ? await auth.supabase
+      .from('documents')
+      .update({ share_expires_at: shareExpiry() })
+      .eq('id', id)
+      .eq('share_token', row.share_token)
+      .select(SHARE_COLUMNS)
+    : await auth.supabase
+      .from('documents')
+      .update({ share_token: randomUUID(), share_expires_at: shareExpiry() })
+      .eq('id', id)
+      .is('share_token', null)
+      .select(SHARE_COLUMNS)
   if (error) return databaseError(error)
   if (data?.length) return NextResponse.json(shareState(data[0] as ShareRow))
   const current = await loadShare(auth.supabase, id)

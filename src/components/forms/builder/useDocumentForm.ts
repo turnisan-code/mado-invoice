@@ -352,7 +352,11 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
     function onFlush(e: Event) {
       const { documentId, waitUntil } = (e as CustomEvent<FlushEditsDetail>).detail
       if (documentId !== docIdRef.current) return
-      waitUntil(latest.current.flush())
+      // flush() reports a failed save itself and resolves; edits still unsaved after it fail
+      // the caller's flush, so it does not act on the stale database copy.
+      waitUntil(latest.current.flush().then(() => {
+        if (latest.current.isDirty(formRef.current)) throw new Error('Pending edits not saved')
+      }))
     }
     function onIssueDate(e: Event) {
       const { documentId, date, dueDate, waitUntil } = (e as CustomEvent<IssueDateDetail>).detail

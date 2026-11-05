@@ -3,6 +3,7 @@ import { google } from 'googleapis'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { GoogleAuth } from '@/lib/google/client'
 import { portalUrl } from '@/lib/templates'
+import { isShareExpired, shareExpiry } from '@/lib/share'
 
 export {
   reminderTitle, nextReminderLevel, daysBetween, reminderFigures, reminderVariables, reminderTemplates,
@@ -86,19 +87,32 @@ export function appOrigin(requestOrigin: string): string {
   return process.env.NEXT_PUBLIC_APP_URL?.trim() || requestOrigin
 }
 
-// The document's client-portal link, created on first use like the Share button does.
-export async function ensurePortalLink(supabase: SupabaseClient, doc: { id: string; share_token?: string | null }, origin: string): Promise<string> {
-  if (doc.share_token) return portalUrl(origin, doc.share_token)
-  const token = randomUUID()
-  const { data, error } = await supabase
-    .from('documents')
-    .update({ share_token: token })
-    .eq('id', doc.id)
-    .is('share_token', null)
-    .not('number', 'is', null)
-    .select('share_token')
+// The document's client-portal link for an email: created on first use like the Share button
+// does (valid SHARE_LINK_DAYS), and an expired one is extended, never handed out dead.
+export async function ensurePortalLink(
+  supabase: SupabaseClient,
+  doc: { id: string; share_token?: string | null; share_expires_at?: string | null },
+  origin: string,
+): Promise<string> {
+  if (doc.share_token && !isShareExpired(doc.share_expires_at)) return portalUrl(origin, doc.share_token)
+  // Conditional, so a link replaced or created meanwhile is not overwritten.
+  const { data, error } = doc.share_token
+    ? await supabase
+      .from('documents')
+      .update({ share_expires_at: shareExpiry() })
+      .eq('id', doc.id)
+      .eq('share_token', doc.share_token)
+      .select('share_token')
+    : await supabase
+      .from('documents')
+      .update({ share_token: randomUUID(), share_expires_at: shareExpiry() })
+      .eq('id', doc.id)
+      .is('share_token', null)
+      .not('number', 'is', null)
+      .select('share_token')
   if (error) throw new Error(error.message)
-  if (data?.length) return portalUrl(origin, token)
+  const written = data?.[0]?.share_token as string | null | undefined
+  if (written) return portalUrl(origin, written)
   const { data: current, error: readErr } = await supabase.from('documents').select('share_token').eq('id', doc.id).maybeSingle()
   if (readErr) throw new Error(readErr.message)
   if (!current?.share_token) throw new Error('Only issued documents can be shared')

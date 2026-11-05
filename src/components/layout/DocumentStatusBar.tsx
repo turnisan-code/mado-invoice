@@ -140,7 +140,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     busyRef.current = true
     setBusy(true)
     try {
-      await flushPendingEdits(doc.id)
+      if (!(await flushPendingEdits(doc.id))) { toast.error(t('messages.unsavedEdits')); return }
       const numberingColumns = `${type}_number_format, ${type}_prefix, next_${type}_number, ${type}_counter_year, ${type}_number_reset_yearly`
       const [draft, settings, latest] = await Promise.all([
         supabase.from('documents')
@@ -254,8 +254,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     setBusy(true)
     try {
       // A Storno copies the invoice's lines from the database, so the builder's pending edits go first.
-      if (createsStorno(newStatus)) await flushPendingEdits(doc.id)
       if (createsStorno(newStatus)) {
+        if (!(await flushPendingEdits(doc.id))) { toast.error(t('messages.unsavedEdits')); return }
         const res = await fetch(`/api/invoices/${doc.id}/convert-to-credit-note`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

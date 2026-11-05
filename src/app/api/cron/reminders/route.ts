@@ -6,8 +6,8 @@ import {
 } from '@/lib/utils/reminder'
 import { today, addDays, viennaDate } from '@/lib/utils/document'
 import { markOverdueInvoices } from '@/lib/utils/overdue'
-import { getIssuedPdf, getReminderPdf } from '@/lib/pdf/snapshot'
-import { pdfFilename, type PdfDocument } from '@/lib/pdf/render'
+import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import type { PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, renderReminderPdf } from '@/lib/pdf/reminder'
 import { fillSubject, fillTemplate, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
 import { logEvent } from '@/lib/events'
@@ -146,8 +146,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // The Mahnung asks for the open balance plus fee and interest; the invoice copy goes along:
-    // the issued copy while nothing is paid, otherwise a render with the payments.
+    // The Mahnung asks for the open balance plus fee and interest; the invoice goes along as
+    // issued (its frozen copy, as every outgoing copy).
     const totals = invoiceTotals(invoice)
     const attachments: MailAttachment[] = []
     try {
@@ -157,7 +157,8 @@ export async function GET(req: NextRequest) {
       console.warn(`[cron/reminders] Mahnung PDF failed for ${number}:`, pdfErr)
     }
     try {
-      attachments.push({ filename: pdfFilename(number), content: await getReminderPdf(supabase, invoice, settings) })
+      const issued = await getIssuedPdf(supabase, invoice.id, 'on_demand')
+      attachments.push({ filename: issued.filename, content: issued.buffer })
     } catch (pdfErr) {
       console.warn(`[cron/reminders] invoice PDF failed for ${number}:`, pdfErr)
     }

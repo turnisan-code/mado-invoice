@@ -195,6 +195,7 @@ export const de = {
       too_many_files: 'Zu viele PDFs für einen Download — einen kürzeren Zeitraum wählen.',
       nothing_to_export: 'Für diesen Zeitraum gibt es nichts zu exportieren.',
       server_error: 'Auf dem Server ist etwas schiefgegangen. Gleich noch einmal versuchen.',
+      mfa_required: 'Neu anmelden, mit dem Code aus der Authenticator-App bestätigen und den Schritt wiederholen.',
     },
     logo: {
       removeTitle: 'Logo entfernen?',
@@ -215,6 +216,8 @@ export const de = {
     },
     googleFailed: 'Google hat einen Fehler gemeldet. Gleich noch einmal versuchen; wenn es wieder passiert, Google neu verbinden.',
     recurringStopped: 'Das Erstellen ist mittendrin abgebrochen. Zeitplan und Rechnungen prüfen, dann noch einmal versuchen.',
+    portalPdfUnavailable: 'Das PDF kann gerade nicht heruntergeladen werden. Bitte versuchen Sie es in einem Moment erneut. Falls das Problem bestehen bleibt, wenden Sie sich bitte an den Absender.',
+    unsavedEdits: 'Die letzten Änderungen konnten nicht gespeichert werden, daher ist nichts passiert. Verbindung prüfen und noch einmal versuchen.',
   },
   status: {
     draft: 'Entwurf',

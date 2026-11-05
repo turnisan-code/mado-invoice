@@ -107,14 +107,3 @@ export async function getIssuedPdf(
 
   return { buffer, filename, path, created, doc: { ...doc, pdf_path: path }, settings }
 }
-
-// A reminder asks for what is still open. The frozen copy says so only while nothing has been
-// paid; after a (part) payment the PDF is rendered from the current data, with the paid and open
-// rows and a QR for the balance due. Never stored: the archive copy stays the issued one.
-export async function getReminderPdf(supabase: SupabaseClient, doc: PdfDocument, settings: Settings): Promise<Buffer> {
-  if (doc.pdf_path && !doc.payments?.length) {
-    const stored = await readStoredPdf(supabase, doc.pdf_path)
-    if (stored) return stored
-  }
-  return renderLoadedPdf(supabase, doc, settings)
-}

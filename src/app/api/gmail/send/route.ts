@@ -5,10 +5,11 @@ import { sendGmail, type MailAttachment } from '@/lib/utils/reminder'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
 import { logEvent } from '@/lib/events'
 import { DocumentNotFoundError } from '@/lib/pdf/render'
+import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { EInvoiceError } from '@/lib/einvoice/common'
 import { exportEInvoice } from '@/lib/einvoice/export'
 
-// Building a Peppol e-invoice embeds the issued PDF, which may first have to be rendered.
+// The attached PDF, and the one a Peppol e-invoice embeds, may first have to be rendered.
 export const maxDuration = 60
 
 const MAX_COPIES = 20
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   const payload = await readJsonObject(req)
   if (!payload) return invalidJson()
 
-  const { to, subject, body, pdfBase64, filename, documentId, einvoice } = payload
+  const { to, subject, body, documentId, einvoice } = payload
   if (typeof to !== 'string' || !isPlainAddress(to.trim())) {
     return apiError(400, 'invalid_address', 'Invalid recipient address')
   }
@@ -43,9 +44,6 @@ export async function POST(req: NextRequest) {
   if (typeof subject !== 'string' || typeof body !== 'string') {
     return apiError(400, 'invalid_request', 'subject and body are required')
   }
-  if ((pdfBase64 !== undefined && typeof pdfBase64 !== 'string') || (filename !== undefined && typeof filename !== 'string')) {
-    return apiError(400, 'invalid_request', 'Invalid attachment')
-  }
   if (documentId !== undefined && !isUuid(documentId)) {
     return apiError(400, 'invalid_request', 'Invalid documentId')
   }
@@ -53,7 +51,22 @@ export async function POST(req: NextRequest) {
     return apiError(400, 'invalid_request', 'einvoice must be ebinterface or ubl, with a documentId')
   }
 
-  const attachment = pdfBase64 && filename ? { filename, content: Buffer.from(pdfBase64, 'base64') } : null
+  // The attachment is the document's frozen copy, loaded here: never a PDF the browser sends
+  // (pdfBase64 is ignored). The editor issues a draft before it can be emailed.
+  let attachment: MailAttachment | null = null
+  if (documentId) {
+    try {
+      const issued = await getIssuedPdf(supabase, documentId as string, 'on_demand')
+      attachment = { filename: issued.filename, content: issued.buffer }
+    } catch (err) {
+      if (err instanceof ArchiveError) {
+        return NextResponse.json({ error: err.message, code: err.code }, { status: err.code === 'not_issued' ? 400 : 500 })
+      }
+      if (err instanceof DocumentNotFoundError) return apiError(404, 'not_found', err.message)
+      console.error('[gmail/send] issued PDF failed:', err)
+      return apiError(500, 'pdf_failed', err instanceof Error ? err.message : 'PDF unavailable')
+    }
+  }
   // The client's e-invoice goes along, built from the stored document as the download is. Nothing
   // is sent when it cannot be built; the dialog says why (einvoice.errors.*).
   let xml: (MailAttachment & { format: 'ebinterface' | 'ubl'; number: string; pdfEmbedded: boolean }) | null = null

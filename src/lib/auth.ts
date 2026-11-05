@@ -35,10 +35,18 @@ export function settingsUnavailable(error: { message: string; code?: string | nu
 
 // First call of every route handler that acts for the signed-in owner. RLS would hide the data
 // anyway, but without this an anonymous call gets a misleading "not found" or a silent no-op.
+// With a verified second factor a password-only (aal1) session is refused here too, as
+// is_app_user() does in the database, so no route depends on the proxy alone. The factors come
+// from getUser() (the Auth server), so one added on another device counts at once.
 export async function requireUser(): Promise<AuthResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, response: apiError(401, 'unauthorized', 'Unauthorized') }
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+  const needsSecondFactor = aal?.nextLevel === 'aal2' || !!user.factors?.some(f => f.status === 'verified')
+  if (needsSecondFactor && aal?.currentLevel !== 'aal2') {
+    return { ok: false, response: apiError(401, 'mfa_required', 'Second factor required') }
+  }
   return { ok: true, supabase, user }
 }
 
