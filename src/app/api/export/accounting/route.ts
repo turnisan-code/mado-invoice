@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { createClient } from '@/lib/supabase/server'
-import { requireUser } from '@/lib/auth'
+import { apiError, databaseError, requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { toCsv, csvDate, type CsvValue } from '@/lib/utils/csv'
 import { createZipStream, type ZipEntry } from '@/lib/utils/zip'
@@ -171,18 +171,18 @@ const OPTIONAL_TABLES = ['document_events', 'bookamat_bookings'] as const
 async function backupResponse(supabase: Supabase) {
   const tables: Record<string, unknown[]> = {}
   const settings = await fetchAll(supabase, 'settings')
-  if ('error' in settings) return NextResponse.json({ error: settings.error }, { status: 500 })
+  if ('error' in settings) return apiError(500, 'database', settings.error)
   // Gmail tokens and the Bookamat key are credentials, not data: they never leave the server.
   tables.settings = settings.rows.map(s => ({ ...toPublicSettings(s as unknown as Settings), drive_folder_id: s.drive_folder_id ?? null }))
   for (const table of BACKUP_TABLES) {
     const result = await fetchAll(supabase, table)
-    if ('error' in result) return NextResponse.json({ error: `${table}: ${result.error}` }, { status: 500 })
+    if ('error' in result) return apiError(500, 'database', `${table}: ${result.error}`)
     tables[table] = result.rows
   }
   for (const table of OPTIONAL_TABLES) {
     const result = await fetchAll(supabase, table)
     if ('rows' in result) tables[table] = result.rows
-    else if (!MISSING_TABLE.has(result.code ?? '')) return NextResponse.json({ error: `${table}: ${result.error}` }, { status: 500 })
+    else if (!MISSING_TABLE.has(result.code ?? '')) return apiError(500, 'database', `${table}: ${result.error}`)
   }
 
   const body = JSON.stringify({ format: 'mado-invoice-backup', version: 1, exported_at: new Date().toISOString(), tables }, null, 2)
@@ -208,14 +208,15 @@ async function pdfZipResponse(supabase: Supabase, period: Period, t: TFn, lang: 
     .order('date')
     .order('number')
     .limit(MAX_PDFS + 1)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return databaseError(error)
   const docs = data ?? []
+  // Opened as a link, so the answer is shown as it is: worded in the UI language.
   if (docs.length > MAX_PDFS) {
-    return NextResponse.json({ error: t('exports.files.tooMany', { count: `${MAX_PDFS}+` }) }, { status: 413 })
+    return apiError(413, 'too_many_files', t('exports.files.tooMany', { count: `${MAX_PDFS}+` }))
   }
   if (!docs.length) {
     const label = periodLabel(period, lang, t('reports.yearLabel', { year: period.year }))
-    return NextResponse.json({ error: t('exports.files.pdfsNone', { period: label }) }, { status: 404 })
+    return apiError(404, 'nothing_to_export', t('exports.files.pdfsNone', { period: label }))
   }
 
   async function load(path: string | null): Promise<Uint8Array | null> {
@@ -264,7 +265,7 @@ export async function GET(req: NextRequest) {
   const yearParam = params.get('year')
   const year = Number(yearParam)
   if (!KINDS.includes(kind) || (yearParam !== null && (!Number.isInteger(year) || year < MIN_YEAR || year > MAX_YEAR))) {
-    return NextResponse.json({ error: `kind=${KINDS.join('|')} and an optional period=month|quarter|year, year=YYYY, quarter=1-4, month=1-12` }, { status: 400 })
+    return apiError(400, 'invalid_request', `kind=${KINDS.join('|')} and an optional period=month|quarter|year, year=YYYY, quarter=1-4, month=1-12`)
   }
 
   const { t, lang } = await getT()
@@ -280,7 +281,7 @@ export async function GET(req: NextRequest) {
   const result = kind === 'documents' ? await documentsCsv(supabase, period, t)
     : kind === 'payments' ? await paymentsCsv(supabase, period, t)
     : await zmCsv(supabase, period, t)
-  if ('error' in result) return NextResponse.json({ error: result.error }, { status: 500 })
+  if ('error' in result) return apiError(500, 'database', result.error)
 
   const filename = kind === 'documents' ? `belege-${slug}.csv` : kind === 'payments' ? `zahlungen-${slug}.csv` : `zm-${slug}.csv`
   return csvResponse(result.csv, filename)

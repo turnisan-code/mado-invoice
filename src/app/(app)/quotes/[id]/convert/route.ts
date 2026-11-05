@@ -1,8 +1,6 @@
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { apiError, databaseError, isUuid, requireUser } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
-import { lifecycleErrorMessage } from '@/lib/status'
-import { getT } from '@/lib/i18n/server'
 
 type Converted = { invoice_id: string; existing: boolean; quote_status: string }
 
@@ -11,17 +9,16 @@ type Converted = { invoice_id: string; existing: boolean; quote_status: string }
 // back the existing invoice when the quote was converted before.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { t } = await getT()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   const { data, error } = await supabase.rpc('convert_quote_to_invoice', { p_quote_id: id })
   // MI019: the quote has advance invoices, so its invoice is the final invoice that deducts them.
-  if (error?.code === 'MI019') return NextResponse.json({ error: t('deposits.errors.useFinal'), code: error.code }, { status: 409 })
-  if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI016' ? 409 : 500 })
+  if (error) return databaseError(error, error.code === 'MI016' || error.code === 'MI019' ? 409 : 500)
   const result = data as Converted | null
-  if (!result) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (!result) return apiError(404, 'not_found', 'Quote not found')
 
   if (!result.existing) {
     const { data: quote } = await supabase.from('documents').select('number').eq('id', id).single()

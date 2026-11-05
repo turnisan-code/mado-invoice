@@ -1,19 +1,21 @@
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import Logo from '@/components/ui/Logo'
 import { createClient } from '@/lib/supabase/server'
 import { LanguageProvider } from '@/lib/i18n/client'
 import { isUiLang, type UiLang } from '@/lib/i18n'
+import { anonymousUiLang, UI_LANG_COOKIE } from '@/app/auth/ui-lang'
 
 export const metadata: Metadata = { robots: { index: false, follow: false } }
 
-// Signed-out visitors cannot read settings (RLS), so the browser's preferred language picks DE or EN.
+// Signed in (code step, new password): the app's language. Signed out, settings are unreadable
+// (RLS): the language last used in the app, else the browser's preferred one.
 async function authLanguage(): Promise<UiLang> {
   const supabase = await createClient()
   const { data } = await supabase.from('settings').select('ui_language').maybeSingle()
   if (isUiLang(data?.ui_language)) return data.ui_language
-  const accepted = (await headers()).get('accept-language') ?? ''
-  return accepted.split(',').map(part => part.trim().slice(0, 2).toLowerCase()).find(isUiLang) ?? 'en'
+  const [cookieStore, headerList] = await Promise.all([cookies(), headers()])
+  return anonymousUiLang(cookieStore.get(UI_LANG_COOKIE)?.value, headerList.get('accept-language'))
 }
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {

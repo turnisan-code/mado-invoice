@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
 import { flushPendingEdits } from '@/lib/issued-pdf'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { vatEndpoint, type EInvoiceErrorCode } from '@/lib/einvoice/common'
 import { normalizeVatId } from '@/lib/utils/validation'
 import { useT } from '@/lib/i18n/client'
@@ -102,14 +103,14 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       const stored = value || (info.stored != null || info.prefill ? '' : null)
       if (stored !== info.stored) {
         const { error } = await supabase.from('documents').update({ buyer_reference: stored }).eq('id', documentId)
-        if (error) { toast.error(t('einvoice.saveFailed', { error: error.message })); return }
+        if (error) { toast.error(t('einvoice.saveFailed', { error: t('messages.api.database') })); return }
         setInfo({ ...info, stored })
       }
       const res = await fetch(`/api/documents/${documentId}/einvoice?format=${format}`)
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         const code = ERROR_CODES.find(c => c === data.code)
-        toast.error(code ? t(`einvoice.errors.${code}`) : t('einvoice.failed', { error: data.error || res.statusText }))
+        toast.error(code ? t(`einvoice.errors.${code}`) : t('einvoice.failed', { error: apiErrorMessage(t, data) }))
         return
       }
       const blob = await res.blob()
@@ -126,7 +127,7 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       setOpen(false)
       router.refresh()
     } catch (err) {
-      toast.error(t('einvoice.failed', { error: err instanceof Error ? err.message : t('common.unknownError') }))
+      toast.error(t('einvoice.failed', { error: requestErrorMessage(t, err) }))
     } finally {
       setBusy(false)
     }

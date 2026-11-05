@@ -14,13 +14,14 @@ export default function QuoteActions({ token, lang }: { token: string; lang: Lan
   const [answer, setAnswer] = useState<Action | null>(null)
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<Action | null>(null)
-  const [failed, setFailed] = useState(false)
+  // Why the last attempt failed; the buttons stay usable for another try.
+  const [failure, setFailure] = useState<string | null>(null)
   // A response no retry can change: the quote expired or was answered, or the link expired.
   const [final, setFinal] = useState<string | null>(null)
 
   async function respond(action: Action) {
     setBusy(true)
-    setFailed(false)
+    setFailure(null)
     try {
       const res = await fetch(`/api/portal/${token}/respond`, {
         method: 'POST',
@@ -28,14 +29,16 @@ export default function QuoteActions({ token, lang }: { token: string; lang: Lan
         body: JSON.stringify({ action }),
       })
       const data = await res.json().catch(() => ({})) as { error?: unknown; code?: unknown }
+      // 'expired' and 'answered' come worded in the quote's language.
       const message = typeof data.error === 'string' && data.error ? data.error : null
       if (res.ok) setAnswer(action)
       else if (res.status === 410 && data.code === 'link_expired') setFinal(t('pdfPortal.portal.expiredTitle'))
       else if (res.status === 409 && data.code === 'expired') setFinal(message ?? t('lifecycle.portal.expiredHint'))
       else if (res.status === 409 && data.code === 'answered') setFinal(message ?? t('lifecycle.portal.answered'))
-      else setFailed(true)
-    } catch {
-      setFailed(true)
+      else if (res.status === 404) setFinal(t('pdfPortal.portal.notFoundBody'))
+      else setFailure(t('pdfPortal.portal.quote.failed'))
+    } catch (err) {
+      setFailure(t(err instanceof TypeError ? 'messages.portal.network' : 'pdfPortal.portal.quote.failed'))
     } finally {
       setBusy(false)
       setPending(null)
@@ -92,7 +95,7 @@ export default function QuoteActions({ token, lang }: { token: string; lang: Lan
           {t('pdfPortal.portal.quote.accept')}
         </button>
       </div>
-      {failed && <p className="text-sm text-red-600" role="alert">{t('pdfPortal.portal.quote.failed')}</p>}
+      {failure && <p className="text-sm text-red-600 max-w-sm text-right" role="alert">{failure}</p>}
       <ConfirmDialog
         open={pending !== null}
         title={pending === 'accepted' ? t('pdfPortal.portal.quote.confirmAccept') : t('pdfPortal.portal.quote.confirmDecline')}

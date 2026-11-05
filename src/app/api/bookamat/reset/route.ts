@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { apiError, invalidJson, isUuid, readJsonObject, requireUser } from '@/lib/auth'
 import { resetBookamatSync } from '@/lib/bookamat'
 
 // Forgets a document's Bookamat bookings so it can be synced again. The UI asks first: the
@@ -9,8 +9,8 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return auth.response
 
   const body = await readJsonObject(req)
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  if (!isUuid(body.documentId)) return NextResponse.json({ error: 'documentId is required' }, { status: 400 })
+  if (!body) return invalidJson()
+  if (!isUuid(body.documentId)) return apiError(400, 'invalid_request', 'documentId is required')
 
   const failure = await resetBookamatSync(auth.supabase, body.documentId)
   if (failure) {

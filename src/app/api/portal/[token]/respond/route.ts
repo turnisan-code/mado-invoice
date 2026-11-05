@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createServiceClient } from '@/lib/supabase/service'
+import { apiError, databaseError, invalidJson, isUuid, readJsonObject } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
 import { formatDate, today } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -45,39 +46,35 @@ async function notifyOwner(supabase: SupabaseClient, quote: QuoteRow, action: Ac
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  // share_token is a uuid column: anything else would fail the query instead of finding nothing.
+  if (!isUuid(token)) return apiError(404, 'not_found', 'Not found')
 
-  let body: { action?: unknown } | null
-  try {
-    body = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
-
-  const action = body?.action
-  if (action !== 'accepted' && action !== 'rejected') {
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
-  }
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  const action = body.action
+  if (action !== 'accepted' && action !== 'rejected') return apiError(400, 'invalid_request', 'Invalid action')
 
   const supabase = createServiceClient()
 
-  const { data: doc } = await supabase
+  const { data: doc, error: lookupErr } = await supabase
     .from('documents')
     .select('id, type, status, number, due_date, language, share_expires_at, clients(name, company)')
     .eq('share_token', token)
-    .single()
+    .maybeSingle()
 
-  if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (lookupErr) return databaseError(lookupErr)
+  if (!doc?.number) return apiError(404, 'not_found', 'Not found')
   // An expired share link no longer opens the portal, so it cannot answer the quote either.
-  if (isShareExpired(doc.share_expires_at)) return NextResponse.json({ error: 'Link expired', code: 'link_expired' }, { status: 410 })
-  if (doc.type !== 'quote') return NextResponse.json({ error: 'Not a quote' }, { status: 400 })
+  if (isShareExpired(doc.share_expires_at)) return apiError(410, 'link_expired', 'Link expired')
+  if (doc.type !== 'quote') return apiError(400, 'invalid_request', 'Not a quote')
 
   // The client's page is in the quote's language; 'expired' and 'answered' are final answers the
-  // page can show as they are.
+  // page shows as they are, so they are worded here in that language.
   const docLang = doc.language === 'en' ? 'en' : 'de'
   const docT = makeT(docLang)
   if (isExpired(doc, today())) {
     const message = `${docT('lifecycle.portal.expiredNotice', { date: formatDate(doc.due_date!, docLang) })} ${docT('lifecycle.portal.expiredHint')}`
-    return NextResponse.json({ error: message, code: 'expired' }, { status: 409 })
+    return apiError(409, 'expired', message)
   }
 
   // Conditional on 'sent', so a second answer (or one after the owner decided) changes nothing.
@@ -88,8 +85,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     .eq('status', 'sent')
     .select('id')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!updated?.length) return NextResponse.json({ error: docT('lifecycle.portal.answered'), code: 'answered' }, { status: 409 })
+  if (error) return databaseError(error)
+  if (!updated?.length) return apiError(409, 'answered', docT('lifecycle.portal.answered'))
 
   await logEvent(supabase, doc.id, 'portal_responded', { action })
   await notifyOwner(supabase, doc as unknown as QuoteRow, action, req.nextUrl.origin)

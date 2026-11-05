@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { apiError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import { getAuthorizedGoogle, googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import { sendGmail } from '@/lib/utils/reminder'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
@@ -14,38 +14,34 @@ function addressList(value: unknown): { emails: string[]; invalid: string[] } | 
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
   const { data: settings, error: settingsErr } = await supabase.from('settings').select('*').single()
-  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
+  if (settingsErr || !settings) return settingsUnavailable(settingsErr)
   if (!settings.gmail_refresh_token) return googleNotConnected(settings)
 
-  let payload: { to?: unknown; cc?: unknown; bcc?: unknown; subject?: unknown; body?: unknown; pdfBase64?: unknown; filename?: unknown; documentId?: unknown } | null
-  try {
-    payload = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  }
+  const payload = await readJsonObject(req)
+  if (!payload) return invalidJson()
 
-  const { to, subject, body, pdfBase64, filename, documentId } = payload ?? {}
+  const { to, subject, body, pdfBase64, filename, documentId } = payload
   if (typeof to !== 'string' || !isPlainAddress(to.trim())) {
-    return NextResponse.json({ error: 'Invalid recipient address', code: 'invalid_address' }, { status: 400 })
+    return apiError(400, 'invalid_address', 'Invalid recipient address')
   }
-  const cc = addressList(payload?.cc)
-  const bcc = addressList(payload?.bcc)
+  const cc = addressList(payload.cc)
+  const bcc = addressList(payload.bcc)
   if (!cc || !bcc || cc.invalid.length || bcc.invalid.length || cc.emails.length + bcc.emails.length > MAX_COPIES) {
-    return NextResponse.json({ error: 'Invalid CC or BCC address', code: 'invalid_address' }, { status: 400 })
+    return apiError(400, 'invalid_address', 'Invalid CC or BCC address')
   }
   if (typeof subject !== 'string' || typeof body !== 'string') {
-    return NextResponse.json({ error: 'subject and body are required' }, { status: 400 })
+    return apiError(400, 'invalid_request', 'subject and body are required')
   }
   if ((pdfBase64 !== undefined && typeof pdfBase64 !== 'string') || (filename !== undefined && typeof filename !== 'string')) {
-    return NextResponse.json({ error: 'Invalid attachment' }, { status: 400 })
+    return apiError(400, 'invalid_request', 'Invalid attachment')
   }
-  if (documentId !== undefined && typeof documentId !== 'string') {
-    return NextResponse.json({ error: 'Invalid documentId' }, { status: 400 })
+  if (documentId !== undefined && !isUuid(documentId)) {
+    return apiError(400, 'invalid_request', 'Invalid documentId')
   }
 
   const attachment = pdfBase64 && filename ? { filename, content: Buffer.from(pdfBase64, 'base64') } : null

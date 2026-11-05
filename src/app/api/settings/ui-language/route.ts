@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { apiError, databaseError, invalidJson, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import { isUiLang } from '@/lib/i18n'
+import { UI_LANG_COOKIE, UI_LANG_COOKIE_MAX_AGE } from '@/app/auth/ui-lang'
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-  const body = await req.json().catch(() => ({}))
-  const lang = (body as { lang?: unknown }).lang
-  if (!isUiLang(lang)) return NextResponse.json({ error: 'Invalid language' }, { status: 400 })
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  const lang = body.lang
+  if (!isUiLang(lang)) return apiError(400, 'invalid_request', 'Invalid language')
 
-  const { data: settings } = await supabase.from('settings').select('id').single()
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
+  const { data: settings, error: settingsErr } = await supabase.from('settings').select('id').single()
+  if (settingsErr || !settings) return settingsUnavailable(settingsErr)
 
   const { error } = await supabase.from('settings').update({ ui_language: lang }).eq('id', settings.id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ lang })
+  if (error) return databaseError(error)
+  const res = NextResponse.json({ lang })
+  // Read by the sign-in pages once signed out.
+  res.cookies.set(UI_LANG_COOKIE, lang, { path: '/', sameSite: 'lax', maxAge: UI_LANG_COOKIE_MAX_AGE, secure: process.env.NODE_ENV === 'production' })
+  return res
 }

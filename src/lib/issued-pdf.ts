@@ -2,20 +2,22 @@
 // email, Drive, Bookamat) is the stored one, never a fresh render of the editor.
 import type { TFn } from '@/lib/i18n'
 import type { ArchiveErrorCode } from '@/lib/pdf/snapshot'
+import { knownApiError } from '@/lib/api-errors'
 
 const ARCHIVE_ERROR_CODES: readonly ArchiveErrorCode[] = ['not_issued', 'stored_unreadable']
 
-// The archive routes answer known failures with a code, worded here in the UI language.
+// The archive routes answer known failures with a code, worded here in the UI language; the
+// server's own text is never shown.
 export function archiveErrorMessage(t: TFn, payload: unknown, fallback: string): string {
   const p = (payload && typeof payload === 'object' ? payload : {}) as { error?: unknown; code?: unknown }
   const code = ARCHIVE_ERROR_CODES.find(c => c === p.code)
   if (code) return t(`archive.errors.${code}`)
-  return typeof p.error === 'string' && p.error ? p.error : fallback
+  return knownApiError(t, p) ?? fallback
 }
 
 export async function fetchIssuedPdf(documentId: string, t: TFn): Promise<Blob> {
   const res = await fetch(`/api/documents/${documentId}/pdf`)
-  if (!res.ok) throw new Error(archiveErrorMessage(t, await res.json().catch(() => ({})), res.statusText))
+  if (!res.ok) throw new Error(archiveErrorMessage(t, await res.json().catch(() => ({})), t('messages.generic')))
   return res.blob()
 }
 

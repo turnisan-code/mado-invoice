@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link2, Check, Loader2, X, HardDrive, Eye, EyeOff, Clock, Share2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { toastApiError } from '@/lib/google/toast'
+import { knownApiError, requestErrorMessage } from '@/lib/api-errors'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
@@ -35,6 +36,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
   const [confirm, setConfirm] = useState<'revoke' | 'rotate' | null>(null)
   const [copied, setCopied] = useState(false)
   const [driveUploading, setDriveUploading] = useState(false)
+  const urlRef = useRef<HTMLInputElement>(null)
   const { t, lang } = useT()
 
   const token = share.token
@@ -52,13 +54,19 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
     setConfirm(null)
   }
 
+  // Throws the failure already worded in the UI language.
   async function shareRequest(method: 'GET' | 'POST' | 'PATCH', action?: 'extend' | 'rotate'): Promise<ShareState> {
-    const res = await fetch(`/api/documents/${documentId}/share`, {
-      method,
-      ...(action ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) } : {}),
-    })
+    let res: Response
+    try {
+      res = await fetch(`/api/documents/${documentId}/share`, {
+        method,
+        ...(action ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) } : {}),
+      })
+    } catch (err) {
+      throw new Error(requestErrorMessage(t, err))
+    }
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : '')
+    if (!res.ok) throw new Error(knownApiError(t, data) ?? '')
     return { token: data.token ?? null, expiresAt: data.expiresAt ?? null, viewedAt: data.viewedAt ?? null }
   }
 
@@ -80,7 +88,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
       setDetails(true)
       setOpen(true)
     } catch (e) {
-      toast.error(e instanceof Error && e.message ? e.message : t('share.generateFailed'))
+      toast.error(e instanceof Error && e.message ? `${t('share.generateFailed')}: ${e.message}` : t('share.generateFailed'))
     } finally {
       setLoading(false)
     }
@@ -97,8 +105,9 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
       toast.success(action === 'rotate'
         ? t('pdfPortal.share.rotated')
         : t('pdfPortal.share.extended', { date: next.expiresAt ? formatDate(next.expiresAt, lang) : '' }))
-    } catch {
-      toast.error(t(action === 'rotate' ? 'pdfPortal.share.rotateFailed' : 'pdfPortal.share.extendFailed'))
+    } catch (e) {
+      const fallback = t(action === 'rotate' ? 'pdfPortal.share.rotateFailed' : 'pdfPortal.share.extendFailed')
+      toast.error(e instanceof Error && e.message ? `${fallback}: ${e.message}` : fallback)
     } finally {
       setLoading(false)
     }
@@ -108,23 +117,32 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
     setLoading(true)
     try {
       const res = await fetch(`/api/documents/${documentId}/share`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed to revoke')
+      if (!res.ok) {
+        const reason = knownApiError(t, await res.json().catch(() => ({})))
+        toast.error(reason ? `${t('share.revokeFailed')}: ${reason}` : t('share.revokeFailed'))
+        return
+      }
       setShare({ token: null, expiresAt: null, viewedAt: null })
       setDetails(false)
       close()
       toast.success(t('share.revoked'))
-    } catch {
-      toast.error(t('share.revokeFailed'))
+    } catch (err) {
+      toast.error(`${t('share.revokeFailed')}: ${requestErrorMessage(t, err)}`)
     } finally {
       setLoading(false)
     }
   }
 
+  // The Clipboard API is missing over plain http and can be refused; the link is then selected
+  // in its field for copying by hand.
   async function copyLink() {
     if (!portalUrl) return
     try {
+      if (!navigator.clipboard) throw new Error('Clipboard unavailable')
       await navigator.clipboard.writeText(portalUrl)
     } catch {
+      urlRef.current?.select()
+      toast.error(t('messages.copyFailed'))
       return
     }
     setCopied(true)
@@ -147,8 +165,8 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
           : t(data.existing ? 'archive.driveExistingPlain' : 'share.savedToDrivePlain'),
         { duration: 5000 }
       )
-    } catch (e) {
-      toast.error(t('share.driveFailed', { error: e instanceof Error ? e.message : t('common.unknownError') }))
+    } catch (err) {
+      toast.error(t('share.driveFailed', { error: requestErrorMessage(t, err) }))
     } finally {
       setDriveUploading(false)
     }
@@ -217,6 +235,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
         </p>
         <div className="flex gap-2">
           <input
+            ref={urlRef}
             readOnly
             aria-label={t('share.urlLabel')}
             value={portalUrl ?? ''}

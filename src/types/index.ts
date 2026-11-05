@@ -21,6 +21,18 @@ export type PaymentKind = 'payment' | 'skonto' | 'writeoff' | 'credit' | 'refund
 export type PaymentMethod = 'bank' | 'cash'
 // Issuer details every issued document needs; one entry per Settings field group.
 export type IssuerField = 'companyName' | 'address' | 'uid' | 'iban'
+// The stable code every API error answer carries next to its English `error` (logs only); the
+// browser words it (src/lib/api-errors.ts). Lifecycle refusals keep their database code (MI0xx),
+// and the archive, Bookamat and e-invoice routes add their own codes.
+export type ApiErrorCode =
+  | 'unauthorized' | 'invalid_json' | 'invalid_request' | 'not_found' | 'settings_missing' | 'database'
+  | 'incomplete' | 'issue_failed' | 'not_issued' | 'archive_failed' | 'pdf_failed'
+  | 'google_reauth' | 'google_failed' | 'drive_not_configured' | 'folder_not_found' | 'not_a_folder' | 'invalid_state'
+  | 'invalid_address' | 'no_email' | 'nothing_outstanding' | 'not_remindable' | 'no_share_link'
+  | 'invalid_status' | 'payment_date_invalid' | 'too_many_rows' | 'nothing_to_apply' | 'apply_failed'
+  | 'inactive' | 'template_cancelled' | 'generate_failed' | 'link_expired' | 'expired' | 'answered'
+  | 'too_many_files' | 'nothing_to_export' | 'server_error'
+export type LifecycleErrorCode = `MI0${number}`
 // Why a document cannot be issued yet (src/lib/utils/issue-checks.ts). Line problems carry the
 // index in the item list and the 1-based position among item lines.
 export type IssueProblem =

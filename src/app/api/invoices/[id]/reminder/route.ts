@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
+import { apiError, databaseError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import {
   sendGmail, reminderFigures, reminderVariables, reminderTemplates, nextReminderLevel, appOrigin, ensurePortalLink,
 } from '@/lib/utils/reminder'
@@ -18,27 +18,30 @@ export const maxDuration = 60
 
 type Mode = 'gmail' | 'manual'
 
-function fail(error: string, code: string, status = 400) {
-  return NextResponse.json({ error, code }, { status })
-}
-
 // Only an issued invoice past its due date with money still open is dunned (P0 #44); credits,
 // Skonto and write-offs count towards the balance. Shared by the draft (GET) and both POST modes.
 function remindable(invoice: PdfDocument) {
   const balance = invoiceTotals(invoice).balance_due
-  if (balance <= 0.005) return fail('Nothing outstanding on this invoice', 'nothing_outstanding')
+  if (balance <= 0.005) return apiError(400, 'nothing_outstanding', 'Nothing outstanding on this invoice')
   if (!canRemind(invoice, balance, today())) {
-    return fail('Only overdue invoices with an open balance can be reminded', 'not_remindable')
+    return apiError(400, 'not_remindable', 'Only overdue invoices with an open balance can be reminded')
   }
   return null
 }
 
-async function loadInvoice(supabase: SupabaseClient, id: string) {
-  const [{ data: settings }, { data: invoice }] = await Promise.all([
+// The invoice and the settings, or the answer that says why there is no reminder to write.
+async function loadInvoice(supabase: SupabaseClient, id: string): Promise<{ response: NextResponse } | { settings: Settings; invoice: PdfDocument }> {
+  if (!isUuid(id)) return { response: apiError(404, 'not_found', 'Invoice not found') }
+  const [settingsRes, invoiceRes] = await Promise.all([
     supabase.from('settings').select('*').single(),
     supabase.from('documents').select('*, document_items(*), payments(*), clients(*)').eq('id', id).eq('type', 'invoice').maybeSingle(),
   ])
-  return { settings: settings as Settings | null, invoice: invoice as PdfDocument | null }
+  if (settingsRes.error || !settingsRes.data) return { response: settingsUnavailable(settingsRes.error) }
+  if (invoiceRes.error) return { response: databaseError(invoiceRes.error) }
+  if (!invoiceRes.data) return { response: apiError(404, 'not_found', 'Invoice not found') }
+  const invoice = invoiceRes.data as PdfDocument
+  const guard = remindable(invoice)
+  return guard ? { response: guard } : { settings: settingsRes.data as Settings, invoice }
 }
 
 // Subject and body as the template renders them for this invoice, in the invoice's language.
@@ -62,15 +65,13 @@ async function composeReminder(supabase: SupabaseClient, invoice: PdfDocument, s
 // The draft the reminder dialog edits: recipients, text and the attachments that will go out.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
 
-  const { settings, invoice } = await loadInvoice(supabase, id)
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 500 })
-  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
-  const guard = remindable(invoice)
-  if (guard) return guard
+  const loaded = await loadInvoice(supabase, id)
+  if ('response' in loaded) return loaded.response
+  const { settings, invoice } = loaded
   const number = invoice.number as string
 
   const level = nextReminderLevel(invoice.reminder_level, settings.reminder_max_level)
@@ -94,16 +95,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 // Either way the reminder is logged and the invoice moves up one level.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const payload = await req.json().catch(() => ({})) as Record<string, unknown>
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  const payload = await readJsonObject(req)
+  if (!payload) return invalidJson()
 
-  const { settings, invoice } = await loadInvoice(supabase, id)
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 500 })
-  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
-  const guard = remindable(invoice)
-  if (guard) return guard
+  const loaded = await loadInvoice(supabase, id)
+  if ('response' in loaded) return loaded.response
+  const { settings, invoice } = loaded
   const number = invoice.number as string
   const totals = invoiceTotals(invoice)
 
@@ -113,7 +113,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const cc = parseEmailList(Array.isArray(payload.cc) || typeof payload.cc === 'string' ? payload.cc as string | string[] : [])
   const bcc = parseEmailList(Array.isArray(payload.bcc) || typeof payload.bcc === 'string' ? payload.bcc as string | string[] : [])
   if ((to && !isPlainAddress(to)) || cc.invalid.length || bcc.invalid.length || cc.emails.length + bcc.emails.length > 20) {
-    return fail('Invalid email address', 'invalid_address')
+    return apiError(400, 'invalid_address', 'Invalid email address')
   }
 
   let subject = typeof payload.subject === 'string' ? payload.subject.replace(/[\r\n]+/g, ' ').trim() : ''
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (mode === 'gmail') {
     if (!settings.gmail_refresh_token || !settings.gmail_email) return googleNotConnected()
-    if (!to) return fail('Client has no email', 'no_email')
+    if (!to) return apiError(400, 'no_email', 'Client has no email')
 
     let body = typeof payload.body === 'string' ? payload.body : ''
     if (!subject || !body) {
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ]
     } catch (err) {
       console.error('[invoices/reminder] PDF failed:', err)
-      return fail('The reminder PDF could not be created', 'pdf_failed', 500)
+      return apiError(500, 'pdf_failed', 'The reminder PDF could not be created')
     }
 
     try {

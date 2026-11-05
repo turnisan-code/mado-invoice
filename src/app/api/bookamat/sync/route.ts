@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { apiError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import { BOOKAMAT_SETTINGS_COLUMNS, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
 import type { AdoptBooking } from '@/lib/bookamat-client'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
@@ -30,13 +30,13 @@ export async function POST(req: NextRequest) {
   const { supabase } = auth
 
   const body = await readJsonObject(req)
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
-  if (!isUuid(body.documentId)) return NextResponse.json({ error: 'documentId is required' }, { status: 400 })
+  if (!body) return invalidJson()
+  if (!isUuid(body.documentId)) return apiError(400, 'invalid_request', 'documentId is required')
   const adopt = parseAdopt(body.adopt)
-  if (!adopt) return NextResponse.json({ error: 'Invalid adopt list' }, { status: 400 })
+  if (!adopt) return apiError(400, 'invalid_request', 'Invalid adopt list')
 
   const { data: settings, error: settingsErr } = await supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single()
-  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
+  if (settingsErr || !settings) return settingsUnavailable(settingsErr)
 
   const result = await syncBookamatDocument(supabase, settings as unknown as BookamatSettings, body.documentId, {
     adopt,

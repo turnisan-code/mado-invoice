@@ -116,5 +116,5 @@ export async function googleErrorResponse(err: unknown, supabase: SupabaseClient
   const message = googleErrorMessage(err)
   console.error(`[${context}]`, message)
   await recordGoogleError(supabase, settingsId, message)
-  return NextResponse.json({ error: message }, { status: 502 })
+  return NextResponse.json({ error: message, code: 'google_failed' }, { status: 502 })
 }

@@ -7,6 +7,7 @@ import { Bell, BellRing, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { toastApiError } from '@/lib/google/toast'
+import { requestErrorMessage } from '@/lib/api-errors'
 import { nextReminderLevel, reminderTitle } from '@/lib/utils/reminder-templates'
 import { formatDate } from '@/lib/utils/document'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
@@ -32,7 +33,7 @@ const ERROR_CODES = ['not_remindable', 'nothing_outstanding', 'no_email', 'inval
 function reportError(t: TFn, payload: unknown, prefix: string) {
   const code = ERROR_CODES.find(c => c === (payload as { code?: unknown } | null)?.code)
   if (code) toast.error(`${prefix}${t(`dunning.errors.${code}`)}`)
-  else toastApiError(t, payload, prefix, t('common.failed'))
+  else toastApiError(t, payload, prefix)
 }
 
 function download(blob: Blob, filename: string) {
@@ -78,8 +79,8 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
       const next = data as ReminderDraft
       setDraft(next)
       setFields({ to: next.to, cc: next.cc.join(', '), bcc: '', subject: next.subject, body: next.body })
-    } catch {
-      toast.error(`${t('dunning.couldNotPrepare')}${t('common.unknownError')}`)
+    } catch (err) {
+      toast.error(`${t('dunning.couldNotPrepare')}${requestErrorMessage(t, err)}`)
       setOpen(false)
     } finally {
       setBusy(null)
@@ -120,8 +121,8 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
       toast.success(mode === 'gmail' ? t('reminders.sent', { title }) : t('dunning.recorded', { title }))
       setOpen(false)
       router.refresh()
-    } catch {
-      toast.error(`${mode === 'gmail' ? t('reminders.couldNotSend') : t('dunning.couldNotRecord')}${t('common.unknownError')}`)
+    } catch (err) {
+      toast.error(`${mode === 'gmail' ? t('reminders.couldNotSend') : t('dunning.couldNotRecord')}${requestErrorMessage(t, err)}`)
     } finally {
       setBusy(null)
     }
@@ -155,8 +156,8 @@ export default function ReminderButton({ documentId, reminderSentAt, reminderLev
       Object.assign(document.createElement('a'), { href: `mailto:${to}?${query}` }).click()
       setMailtoOpened(true)
       await logEvent(createClient(), documentId, 'mailto_opened', { to: fields.to.trim(), subject: fields.subject, level: draft.level })
-    } catch (e) {
-      toast.error(t('dunning.pdfFailed', { error: e instanceof Error ? e.message : t('common.unknownError') }))
+    } catch (err) {
+      toast.error(t('dunning.pdfFailed', { error: requestErrorMessage(t, err) }))
     } finally {
       setBusy(null)
     }

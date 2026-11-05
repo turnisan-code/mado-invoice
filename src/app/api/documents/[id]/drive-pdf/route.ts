@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isUuid, requireUser } from '@/lib/auth'
+import { apiError, databaseError, isUuid, requireUser, settingsUnavailable } from '@/lib/auth'
 import { googleErrorResponse, googleNotConnected } from '@/lib/google/client'
 import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { archiveToDrive } from '@/lib/pdf/drive'
@@ -13,26 +13,26 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const auth = await requireUser()
   if (!auth.ok) return auth.response
   const { supabase } = auth
-  if (!isUuid(id)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   const [{ data: doc, error: docErr }, { data: settings, error: settingsErr }] = await Promise.all([
     supabase.from('documents').select('id, number').eq('id', id).maybeSingle(),
     supabase.from('settings').select('drive_folder_id, gmail_email, gmail_refresh_token').single(),
   ])
-  if (docErr || settingsErr) return NextResponse.json({ error: (docErr ?? settingsErr)!.message }, { status: 500 })
-  if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (!doc.number) return NextResponse.json({ error: 'Issue the document before saving it to Drive', code: 'not_issued' }, { status: 400 })
-  if (!settings) return NextResponse.json({ error: 'Settings not found' }, { status: 404 })
+  if (docErr) return databaseError(docErr)
+  if (settingsErr || !settings) return settingsUnavailable(settingsErr)
+  if (!doc) return apiError(404, 'not_found', 'Not found')
+  if (!doc.number) return apiError(400, 'not_issued', 'Issue the document before saving it to Drive')
   if (!settings.gmail_refresh_token) return googleNotConnected(settings)
-  if (!settings.drive_folder_id) return NextResponse.json({ error: 'No Drive folder configured' }, { status: 400 })
+  if (!settings.drive_folder_id) return apiError(400, 'drive_not_configured', 'No Drive folder configured')
 
   let issued
   try {
     issued = await getIssuedPdf(supabase, id, 'on_demand')
   } catch (err) {
     console.error('[drive-pdf] archive copy unavailable:', err)
-    const code = err instanceof ArchiveError ? err.code : undefined
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'PDF unavailable', code }, { status: 500 })
+    if (err instanceof ArchiveError) return NextResponse.json({ error: err.message, code: err.code }, { status: 500 })
+    return apiError(500, 'archive_failed', err instanceof Error ? err.message : 'PDF unavailable')
   }
 
   try {

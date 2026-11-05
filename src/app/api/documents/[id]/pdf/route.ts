@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { apiError, isUuid, requireUser } from '@/lib/auth'
 import { ArchiveError, getIssuedPdf, getReminderPdf } from '@/lib/pdf/snapshot'
 import { DocumentNotFoundError, loadPdfDocument, loadSettings, pdfFilename } from '@/lib/pdf/render'
 
 export const maxDuration = 60
 
-async function reminderPdf(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
+async function reminderPdf(supabase: SupabaseClient, id: string) {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, id), loadSettings(supabase)])
   if (!doc.number) throw new ArchiveError('not_issued', 'Only issued documents can be reminded')
   return { buffer: await getReminderPdf(supabase, doc, settings), filename: pdfFilename(doc.number) }
@@ -18,9 +19,10 @@ async function reminderPdf(supabase: Awaited<ReturnType<typeof createClient>>, i
 // balance that is not stored.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   try {
     const { buffer, filename } = req.nextUrl.searchParams.get('for') === 'reminder'
@@ -34,11 +36,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     })
   } catch (err) {
-    if (err instanceof DocumentNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 })
+    if (err instanceof DocumentNotFoundError) return apiError(404, 'not_found', err.message)
     if (err instanceof ArchiveError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.code === 'not_issued' ? 404 : 500 })
     }
     console.error('[documents/pdf]', err)
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'PDF unavailable' }, { status: 500 })
+    return apiError(500, 'pdf_failed', err instanceof Error ? err.message : 'PDF unavailable')
   }
 }

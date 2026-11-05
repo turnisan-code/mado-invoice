@@ -9,11 +9,11 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge, STATUS_TEXT } from '@/components/lists/StatusBadge'
 import { inputClass } from '@/components/lists/ListParts'
 import { toastApiError } from '@/lib/google/toast'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { logEvent } from '@/lib/events'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { addDays, calcTotals, formatMoney, today } from '@/lib/utils/document'
-import { numberingErrorMessage } from '@/lib/utils/numbering'
-import { displayStatus, lifecycleErrorMessage, statusLabelKey, statusMenuTargets } from '@/lib/status'
+import { asDbError, displayStatus, lifecycleErrorMessage, statusLabelKey, statusMenuTargets } from '@/lib/status'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { DisplayStatus, DocumentStatus, DocumentType, IssueProblem, PaymentKind, PaymentMethod, Settings } from '@/types'
@@ -148,7 +148,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         supabase.from('documents').select('number, date').eq('type', type).not('number', 'is', null).neq('id', doc.id)
           .order('date', { ascending: false }).limit(1).maybeSingle(),
       ])
-      if (draft.error || !draft.data) { toast.error(draft.error?.message ?? t('common.unknownError')); return }
+      if (draft.error || !draft.data) { toast.error(draft.error ? lifecycleErrorMessage(draft.error, t) : t('messages.api.not_found')); return }
       const d = draft.data
       const s = (settings.data ?? {}) as Partial<NumberingSettings & Pick<Settings, 'default_payment_days' | 'default_quote_validity_days'>>
       // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
@@ -169,6 +169,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         zeroTotal: total === 0 ? formatMoney(0, d.currency ?? 'EUR') : null,
         problems: null,
       })
+    } catch (err) {
+      toast.error(requestErrorMessage(t, err))
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -192,14 +194,14 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         // Credit notes have no payment term to follow the new date.
         const todayDue = type === 'credit_note' ? undefined : prep.todayDue
         const handled = await applyIssueDateInEditor(doc.id, todayStr, todayDue).catch((err: unknown) => {
-          toast.error(t('builder.notSavedToast', { error: err instanceof Error ? err.message : t('common.unknownError') }))
+          toast.error(t('builder.notSavedToast', { error: lifecycleErrorMessage(asDbError(err), t) }))
           return null
         })
         if (handled === null) return
         if (!handled) {
           const { error } = await supabase.from('documents')
             .update({ date: todayStr, ...(todayDue === undefined ? {} : { due_date: todayDue }) }).eq('id', doc.id)
-          if (error) { toast.error(error.message); return }
+          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
         }
       }
       const showProblems = (problems: IssueProblem[]) => setIssue(p => (p ? { ...p, problems } : p))
@@ -211,18 +213,15 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         })
         const data = await res.json().catch(() => ({}))
         if (res.status === 422 && isIssueProblems(data.problems)) { showProblems(data.problems); return }
-        if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
+        if (!res.ok) { toast.error(apiErrorMessage(t, data, t('statusBar.markPaidFailed'))); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
       } else {
         // Issuing (number, archive copy, Drive) runs on the server and moves a draft to 'sent'.
         const res = await fetch(`/api/documents/${doc.id}/issue`, { method: 'POST' })
         const data = await res.json().catch(() => ({}))
         if (res.status === 422 && isIssueProblems(data.problems)) { showProblems(data.problems); return }
-        if (!res.ok) {
-          toast.error(numberingErrorMessage({ code: data.code, message: typeof data.error === 'string' && data.error ? data.error : t('common.unknownError'), details: data.details }, t))
-          return
-        }
-        if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
+        if (!res.ok) { toast.error(apiErrorMessage(t, data, t('messages.api.issue_failed'))); return }
+        if (data.snapshotError) toast.error(t('messages.archiveLater'))
         if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
         const from = status === 'draft' ? 'sent' : status
         if (newStatus !== from) {
@@ -235,6 +234,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
       setIssue(null)
       router.refresh()
       toast.success(recordsPayment(newStatus) ? t('statusBar.markedPaid') : t('statusBar.statusUpdated', { status: statusLabel(newStatus) }))
+    } catch (err) {
+      toast.error(requestErrorMessage(t, err))
     } finally {
       busyRef.current = false
       setBusy(false)
@@ -259,8 +260,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
           body: JSON.stringify({ cancel: true, reason: stornoReason.trim() || undefined }),
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) { toast.error(data.error ?? t('statusBar.stornoFailed')); return }
-        if (data.snapshotError) toast.error(t('builder.snapshotFailed', { error: data.snapshotError }))
+        if (!res.ok) { toast.error(apiErrorMessage(t, data, t('statusBar.stornoFailed'))); return }
+        if (data.snapshotError) toast.error(t('messages.archiveLater'))
         if (data.driveError) toastApiError(t, data.driveError, t('builder.driveFailedPrefix'))
         setConfirm(null)
         toast.success(t('statusBar.invoiceCancelled', { number: data.number ?? '' }))
@@ -274,7 +275,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
           body: JSON.stringify({ ids: [doc.id], status: 'paid', paidDate, method: paidMethod }),
         })
         const data = await res.json().catch(() => ({}))
-        if (!res.ok) { toast.error(data.error ?? t('statusBar.markPaidFailed')); return }
+        if (!res.ok) { toast.error(apiErrorMessage(t, data, t('statusBar.markPaidFailed'))); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
       } else {
         const from = status
@@ -288,6 +289,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
       setConfirm(null)
       router.refresh()
       toast.success(recordsPayment(newStatus) ? t('statusBar.markedPaid') : t('statusBar.statusUpdated', { status: statusLabel(newStatus) }))
+    } catch (err) {
+      toast.error(requestErrorMessage(t, err))
     } finally {
       busyRef.current = false
       setBusy(false)

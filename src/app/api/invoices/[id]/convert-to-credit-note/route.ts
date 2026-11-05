@@ -1,10 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { apiError, databaseError, invalidJson, isUuid, readJsonObject, requireUser } from '@/lib/auth'
 import { logEvent } from '@/lib/events'
 import { issueDocument } from '@/lib/pdf/issue'
 import { applyCreditNote } from '@/lib/credits'
-import { lifecycleErrorMessage } from '@/lib/status'
-import { getT } from '@/lib/i18n/server'
 
 // A Storno renders, stores and archives its PDF before answering.
 export const maxDuration = 60
@@ -17,19 +15,20 @@ type Created = { credit_note_id: string; number: string | null; invoice_status: 
 // An optional { reason } is kept in the history of both documents.
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { t } = await getT()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+  const { supabase } = auth
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
-  const body = await req.json().catch(() => ({}))
-  const cancel = body?.cancel === true
-  const reason = cancel && typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) || undefined : undefined
+  const body = await readJsonObject(req)
+  if (!body) return invalidJson()
+  const cancel = body.cancel === true
+  const reason = cancel && typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) || undefined : undefined
 
   const { data, error } = await supabase.rpc('create_credit_note', { p_invoice_id: id, p_cancel: cancel })
-  if (error) return NextResponse.json({ error: lifecycleErrorMessage(error, t), code: error.code }, { status: error.code === 'MI017' || error.code === 'MI018' ? 409 : 500 })
+  if (error) return databaseError(error, error.code === 'MI017' || error.code === 'MI018' ? 409 : 500)
   const created = data as Created | null
-  if (!created) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (!created) return apiError(404, 'not_found', 'Invoice not found')
   const creditNoteId = created.credit_note_id
 
   const { data: invoice } = await supabase.from('documents').select('number').eq('id', id).single()

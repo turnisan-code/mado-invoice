@@ -11,6 +11,7 @@ import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
+import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
@@ -125,7 +126,7 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
           const { toastBulkIssueProblems } = await import('@/components/forms/builder/IssueProblems')
           if (toastBulkIssueProblems(t, data)) { router.refresh(); return }
         }
-        toast.error(t('lists.bulkFailed', { error: data.error ?? t('common.failed') }))
+        toast.error(t('lists.bulkFailed', { error: apiErrorMessage(t, data) }))
         return
       }
       const { updated, skipped } = data
@@ -133,8 +134,8 @@ export default function QuoteList({ quotes }: { quotes: Quote[] }) {
       if (skipped) toast.info(n(skipped, t('quotes.skippedOne', { count: skipped }), t('quotes.skippedOther', { count: skipped })))
       selection.clear()
       router.refresh()
-    } catch {
-      toast.error(t('lists.bulkFailed', { error: t('common.failed') }))
+    } catch (err) {
+      toast.error(t('lists.bulkFailed', { error: requestErrorMessage(t, err) }))
     } finally {
       setBulkLoading(false)
       setBulkConfirm(false)

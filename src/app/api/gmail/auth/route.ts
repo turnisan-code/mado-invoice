@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { randomUUID } from 'crypto'
-import { requireUser } from '@/lib/auth'
+import { databaseError, requireUser, settingsUnavailable } from '@/lib/auth'
 import { getOAuthClient, OAUTH_STATE_COOKIE } from '@/lib/google/client'
 
 export async function GET() {
@@ -36,7 +36,7 @@ export async function DELETE() {
   const { supabase } = auth
 
   const { data: settings, error: settingsErr } = await supabase.from('settings').select('id, gmail_access_token, gmail_refresh_token').single()
-  if (settingsErr || !settings) return NextResponse.json({ error: settingsErr?.message ?? 'Settings not found' }, { status: 500 })
+  if (settingsErr || !settings) return settingsUnavailable(settingsErr)
 
   // Revoking either token invalidates the whole grant; a failure here only means Google
   // already forgot it (or is unreachable), so the local disconnect proceeds regardless. The Drive
@@ -56,7 +56,7 @@ export async function DELETE() {
     google_last_error: null,
     google_last_error_at: null,
   }).eq('id', settings.id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return databaseError(error)
 
   return NextResponse.json({ ok: true })
 }

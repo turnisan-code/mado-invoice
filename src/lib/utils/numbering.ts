@@ -72,11 +72,12 @@ const ISSUE_PROBLEM_KEYS: Record<string, DictKey> = {
   negative_total: 'editor.problems.negativeTotal',
 }
 
-// The SQL raises English messages; MI001–MI004 are shown from the dictionaries instead.
+// The SQL raises English messages; MI001–MI004 are shown from the dictionaries instead, and any
+// other database or network failure as a generic sentence (its raw text is for logs only).
 export function numberingErrorMessage(error: { code?: string | null; message: string; details?: string | null }, t: TFn): string {
   switch (error.code) {
     case 'MI001': return t('clientData.numbering.errorFuture')
-    case 'MI002': return error.details ? t('clientData.numbering.errorClosedYear', { year: error.details }) : error.message
+    case 'MI002': return error.details ? t('clientData.numbering.errorClosedYear', { year: error.details }) : t('messages.api.issue_failed')
     case 'MI003': return t('clientData.numbering.errorNoCounter')
     case 'MI004': {
       const codes = (error.details ?? '').split(',').map(c => c.trim()).filter(Boolean)
@@ -84,6 +85,6 @@ export function numberingErrorMessage(error: { code?: string | null; message: st
       if (messages.length < codes.length || !codes.length) messages.push(t('lifecycle.errors.incomplete'))
       return messages.join(' ')
     }
-    default: return error.message
+    default: return t('messages.generic')
   }
 }

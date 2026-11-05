@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readJsonObject, requireUser } from '@/lib/auth'
+import { apiError, invalidJson, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import { BookamatError, fetchBookamatAccounts } from '@/lib/bookamat'
 import { today } from '@/lib/utils/document'
 
@@ -11,22 +11,22 @@ export async function POST(req: NextRequest) {
   const { supabase } = auth
 
   const body = await readJsonObject(req)
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  if (!body) return invalidJson()
   const { username, country } = body
   if (typeof username !== 'string' || !username.trim() || typeof country !== 'string' || !/^[a-z]{2}$/.test(country)) {
-    return NextResponse.json({ error: 'username and a two-letter country are required' }, { status: 400 })
+    return apiError(400, 'invalid_request', 'username and a two-letter country are required')
   }
   if (body.apiKey !== undefined && typeof body.apiKey !== 'string') {
-    return NextResponse.json({ error: 'Invalid apiKey' }, { status: 400 })
+    return apiError(400, 'invalid_request', 'Invalid apiKey')
   }
 
   let apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
   if (!apiKey) {
     const { data: settings, error } = await supabase.from('settings').select('bookamat_api_key').single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return settingsUnavailable(error)
     apiKey = settings?.bookamat_api_key ?? ''
   }
-  if (!apiKey) return NextResponse.json({ error: 'apiKey is required' }, { status: 400 })
+  if (!apiKey) return NextResponse.json({ error: 'apiKey is required', code: 'not_configured' }, { status: 400 })
 
   const year = Number(today().slice(0, 4))
   try {
