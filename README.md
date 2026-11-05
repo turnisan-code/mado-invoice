@@ -209,19 +209,33 @@ once; where any earlier version was applied, also every credit note applied from
 connection.
 
 While an action approved in Mado runs (issuing takes seconds per draft: the number, the PDF, the
-Drive copy), Claude cannot change the documents it names, their lines and payments, the advance
-and partial invoices a final invoice among them deducts (no linking or unlinking one, no payment
-on one), or their clients: the database refuses (MI046) until the action has finished, ten
-minutes after the approval at most. The run also compares each draft, with its client, once more
-just before its number is taken, and an issue-and-send the document and client before the email
-goes out; one that changed after the approval stops the run there, what was issued before stays
-issued and the result lists the rest as not issued. An action Claude confirms in chat runs on
-Claude's own connection, which the database cannot tell apart from Claude's other changes, so
-there that comparison is the check. Nor does such an action start while an action approved in Mado
-runs on a document or client it names, or on the final invoice that deducts one (MI046; it stays
-prepared and Claude confirms it again afterwards): the database would refuse what it records after
-sending (the email's sent date, the reminder's level), and the automatic reminders would then send
-the same Mahnung again.
+Drive copy), Claude cannot change the documents it names, the invoice a credit note among them
+corrects, their lines and payments, the advance and partial invoices a final invoice among them
+deducts (no linking or unlinking one, no payment on one), or their clients: the database refuses
+(MI046) until the action has finished, ten minutes after the approval at most. The run also
+compares each draft, with its client, once more just before its number is taken, and an
+issue-and-send the document and client before the email goes out; one that changed after the
+approval stops the run there, what was issued before stays issued and the result lists the rest as
+not issued. An action Claude confirms in chat runs on Claude's own connection, which the database
+cannot tell apart from Claude's other changes, so there that comparison is the check. Once a
+document is numbered, its archive copy is made with the client as it was when the action started
+(the owner's own issuing: when the number was taken) and only if no payment was recorded on it from
+Claude since: a client Claude changes or a payment it records on the document in the meantime (in
+parallel with an action confirmed in chat) leaves the document without a copy until the owner saves
+the client or confirms the payments, and the result says so.
+
+One action runs at a time, approved in Mado or confirmed in chat. While one runs, Claude's
+confirmation does not start another and an approval in Mado is refused (“Another action is still
+running”; MI047); that action stays prepared, to be confirmed or approved again once the first has
+finished (ten minutes after it started at most, should it have stopped without reporting back).
+Two at once would get in each other's way: one confirmed in chat runs on Claude's own connection,
+where the database refuses what it records while one approved in Mado holds the same invoice (the
+email's sent date, the reminder's level, a credit note's credit), and the automatic reminders would
+then send the same Mahnung again.
+
+Issuing a credit note (also a Storno) applies it to the invoice it corrects; should that fail, the
+toast in Mado, the approval page and Claude's result say so, and the credit note's page offers to
+apply it.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.

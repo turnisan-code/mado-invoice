@@ -19,6 +19,7 @@ const REASON_KEYS: Record<Extract<ApproveFormResult, { ok: false }>['reason'], D
   invalid_code: 'mcp.approve.errors.invalidCode',
   no_factor: 'mcp.approve.errors.noFactor',
   fresh_code: 'mcp.errors.freshCode',
+  busy: 'mcp.approve.errors.busy',
   origin: 'mcp.approve.errors.origin',
   unauthorized: 'mcp.approve.errors.unauthorized',
   error: 'mcp.approve.errors.generic',
@@ -43,7 +44,8 @@ export default function ApproveForm({ id, requireCode, canApprove }: { id: strin
         // A changed state is shown by the page itself once it reloads, with what can be done about
         // it (a client or payments Claude changed are cleared in Mado), so it is not repeated here.
         if (result.reason !== 'state_changed') setError(t(REASON_KEYS[result.reason]))
-        if (result.reason === 'invalid_code' || result.reason === 'fresh_code') setCode('')
+        // The next attempt takes the code current then.
+        if (result.reason === 'invalid_code' || result.reason === 'fresh_code' || result.reason === 'busy') setCode('')
       }
       setBusy(null)
       router.refresh()

@@ -12,6 +12,9 @@ export type CreatedCreditNote = {
   number: string | null
   snapshotError: string | null
   driveError: { error: string; code?: string } | null
+  // A Storno whose credit could not be taken off the invoice's open balance (its page offers to
+  // apply it).
+  creditNotApplied: boolean
 }
 
 type Created = { credit_note_id: string; number: string | null; invoice_status: string }
@@ -34,7 +37,7 @@ export async function createCreditNote(
 
   const { data: invoice } = await supabase.from('documents').select('number').eq('id', invoiceId).single()
   await logEvent(supabase, creditNoteId, 'converted', { from_id: invoiceId, from_number: invoice?.number ?? null, from_type: 'invoice', storno: cancel, reason })
-  const result: CreatedCreditNote = { creditNoteId, number: null, snapshotError: null, driveError: null }
+  const result: CreatedCreditNote = { creditNoteId, number: null, snapshotError: null, driveError: null, creditNotApplied: false }
   if (!cancel) return { data: result, error: null }
 
   result.number = created.number
@@ -54,6 +57,7 @@ export async function createCreditNote(
     await applyCreditNote(supabase, creditNoteId)
   } catch (err) {
     console.error(`[convert-to-credit-note] Storno ${created.number} not applied:`, err)
+    result.creditNotApplied = true
   }
   return { data: result, error: null }
 }

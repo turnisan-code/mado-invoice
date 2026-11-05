@@ -137,13 +137,15 @@ export const stornoAction = defineAction<Args>({
     const report: Worded[] = [notice('mcp.approve.result.storno', { number: data.number ?? '' })]
     if (data.snapshotError) report.push(notice('mcp.approve.result.archiveFailed', { number: data.number ?? '' }))
     if (data.driveError) report.push(notice('mcp.approve.result.driveFailed', { number: data.number ?? '' }))
+    if (data.creditNotApplied) report.push(notice('mcp.approve.result.creditNotApplied', { number: data.number ?? '' }))
     const warnings = report.slice(1).map(w => word(ctx.t, 'en', w))
     return {
       summary: report.map(w => word(ctx.t, 'en', w)).join(' '),
       data: {
         credit_note_id: data.creditNoteId, number: data.number, invoice_id: args.invoice_id,
         app_url: documentUrl('credit_note', data.creditNoteId), ...(data.snapshotError ? {} : { pdf_url: documentPdfUrl(data.creditNoteId) }),
-        archive_failed: !!data.snapshotError, drive_error: data.driveError?.error ?? null, report,
+        archive_failed: !!data.snapshotError, drive_error: data.driveError?.error ?? null,
+        ...(data.creditNotApplied ? { credit_not_applied: true } : {}), report,
       },
       ...(warnings.length ? { warnings } : {}),
     }

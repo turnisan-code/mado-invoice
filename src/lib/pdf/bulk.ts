@@ -90,12 +90,13 @@ export type MovedDates = { date: string; due_date?: string }
 // Drive). A failed issue puts the draft's own dates back and throws as issueDocument does; archive
 // and Drive problems, an order the numbers no longer follow and lost project links come back as notes.
 // `beforeIssue` is the caller's last check just before the number is taken (with the dates the
-// draft was just moved to); what it throws fails the issue the same way.
+// draft was just moved to); what it throws fails the issue the same way. `clientWrittenAt`: the
+// client's mark as an approved run read it (issueDocument).
 export async function issueBulkDraft(
   supabase: SupabaseClient,
   batch: BulkIssue,
   d: BulkDraft,
-  opts: { beforeIssue?: (moved: MovedDates | null) => Promise<void> } = {},
+  opts: { beforeIssue?: (moved: MovedDates | null) => Promise<void>; clientWrittenAt?: string | null } = {},
 ): Promise<IssuedNote> {
   let date = d.date
   let movedFrom: string | null = null
@@ -121,7 +122,7 @@ export async function issueBulkDraft(
   let outcome: IssueOutcome
   try {
     await opts.beforeIssue?.(moved)
-    outcome = await issueDocument(supabase, d.id)
+    outcome = await issueDocument(supabase, d.id, opts.clientWrittenAt !== undefined ? { clientWrittenAt: opts.clientWrittenAt } : {})
   } catch (err) {
     if (movedFrom) {
       const { error } = await supabase.from('documents').update({ date: movedFrom, due_date: d.due_date }).eq('id', d.id).is('number', null)
@@ -140,6 +141,7 @@ export async function issueBulkDraft(
     beforeLatest: earlier,
     snapshotFailed: !!outcome.snapshotError,
     driveError: outcome.driveError,
+    creditNotApplied: outcome.creditNotApplied,
     unlinked: batch.type === 'invoice' ? await lostEntries(supabase, d.id) : null,
   }
 }

@@ -32,17 +32,19 @@
 --     booking takes its date, amount and account from the rows.
 --   * While an action the owner approved in Mado runs (mcp_actions 'running' via 'app', ten
 --     minutes after the claim at most), a Claude session writes nothing the run reads: the
---     documents its arguments name, their lines and payments, the advance and partial invoices
---     such a final invoice deducts, and their clients (mcp_approved_run_guard, MI046). Issuing a
---     batch takes seconds per draft, and a draft later in it is still an unnumbered draft
---     meanwhile: what Claude wrote there after the approval would be numbered and frozen without
---     anyone approving it. Nor does an action Claude confirms in the chat start meanwhile on what
---     such a run holds (mcp_actions_chat_claim_guard, MI046): it runs on Claude's own session, so
---     what it records after sending (the email's sent date, the reminder's level) would be refused.
+--     documents its arguments name and the invoice a credit note among them corrects, their lines
+--     and payments, the advance and partial invoices such a final invoice deducts, and their
+--     clients (mcp_approved_run_guard, MI046). Issuing a batch takes seconds per draft, and a draft
+--     later in it is still an unnumbered draft meanwhile: what Claude wrote there after the
+--     approval would be numbered and frozen without anyone approving it.
+--   * One action runs at a time, approved in Mado or confirmed in the chat (mcp_actions_one_run,
+--     MI047): one confirmed in the chat runs on Claude's own session, so while one approved in Mado
+--     holds what it touches, what it records after sending (the email's sent date, the reminder's
+--     level, a credit note's credit) would be refused, whichever of the two started first.
 -- Error codes: MI044 = only a draft's lines can be changed from a Claude connection, MI045 = the
 -- template of a recurring schedule cannot be changed or deleted from one, MI046 = an action the
--- owner approved is running on the document or its client (also refusing Claude's confirmation in
--- the chat of an action on it).
+-- owner approved is running on the document or its client, MI047 = another action is running (a
+-- confirmation in the chat or an approval in Mado then starts nothing; the action stays pending).
 -- Mirrored in supabase/schema.sql; supabase/tests/mcp_drafts_guards.sql checks the guards and
 -- rolls back. Idempotent — safe to re-run.
 
@@ -399,22 +401,23 @@ create trigger documents_mcp_payments_guard
 -- rendered and stored, the Drive copy), and a draft later in the batch is still an unnumbered draft
 -- meanwhile; an email, a reminder or a booking reads the client and the rows it is made of as the
 -- run goes. So while the run lasts, a Claude session writes nothing it reads: the documents its
--- arguments name (document_ids, document_id, invoice_id, the draft or client to delete), their
--- lines and payments (also a credit that names such a credit note), the advance and partial
--- invoices such a final invoice deducts (final_invoice_id before or after the write: linking or
--- unlinking one, or a payment that marks it) and the clients of those documents (MI046). A Claude
--- write committed before the claim changes the fingerprint and stops the run; one after it is
--- refused here. The hold ends with the run, or ten minutes after the claim at most (STALE_RUN_MS
--- in src/lib/mcp/confirm.ts: a run that died with its function). An action Claude confirms in the
--- chat runs on Claude's own session, which this cannot tell apart from Claude's other writes; that
--- run, like an approved one, compares each draft again just before its number is taken and before
--- the email goes out (src/lib/mcp/actions/issue.ts), and it does not start while such a run holds
--- what it names (mcp_actions_chat_claim_guard below). The owner's browser, the crons and the
--- approved run itself are not affected.
+-- arguments name (document_ids, document_id, invoice_id, the draft or client to delete) and the
+-- invoice a credit note among them corrects (issuing it applies its credit there), their lines and
+-- payments (also a credit that names such a credit note), the advance and partial invoices such a
+-- final invoice deducts (final_invoice_id before or after the write: linking or unlinking one, or a
+-- payment that marks it) and the clients of those documents (MI046). A Claude write committed
+-- before the claim changes the fingerprint and stops the run; one after it is refused here. The
+-- hold ends with the run, or ten minutes after the claim at most (STALE_RUN_MS in
+-- src/lib/mcp/confirm.ts: a run that died with its function). An action Claude confirms in the chat
+-- runs on Claude's own session, which this cannot tell apart from Claude's other writes; that run,
+-- like an approved one, compares each draft again just before its number is taken and before the
+-- email goes out (src/lib/mcp/actions/issue.ts), and no other action runs meanwhile
+-- (mcp_actions_one_run below). The owner's browser, the crons and the approved run itself are not
+-- affected.
 create index if not exists mcp_actions_running_idx on public.mcp_actions(claimed_at) where status = 'running';
 
--- Whether such a run names one of the documents or clients, or a document of one of the clients.
--- Arguments that are no uuid name nothing.
+-- Whether such a run names one of the documents or clients (a credit note it names also names the
+-- invoice it corrects), or a document of one of the clients. Arguments that are no uuid name nothing.
 create or replace function public.mcp_approved_run_holds(p_documents uuid[], p_clients uuid[])
 returns boolean
 language plpgsql stable security definer
@@ -439,6 +442,9 @@ begin
   where a.status = 'running' and a.claimed_via = 'app' and a.claimed_at > now() - interval '10 minutes'
     and n.what is not null
     and n.val ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+  v_documents := v_documents
+    || coalesce((select array_agg(d.converted_from_id) from public.documents d
+                 where d.id = any(v_documents) and d.type = 'credit_note' and d.converted_from_id is not null), '{}');
   return v_documents && p_documents
       or v_clients && p_clients
       or exists (select 1 from public.documents d where d.id = any(v_documents) and d.client_id = any(p_clients));
@@ -475,7 +481,7 @@ begin
     end if;
     if public.mcp_approved_run_holds(v_documents, v_clients) then
       raise exception using errcode = 'MI046',
-        message = 'An action the owner approved is running on this document, its client or the final invoice that deducts it. Try again when it has finished.';
+        message = 'An action the owner approved is running on this document, its client, the final invoice that deducts it or a credit note that corrects it. Try again when it has finished.';
     end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
@@ -500,54 +506,47 @@ create trigger clients_mcp_run_guard
   before update or delete on public.clients
   for each row execute function public.mcp_approved_run_guard();
 
--- Claude confirms an action in the chat (mcp_claim_action: status 'running', claimed_via 'chat'):
--- it runs on Claude's own session, so while a run the owner approved in Mado holds what it names,
--- the guard above would refuse its writes as it goes. An email or a Mahnung would go out and the
--- record of it (sent_at, reminder_sent_at, reminder_level) be refused and only logged, and the
--- reminder cron would send the same Mahnung level again. So the claim is refused (MI046) while
--- such a run holds a document or client its arguments name (as mcp_approved_run_holds reads them),
--- the final invoice that deducts one of the documents or an advance or partial invoice one of them
--- deducts; the action stays pending and Claude confirms it again when that run has finished.
-create or replace function public.mcp_actions_chat_claim_guard()
+-- ─── One action at a time ────────────────────────────────────────────────────
+-- Whether the owner approved it in Mado (mcp_approve_action) or Claude confirmed it in the chat
+-- (mcp_claim_action), one action runs at a time. One confirmed in the chat runs on Claude's own
+-- session, so while one approved in Mado holds what it touches, the guard above refuses what it
+-- writes as it goes, whichever of the two started first: an email or a Mahnung goes out and the
+-- record of it (sent_at, reminder_sent_at, reminder_level) is refused and only logged, so the
+-- reminder cron sends the same level again, or a credit note is numbered without its credit on the
+-- invoice it corrects. So a claim (pending -> running, either channel) is refused (MI047) while
+-- another action runs, claimed in the last ten minutes (STALE_RUN_MS in src/lib/mcp/confirm.ts: a
+-- run that died with its function stops counting then). The raise undoes the claim: the action
+-- stays pending, and Claude confirms it again or the owner approves it again once the other one
+-- has finished. Two claims in the same instant take a transaction-scoped advisory lock on a fixed
+-- key one after the other; the second then reads what the first committed (each query reads what
+-- was committed before it, read committed as PostgREST runs it) and is refused. mcp_claim_action
+-- moving an action to Mado changes its approval, not its status, and is not affected. An earlier
+-- version of this migration refused only a chat claim, and only on what an approved run held
+-- (mcp_actions_chat_claim_guard): dropped here.
+drop trigger if exists mcp_actions_chat_claim_guard on public.mcp_actions;
+drop function if exists public.mcp_actions_chat_claim_guard();
+create or replace function public.mcp_actions_one_run()
 returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
-declare
-  v_documents uuid[];
-  v_clients   uuid[];
 begin
-  if new.status = 'running' and old.status = 'pending' and new.claimed_via = 'chat' then
-    select coalesce(array_agg(n.val::uuid) filter (where n.what = 'document'), '{}'),
-           coalesce(array_agg(n.val::uuid) filter (where n.what = 'client'), '{}')
-      into v_documents, v_clients
-    from (
-      select e.val, 'document' from jsonb_array_elements_text(
-        case when jsonb_typeof(new.args -> 'document_ids') = 'array' then new.args -> 'document_ids' else '[]'::jsonb end) e(val)
-      union all select new.args ->> 'document_id', 'document'
-      union all select new.args ->> 'invoice_id', 'document'
-      union all select new.args ->> 'id', case new.args ->> 'kind' when 'draft' then 'document' when 'client' then 'client' end
-        where new.kind = 'delete'
-    ) n(val, what)
-    where n.what is not null
-      and n.val ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
-    v_documents := v_documents
-      || coalesce((select array_agg(d.final_invoice_id) from public.documents d
-                   where d.id = any(v_documents) and d.final_invoice_id is not null), '{}')
-      || coalesce((select array_agg(d.id) from public.documents d where d.final_invoice_id = any(v_documents)), '{}');
-    if public.mcp_approved_run_holds(v_documents, v_clients) then
-      raise exception using errcode = 'MI046',
-        message = 'An action the owner approved is running on a document or client this action names, or on the final invoice that deducts one. It stays prepared: confirm it again when that action has finished.';
+  if new.status = 'running' and old.status = 'pending' then
+    perform pg_advisory_xact_lock(20261105047);
+    if exists (select 1 from public.mcp_actions a
+               where a.id <> new.id and a.status = 'running' and a.claimed_at > now() - interval '10 minutes') then
+      raise exception using errcode = 'MI047',
+        message = 'Another action is running. This one was not started and stays prepared: confirm or approve it again when that one has finished (ten minutes at most if it stopped unexpectedly).';
     end if;
   end if;
   return new;
 end;
 $$;
 
-drop trigger if exists mcp_actions_chat_claim_guard on public.mcp_actions;
-create trigger mcp_actions_chat_claim_guard
+drop trigger if exists mcp_actions_one_run on public.mcp_actions;
+create trigger mcp_actions_one_run
   before update of status on public.mcp_actions
-  for each row execute function public.mcp_actions_chat_claim_guard();
+  for each row execute function public.mcp_actions_one_run();
 
 -- ─── Function privileges ─────────────────────────────────────────────────────
 revoke execute on function public.mcp_address_set(text[]) from public, anon;
@@ -561,4 +560,4 @@ revoke execute on function public.payments_mcp_mark() from public, anon, authent
 revoke execute on function public.documents_mcp_payments_guard() from public, anon, authenticated;
 revoke execute on function public.mcp_approved_run_holds(uuid[], uuid[]) from public, anon, authenticated;
 revoke execute on function public.mcp_approved_run_guard() from public, anon, authenticated;
-revoke execute on function public.mcp_actions_chat_claim_guard() from public, anon, authenticated;
+revoke execute on function public.mcp_actions_one_run() from public, anon, authenticated;

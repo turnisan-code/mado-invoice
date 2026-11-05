@@ -53,23 +53,31 @@ export async function startIssueBatches(
 // Issues the drafts oldest first (issueOrder), each through issueBulkDraft: moved to today when
 // `redate` says so, numbered, frozen and archived. The first failure stops the run; what was
 // issued before it stays issued. `beforeIssue` runs just before each draft's number is taken
-// (issueBulkDraft); what it throws is that draft's failure.
+// (issueBulkDraft); what it throws is that draft's failure. `clientWrittenAt`: each draft's client
+// mark as an approved run read it, which its archive copy is made with (issueDocument).
 export async function issueMany<D extends IssueDraft>(
   supabase: SupabaseClient,
   batches: Partial<Record<DocumentType, BulkIssue>>,
   drafts: readonly D[],
-  opts: { deadline?: number | null; beforeIssue?: (draft: D, moved: MovedDates | null) => Promise<void> } = {},
+  opts: {
+    deadline?: number | null
+    beforeIssue?: (draft: D, moved: MovedDates | null) => Promise<void>
+    clientWrittenAt?: (draft: D) => string | null
+  } = {},
 ): Promise<IssueRun<D>> {
   const run: IssueRun<D> = { notes: [], failed: null, stopped: [] }
   const ordered = issueOrder(drafts)
-  const { beforeIssue } = opts
+  const { beforeIssue, clientWrittenAt } = opts
   for (const [i, d] of ordered.entries()) {
     if (opts.deadline && opts.deadline - Date.now() < MIN_ISSUE_MS) {
       run.stopped = ordered.slice(i)
       break
     }
     try {
-      run.notes.push(await issueBulkDraft(supabase, batches[d.type]!, d, beforeIssue ? { beforeIssue: moved => beforeIssue(d, moved) } : {}))
+      run.notes.push(await issueBulkDraft(supabase, batches[d.type]!, d, {
+        ...(beforeIssue ? { beforeIssue: (moved: MovedDates | null) => beforeIssue(d, moved) } : {}),
+        ...(clientWrittenAt ? { clientWrittenAt: clientWrittenAt(d) } : {}),
+      }))
     } catch (error) {
       run.failed = { draft: d, error }
       break

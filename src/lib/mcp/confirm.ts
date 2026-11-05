@@ -149,7 +149,8 @@ async function finish(supabase: SupabaseClient, id: string, ok: boolean, result:
 // committed first, so a Claude write before it changes the fingerprint and one after it is
 // refused by the database while an action approved in Mado runs (MI046,
 // 20261105_mcp_drafts.sql); the state checked here goes to execute(), which compares each document
-// with it again before numbering or sending it (approvedState in types.ts).
+// with it again before numbering or sending it (approvedState in types.ts). No other action was
+// claimed meanwhile: one runs at a time (MI047, mcp_actions_one_run).
 export async function runClaimed(ctx: ServiceContext, row: McpAction): Promise<RunResult> {
   try {
     const def = actionKind(row.kind)
@@ -179,9 +180,9 @@ export async function confirmAction(ctx: ToolContext, input: { confirmation_id: 
   if (row.kind !== input.action || row.label !== input.label) throw new McpToolError('label_mismatch')
   if (row.approval !== 'chat' || actionState(row) !== 'pending') return describeAction(row, ctx.t, input.confirmation_id)
 
-  // MI046: an action the owner approved in Mado runs on what this one names; this one would run on
-  // Claude's session, where the database refuses the record of what it sent
-  // (mcp_actions_chat_claim_guard), so it does not start and stays pending.
+  // MI047: another action runs (approved in Mado or confirmed in the chat; one runs at a time,
+  // mcp_actions_one_run), so this one does not start and stays pending; Claude is told to confirm it
+  // again once that one has finished.
   const { data, error } = await ctx.supabase.rpc('mcp_claim_action', { p_handle_hash: row.handle_hash })
   if (error) {
     // Claimed by a parallel call, expired or rejected since it was read.
@@ -209,11 +210,13 @@ export type CodeCheck = 'ok' | 'invalid' | 'no_factor'
 
 export type ApproveResult =
   | { ok: true; row: McpAction }
-  | { ok: false; reason: 'not_found' | 'not_pending' | 'expired' | 'revoked' | 'state_changed' | 'invalid_code' | 'no_factor' | 'fresh_code' }
+  | { ok: false; reason: 'not_found' | 'not_pending' | 'expired' | 'revoked' | 'state_changed' | 'invalid_code' | 'no_factor' | 'fresh_code' | 'busy' }
 
 // The owner approved in Mado (cookie session, never a Claude one: the database refuses those).
 // The state is compared first, so a changed document is reported before a code is asked for;
-// then the authenticator code, the atomic claim, and the run with the owner's session.
+// then the authenticator code, the atomic claim, and the run with the owner's session. 'busy':
+// another action runs (MI047, one at a time); nothing was claimed and this one can be approved
+// again once that one has finished.
 export async function approveAction(
   ctx: ServiceContext,
   id: string,
@@ -247,6 +250,7 @@ export async function approveAction(
   const { data, error } = await ctx.supabase.rpc('mcp_approve_action', { p_id: id })
   if (error) {
     if (error.code === 'MI043') return { ok: false, reason: 'fresh_code' }
+    if (error.code === 'MI047') return { ok: false, reason: 'busy' }
     if (error.code !== 'MI041') throw error
     const now = await readAction(ctx.supabase, id)
     if (!now) return { ok: false, reason: 'not_found' }

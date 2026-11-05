@@ -217,6 +217,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     snapshotError: string | null
     drive: { webViewLink: string | null; existing: boolean } | null
     driveError: { error: string; code?: string } | null
+    creditNotApplied?: boolean
   }
 
   async function buildPdfBlob(numOverride?: string, includeQr = false) {
@@ -269,6 +270,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   // the issue, it is only reported (the page then offers to create the archive copy).
   function reportArchive(result: IssueResponse) {
     if (result.snapshotError) toast.error(t('messages.archiveLater'))
+    if (result.creditNotApplied) toast.error(t('messages.creditNotApplied'))
     if (result.driveError) toastApiError(t, result.driveError, t('builder.driveFailedPrefix'))
     else if (result.drive) notifyDriveUpload(t, result.drive.webViewLink, result.drive.existing)
   }

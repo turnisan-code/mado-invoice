@@ -3,10 +3,11 @@
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
 -- until the owner saves the client there; a client it changed keeps mcp_written_at until then, and
 -- an invoice or credit note whose payments or refunds it changed keeps mcp_payments_at until the
--- owner confirms them (an applied credit marks the credit note too), and while an action the owner
--- approved runs it writes none of what the run reads and confirms no action on it in the chat
--- (MI046).
--- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
+-- owner confirms them (an applied credit marks the credit note too), while an action the owner
+-- approved runs it writes none of what the run reads (MI046), and one action runs at a time,
+-- approved in Mado or confirmed in the chat (MI047).
+-- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations, while no action
+-- runs (one claimed in the last ten minutes would refuse the claims here, MI047); the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
 -- claude.ai grant's session). The first failed check stops the script with "FAIL <check>"; a clean
@@ -348,6 +349,8 @@ begin
     format($q$insert into public.payments (document_id, date, amount, kind, method) values (%L, current_date, 120, 'payment', 'bank')$q$, v_rinv), 'MI046');
   perform public.mcp_drafts_test_raises('claude cannot apply a credit note an approved Bookamat sync runs on (MI046)',
     format($q$insert into public.payments (document_id, date, amount, kind, method, credit_note_id) values (%L, current_date, 120, 'credit', 'bank', %L)$q$, v_rcninv, v_rcn), 'MI046');
+  perform public.mcp_drafts_test_raises('nor record a payment on the invoice that credit note corrects (MI046)',
+    format($q$insert into public.payments (document_id, date, amount, kind, method) values (%L, current_date, 120, 'payment', 'bank')$q$, v_rcninv), 'MI046');
   perform public.mcp_drafts_test_raises('claude cannot record a refund on it (MI046)',
     format($q$insert into public.payments (document_id, date, amount, kind, method) values (%L, current_date, 10, 'refund', 'bank')$q$, v_rcn), 'MI046');
   perform public.mcp_drafts_test_ok('what the approved runs read is as the owner approved it',
@@ -358,21 +361,18 @@ begin
     and (select final_invoice_id is null from public.documents where id = v_rfree)
     and not exists (select 1 from public.payments where document_id in (v_rinv, v_rcninv, v_rcn, v_rdep)));
 
-  -- Claude confirms in the chat an action on what such a run holds: it does not start and stays
-  -- pending (it would run on Claude's session, where the record of the reminder it sent is
-  -- refused). One on an invoice nothing holds starts.
+  -- One action runs at a time: while these runs last, Claude confirms in the chat neither an action
+  -- on what they hold (it would run on Claude's session, where the record of the reminder it sent
+  -- is refused) nor one on anything else (MI047). Both stay pending.
   perform public.mcp_create_action('h-chat-held', 'send_reminder', jsonb_build_object('invoice_id', v_rinv, 'mode', 'manual'), 'ah', 'fp', 'Remind', '{}', false);
-  perform public.mcp_drafts_test_raises('claude cannot confirm in the chat a reminder on an invoice an approved reminder runs on (MI046)',
-    $q$select public.mcp_claim_action('h-chat-held')$q$, 'MI046');
-  perform public.mcp_create_action('h-chat-deposit', 'send_reminder', jsonb_build_object('invoice_id', v_rdep, 'mode', 'manual'), 'ah', 'fp', 'Remind', '{}', false);
-  perform public.mcp_drafts_test_raises('nor one on the advance invoice a final draft an approved issue runs on deducts (MI046)',
-    $q$select public.mcp_claim_action('h-chat-deposit')$q$, 'MI046');
+  perform public.mcp_drafts_test_raises('claude cannot confirm in the chat a reminder on an invoice an approved reminder runs on (MI047)',
+    $q$select public.mcp_claim_action('h-chat-held')$q$, 'MI047');
+  perform public.mcp_create_action('h-chat-free', 'send_reminder', jsonb_build_object('invoice_id', current_setting('mcp_test.issued')::uuid, 'mode', 'manual'), 'ah', 'fp', 'Remind', '{}', false);
+  perform public.mcp_drafts_test_raises('nor one on an invoice no approved run holds (MI047)',
+    $q$select public.mcp_claim_action('h-chat-free')$q$, 'MI047');
   perform public.mcp_drafts_test_ok('both stay pending, to be confirmed in the chat',
     (select count(*) = 2 and bool_and(status = 'pending' and approval = 'chat' and claimed_at is null)
-     from public.mcp_actions where handle_hash in ('h-chat-held', 'h-chat-deposit')));
-  perform public.mcp_create_action('h-chat-free', 'send_reminder', jsonb_build_object('invoice_id', current_setting('mcp_test.issued')::uuid, 'mode', 'manual'), 'ah', 'fp', 'Remind', '{}', false);
-  perform public.mcp_drafts_test_ok('one on an invoice no approved run holds starts',
-    (select status = 'running' and claimed_via = 'chat' from public.mcp_claim_action('h-chat-free')));
+     from public.mcp_actions where handle_hash in ('h-chat-held', 'h-chat-free')));
 
   update public.documents set notes = 'Claude' where id = current_setting('mcp_test.stale_run_draft')::uuid;
   perform public.mcp_drafts_test_ok('a run claimed more than ten minutes ago holds nothing',
@@ -540,6 +540,108 @@ begin
   perform public.mcp_drafts_test_ok('saved by the owner: the chat policy holds again', v.approval = 'chat');
   select * into v from public.mcp_create_action('h-new', 'send_email', jsonb_build_object('to', jsonb_build_array('new-cc@example.test')), 'ah', 'fp', 'Send', '{}', false);
   perform public.mcp_drafts_test_ok('the client claude created is still marked', v.approval = 'app');
+end $$;
+
+-- ─── One action at a time ────────────────────────────────────────────────────
+-- The approved runs above have finished; the one Claude confirmed in the chat still runs.
+reset role;
+update public.mcp_actions set status = 'done', finished_at = now() where handle_hash in ('h-run-issue', 'h-run-remind', 'h-run-sync');
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$
+declare
+  v_forced uuid := (select id from public.mcp_actions where handle_hash = 'h-forced');
+begin
+  perform public.mcp_drafts_test_raises('browser: no approval while an action confirmed in the chat runs (MI047)',
+    format('select public.mcp_approve_action(%L)', v_forced), 'MI047');
+  perform public.mcp_drafts_test_ok('browser: the refused approval leaves the action pending, to be approved again',
+    (select status = 'pending' and claimed_at is null and claimed_via is null from public.mcp_actions where id = v_forced));
+  update public.settings set mcp_confirm_policy = '{"send_email": "chat"}' where id is not null;
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$
+declare
+  v       record;
+  v_found boolean;
+begin
+  select * into v from public.mcp_claim_action('h-chat-held');
+  v_found := found;
+  perform public.mcp_drafts_test_ok('meanwhile a kind set back to Mado still moves Claude''s action there (its approval, not its status)',
+    not v_found and (select approval = 'app' and status = 'pending' and claimed_at is null from public.mcp_actions where handle_hash = 'h-chat-held'));
+end $$;
+
+reset role;
+update public.mcp_actions set status = 'done', finished_at = now() where handle_hash = 'h-run-chat';
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$
+declare
+  v record;
+begin
+  select * into v from public.mcp_approve_action((select id from public.mcp_actions where handle_hash = 'h-forced'));
+  perform public.mcp_drafts_test_ok('browser: approved once the action confirmed in the chat has finished', v.status = 'running' and v.claimed_via = 'app');
+  perform public.mcp_drafts_test_raises('browser: nor a second approval while the first runs (MI047)',
+    format('select public.mcp_approve_action(%L)', (select id from public.mcp_actions where handle_hash = 'h-chat-held')), 'MI047');
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$ begin
+  perform public.mcp_drafts_test_raises('claude cannot confirm in the chat while an action approved in Mado runs (MI047)',
+    $q$select public.mcp_claim_action('h-known')$q$, 'MI047');
+  perform public.mcp_drafts_test_ok('the refused confirmation leaves the action pending',
+    (select status = 'pending' and claimed_at is null from public.mcp_actions where handle_hash = 'h-known'));
+end $$;
+
+reset role;
+update public.mcp_actions set claimed_at = now() - interval '11 minutes' where handle_hash = 'h-forced';
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$ begin
+  perform public.mcp_drafts_test_ok('an approved run claimed more than ten minutes ago no longer counts: the confirmation starts',
+    (select status = 'running' and claimed_via = 'chat' from public.mcp_claim_action('h-known')));
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$ begin
+  perform public.mcp_drafts_test_raises('browser: no approval while that confirmed action runs (MI047)',
+    format('select public.mcp_approve_action(%L)', (select id from public.mcp_actions where handle_hash = 'h-chat-held')), 'MI047');
+end $$;
+
+reset role;
+update public.mcp_actions set claimed_at = now() - interval '11 minutes' where handle_hash = 'h-known';
+select set_config('request.jwt.claims', current_setting('mcp_test.browser'), true);
+set local role authenticated;
+do $$
+declare
+  v record;
+begin
+  select * into v from public.mcp_approve_action((select id from public.mcp_actions where handle_hash = 'h-chat-held'));
+  perform public.mcp_drafts_test_ok('browser: a confirmed run claimed more than ten minutes ago no longer counts: approved',
+    v.status = 'running' and v.claimed_via = 'app');
+end $$;
+
+reset role;
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$ begin
+  perform public.mcp_drafts_test_raises('claude cannot confirm in the chat while that approved action runs (MI047)',
+    $q$select public.mcp_claim_action('h-after')$q$, 'MI047');
+end $$;
+
+reset role;
+update public.mcp_actions set status = 'done', finished_at = now() where handle_hash = 'h-chat-held';
+select set_config('request.jwt.claims', current_setting('mcp_test.claude'), true);
+set local role authenticated;
+do $$ begin
+  perform public.mcp_drafts_test_ok('once the approved action has finished, the confirmation starts',
+    (select status = 'running' and claimed_via = 'chat' from public.mcp_claim_action('h-after')));
 end $$;
 
 reset role;

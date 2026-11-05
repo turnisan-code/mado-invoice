@@ -19,6 +19,10 @@ export type IssueOutcome = {
   snapshotCode: ArchiveErrorCode | null
   drive: DriveArchive | null
   driveError: { error: string; code?: string } | null
+  // An issued credit note whose credit could not be taken off the open balance of the invoice it
+  // corrects: the invoice still shows it as open (and is reminded of it) until it is applied on the
+  // credit note's page.
+  creditNotApplied: boolean
 }
 
 type IssueCheck = { problems: IssueProblem[]; uiLanguage: unknown }
@@ -89,13 +93,22 @@ async function recordIssuedTotal(supabase: SupabaseClient, documentId: string): 
 // and the owner has not saved in Mado since (clients.mcp_written_at): refused with code
 // 'client_changed' just before the number is taken, and should Claude change the client after
 // that, no archive copy is made from it (getIssuedPdf), the invoice stays without one until the
-// owner saves the client (snapshotCode 'client_changed'). The owner's own issuing is not held.
-export async function issueDocument(supabase: SupabaseClient, documentId: string, opts: { unattended?: boolean } = {}): Promise<IssueOutcome> {
+// owner saves the client (snapshotCode 'client_changed'). The owner's own issuing is not held, but
+// the archive copy is made from the client as it was when the number was taken: should Claude
+// change it in between, or record a payment on the just-numbered document, there is no copy until
+// the owner saves the client or confirms the payments (getIssuedPdf). `clientWrittenAt`: the
+// client's mark as a run Claude prepared read it when it was approved, compared instead.
+export async function issueDocument(
+  supabase: SupabaseClient,
+  documentId: string,
+  opts: { unattended?: boolean; clientWrittenAt?: string | null } = {},
+): Promise<IssueOutcome> {
   // The whole client row: a database without clients.mcp_written_at has nothing from Claude.
-  const { data: before, error: lookupErr } = await supabase.from('documents').select(opts.unattended ? 'number, type, clients(*)' : 'number, type').eq('id', documentId).maybeSingle()
+  const { data: before, error: lookupErr } = await supabase.from('documents').select('number, type, clients(*)').eq('id', documentId).maybeSingle()
   if (lookupErr) throw new Error(lookupErr.message)
   if (!before) throw new Error('Document not found')
   const row = before as unknown as { number: string | null; type: string; clients?: { mcp_written_at?: string | null } | null }
+  const clientWrittenAt = opts.clientWrittenAt !== undefined ? opts.clientWrittenAt : row.clients?.mcp_written_at ?? null
   if (opts.unattended && !row.number && row.clients?.mcp_written_at) {
     throw Object.assign(new Error('The client was changed from a Claude connection and not saved in Mado since; the invoice stays a draft'), { code: 'client_changed' })
   }
@@ -106,24 +119,34 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!row.number) await logEvent(supabase, documentId, 'issued', { number })
   await recordIssuedTotal(supabase, documentId)
-  // An issued credit note takes its amount off the open balance of the invoice it corrects; a
-  // failure leaves it unapplied, and its page offers to apply it.
-  if (!row.number && row.type === 'credit_note') {
-    await applyCreditNote(supabase, documentId).catch(err => console.error(`[issue] credit note ${number} not applied:`, err))
+
+  const outcome: IssueOutcome = {
+    number: number as string, pdfPath: null, snapshotError: null, snapshotCode: null, drive: null, driveError: null, creditNotApplied: false,
   }
 
-  const outcome: IssueOutcome = { number: number as string, pdfPath: null, snapshotError: null, snapshotCode: null, drive: null, driveError: null }
-
-  let issued: Awaited<ReturnType<typeof getIssuedPdf>>
+  let issued: Awaited<ReturnType<typeof getIssuedPdf>> | null = null
   try {
-    issued = await getIssuedPdf(supabase, documentId, 'issue', { unattended: opts.unattended })
+    issued = await getIssuedPdf(supabase, documentId, 'issue', { unattended: opts.unattended, clientWrittenAt })
     outcome.pdfPath = issued.path
   } catch (err) {
     console.error(`[issue] archive copy failed for ${number}:`, err)
     outcome.snapshotError = err instanceof Error ? err.message : String(err)
     outcome.snapshotCode = err instanceof ArchiveError ? err.code : null
-    return outcome
   }
+
+  // An issued credit note takes its amount off the open balance of the invoice it corrects, after
+  // its archive copy (as a Storno's is): applied from a Claude session, the credit marks the credit
+  // note's payments (payments_mcp_mark), which would hold the copy. A failure leaves it unapplied,
+  // reported with the outcome; its page offers to apply it.
+  if (!row.number && row.type === 'credit_note') {
+    try {
+      await applyCreditNote(supabase, documentId)
+    } catch (err) {
+      console.error(`[issue] credit note ${number} not applied:`, err)
+      outcome.creditNotApplied = true
+    }
+  }
+  if (!issued) return outcome
 
   const { settings, doc } = issued
   if (!settings.drive_folder_id || !settings.gmail_refresh_token) return outcome

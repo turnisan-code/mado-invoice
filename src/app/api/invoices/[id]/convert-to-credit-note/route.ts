@@ -24,5 +24,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (error) return databaseError(error, error.code === 'MI017' || error.code === 'MI018' || error.code === 'MI020' ? 409 : 500)
   if (!data) return apiError(404, 'not_found', 'Invoice not found')
   if (!cancel) return NextResponse.json({ creditNoteId: data.creditNoteId })
-  return NextResponse.json({ creditNoteId: data.creditNoteId, number: data.number, snapshotError: data.snapshotError, driveError: data.driveError })
+  return NextResponse.json({ creditNoteId: data.creditNoteId, number: data.number, snapshotError: data.snapshotError, driveError: data.driveError, creditNotApplied: data.creditNotApplied })
 }

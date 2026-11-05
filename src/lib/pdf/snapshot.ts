@@ -74,11 +74,20 @@ export type IssuedPdf = {
 // (the recurring generator issuing a period invoice nobody looked at): the same holds at issue,
 // checked in the very read the copy is rendered from, so a client Claude changes after the
 // generator's own check is not frozen into it either.
+// At issue otherwise (the owner's own issuing, or a run approved in Mado or confirmed in the chat)
+// the payments' mark holds too: a draft has no payments, so a just-numbered document carries it only
+// when a Claude session wrote a payment after the number (issueDocument applies a credit note's
+// credit after this copy). The client is held only when it carries a mark other than
+// `clientWrittenAt`, the mark as the run read it when it was approved (or when the number was taken,
+// for the owner's own issuing): a client Claude changed and the owner approved issuing for is
+// archived as shown on the approval page, one Claude changes after that (a parallel call during a
+// run confirmed in the chat, where nothing refuses it) is not frozen into the copy, and one the
+// owner saved meanwhile (no mark) is.
 export async function getIssuedPdf(
   supabase: SupabaseClient,
   documentId: string,
   source: 'issue' | 'on_demand' | 'manual',
-  opts: { unattended?: boolean } = {},
+  opts: { unattended?: boolean; clientWrittenAt?: string | null } = {},
 ): Promise<IssuedPdf> {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.number) throw new ArchiveError('not_issued', 'Only issued documents have an archive copy')
@@ -93,13 +102,15 @@ export async function getIssuedPdf(
   }
 
   const path = doc.pdf_path ?? storageKey(doc.date, doc.number)
-  const held = source !== 'issue' || !!opts.unattended
-  if (held && (doc.clients?.mcp_written_at || doc.mcp_payments_at)) {
+  const atIssue = source === 'issue' && !opts.unattended
+  const written = doc.clients?.mcp_written_at ?? null
+  const clientHeld = atIssue ? !!written && opts.clientWrittenAt !== undefined && written !== opts.clientWrittenAt : !!written
+  if (clientHeld || doc.mcp_payments_at) {
     // Only a copy rendered now waits: one already stored at the key whose link was never written
     // (the upload succeeded, linking it failed) was rendered before, and is adopted.
     const stored = doc.pdf_path ? null : await readStoredPdf(supabase, path)
     if (stored) return linkCopy(supabase, { buffer: stored, filename, path, doc, settings }, source)
-    if (doc.clients?.mcp_written_at) {
+    if (clientHeld) {
       throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
     }
     throw new ArchiveError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no archive copy is made with them')

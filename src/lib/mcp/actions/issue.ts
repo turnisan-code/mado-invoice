@@ -111,6 +111,7 @@ export function issueOutcome<D extends IssueDraftRow>(ctx: ServiceContext, run: 
     if (n.beforeLatest) warnings.push(notice('mcp.approve.result.beforeLatest', { number: n.number, latest: n.beforeLatest.number }))
     if (n.snapshotFailed) warnings.push(notice('mcp.approve.result.archiveFailed', { number: n.number }))
     if (n.driveError) warnings.push(notice('mcp.approve.result.driveFailed', { number: n.number }))
+    if (n.creditNotApplied) warnings.push(notice('mcp.approve.result.creditNotApplied', { number: n.number }))
     if (n.unlinked) warnings.push(notice('mcp.approve.notices.unlinked', { number: n.number, entries: entries(n.unlinked.time, n.unlinked.expenses) }))
   }
   const failed = run.failed ? { document_id: run.failed.draft.id, error: storedError(run.failed.error, ctx.t) } : null
@@ -130,6 +131,7 @@ export function issueOutcome<D extends IssueDraftRow>(ctx: ServiceContext, run: 
         return {
           id: n.id, type, number: n.number, moved_from: n.movedFrom, date_kept: n.dateKept, before_latest: n.beforeLatest,
           archive_failed: n.snapshotFailed, drive_error: n.driveError?.error ?? null, unlinked: n.unlinked,
+          ...(n.creditNotApplied ? { credit_not_applied: true } : {}),
           app_url: documentUrl(type, n.id), ...(n.snapshotFailed ? {} : { pdf_url: documentPdfUrl(n.id) }),
         }
       }),
@@ -176,6 +178,9 @@ export async function stillApproved(
 // refuses Claude's writes to the drafts, the invoices a final draft deducts and their clients
 // (MI046); a run Claude confirmed in the chat runs on Claude's own session, so there this check is
 // what holds it (a deduction changed meanwhile fails the draft's issue check, deductionsOutdated).
+// After the number, the archive copy is made with the client as approved and without payments
+// Claude wrote since (getIssuedPdf): one Claude changes meanwhile leaves the document without a copy
+// until the owner saves the client or confirms the payments (the result says so, archiveFailed).
 export async function runIssue(ctx: ServiceContext, ids: readonly string[], redate: boolean, approved: ApprovedDrafts | undefined) {
   if (!approved) throw new McpToolError('internal')
   const drafts = ids.map(id => approved.get(id)).filter((d): d is IssueDraftRow => !!d)
@@ -184,6 +189,7 @@ export async function runIssue(ctx: ServiceContext, ids: readonly string[], reda
   if ('error' in started) throw started.error
   const run = await issueMany(ctx.supabase, started.batches, drafts, {
     deadline: ctx.deadline,
+    clientWrittenAt: d => d.clients?.mcp_written_at ?? null,
     beforeIssue: async (d, moved) => {
       if (!await stillApproved(ctx, approved, d.id, { moved })) {
         throw refuse(ctx, 'mcp.approve.refusals.changedSinceApproval', undefined, 'state_changed', { document_id: d.id })
