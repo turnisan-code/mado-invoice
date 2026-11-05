@@ -92,8 +92,29 @@ export type SessionAccess =
   // The session is gone for good (signed out everywhere, password changed, reuse detected): the
   // grant has to be revoked.
   | { ok: false; reason: 'ended' }
-  // Supabase could not be reached or another request is still refreshing: try again shortly.
-  | { ok: false; reason: 'unavailable' }
+  // Supabase could not be reached, refused for now (rate limit, timeout, 5xx) or another request
+  // is still refreshing: try again after retryAfter seconds.
+  | { ok: false; reason: 'unavailable'; retryAfter: number }
+
+const RETRY_SOON = 5
+const RETRY_RATE_LIMITED = 30
+
+// Supabase Auth's answers that mean the refresh token or its session is gone for good.
+const SESSION_GONE = new Set([
+  'refresh_token_not_found', 'refresh_token_already_used', 'session_not_found', 'session_expired', 'user_not_found', 'user_banned',
+])
+
+// Why a refresh failed. Only a definitive refusal ends the grant; a rate limit (429), a timeout
+// (408), a server error (5xx), a network failure or an unknown code is transient. Older Supabase
+// Auth versions send no code; their refusals of a refresh token all start "Invalid Refresh Token".
+export function refreshFailure(error: unknown): Extract<SessionAccess, { ok: false }> {
+  if (isAuthApiError(error)) {
+    const gone = error.code ? SESSION_GONE.has(error.code) : error.status === 400 && /^Invalid Refresh Token/i.test(error.message)
+    if (gone) return { ok: false, reason: 'ended' }
+    if (error.status === 429) return { ok: false, reason: 'unavailable', retryAfter: RETRY_RATE_LIMITED }
+  }
+  return { ok: false, reason: 'unavailable', retryAfter: RETRY_SOON }
+}
 
 const expiresAtMs = (stored: Pick<StoredSession, 'sb_access_expires_at'>) =>
   stored.sb_access_expires_at ? Date.parse(stored.sb_access_expires_at) : 0
@@ -110,7 +131,8 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // The grant's current Supabase access token, refreshed by one request under the lease when fewer
 // than SESSION_REFRESH_MARGIN seconds remain. A request that finds the lease taken keeps using the
-// old token while it is still valid, else waits for the refreshed one.
+// old token while it is still valid, else waits for the refreshed one. The cached token is only
+// used while its session exists: mcp_authenticate ends a grant whose session was deleted.
 export async function grantAccessToken(service: ServiceClient, grantId: string, stored: StoredSession, now = Date.now()): Promise<SessionAccess> {
   const current = decryptAccess(grantId, stored)
   if (current && expiresAtMs(stored) - now > SESSION_REFRESH_MARGIN * 1000) return { ok: true, accessToken: current }
@@ -125,7 +147,7 @@ export async function grantAccessToken(service: ServiceClient, grantId: string, 
       const token = decryptAccess(grantId, fresh)
       if (token && expiresAtMs(fresh) - Date.now() > 10_000) return { ok: true, accessToken: token }
     }
-    return { ok: false, reason: 'unavailable' }
+    return { ok: false, reason: 'unavailable', retryAfter: RETRY_SOON }
   }
 
   let refreshToken: string
@@ -146,9 +168,10 @@ export async function grantAccessToken(service: ServiceClient, grantId: string, 
     const { data, error } = await anonAuthClient().auth.refreshSession({ refresh_token: refreshToken })
     if (error || !data.session) {
       await releaseSessionLease(service, grantId)
-      // An answer from Supabase Auth refusing the token ends the grant; anything else is transient.
-      if (error && !(isAuthApiError(error) && error.status >= 400 && error.status < 500)) return { ok: false, reason: 'unavailable' }
-      return { ok: false, reason: 'ended' }
+      if (!error) return { ok: false, reason: 'ended' }
+      const failure = refreshFailure(error)
+      if (failure.reason === 'unavailable') console.error('[mcp] session refresh refused for now:', error.status ?? '-', error.code ?? error.name)
+      return failure
     }
     const exp = jwtClaims(data.session.access_token)?.exp
     const expiresAt = typeof exp === 'number' ? exp : Math.floor(Date.now() / 1000) + (data.session.expires_in ?? 0)
@@ -157,6 +180,6 @@ export async function grantAccessToken(service: ServiceClient, grantId: string, 
   } catch (err) {
     console.error('[mcp] session refresh failed:', err instanceof Error ? err.name : typeof err)
     await releaseSessionLease(service, grantId)
-    return { ok: false, reason: 'unavailable' }
+    return { ok: false, reason: 'unavailable', retryAfter: RETRY_SOON }
   }
 }

@@ -1,10 +1,10 @@
 // The token and revocation endpoints (RFC 6749, RFC 7009) for public clients with PKCE: an
-// authorization code is exchanged once, refresh tokens rotate on every use, and a code or refresh
-// token presented a second time revokes the whole grant.
-import { RESOURCE } from '../config'
-import { verifyPkce } from '../crypto'
+// authorization code is exchanged once, refresh tokens rotate on every use, and a code presented a
+// second time, or a refresh token presented again after REFRESH_REUSE_WINDOW, revokes the whole grant.
+import { REFRESH_REUSE_WINDOW, RESOURCE } from '../config'
+import { sha256Hex, verifyPkce } from '../crypto'
 import {
-  consumeCode, deleteToken, findToken, grantIsLive, issueTokens, loadGrant, revokeGrant, rotateRefreshToken,
+  consumeCode, deleteToken, findRefreshToken, findToken, grantIsLive, issueTokens, loadGrant, retireRefreshToken, revokeGrant,
   type ServiceClient,
 } from './store'
 
@@ -76,26 +76,40 @@ export async function exchangeCode(service: ServiceClient, form: URLSearchParams
   return tokenResponse(await issueTokens(service, grant), grant.scopes)
 }
 
-export async function refreshTokens(service: ServiceClient, form: URLSearchParams): Promise<Response> {
+// Everything is checked before the token is retired, so a refused refresh (another client, a
+// scope beyond the grant, a dead grant) leaves it usable. A token presented again within
+// REFRESH_REUSE_WINDOW of its rotation (two refreshes racing, a retry after a lost response) gets a
+// fresh pair for the same grant: only hashes are stored, so the first answer cannot be repeated.
+// Later, the same token is theft and revokes the grant.
+export async function refreshTokens(service: ServiceClient, form: URLSearchParams, now = Date.now()): Promise<Response> {
   const token = form.get('refresh_token')
   const clientId = form.get('client_id')
   if (!token || !clientId) return oauthError('invalid_request', 'refresh_token and client_id are required')
   const resource = form.get('resource')
   if (resource !== null && resource !== RESOURCE) return oauthError('invalid_target', `resource must be ${RESOURCE}`)
 
-  const rotated = await rotateRefreshToken(service, token)
-  if (rotated.status === 'reused') {
-    await revokeGrant(service, rotated.grantId, 'refresh_reuse')
+  const hash = sha256Hex(token)
+  let row = await findRefreshToken(service, hash)
+  if (!row) return invalidGrant('Unknown, expired or revoked refresh token')
+  if (row.rotated_at && now - Date.parse(row.rotated_at) > REFRESH_REUSE_WINDOW * 1000) {
+    await revokeGrant(service, row.grant_id, 'refresh_reuse')
     return invalidGrant('The refresh token was already used; the connection has been revoked')
   }
-  if (rotated.status === 'invalid') return invalidGrant('Unknown, expired or revoked refresh token')
+  if (Date.parse(row.expires_at) <= now) return invalidGrant('Unknown, expired or revoked refresh token')
 
-  const grant = await loadGrant(service, rotated.grantId)
-  if (!grant || !grantIsLive(grant)) return invalidGrant('The connection has expired or was revoked')
+  const grant = await loadGrant(service, row.grant_id)
+  if (!grant || !grantIsLive(grant, now)) return invalidGrant('The connection has expired or was revoked')
   if (grant.client_id !== clientId) return invalidGrant('The refresh token was issued to another client')
   const requested = (form.get('scope') ?? '').split(' ').filter(Boolean)
   if (requested.some(s => s !== 'offline_access' && !grant.scopes.includes(s))) return oauthError('invalid_scope', 'scope exceeds the connection')
-  return tokenResponse(await issueTokens(service, grant, rotated.hash), grant.scopes)
+
+  if (!row.rotated_at && !(await retireRefreshToken(service, hash, now))) {
+    // Another request retired it a moment ago (within the window by definition), or the grant
+    // was revoked and its tokens deleted in between.
+    row = await findRefreshToken(service, hash)
+    if (!row?.rotated_at) return invalidGrant('Unknown, expired or revoked refresh token')
+  }
+  return tokenResponse(await issueTokens(service, grant, hash, now), grant.scopes)
 }
 
 // RFC 7009: the answer is 200 whether or not the token was known. A refresh token ends the

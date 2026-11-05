@@ -33,6 +33,7 @@ export interface SessionTokens {
   sessionId: string
 }
 
+// 'session_ended' is also set by mcp_authenticate when the grant's Supabase session is gone.
 export type RevokeReason =
   | 'owner' | 'sign_out_everywhere' | 'reconnected' | 'client_revoked' | 'code_replay' | 'code_rejected'
   | 'refresh_reuse' | 'session_ended' | 'expired'
@@ -47,6 +48,16 @@ export interface NewGrant {
   redirectUri: string
   scopes: readonly McpScope[]
   session: SessionTokens
+  // SHA-256 of the signed authorization request the owner approved. Unique, so one request
+  // yields one grant however often its consent form is sent.
+  consentHash: string
+}
+
+// True when this signed authorization request was already approved.
+export async function consentUsed(service: ServiceClient, consentHash: string): Promise<boolean> {
+  const { data, error } = await service.from('mcp_grants').select('id').eq('consent_hash', consentHash).limit(1)
+  check(error)
+  return ((data as unknown[] | null) ?? []).length > 0
 }
 
 export async function createGrant(service: ServiceClient, grant: NewGrant, now = Date.now()): Promise<string> {
@@ -60,6 +71,7 @@ export async function createGrant(service: ServiceClient, grant: NewGrant, now =
     redirect_uri: grant.redirectUri,
     scopes: [...grant.scopes],
     resource: RESOURCE,
+    consent_hash: grant.consentHash,
     sb_session_id: grant.session.sessionId,
     sb_access_enc: encryptSecret(grant.session.accessToken, id),
     sb_access_expires_at: iso(grant.session.expiresAt * 1000),
@@ -212,14 +224,28 @@ export async function issueTokens(service: ServiceClient, grant: Pick<GrantRow, 
   return { accessToken, refreshToken, expiresIn: Math.max(0, Math.floor((accessEnd - now) / 1000)) }
 }
 
-export type RotatedRefresh =
-  | { status: 'ok'; grantId: string; hash: string }
-  | { status: 'reused'; grantId: string }
-  | { status: 'invalid' }
+export interface RefreshTokenRow {
+  grant_id: string
+  expires_at: string
+  rotated_at: string | null
+}
 
-// Retires a refresh token for good. One already retired is theft (the caller revokes the grant).
-export async function rotateRefreshToken(service: ServiceClient, token: string, now = Date.now()): Promise<RotatedRefresh> {
-  const hash = sha256Hex(token)
+// A refresh token as stored, without touching it: the token endpoint checks the grant, the client
+// and the scope first and only then retires it, so a refused refresh never burns the token.
+export async function findRefreshToken(service: ServiceClient, hash: string): Promise<RefreshTokenRow | null> {
+  const { data, error } = await service
+    .from('mcp_tokens')
+    .select('grant_id, expires_at, rotated_at')
+    .eq('token_hash', hash)
+    .eq('kind', 'refresh')
+    .maybeSingle()
+  check(error)
+  return (data as RefreshTokenRow | null) ?? null
+}
+
+// Retires a refresh token in the statement that checks it is still live, so of two concurrent
+// refreshes exactly one wins. False: another request retired it first, or it is gone.
+export async function retireRefreshToken(service: ServiceClient, hash: string, now = Date.now()): Promise<boolean> {
   const { data, error } = await service
     .from('mcp_tokens')
     .update({ rotated_at: iso(now) })
@@ -229,17 +255,7 @@ export async function rotateRefreshToken(service: ServiceClient, token: string, 
     .gt('expires_at', iso(now))
     .select('grant_id')
   check(error)
-  const row = (data as { grant_id: string }[] | null)?.[0]
-  if (row) return { status: 'ok', grantId: row.grant_id, hash }
-  const { data: seen, error: seenError } = await service
-    .from('mcp_tokens')
-    .select('grant_id, rotated_at')
-    .eq('token_hash', hash)
-    .eq('kind', 'refresh')
-    .maybeSingle()
-  check(seenError)
-  const prior = seen as { grant_id: string; rotated_at: string | null } | null
-  return prior?.rotated_at ? { status: 'reused', grantId: prior.grant_id } : { status: 'invalid' }
+  return ((data as unknown[] | null) ?? []).length > 0
 }
 
 export async function findToken(service: ServiceClient, token: string): Promise<{ hash: string; grantId: string; kind: 'access' | 'refresh' } | null> {

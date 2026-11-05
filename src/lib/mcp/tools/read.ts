@@ -14,7 +14,7 @@ import { calcTotals, lineAmount, roundCents, today } from '@/lib/utils/document'
 import { issueProblemMessage, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import { makePeriod } from '@/app/(app)/reports/period'
 import {
-  filterDocuments, getClientDetail, getDocumentDetail, getProjectDetail, listClients, listDocuments, listProjectRows,
+  filterDocuments, getClientDetail, getDocumentDetail, getProjectDetail, invoiceShownStatus, listClients, listDocuments, listProjectRows,
   listRecurringSchedules, summarizeDocument,
 } from '@/lib/services/queries'
 import { dashboardInvoiceTotals, loadClientStatement, loadDashboardFigures, loadIstReport } from '@/lib/services/reports'
@@ -35,6 +35,12 @@ const DOCUMENT_TYPES = ['invoice', 'quote', 'credit_note'] as const
 const HISTORY_SHOWN = 50
 const ENTRIES_SHOWN = 200
 const STATEMENT_ROWS_SHOWN = 200
+
+// Paging inputs, the same on every list: offset is the previous answer's next_offset.
+const limitArg = (max: number, fallback: number) =>
+  z.number().int().min(1).max(max).default(fallback).describe(`How many to return (at most ${max})`)
+const offsetArg = (what = 'next_offset') =>
+  z.number().int().min(0).default(0).describe(`How many to skip; pass the previous answer's ${what} for the next page`)
 
 function page<T>(rows: readonly T[], offset: number, limit: number) {
   const items = rows.slice(offset, offset + limit)
@@ -108,19 +114,20 @@ const getContext = defineTool({
 const searchDocuments = defineTool({
   name: 'search_documents',
   title: 'Search documents',
-  description: 'Find invoices, quotes or credit notes, newest first. Each row has id, number (null for a draft), status, display_status (e.g. partially_paid, expired, settled), dates, client, total and balance_due (invoices: still owed; credit notes: not yet applied or refunded). Filter by status (invoices: sent or overdue by the due date), view, client, dates or q (number or client name). Page with offset/next_offset.',
+  description: 'Find invoices, quotes or credit notes, newest first. Each row has id, number (null for a draft), status, display_status (e.g. overdue by the due date, partially_paid, expired, settled), dates, client, total and balance_due (invoices: still owed; credit notes: not yet applied or refunded). Filter by status (invoices: sent or overdue by the due date), view, client, dates or q (number or client name). Page with offset/next_offset. Searches the newest 1000 documents of the type; older ones are not found here (get_client lists every document of a client).',
   scope: 'mado:read',
   inputSchema: z.object({
-    type: z.enum(DOCUMENT_TYPES),
-    status: z.enum(['draft', 'sent', 'overdue', 'paid', 'accepted', 'rejected', 'cancelled']).optional(),
+    type: z.enum(DOCUMENT_TYPES).describe('Which kind of document to search'),
+    status: z.enum(['draft', 'sent', 'overdue', 'paid', 'accepted', 'rejected', 'cancelled']).optional()
+      .describe('Stored status; for invoices sent and overdue follow the due date. Invoices: draft, sent, overdue, paid, cancelled. Quotes: draft, sent, accepted, rejected, cancelled. Credit notes: draft, sent, cancelled'),
     view: z.enum(['open', 'overdue', 'partially_paid', 'written_off', 'expired', 'settled']).optional()
       .describe('open: invoices still owed, quotes awaiting an answer, credit notes not settled'),
     client_id: uuid('Only this client\'s documents').optional(),
     q: z.string().max(200).optional().describe('Part of the number or the client name'),
     date_from: isoDate('Document date from').optional(),
     date_to: isoDate('Document date to').optional(),
-    limit: z.number().int().min(1).max(50).default(25),
-    offset: z.number().int().min(0).default(0),
+    limit: limitArg(50, 25),
+    offset: offsetArg(),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -143,7 +150,7 @@ const searchDocuments = defineTool({
 const getDocument = defineTool({
   name: 'get_document',
   title: 'Get document',
-  description: 'One invoice, quote or credit note in full: client, lines in order, totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
+  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({ id: uuid('Document id') }),
   hints: READ,
@@ -156,10 +163,13 @@ const getDocument = defineTool({
     const totals = calcTotals(items, payments, discount, doc.tax_treatment)
     const date = today()
     const extras = await documentExtras(ctx, detail, totals.total)
-    const shownStatus = displayStatus({
-      type: doc.type, status: doc.status, due_date: doc.due_date, total: totals.total, payments,
-      creditSettled: extras.credit_settlement?.settled,
-    }, date)
+    // As in search_documents and the lists: an invoice's due date decides between sent and overdue.
+    const shownStatus = doc.type === 'invoice'
+      ? invoiceShownStatus({
+          document_items: items, payments, tax_treatment: doc.tax_treatment, discount_type: doc.discount_type, discount_value: doc.discount_value,
+          status: doc.status, due_date: doc.due_date,
+        }, date)
+      : displayStatus({ type: doc.type, status: doc.status, due_date: doc.due_date, creditSettled: extras.credit_settlement?.settled }, date)
     const client = doc.clients
     return {
       summary: `${doc.type.replace('_', ' ')} ${doc.number ?? '(draft)'} · ${clientDisplayName(client)} · ${shownStatus} · EUR ${totals.total.toFixed(2)} gross`,
@@ -298,10 +308,10 @@ const listClientsTool = defineTool({
   description: 'Clients by name with client number, email, country, VAT ID, tax treatment, open balance (still owed on issued invoices) and the date last invoiced. q searches number, name, company, email, city, VAT ID and tags. Inactive clients are left out unless include_archived is true.',
   scope: 'mado:read',
   inputSchema: z.object({
-    q: z.string().max(200).optional(),
-    include_archived: z.boolean().default(false),
-    limit: z.number().int().min(1).max(100).default(50),
-    offset: z.number().int().min(0).default(0),
+    q: z.string().max(200).optional().describe('Part of the number, name, company, email, city, VAT ID or a tag'),
+    include_archived: z.boolean().default(false).describe('Also list inactive clients'),
+    limit: limitArg(100, 50),
+    offset: offsetArg(),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -328,17 +338,28 @@ const listClientsTool = defineTool({
 const getClient = defineTool({
   name: 'get_client',
   title: 'Get client',
-  description: 'One client: address, tax data, terms, e-invoice settings, notes, rate card (catalogue prices for this client), projects, money received, open balance and the 50 latest documents with the status the app shows.',
+  description: 'One client: address, tax data, terms, e-invoice settings, notes, rate card (catalogue prices for this client), money received, open balance, its projects (newest first) and its documents (newest first, with the status the app shows). Documents and projects come a page at a time: documents_total and documents_next_offset (projects_total, projects_next_offset) say how to fetch more.',
   scope: 'mado:read',
-  inputSchema: z.object({ id: uuid('Client id') }),
+  inputSchema: z.object({
+    id: uuid('Client id'),
+    documents_limit: limitArg(50, 50),
+    documents_offset: offsetArg('documents_next_offset'),
+    projects_limit: limitArg(50, 25),
+    projects_offset: offsetArg('projects_next_offset'),
+  }),
   hints: READ,
-  async run({ id }, ctx) {
+  async run({ id, documents_limit, documents_offset, projects_limit, projects_offset }, ctx) {
     const [detail, projects] = await Promise.all([
-      getClientDetail(ctx.supabase, id, today(), 'id'),
-      ctx.supabase.from('projects').select('id, name, status, hourly_rate').eq('client_id', id).order('created_at', { ascending: false }),
+      getClientDetail(ctx.supabase, id, today(), 'id', { offset: documents_offset, limit: documents_limit }),
+      ctx.supabase.from('projects').select('id, name, status, hourly_rate', { count: 'exact' }).eq('client_id', id)
+        .order('created_at', { ascending: false }).order('id').range(projects_offset, projects_offset + projects_limit - 1),
     ])
     if (!detail) throw new McpToolError('not_found')
     if (projects.error) throw projects.error
+    const projectRows = projects.data ?? []
+    const documentsTotal = detail.documentCount ?? documents_offset + detail.documents.length
+    const projectsTotal = projects.count ?? projects_offset + projectRows.length
+    const next = (offset: number, count: number, total: number) => (offset + count < total ? offset + count : null)
     const c = detail.client
     const names = new Map(detail.catalogue.map(i => [i.id, i.name_de || i.name_en]))
     return {
@@ -355,7 +376,11 @@ const getClient = defineTool({
         },
         stats: { money_received: detail.totalRevenue, open_balance: roundCents(detail.openBalance), invoice_count: detail.invoiceCount },
         rates: detail.rates.map(r => ({ catalogue_item_id: r.catalogue_item_id, item: names.get(r.catalogue_item_id) ?? null, price: Number(r.price), note: r.note })),
-        projects: (projects.data ?? []).map(p => ({ ...p, app_url: projectUrl(p.id) })),
+        projects_total: projectsTotal,
+        projects_next_offset: next(projects_offset, projectRows.length, projectsTotal),
+        projects: projectRows.map(p => ({ ...p, app_url: projectUrl(p.id) })),
+        documents_total: documentsTotal,
+        documents_next_offset: next(documents_offset, detail.documents.length, documentsTotal),
         documents: detail.documents.map(({ doc, total, shown: status }) => ({
           id: doc.id, type: doc.type, number: doc.number, date: doc.date, due_date: doc.due_date, display_status: status, total,
           app_url: documentUrl(doc.type, doc.id),
@@ -371,11 +396,13 @@ const getClient = defineTool({
 const listCatalogue = defineTool({
   name: 'list_catalogue',
   title: 'List catalogue',
-  description: 'Catalogue items for building document lines: names and descriptions in German and English, unit, VAT rate, default net price and, with client_id, the price on that client\'s rate card. Inactive items only with include_inactive.',
+  description: 'Catalogue items in catalogue order for building document lines: names and descriptions in German and English, unit, VAT rate, default net price and, with client_id, the price on that client\'s rate card. Inactive items only with include_inactive. Page with offset/next_offset.',
   scope: 'mado:read',
   inputSchema: z.object({
     client_id: uuid('Price the items for this client').optional(),
-    include_inactive: z.boolean().default(false),
+    include_inactive: z.boolean().default(false).describe('Also list items switched off in the catalogue'),
+    limit: limitArg(50, 50),
+    offset: offsetArg(),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -389,10 +416,12 @@ const listCatalogue = defineTool({
     const used = new Map(((usage.data ?? []) as { catalogue_item_id: string; uses: number; last_used: string | null }[]).map(r => [r.catalogue_item_id, r]))
     const card = rateMap((rates ?? []) as { catalogue_item_id: string; price: number }[])
     const list = ((items ?? []) as CatalogueItem[]).filter(i => args.include_inactive || i.active)
+    const { items: shownItems, ...paging } = page(list, args.offset, args.limit)
     return {
-      summary: shown(list.length, list.length, 'catalogue items'),
+      summary: shown(shownItems.length, list.length, 'catalogue items', args.offset),
       data: {
-        items: list.map(i => ({
+        ...paging,
+        items: shownItems.map(i => ({
           id: i.id, name_de: i.name_de, name_en: i.name_en, description_de: i.description_de, description_en: i.description_en,
           unit: i.unit, vat_rate: i.vat_rate, default_price: Number(i.default_price), category: i.category, active: i.active,
           ...(args.client_id ? { client_price: cataloguePrice(i, card), has_client_rate: i.id in card } : {}),
@@ -421,11 +450,13 @@ function projectFigures(p: Pick<Project, 'hourly_rate' | 'budget_hours' | 'budge
 const listProjects = defineTool({
   name: 'list_projects',
   title: 'List projects',
-  description: 'Projects, newest first, with hourly rate, logged and billable hours, unbilled time and expenses (net), billed amounts and budget use (1 = the whole budget).',
+  description: 'Projects, newest first, with hourly rate, logged and billable hours, unbilled time and expenses (net), billed amounts and budget use (1 = the whole budget). Page with offset/next_offset.',
   scope: 'mado:read',
   inputSchema: z.object({
     client_id: uuid('Only this client\'s projects').optional(),
-    status: z.enum(PROJECT_STATUSES).optional(),
+    status: z.enum(PROJECT_STATUSES).optional().describe('Only projects with this status'),
+    limit: limitArg(50, 25),
+    offset: offsetArg(),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -433,10 +464,12 @@ const listProjects = defineTool({
     const list = rows
       .filter(p => !args.client_id || p.client_id === args.client_id)
       .filter(p => !args.status || p.status === (args.status as ProjectStatus))
+    const { items, ...paging } = page(list, args.offset, args.limit)
     return {
-      summary: shown(list.length, list.length, 'projects'),
+      summary: shown(items.length, list.length, 'projects', args.offset),
       data: {
-        projects: list.map(p => ({
+        ...paging,
+        projects: items.map(p => ({
           id: p.id, name: p.name, status: p.status, client: { id: p.client_id, name: clientDisplayName(p.clients) },
           hourly_rate: p.hourly_rate, ...projectFigures(p, projectTotals(p, p.time_entries ?? [], p.project_expenses ?? [])),
           app_url: projectUrl(p.id),
@@ -453,8 +486,9 @@ const getProject = defineTool({
   scope: 'mado:read',
   inputSchema: z.object({
     id: uuid('Project id'),
-    include_billed: z.boolean().default(false),
-    grouping: z.enum(INVOICE_GROUPINGS as [InvoiceGrouping, ...InvoiceGrouping[]]).default('entry'),
+    include_billed: z.boolean().default(false).describe('Also list time and expenses already invoiced'),
+    grouping: z.enum(INVOICE_GROUPINGS as [InvoiceGrouping, ...InvoiceGrouping[]]).default('entry')
+      .describe('How the invoice preview groups the unbilled work: one line per entry, per description or per day'),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -545,10 +579,10 @@ const getVatReport = defineTool({
   description: 'VAT figures for a month, quarter or year on the Ist basis (VAT due when money arrives), exactly as the Reports page shows them: taxable base and VAT per rate with the UVA field (KZ 022 20 %, 006 13 %, 029 10 %), reverse-charge and non-EU bases, the ZM (recurring EU services per recipient VAT ID, by service period), credit notes not yet settled, counts and dunning fees received. Figures for the owner\'s accountant; not a filing.',
   scope: 'mado:read',
   inputSchema: z.object({
-    period: z.enum(['month', 'quarter', 'year']),
-    year: z.number().int().min(2000).max(2100),
-    quarter: z.number().int().min(1).max(4).optional(),
-    month: z.number().int().min(1).max(12).optional(),
+    period: z.enum(['month', 'quarter', 'year']).describe('The length of the reporting period'),
+    year: z.number().int().min(2000).max(2100).describe('Calendar year, e.g. 2026'),
+    quarter: z.number().int().min(1).max(4).optional().describe('1–4. Required when period is quarter'),
+    month: z.number().int().min(1).max(12).optional().describe('1–12. Required when period is month'),
   }),
   hints: READ,
   async run(args, ctx) {
@@ -593,7 +627,7 @@ const getClientStatement = defineTool({
     client_id: uuid('Client id'),
     from: isoDate('Period start').optional(),
     to: isoDate('Period end, default today').optional(),
-    open_only: z.boolean().default(false),
+    open_only: z.boolean().default(false).describe('List every document still open up to `to`, whatever its date, instead of the period'),
   }),
   hints: READ,
   async run(args, ctx) {

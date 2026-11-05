@@ -84,6 +84,8 @@ export async function authenticateRequest(req: Request): Promise<AuthOutcome> {
     console.error('[mcp] authenticate failed:', error.code, error.message)
     return { ok: false, response: unavailable(5) }
   }
+  // No row also when the grant's Supabase session no longer exists (signed out everywhere, password
+  // changed): mcp_authenticate then revokes the grant, so the cached session JWT is never used.
   const row = (data as AuthRow[] | null)?.[0]
   if (!row) return invalid('The access token is unknown, expired or revoked')
   if (row.resource !== RESOURCE) return invalid('The access token is for another resource')
@@ -92,7 +94,7 @@ export async function authenticateRequest(req: Request): Promise<AuthOutcome> {
 
   const access = await grantAccessToken(service, row.grant_id, row)
   if (!access.ok) {
-    if (access.reason === 'unavailable') return { ok: false, response: unavailable(5) }
+    if (access.reason === 'unavailable') return { ok: false, response: unavailable(access.retryAfter) }
     await revokeGrant(service, row.grant_id, 'session_ended')
     return invalid('The connection has ended; connect Claude again')
   }

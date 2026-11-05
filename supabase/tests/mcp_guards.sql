@@ -7,6 +7,7 @@
 --   browser_aal1   the browser before the code step
 --   claude         the session of a seeded claude.ai grant, at aal2
 --   claude2        the session of a second (Claude Code) grant
+-- Both grant sessions are seeded in auth.sessions too, as mcp_authenticate requires.
 -- The first failed check stops the script with "FAIL <check>"; a clean run ends with the row
 -- 'all MCP guard checks passed', selected after the rollback so the SQL editor shows it.
 
@@ -61,15 +62,17 @@ declare
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
 
+  insert into auth.sessions (id, user_id, created_at, updated_at)
+  values (v_claude, v_owner, now(), now()), (v_claude2, v_owner, now(), now());
   insert into public.mcp_grants (id, user_id, client_id, client_name, redirect_uri, client_kind, scopes, resource,
-    sb_session_id, sb_access_enc, sb_refresh_enc, idle_expires_at, expires_at)
+    consent_hash, sb_session_id, sb_access_enc, sb_refresh_enc, idle_expires_at, expires_at)
   values
     (v_grant, v_owner, 'https://claude.ai/oauth/mcp-oauth-client-metadata', 'Claude (guard test)', 'https://claude.ai/api/mcp/auth_callback',
      'claude_ai', array['mado:read', 'mado:write', 'mado:irreversible'], 'https://mado.test/api/mcp',
-     v_claude, 'v1.secret-access', 'v1.secret-refresh', now() + interval '30 days', now() + interval '90 days'),
+     public.mcp_test_h('consent_guard'), v_claude, 'v1.secret-access', 'v1.secret-refresh', now() + interval '30 days', now() + interval '90 days'),
     (v_grant2, v_owner, 'https://claude.ai/oauth/claude-code-client-metadata', 'Claude Code (guard test)', 'http://localhost:33418/callback',
      'claude_code', array['mado:read', 'mado:write', 'mado:irreversible'], 'https://mado.test/api/mcp',
-     v_claude2, 'v1.secret-access', 'v1.secret-refresh', now() + interval '30 days', now() + interval '90 days');
+     null, v_claude2, 'v1.secret-access', 'v1.secret-refresh', now() + interval '30 days', now() + interval '90 days');
   insert into public.mcp_tokens (token_hash, grant_id, kind, expires_at)
   values (public.mcp_test_h('mado_at_guard'), v_grant, 'access', now() + interval '1 hour'),
          (public.mcp_test_h('mado_at_expired'), v_grant, 'access', now() - interval '1 second'),
@@ -118,6 +121,7 @@ begin
   perform public.mcp_test_raises('mcp_tokens unreadable', 'select count(*) from public.mcp_tokens', '42501');
   perform public.mcp_test_raises('grant session tokens unreadable', 'select sb_refresh_enc from public.mcp_grants', '42501');
   perform public.mcp_test_raises('grant session id unreadable', 'select sb_session_id from public.mcp_grants', '42501');
+  perform public.mcp_test_raises('grant consent hash unreadable', 'select consent_hash from public.mcp_grants', '42501');
   perform public.mcp_test_ok('grants list readable',
     (select count(*) from public.mcp_grants where client_name like '%(guard test)') = 2);
   perform public.mcp_test_raises('actions not writable directly',
@@ -341,6 +345,20 @@ begin
   update public.mcp_grants set rate_minute_count = 0, revoked_at = now(), revoked_reason = 'guard test' where id = v.grant_id;
   perform public.mcp_test_ok('authenticate: revoked grant → nothing',
     not exists (select 1 from public.mcp_authenticate(public.mcp_test_h('mado_at_guard'))));
+  update public.mcp_grants set revoked_at = null, revoked_reason = null where id = v.grant_id;
+
+  perform public.mcp_test_raises('one approved authorization request, one grant (23505)',
+    format($q$insert into public.mcp_grants (user_id, client_id, client_name, redirect_uri, client_kind, scopes, resource, consent_hash, idle_expires_at, expires_at)
+      values (%L, 'x', 'x', 'x', 'static', '{}', 'x', %L, now(), now())$q$, v.user_id, public.mcp_test_h('consent_guard')), '23505');
+
+  -- Signed out everywhere or password changed: the grant's Supabase session is deleted.
+  perform public.mcp_end_session(v.sb_session_id);
+  perform public.mcp_test_ok('authenticate: session gone → nothing',
+    not exists (select 1 from public.mcp_authenticate(public.mcp_test_h('mado_at_guard'))));
+  perform public.mcp_test_ok('authenticate: session gone → the grant is revoked, its tokens deleted',
+    (select revoked_at is not null and revoked_reason = 'session_ended' and sb_access_enc is null and sb_refresh_enc is null
+       from public.mcp_grants where id = v.grant_id)
+    and not exists (select 1 from public.mcp_tokens where grant_id = v.grant_id));
   update public.mcp_grants set revoked_at = null, revoked_reason = null where id = v.grant_id;
 
   perform public.mcp_end_session(gen_random_uuid());

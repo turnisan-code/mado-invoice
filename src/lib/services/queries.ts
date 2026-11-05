@@ -357,6 +357,8 @@ export interface ClientDocument {
 export interface ClientDetail<S> {
   client: Client
   documents: ClientDocument[]
+  // With a documents page: how many documents the client has in all.
+  documentCount: number | null
   totalRevenue: number
   openBalance: number
   invoiceCount: number
@@ -366,20 +368,25 @@ export interface ClientDetail<S> {
   rates: { id: string; client_id: string; catalogue_item_id: string; price: number; note: string | null }[]
 }
 
+const CLIENT_DOCUMENT_COLUMNS = 'id, type, number, date, due_date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)'
+
 // The client page: the 50 latest documents with the status the lists show, the money received
 // (payments less refunds), the open balance and the invoice count over every invoice, the rate card.
-export async function getClientDetail<S = Record<string, unknown>>(supabase: SupabaseClient, id: string, todayStr: string, settingsColumns: string): Promise<ClientDetail<S> | null> {
+// With documentsPage (Claude's get_client) one page of the documents, newest first, and their count.
+export async function getClientDetail<S = Record<string, unknown>>(
+  supabase: SupabaseClient, id: string, todayStr: string, settingsColumns: string,
+  documentsPage?: { offset: number; limit: number },
+): Promise<ClientDetail<S> | null> {
   const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
   if (!client) return null
 
   // The history list shows the 50 latest documents; the stats aggregate every invoice.
-  const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }, { data: catalogue }, { data: rates }] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('id, type, number, date, due_date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
-      .eq('client_id', id)
-      .order('date', { ascending: false })
-      .limit(50),
+  const documentQuery = documentsPage
+    ? supabase.from('documents').select(CLIENT_DOCUMENT_COLUMNS, { count: 'exact' }).eq('client_id', id)
+      .order('date', { ascending: false }).order('id').range(documentsPage.offset, documentsPage.offset + documentsPage.limit - 1)
+    : supabase.from('documents').select(CLIENT_DOCUMENT_COLUMNS).eq('client_id', id).order('date', { ascending: false }).limit(50)
+  const [{ data: documents, count: documentCount }, { data: invoices }, { data: settings }, { data: refunds }, { data: catalogue }, { data: rates }] = await Promise.all([
+    documentQuery,
     supabase
       .from('documents')
       .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
@@ -433,6 +440,7 @@ export async function getClientDetail<S = Record<string, unknown>>(supabase: Sup
       }, todayStr)
       return { doc, total: totals.total, shown }
     }),
+    documentCount: documentsPage ? documentCount ?? null : null,
     totalRevenue,
     openBalance,
     invoiceCount,

@@ -6,9 +6,13 @@ import { useRouter } from 'next/navigation'
 import { Bot, Copy, LogOut, ShieldCheck, Unplug } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import FormError from '@/app/(auth)/_components/FormError'
 import { createClient } from '@/lib/supabase/client'
+import { n } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
 import { ACTION_KINDS } from '@/lib/mcp/types'
@@ -51,7 +55,12 @@ export default function ConnectedApps({ connectorUrl, grants, calls, pendingCoun
     Object.fromEntries(ACTION_KINDS.map(kind => [kind, policy[kind] === 'chat' ? 'chat' : 'app'])))
   const [askCode, setAskCode] = useState(approvalCode)
   const [saving, setSaving] = useState(false)
+  const [code, setCode] = useState('')
+  const [policyError, setPolicyError] = useState<string | null>(null)
   const dirty = askCode !== approvalCode || ACTION_KINDS.some(kind => channels[kind] !== (policy[kind] === 'chat' ? 'chat' : 'app'))
+  // Moving a kind to Claude or switching the code off loosens the approval: the server then asks
+  // for a current authenticator code. Tightening saves without one.
+  const loosening = (approvalCode && !askCode) || ACTION_KINDS.some(kind => channels[kind] === 'chat' && policy[kind] !== 'chat')
 
   const when = new Intl.DateTimeFormat(lang === 'de' ? 'de-AT' : 'en-GB', {
     timeZone: 'Europe/Vienna', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -85,9 +94,21 @@ export default function ConnectedApps({ connectorUrl, grants, calls, pendingCoun
   async function savePolicy(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setPolicyError(null)
     try {
-      const result = await saveApprovalSettings(channels, askCode)
-      if (!result.ok) { toast.error(t('account.genericError')); return }
+      const result = await saveApprovalSettings(channels, askCode, loosening ? code : undefined)
+      if (!result.ok) {
+        if (result.reason === 'code' && !loosening) {
+          // The stored settings changed since this page loaded (another tab): reload them, which
+          // shows the code field.
+          setPolicyError(t('mcp.connectedApps.loosenCodeHint'))
+          router.refresh()
+        } else if (result.reason === 'code') { setPolicyError(t('mcp.connectedApps.loosenCodeInvalid')); setCode('') }
+        else if (result.reason === 'no_factor') setPolicyError(t('mcp.connectedApps.loosenNoFactor'))
+        else toast.error(t('account.genericError'))
+        return
+      }
+      setCode('')
       toast.success(t('mcp.connectedApps.policySaved'))
       router.refresh()
     } catch {
@@ -153,7 +174,11 @@ export default function ConnectedApps({ connectorUrl, grants, calls, pendingCoun
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <p className={subhead}>{t('mcp.connectedApps.approvalsTitle')}</p>
-            <p className="text-sm mt-1">{pendingCount ? t('mcp.connectedApps.approvalsCount', { count: pendingCount }) : t('mcp.connectedApps.approvalsNone')}</p>
+            <p className="text-sm mt-1">
+              {pendingCount
+                ? n(pendingCount, t('mcp.connectedApps.approvalsCountOne', { count: pendingCount }), t('mcp.connectedApps.approvalsCountOther', { count: pendingCount }))
+                : t('mcp.connectedApps.approvalsNone')}
+            </p>
           </div>
           {pendingCount > 0 && (
             <Link href="/mcp/approve" className="text-sm underline underline-offset-4">{t('mcp.connectedApps.approvalsOpen')}</Link>
@@ -188,7 +213,25 @@ export default function ConnectedApps({ connectorUrl, grants, calls, pendingCoun
               <span className="block text-xs text-neutral-500 dark:text-neutral-400">{t('mcp.connectedApps.approvalCodeHint')}</span>
             </span>
           </label>
-          <Button type="submit" className="h-10 sm:h-10 px-4" disabled={saving || !dirty}>
+          {loosening && (
+            <div className="space-y-1.5">
+              <Label htmlFor="policy-code">{t('mcp.connectedApps.loosenCodeLabel')}</Label>
+              <Input
+                id="policy-code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                className="h-10 sm:h-10 text-center text-lg tracking-[0.4em] font-mono max-w-48"
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                aria-describedby="policy-code-hint"
+              />
+              <p id="policy-code-hint" className="text-xs text-neutral-500 dark:text-neutral-400">{t('mcp.connectedApps.loosenCodeHint')}</p>
+            </div>
+          )}
+          <FormError message={policyError} />
+          <Button type="submit" className="h-10 sm:h-10 px-4" disabled={saving || !dirty || (loosening && code.length !== 6)}>
             {saving ? t('common.working') : t('mcp.connectedApps.savePolicy')}
           </Button>
         </form>
@@ -239,10 +282,13 @@ export function SignOutEverywhere() {
 
   async function signOutEverywhere() {
     setBusy(true)
-    try {
-      await disconnectAllApps()
-    } catch {
-      // The global sign-out below still ends every Claude session; its grant is revoked on its next call.
+    // Signing out everywhere promises that Claude is disconnected too. When the connections could
+    // not be revoked, stop before signing out: the owner is still signed in here and can try again.
+    const result = await disconnectAllApps().catch(() => ({ ok: false as const }))
+    if (!result.ok) {
+      setBusy(false)
+      toast.error(t('mcp.connectedApps.signOutEverywhereFailed'))
+      return
     }
     rememberUiLang(lang)
     await createClient().auth.signOut({ scope: 'global' }).catch(() => {})

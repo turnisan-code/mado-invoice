@@ -17,10 +17,12 @@ export default async function AccountPage() {
   const factors = (user?.factors ?? []).filter(f => f.factor_type === 'totp' && f.status === 'verified')
 
   // Before the connector's migration these reads fail: the section then shows nothing connected.
+  // A grant past its lifetime or its idle deadline is over even before the housekeeping revokes it.
+  const now = new Date().toISOString()
   const [{ data: grants }, { count: pending }, { data: callRows }, { data: settings }] = await Promise.all([
     supabase.from('mcp_grants').select('id, client_name, client_kind, redirect_uri, scopes, created_at, last_used_at, expires_at')
-      .is('revoked_at', null).order('created_at', { ascending: false }),
-    supabase.from('mcp_actions').select('id', { count: 'exact', head: true }).eq('status', 'pending').gt('expires_at', new Date().toISOString()),
+      .is('revoked_at', null).gt('expires_at', now).gt('idle_expires_at', now).order('created_at', { ascending: false }),
+    supabase.from('mcp_actions').select('id', { count: 'exact', head: true }).eq('status', 'pending').gt('expires_at', now),
     supabase.from('mcp_calls').select('id, grant_id, tool, ok, error_code, ms, created_at').order('created_at', { ascending: false }).limit(50),
     supabase.from('settings').select('mcp_confirm_policy, mcp_approval_totp').maybeSingle(),
   ])

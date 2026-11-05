@@ -26,6 +26,7 @@ const KIND_KEYS = {
 const ERROR_KEYS = {
   code: 'mcp.consent.errorCode',
   expired: 'mcp.consent.expired',
+  used: 'mcp.consent.used',
   owner: 'mcp.consent.notOwner',
   failed: 'mcp.consent.errorFailed',
 } as const
@@ -43,7 +44,8 @@ export default function ConsentForm({ blob, clientName, clientKind, redirectHost
   const { t } = useT()
   const [state, action, pending] = useActionState<ConsentState, FormData>(answerConsent, null)
   const [code, setCode] = useState('')
-  const offered = MCP_SCOPES.filter(s => requestedScopes.includes(s))
+  // Reading is always granted, so it is always shown, even when Claude asked only for more.
+  const offered = MCP_SCOPES.filter(s => s === 'mado:read' || requestedScopes.includes(s))
 
   return (
     <form action={action} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-5 sm:p-6 space-y-5">
