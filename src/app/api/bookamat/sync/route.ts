@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
   const receivedShare = totals.total > 0 ? Math.min(1, receivedTotal / totals.total) : 1
 
   // Use payment date year for the fiscal year URL (not invoice date)
-  const year = new Date(paymentDate).getFullYear()
+  const year = Number(String(paymentDate).slice(0, 4))
   if (!Number.isInteger(year) || year < 1000 || year > 9999) {
     return NextResponse.json({ error: 'Invalid payment date' }, { status: 400 })
   }

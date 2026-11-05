@@ -15,6 +15,14 @@ export interface MoneyInputProps extends Omit<React.ComponentProps<'input'>, 'va
   decimals?: number
 }
 
+// The value is stored as the database keeps it (numeric(10,2) prices, numeric(10,4) quantities),
+// so the builder's PDF and every later re-render from the database compute the same totals.
+// Half away from zero like Postgres; toPrecision drops binary noise (1.005 × 100 = 100.4999…).
+function roundTo(n: number, digits: number): number {
+  const f = 10 ** digits
+  return (Math.sign(n) * Math.round(Number((Math.abs(n) * f).toPrecision(15)))) / f || 0
+}
+
 // Text input that keeps what the user types while focused, reports a parsed number on every
 // valid keystroke and formats the committed value back on blur.
 export function MoneyInput({ value, onValueChange, integer = false, decimals = 2, onFocus, onBlur, ...props }: MoneyInputProps) {
@@ -36,7 +44,7 @@ export function MoneyInput({ value, onValueChange, integer = false, decimals = 2
     const parsed = parseLocaleNumber(raw)
     if (parsed === null) { setInvalid(true); return }
     setInvalid(false)
-    onValueChange(integer ? Math.round(parsed) : parsed)
+    onValueChange(roundTo(parsed, fractionDigits))
   }
 
   return (

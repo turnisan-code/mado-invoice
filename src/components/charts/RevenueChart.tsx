@@ -10,7 +10,7 @@ export interface MonthData {
   current: boolean
 }
 
-export default function RevenueChart({ months, currency = 'EUR' }: { months: MonthData[]; currency?: string }) {
+export default function RevenueChart({ months, currency = 'EUR', label }: { months: MonthData[]; currency?: string; label?: string }) {
   const [hovered, setHovered] = useState<number | null>(null)
   const max = Math.max(...months.map(m => m.revenue), 1)
 
@@ -26,6 +26,8 @@ export default function RevenueChart({ months, currency = 'EUR' }: { months: Mon
         viewBox={`0 0 ${W} ${H + LABEL_H}`}
         className="w-full"
         style={{ overflow: 'visible' }}
+        role="img"
+        aria-label={`${label ? `${label}: ` : ''}${months.map(m => `${m.label} ${formatMoney(m.revenue, currency)}`).join(', ')}`}
         onMouseLeave={() => setHovered(null)}
       >
         {months.map((m, i) => {
@@ -35,7 +37,7 @@ export default function RevenueChart({ months, currency = 'EUR' }: { months: Mon
           const isHov = hovered === i
 
           return (
-            <g key={m.yearMonth} onMouseEnter={() => setHovered(i)}>
+            <g key={m.yearMonth} onMouseEnter={() => setHovered(i)} onClick={() => setHovered(i)}>
               {/* hit area */}
               <rect x={x} y={0} width={barW} height={H + LABEL_H} fill="transparent" />
 

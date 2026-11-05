@@ -14,6 +14,12 @@ const SOURCE: Record<string, string[]> = {
 }
 const ITEM_COLS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
 
+function isPastIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value && value <= today()
+}
+
 export async function PATCH(req: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -25,6 +31,11 @@ export async function PATCH(req: Request) {
   }
   const sources = SOURCE[body.status]
   if (!sources) return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+  const paidDate: unknown = body.paidDate ?? today()
+  const method: unknown = body.method ?? 'bank'
+  if (body.status === 'paid' && (!isPastIsoDate(paidDate) || (method !== 'bank' && method !== 'cash'))) {
+    return NextResponse.json({ error: 'paidDate must be a date (YYYY-MM-DD) not in the future and method bank or cash' }, { status: 400 })
+  }
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
@@ -43,17 +54,20 @@ export async function PATCH(req: Request) {
   }
 
   if (body.status === 'paid') {
-    // "Paid" means money arrived: record the open balance as a payment dated today.
+    // "Paid" means money arrived: record the open balance as a payment on the date and by the
+    // method the user confirmed (Ist-Besteuerung and the Bookamat account depend on both).
     const rows = invoices
       .map(d => ({
         document_id: d.id,
-        date: today(),
+        date: paidDate,
         amount: calcTotals(
           d.document_items ?? [],
           d.payments ?? [],
           d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
           d.tax_treatment,
         ).balance_due,
+        kind: 'payment',
+        method,
         note: null,
       }))
       .filter(r => r.amount > 0)
