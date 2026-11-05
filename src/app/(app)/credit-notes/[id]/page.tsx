@@ -8,6 +8,8 @@ import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import DocumentHistory from '@/components/layout/DocumentHistory'
+import CreditNoteSettlement from '@/components/layout/CreditNoteSettlement'
+import { loadCreditNoteSettlement } from '@/lib/credits'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
 import { fetchReference } from '@/lib/utils/document-reference'
@@ -32,6 +34,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
 
   const publicSettings = toPublicSettings(settings)
   const reference = await fetchReference(supabase, doc)
+  const settlement = await loadCreditNoteSettlement(supabase, doc)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
   return (
@@ -48,7 +51,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
-          <DocumentStatusBar document={doc} />
+          <DocumentStatusBar document={doc} display={settlement.settled ? 'settled' : undefined} />
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
@@ -66,6 +69,17 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           reference={reference}
         />
       </div>
+      {doc.status !== 'cancelled' && (
+        <CreditNoteSettlement
+          creditNoteId={doc.id}
+          issued={!!doc.number}
+          total={settlement.total}
+          currency={doc.currency ?? 'EUR'}
+          invoice={settlement.invoice}
+          applied={settlement.applied}
+          refunds={settlement.refunds}
+        />
+      )}
       <DocumentHistory documentId={doc.id} currency={doc.currency ?? 'EUR'} />
     </div>
   )

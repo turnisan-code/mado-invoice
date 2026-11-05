@@ -11,6 +11,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { StatusBadge } from './StatusBadge'
+import { displayStatus, statusLabelKey } from '@/lib/status'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
@@ -44,7 +45,7 @@ export interface Invoice {
   discount_value?: number | null
   pdf_path?: string | null
   document_items: DocItem[]
-  payments?: { amount: number }[]
+  payments?: { amount: number; kind?: string }[]
 }
 
 function docTotals(d: Invoice) {
@@ -152,6 +153,12 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
 
   const { page, pageCount, pageItems } = paginate(filtered, list.page)
   const selection = useSelection(filtered, pageItems)
+
+  // Partly paid and written-off invoices show that instead of their stored status.
+  const statusBadge = (d: Invoice) => {
+    const shown = displayStatus({ type: 'invoice', status: d.status, total: docTotal(d), payments: d.payments ?? [] }, todayStr)
+    return <StatusBadge status={shown} label={t(statusLabelKey(shown))} />
+  }
 
   function setFilters(patch: Partial<Record<keyof typeof LIST.filters, string>>) {
     selection.clear()
@@ -306,7 +313,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                     {isOpen(doc) && balance !== docTotal(doc) && (
                       <p className="text-xs text-amber-600 dark:text-amber-400">{t('invoices.openAmount', { amount: formatMoney(balance, doc.currency ?? undefined) })}</p>
                     )}
-                    <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                    {statusBadge(doc)}
                   </div>
                 </Link>
               </div>
@@ -357,7 +364,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [] }: { inv
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
-                  <StatusBadge status={doc.status} label={statusLabel(doc.status)} />
+                  {statusBadge(doc)}
                 </td>
               </ClickableRow>
             ))}

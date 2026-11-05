@@ -8,7 +8,7 @@ export default async function InvoicesPage() {
   const [{ data: docs }, { data: schedules }] = await Promise.all([
     supabase
       .from('documents')
-      .select('id, number, status, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, pdf_path, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount)')
+      .select('id, number, status, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, pdf_path, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
       .eq('type', 'invoice')
       .order('date', { ascending: false }),
     supabase.from('recurring_schedules').select('source_document_id'),

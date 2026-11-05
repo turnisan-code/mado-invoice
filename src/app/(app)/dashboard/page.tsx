@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { CheckCircle, AlertTriangle, TrendingUp, Wallet } from 'lucide-react'
+import { CheckCircle, AlertTriangle, TrendingUp, Wallet, MessageSquare } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
@@ -7,6 +7,8 @@ import { StatusBadge } from '@/components/lists/StatusBadge'
 import { getT } from '@/lib/i18n/server'
 import { n, type DictKey } from '@/lib/i18n'
 import { makePeriod, periodParams } from '@/app/(app)/reports/period'
+import { unappliedCreditNotes } from '@/lib/credits'
+import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
 
 // Month keys come from the Vienna calendar date and are shifted in UTC, so neither the server's
 // time zone nor a 31st (setMonth overflow) can move a payment into the wrong month.
@@ -50,7 +52,7 @@ export default async function DashboardPage() {
   const items = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
   const invoiceCols = `id, number, status, due_date, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${items}, payments(amount)`
 
-  const [{ data: activeInvoices }, { data: received }, { data: paidPayments }, { data: quotes }] = await Promise.all([
+  const [{ data: activeInvoices }, { data: received }, { data: paidPayments }, { data: quotes }, { data: responseEvents }, unapplied] = await Promise.all([
     supabase.from('documents').select(invoiceCols).eq('type', 'invoice').in('status', ['sent', 'overdue']),
     // Revenue is cash-based (Ist-Besteuerung): every money payment counts on the day it arrived,
     // whatever the invoice status; Skonto and write-offs close invoices without revenue.
@@ -61,11 +63,27 @@ export default async function DashboardPage() {
       .select(`id, date, document_id, documents!inner(type, ${invoiceCols})`)
       .eq('documents.type', 'invoice')
       .eq('documents.status', 'paid')
+      // An applied credit note is no money received, so it never dates a payment here.
+      .neq('kind', 'credit')
       .order('date', { ascending: false })
       .order('id', { ascending: false })
       .limit(40),
     supabase.from('documents').select('id, number, date, due_date, clients(name, company)').eq('type', 'quote').eq('status', 'sent').order('date', { ascending: false }).limit(5),
+    // Client answers in the portal stay here until the owner opens the quote.
+    supabase
+      .from('document_events')
+      .select('id, created_at, detail, documents!inner(id, number, clients(name, company))')
+      .eq('type', 'portal_responded')
+      .is('read_at', null)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    // Credit notes that should already have reduced their invoice's balance.
+    unappliedCreditNotes(supabase).catch(err => {
+      console.error('[dashboard] unapplied credit notes:', err)
+      return []
+    }),
   ])
+  const responses = (responseEvents ?? []) as unknown as { id: string; created_at: string; detail: { action?: string }; documents: { id: string; number: string | null; clients: ClientRef } }[]
 
   const active = (activeInvoices ?? []) as unknown as InvoiceRow[]
   const payments = (received ?? []) as unknown as { amount: number; date: string; document_id: string }[]
@@ -192,6 +210,41 @@ export default async function DashboardPage() {
             {' '}{t('dashboard.overdueAlertTail', { amount: formatMoney(overdueTotal) })}
           </span>
         </Link>
+      )}
+
+      {unapplied.length > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-sm text-amber-800 dark:text-amber-300 flex-wrap sm:flex-nowrap">
+          <AlertTriangle size={15} className="shrink-0 mt-0.5" aria-hidden="true" />
+          <span className="flex-1 min-w-0">
+            <strong>{n(unapplied.length, t('lifecycle.credit.unappliedOne', { count: unapplied.length }), t('lifecycle.credit.unappliedOther', { count: unapplied.length }))}</strong>
+            {' '}{t('lifecycle.credit.unappliedHint')}
+          </span>
+          <ApplyCreditNotesButton />
+        </div>
+      )}
+
+      {responses.length > 0 && (
+        <div className={`${card} overflow-hidden`}>
+          <div className="px-5 py-3 border-b border-neutral-100 dark:border-neutral-800 flex items-center gap-2">
+            <MessageSquare size={14} className="text-blue-600 dark:text-blue-400" aria-hidden="true" />
+            <span className="font-medium text-sm">{t('lifecycle.responses.title')}</span>
+          </div>
+          <ul className="divide-y divide-neutral-50 dark:divide-neutral-800">
+            {responses.map(r => {
+              const accepted = r.detail?.action === 'accepted'
+              const vars = { client: clientName(r.documents.clients) || '—', number: r.documents.number ?? '' }
+              return (
+                <li key={r.id}>
+                  <Link href={`/quotes/${r.documents.id}`} className="flex items-center gap-3 px-5 py-3 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+                    <span className="flex-1 min-w-0 truncate">{t(accepted ? 'lifecycle.responses.accepted' : 'lifecycle.responses.rejected', vars)}</span>
+                    <span className="text-xs text-neutral-500 dark:text-neutral-400 shrink-0">{formatDate(r.created_at, lang)}</span>
+                    <StatusBadge status={accepted ? 'accepted' : 'rejected'} label={statusLabel(accepted ? 'accepted' : 'rejected')} className="shrink-0" />
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
       )}
 
       {/* KPI Cards */}

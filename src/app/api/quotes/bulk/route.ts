@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
+import { asDbError, lifecycleErrorMessage } from '@/lib/status'
+import { getT } from '@/lib/i18n/server'
 
 // Issuing renders, stores and archives each draft's PDF in turn.
 export const maxDuration = 60
@@ -28,7 +30,8 @@ export async function PATCH(req: Request) {
   // Each quote gets the next number and 'sent' in one transaction, then its archive copy.
   for (const d of quotes) {
     try { await issueDocument(supabase, d.id) } catch (err) {
-      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+      const { t } = await getT()
+      return NextResponse.json({ error: lifecycleErrorMessage(asDbError(err), t) }, { status: 500 })
     }
   }
 

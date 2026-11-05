@@ -1,18 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { formatMoney, today, roundCents, skontoAmount, skontoDeadline } from '@/lib/utils/document'
+import { formatDate, formatMoney, today, roundCents, skontoAmount, skontoDeadline } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { StatusBadge } from '@/components/lists/StatusBadge'
 import type { Currency, PaymentKind, PaymentMethod } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { logEvent } from '@/lib/events'
+import { canTransition, DOCUMENT_STATUSES, lifecycleErrorMessage, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
 
 interface Payment {
   id: string
@@ -21,7 +24,14 @@ interface Payment {
   note: string | null
   kind: PaymentKind
   method: PaymentMethod
+  reference?: string | null
+  credit_note_id?: string | null
 }
+
+type NewPayment = Omit<Payment, 'id' | 'credit_note_id'>
+
+// Statuses a settled invoice moves to 'paid' from.
+const PAYABLE: readonly string[] = DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid'))
 
 interface Props {
   documentId: string
@@ -50,11 +60,16 @@ export default function PaymentPanel({
     setPayments(initial)
   }
   const [payDate, setPayDate] = useState(today())
+  const [dateIssue, setDateIssue] = useState<'required' | 'future' | null>(null)
   const [amount, setAmount] = useState<number | null>(null)
   const [note, setNote] = useState('')
+  const [reference, setReference] = useState('')
   const [method, setMethod] = useState<PaymentMethod>('bank')
   const [saving, setSaving] = useState(false)
   const [confirmOverpay, setConfirmOverpay] = useState(false)
+  const [writingOff, setWritingOff] = useState(false)
+  const [writeOffReason, setWriteOffReason] = useState('')
+  const [writeOffInvalid, setWriteOffInvalid] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<Payment | null>(null)
   const [removing, setRemoving] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
@@ -64,19 +79,28 @@ export default function PaymentPanel({
   const [bookamatId, setBookamatId] = useState(bookamatBookingId ?? null)
   const router = useRouter()
   const supabase = createClient()
-  const { t } = useT()
+  const uid = useId()
+  const { t, lang } = useT()
 
-  const kindLabel: Record<PaymentKind, string | null> = { payment: null, skonto: t('payments.skonto'), writeoff: t('payments.writtenOff') }
+  const kindLabel: Record<PaymentKind, string | null> = {
+    payment: null, skonto: t('payments.skonto'), writeoff: t('payments.writtenOff'),
+    credit: t('lifecycle.payments.creditNotePlain'), refund: t('lifecycle.credit.refund'),
+  }
 
-  // The balance counts every kind: a Skonto taken or a write-off closes the invoice like money would.
+  // The balance counts every kind: a Skonto taken, a write-off or an applied credit note closes
+  // the invoice like money would.
   const totalPaid = roundCents(payments.reduce((s, p) => s + p.amount, 0))
   const balanceDue = roundCents(total - totalPaid)
-  const fullyPaid = balanceDue <= 0.005
-  const overpaid = balanceDue < -0.005
+  const state = paymentState(total, payments)
+  // An empty or zero invoice has nothing to pay, so it is never "paid in full".
+  const nothingDue = state === 'nothing_due'
+  const fullyPaid = !nothingDue && balanceDue <= 0.005
+  const overpaid = state === 'overpaid'
+  const writtenOff = roundCents(payments.filter(p => p.kind === 'writeoff').reduce((s, p) => s + p.amount, 0))
 
   // Payments belong to issued, live invoices: a draft has no legal number yet and a cancelled
   // invoice has been replaced by its Storno.
-  const canRecord = !!number && status !== 'cancelled'
+  const canRecord = !!number && status !== 'cancelled' && !nothingDue
 
   // Skonto may be taken when the money arrived within the Skonto window and covers the total
   // less the Skonto; tiny leftovers (bank fees, rounding) can be written off instead.
@@ -84,70 +108,89 @@ export default function PaymentPanel({
   const skontoDue = skontoDays != null ? skontoDeadline(date, skontoDays) : null
   const lastReceived = payments.filter(p => p.kind === 'payment').map(p => p.date).sort().at(-1) ?? null
   const offerSkonto = canRecord && !fullyPaid && skonto > 0 && !!skontoDue && !!lastReceived && lastReceived <= skontoDue && balanceDue <= skonto + 0.01
-  const offerWriteoff = canRecord && !fullyPaid && balanceDue < 1
+  // Under a euro left over is a rounding or bank-fee difference, closed in one click; a larger
+  // uncollectible balance is written off with a reason.
+  const offerWriteoff = canRecord && !fullyPaid && balanceDue < SMALL_DIFFERENCE
+  const offerUncollectible = canRecord && !fullyPaid && balanceDue >= SMALL_DIFFERENCE
 
-  async function recordRow(row: { date: string; amount: number; note: string | null; kind: PaymentKind; method: PaymentMethod }) {
+  async function recordRow(row: NewPayment): Promise<boolean> {
     setSaving(true)
-    const { data, error } = await supabase
-      .from('payments')
-      .insert({ document_id: documentId, ...row })
-      .select()
-      .single()
-    if (error) { toast.error(error.message); setSaving(false); return }
+    try {
+      const { data, error } = await supabase
+        .from('payments')
+        .insert({ document_id: documentId, ...row })
+        .select()
+        .single()
+      if (error) { toast.error(error.message); return false }
 
-    const next = [...payments, data]
-    setPayments(next)
-    await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method })
+      const next = [...payments, data]
+      setPayments(next)
+      await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method, reference: row.reference ?? undefined })
 
-    const newTotal = next.reduce((s, p) => s + p.amount, 0)
-    const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
-    if (newTotal >= total - 0.005) {
-      await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId)
-      if (status !== 'paid') await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
-      toast.success(t('payments.recordedAndPaid', { label }))
-      if (!bookamatId && bookamatConfigured) {
-        setShowBookamatPrompt(true)
+      const newTotal = next.reduce((s, p) => s + p.amount, 0)
+      const label = row.kind === 'skonto' ? t('payments.skontoRecorded') : row.kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
+      if (newTotal >= total - 0.005 && PAYABLE.includes(status)) {
+        const { data: updated, error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE).select('id')
+        if (statusErr) toast.error(lifecycleErrorMessage(statusErr, t))
+        else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
+        toast.success(t('payments.recordedAndPaid', { label }))
+        if (!bookamatId && bookamatConfigured) {
+          setShowBookamatPrompt(true)
+        }
+      } else {
+        toast.success(t('payments.recorded', { label }))
       }
-    } else {
-      toast.success(t('payments.recorded', { label }))
+      router.refresh()
+      return true
+    } finally {
+      setSaving(false)
     }
-
-    setSaving(false)
-    router.refresh()
   }
 
   async function addPayment(allowOverpayment = false) {
     if (!number) { toast.error(t('payments.issueBeforePayment')); return }
     if (status === 'cancelled') { toast.error(t('payments.cancelledInvoice')); return }
+    const issue = paymentDateIssue(payDate, today())
+    setDateIssue(issue)
+    if (issue) { toast.error(t(issue === 'required' ? 'lifecycle.payments.dateRequired' : 'lifecycle.payments.dateFuture')); return }
     const amt = amount ?? 0
     if (!amt || amt <= 0) { toast.error(t('payments.invalidAmount')); return }
     if (amt > balanceDue + 0.005 && !allowOverpayment) { setConfirmOverpay(true); return }
     setConfirmOverpay(false)
-    await recordRow({ date: payDate, amount: amt, note: note || null, kind: 'payment', method })
+    const ok = await recordRow({ date: payDate, amount: amt, note: note.trim() || null, kind: 'payment', method, reference: reference.trim() || null })
+    if (!ok) return
     setAmount(null)
     setNote('')
+    setReference('')
   }
 
-  async function settleRemaining(kind: 'skonto' | 'writeoff') {
-    if (balanceDue <= 0.005) return
-    const settleNote = kind === 'skonto' ? `Skonto ${skontoPercent} %` : null
-    await recordRow({ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' })
+  async function settleRemaining(kind: 'skonto' | 'writeoff', reason: string | null = null): Promise<boolean> {
+    if (balanceDue <= 0.005) return false
+    const settleNote = kind === 'skonto' ? `Skonto ${skontoPercent} %` : reason
+    return recordRow({ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' })
+  }
+
+  async function writeOffUncollectible() {
+    const reason = writeOffReason.trim()
+    if (!reason) { setWriteOffInvalid(true); return }
+    if (await settleRemaining('writeoff', reason)) {
+      setWritingOff(false)
+      setWriteOffReason('')
+    }
   }
 
   async function removePayment(id: string) {
-    setRemoving(true)
-    const { error } = await supabase.from('payments').delete().eq('id', id)
-    if (error) { toast.error(error.message); setRemoving(false); return }
     const removed = payments.find(p => p.id === id)
-    if (removed) await logEvent(supabase, documentId, 'payment_removed', { amount: removed.amount, date: removed.date, kind: removed.kind, method: removed.method })
     const next = payments.filter(p => p.id !== id)
+    const reopen = status === 'paid' && next.reduce((s, p) => s + p.amount, 0) < total - 0.005
+    setRemoving(true)
+    // One transaction: the row goes and a paid invoice that is open again reopens (the only way
+    // the lifecycle trigger lets paid go back to sent/overdue).
+    const { data: reopened, error } = await supabase.rpc('remove_payment', { p_payment_id: id, p_reopen: reopen })
+    if (error) { toast.error(lifecycleErrorMessage(error, t)); setRemoving(false); return }
+    if (removed) await logEvent(supabase, documentId, 'payment_removed', { amount: removed.amount, date: removed.date, kind: removed.kind, method: removed.method })
+    if (reopened) await logEvent(supabase, documentId, 'status_changed', { from: 'paid', to: reopened })
     setPayments(next)
-
-    const newTotal = next.reduce((s, p) => s + p.amount, 0)
-    if (status === 'paid' && newTotal < total - 0.005) {
-      await supabase.from('documents').update({ status: 'sent' }).eq('id', documentId)
-      await logEvent(supabase, documentId, 'status_changed', { from: 'paid', to: 'sent' })
-    }
 
     setRemoving(false)
     setPendingRemove(null)
@@ -233,30 +276,48 @@ export default function PaymentPanel({
     <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{t('payments.title')}</h2>
-        <div className="text-sm text-neutral-500 dark:text-neutral-400">
-          {t('payments.balance')} <span className={overpaid ? 'text-red-600 font-semibold' : fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
-            {overpaid ? t('payments.overpaidBy', { amount: formatMoney(-balanceDue, currency) }) : fullyPaid ? t('payments.paidInFull') : formatMoney(balanceDue, currency)}
-          </span>
+        <div className="text-sm text-neutral-500 dark:text-neutral-400 flex items-center gap-2 flex-wrap">
+          {status === 'cancelled' ? (
+            <span className="font-semibold">{t('lifecycle.payments.cancelled')}</span>
+          ) : nothingDue ? (
+            <span className="font-semibold">{t('lifecycle.payments.nothingToPay')}</span>
+          ) : (
+            <>
+              <span>
+                {t('payments.balance')} <span className={overpaid ? 'text-red-600 font-semibold' : state === 'written_off' ? 'text-orange-600 dark:text-orange-400 font-semibold' : fullyPaid ? 'text-green-600 font-semibold' : 'font-semibold text-amber-600'}>
+                  {overpaid ? t('payments.overpaidBy', { amount: formatMoney(-balanceDue, currency) })
+                    : state === 'written_off' ? t('lifecycle.payments.writtenOff', { amount: formatMoney(writtenOff, currency) })
+                    : fullyPaid ? t('payments.paidInFull') : formatMoney(balanceDue, currency)}
+                </span>
+              </span>
+              {state === 'partially_paid' && <StatusBadge status="partially_paid" label={t('lifecycle.states.partially_paid')} />}
+            </>
+          )}
         </div>
       </div>
 
       {payments.length > 0 && (
         <div className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
           {payments.map(p => (
-            <div key={p.id} className="flex items-center py-1 sm:py-2 gap-3">
-              <span className="text-neutral-500 dark:text-neutral-400 w-24 shrink-0">{p.date}</span>
+            <div key={p.id} className="flex items-center py-1 sm:py-2 gap-x-3 gap-y-0.5 flex-wrap">
+              <span className="text-neutral-500 dark:text-neutral-400 w-24 shrink-0">{formatDate(p.date, lang)}</span>
               <span className="font-medium">{formatMoney(p.amount, currency)}</span>
-              {kindLabel[p.kind] && (
+              {p.kind === 'credit' && p.credit_note_id ? (
+                <Link href={`/credit-notes/${p.credit_note_id}`} className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:underline shrink-0">
+                  {p.note ? t('lifecycle.payments.creditNote', { number: p.note }) : t('lifecycle.payments.creditNotePlain')}
+                </Link>
+              ) : kindLabel[p.kind] && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 shrink-0">{kindLabel[p.kind]}</span>
               )}
               {p.method === 'cash' && p.kind === 'payment' && (
                 <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 shrink-0">{t('payments.cashBadge')}</span>
               )}
-              {p.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
+              {p.reference && <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono truncate min-w-0">{t('lifecycle.payments.referenceShort', { reference: p.reference })}</span>}
+              {p.note && p.kind !== 'credit' && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{p.note}</span>}
               <button
                 type="button"
                 onClick={() => setPendingRemove(p)}
-                aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: p.date })}
+                aria-label={t('payments.removePayment', { amount: formatMoney(p.amount, currency), date: formatDate(p.date, lang) })}
                 className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-400 dark:text-neutral-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
               >
                 <Trash2 size={14} />
@@ -266,16 +327,21 @@ export default function PaymentPanel({
         </div>
       )}
 
-      {(offerSkonto || offerWriteoff) && (
+      {(offerSkonto || offerWriteoff || offerUncollectible) && (
         <div className="flex flex-wrap gap-2">
           {offerSkonto && (
-            <button type="button" onClick={() => settleRemaining('skonto')} disabled={saving} className={settleBtn}>
+            <button type="button" onClick={() => void settleRemaining('skonto')} disabled={saving} className={settleBtn}>
               {t('payments.settleSkonto', { amount: formatMoney(balanceDue, currency) })}
             </button>
           )}
           {offerWriteoff && (
-            <button type="button" onClick={() => settleRemaining('writeoff')} disabled={saving} className={settleBtn}>
+            <button type="button" onClick={() => void settleRemaining('writeoff')} disabled={saving} className={settleBtn}>
               {t('payments.writeOff', { amount: formatMoney(balanceDue, currency) })}
+            </button>
+          )}
+          {offerUncollectible && (
+            <button type="button" onClick={() => { setWriteOffInvalid(false); setWritingOff(true) }} disabled={saving} className={settleBtn}>
+              {t('lifecycle.payments.writeOffOpen')}
             </button>
           )}
         </div>
@@ -289,9 +355,12 @@ export default function PaymentPanel({
           <div className="flex gap-2">
             <Input
               type="date"
+              required
+              max={today()}
               aria-label={t('payments.paymentDate')}
+              aria-invalid={dateIssue ? true : undefined}
               value={payDate}
-              onChange={e => setPayDate(e.target.value)}
+              onChange={e => { setPayDate(e.target.value); setDateIssue(null) }}
               className="flex-1 min-w-0"
             />
             <MoneyInput
@@ -312,6 +381,16 @@ export default function PaymentPanel({
               <option value="bank">{t('payments.methodBank')}</option>
               <option value="cash">{t('payments.methodCash')}</option>
             </select>
+            <Input
+              aria-label={t('lifecycle.payments.reference')}
+              placeholder={t('lifecycle.payments.reference')}
+              value={reference}
+              maxLength={140}
+              onChange={e => setReference(e.target.value)}
+              className="flex-1 min-w-0"
+            />
+          </div>
+          <div className="flex gap-2">
             <Input
               aria-label={t('payments.note')}
               placeholder={t('payments.note')}
@@ -374,9 +453,34 @@ export default function PaymentPanel({
       />
 
       <ConfirmDialog
+        open={writingOff}
+        title={t('lifecycle.payments.writeOffTitle', { amount: formatMoney(Math.max(balanceDue, 0), currency) })}
+        description={t('lifecycle.payments.writeOffDesc')}
+        confirmLabel={saving ? t('common.saving') : t('lifecycle.payments.writeOffConfirm')}
+        destructive
+        busy={saving}
+        onConfirm={() => void writeOffUncollectible()}
+        onCancel={() => setWritingOff(false)}
+      >
+        <div className="space-y-1">
+          <label htmlFor={`${uid}-writeoff-reason`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('lifecycle.payments.writeOffReason')}</label>
+          <Input
+            id={`${uid}-writeoff-reason`}
+            value={writeOffReason}
+            maxLength={200}
+            placeholder={t('lifecycle.payments.writeOffReasonPlaceholder')}
+            aria-invalid={writeOffInvalid || undefined}
+            aria-describedby={writeOffInvalid ? `${uid}-writeoff-error` : undefined}
+            onChange={e => { setWriteOffReason(e.target.value); setWriteOffInvalid(false) }}
+          />
+          {writeOffInvalid && <p id={`${uid}-writeoff-error`} role="alert" className="text-xs text-red-600 dark:text-red-400">{t('lifecycle.payments.writeOffReasonRequired')}</p>}
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
         open={!!pendingRemove}
         title={t('payments.removeTitle')}
-        description={pendingRemove ? t('payments.removeDesc', { amount: formatMoney(pendingRemove.amount, currency), date: pendingRemove.date }) : undefined}
+        description={pendingRemove ? t('payments.removeDesc', { amount: formatMoney(pendingRemove.amount, currency), date: formatDate(pendingRemove.date, lang) }) : undefined}
         confirmLabel={removing ? t('common.removing') : t('common.remove')}
         destructive
         busy={removing}

@@ -3,7 +3,8 @@
 import DocumentBuilder from '@/components/forms/DocumentBuilder'
 import PaymentPanel from '@/components/layout/PaymentPanel'
 import ReminderButton from '@/components/layout/ReminderButton'
-import { formatDate } from '@/lib/utils/document'
+import { formatDate, roundCents, today } from '@/lib/utils/document'
+import { canRemind } from '@/lib/status'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
 import { fetchIssuedPdf, blobToBase64 } from '@/lib/issued-pdf'
 import type { Client, CatalogueItem, Document, Currency, Payment, ReminderLogEntry } from '@/types'
@@ -45,7 +46,8 @@ export default function InvoicePageClient({
   }
 
   const gmailConfigured = settings.gmail_connected
-  const showReminder = (document.status === 'overdue' || document.status === 'sent') && gmailConfigured
+  const balance = roundCents(total - payments.reduce((s, p) => s + p.amount, 0))
+  const showReminder = canRemind(document, balance, today()) && gmailConfigured
 
   return (
     <>

@@ -9,6 +9,10 @@ export const STATUS_BADGE: Record<string, string> = {
   rejected: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
   expired: 'text-red-700 bg-red-100 dark:bg-red-950 dark:text-red-300',
   cancelled: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
+  // Derived from payments (src/lib/status.ts displayStatus), never stored.
+  partially_paid: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
+  written_off: 'text-orange-700 bg-orange-100 dark:bg-orange-950 dark:text-orange-300',
+  settled: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
   active: 'text-green-700 bg-green-100 dark:bg-green-950 dark:text-green-300',
   inactive: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
   lead: 'text-amber-700 bg-amber-100 dark:bg-amber-950 dark:text-amber-300',
