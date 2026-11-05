@@ -71,8 +71,8 @@ create index if not exists project_expenses_document_item_id_idx on project_expe
 -- p_lines is what src/lib/projects.ts buildInvoiceLines computed: one object per line with the
 -- document_items columns plus time_entry_ids / expense_ids, the entries the line bills. One
 -- transaction: the project row is locked, the draft is created for the project's client (its
--- language, tax treatment and payment days; Skonto from the settings, stored only when above 0
--- as the builder does), every line inserted and
+-- language, tax treatment, payment days and Skonto, each falling back to the settings default;
+-- Skonto is stored only when above 0, as the builder does), every line inserted and
 -- its entries linked. An entry that is no longer an unbilled billable entry of this project rolls
 -- everything back (MI032), so nothing is ever billed twice.
 create or replace function invoice_project_entries(p_project_id uuid, p_lines jsonb)
@@ -109,8 +109,8 @@ begin
   ) values (
     'invoice', null, 'draft', c.id, today, today + coalesce(c.payment_days, s.default_payment_days, 14),
     c.language, 'EUR', c.tax_treatment, 1,
-    case when s.default_skonto_percent > 0 then s.default_skonto_percent end,
-    case when s.default_skonto_percent > 0 then s.default_skonto_days end
+    case when coalesce(c.skonto_percent, s.default_skonto_percent) > 0 then coalesce(c.skonto_percent, s.default_skonto_percent) end,
+    case when coalesce(c.skonto_percent, s.default_skonto_percent) > 0 then coalesce(c.skonto_days, s.default_skonto_days) end
   ) returning id into doc_id;
 
   for l in select value from jsonb_array_elements(p_lines) loop

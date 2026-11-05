@@ -60,9 +60,9 @@ export function formatPercent(t: TFn, value: number, lang: Language): string {
 }
 
 // Credits and discounts print with a real minus sign (Intl uses a hyphen), and never as "-0,00".
-export function formatSignedMoney(amount: number, currency = 'EUR'): string {
+export function formatSignedMoney(amount: number, currency = 'EUR', lang?: Language): string {
   const value = roundCents(amount)
-  return value < 0 ? `−${formatMoney(-value, currency)}` : formatMoney(Math.abs(value), currency)
+  return value < 0 ? `−${formatMoney(-value, currency, lang)}` : formatMoney(Math.abs(value), currency, lang)
 }
 
 export function formatIban(iban: string): string {

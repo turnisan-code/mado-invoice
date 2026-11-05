@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isUiLang, makeT } from '@/lib/i18n'
-import { orderItems } from '@/lib/utils/document'
+import { calcTotals, orderItems } from '@/lib/utils/document'
 import { ISSUER_SETTINGS_COLUMNS, IssueCheckError, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
 import { clearGoogleTokens, googleErrorMessage, isGoogleAuthError, isGoogleScopeError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE, GOOGLE_SCOPE_MESSAGE } from '@/lib/google/reauth'
@@ -47,6 +47,24 @@ async function assertIssuable(supabase: SupabaseClient, documentId: string): Pro
   if (problems.length) throw new IssueCheckError(problems, makeT(isUiLang(settings?.ui_language) ? settings.ui_language : 'en'))
 }
 
+// The total the frozen PDF prints (before payments), kept so a later edit that changes the amount
+// can be flagged. Written once, before the first frozen copy exists; a failure is only logged.
+async function recordIssuedTotal(supabase: SupabaseClient, documentId: string): Promise<void> {
+  const { data: doc, error } = await supabase.from('documents')
+    .select('discount_type, discount_value, tax_treatment, issued_total, pdf_path, document_items(*)')
+    .eq('id', documentId)
+    .maybeSingle()
+  if (error || !doc) {
+    console.error(`[issue] issued total of ${documentId} not read:`, error?.message ?? 'not found')
+    return
+  }
+  if (doc.issued_total != null || doc.pdf_path) return
+  const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
+  const { total } = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment)
+  const { error: writeErr } = await supabase.from('documents').update({ issued_total: total }).eq('id', documentId).is('issued_total', null)
+  if (writeErr) console.error(`[issue] issued total of ${documentId} not recorded:`, writeErr.message)
+}
+
 // Every issuance path goes through here: issue_document assigns the number atomically, then the
 // PDF is frozen in the private bucket and archived to Drive when a folder is configured. Only a
 // failed number assignment throws; archive failures are returned so the caller can report them
@@ -61,6 +79,7 @@ export async function issueDocument(supabase: SupabaseClient, documentId: string
   // With its code and detail (MI001–MI004 say why), so every caller can word the refusal.
   if (error) throw Object.assign(new Error(error.message), { code: error.code, details: error.details })
   if (!before.number) await logEvent(supabase, documentId, 'issued', { number })
+  await recordIssuedTotal(supabase, documentId)
   // An issued credit note takes its amount off the open balance of the invoice it corrects; a
   // failure leaves it unapplied, and its page offers to apply it.
   if (!before.number && before.type === 'credit_note') {

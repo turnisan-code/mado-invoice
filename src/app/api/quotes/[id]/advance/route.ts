@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { databaseError, invalidJson, isUuid, readJsonObject, requireUser } from '@/lib/auth'
 import { advanceItems, billedAmount, depositTotals, loadQuoteDeposits } from '@/lib/deposits'
 import { logEvent } from '@/lib/events'
 import { getT } from '@/lib/i18n/server'
@@ -16,11 +16,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { supabase } = auth
   const { t } = await getT()
   const { id } = await params
-  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
 
   const body = await readJsonObject(req)
-  const mode = body?.mode === 'percent' || body?.mode === 'amount' ? body.mode : null
-  const value = typeof body?.value === 'number' && Number.isFinite(body.value) ? body.value : null
+  if (!body) return invalidJson()
+  const mode = body.mode === 'percent' || body.mode === 'amount' ? body.mode : null
+  const value = typeof body.value === 'number' && Number.isFinite(body.value) ? body.value : null
   if (!mode || value == null || value <= 0 || (mode === 'percent' && value > 100)) {
     return NextResponse.json({ error: t('deposits.errors.badAmount') }, { status: 400 })
   }
@@ -28,8 +29,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { data: quote, error } = await supabase.from('documents')
     .select('id, number, status, date, client_id, service_date, service_date_end, language, tax_treatment, discount_type, discount_value, buyer_reference, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), clients(payment_days)')
     .eq('id', id).eq('type', 'quote').maybeSingle()
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!quote) return NextResponse.json({ error: t('lifecycle.errors.notFound') }, { status: 404 })
+  if (error) return databaseError(error)
+  if (!quote) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
   if (quote.status !== 'sent' && quote.status !== 'accepted') {
     return NextResponse.json({ error: t('lifecycle.errors.quoteNotConvertible') }, { status: 409 })
   }
@@ -42,7 +43,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     supabase.from('documents').select('id').eq('converted_from_id', id).eq('type', 'invoice')
       .in('invoice_kind', ['standard', 'final']).neq('status', 'cancelled').limit(1).maybeSingle(),
   ])
-  if (convErr) return NextResponse.json({ error: convErr.message }, { status: 500 })
+  if (convErr) return databaseError(convErr)
   if (conversion) return NextResponse.json({ error: t('deposits.errors.quoteConverted') }, { status: 409 })
   const earlier = deposits
     .filter(d => d.invoice_kind === 'advance' && d.status !== 'cancelled')
@@ -76,12 +77,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     converted_from_id: quote.id,
     buyer_reference: quote.buyer_reference,
   }).select('id').single()
-  if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
+  if (insErr) return databaseError(insErr)
 
   const { error: itemsErr } = await supabase.from('document_items').insert(lines.map(l => ({ ...l, document_id: invoice.id })))
   if (itemsErr) {
     await supabase.from('documents').delete().eq('id', invoice.id)
-    return NextResponse.json({ error: itemsErr.message }, { status: 500 })
+    return databaseError(itemsErr)
   }
 
   await logEvent(supabase, invoice.id, 'converted', { from_id: quote.id, from_number: quote.number, from_type: 'quote' })

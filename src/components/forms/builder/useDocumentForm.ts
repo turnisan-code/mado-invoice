@@ -13,7 +13,7 @@ import {
   AUTOSAVE_DELAY, PATHS, contentKeyOf, docFields, initialForm, itemsPayload, savedKeyOf, storedKeyOf, termDays,
   type EditorDocument, type FormState, type LineItem,
 } from './model'
-import { ISSUE_DATE_EVENT, type IssueDateDetail } from './events'
+import { BUYER_REFERENCE_EVENT, ISSUE_DATE_EVENT, type BuyerReferenceDetail, type IssueDateDetail } from './events'
 
 // Unsaved edits kept on this device per document ('new' until the draft exists). `base` is the
 // saved key the edits started from: a server copy that moved on since then is newer. It is null
@@ -347,11 +347,17 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       l.applyOverrides(dueDate === undefined ? { date } : { date, dueDate })
       waitUntil(l.serialized(() => latest.current.persist(formRef.current)))
     }
+    function onBuyerReference(e: Event) {
+      const { documentId, buyerReference } = (e as CustomEvent<BuyerReferenceDetail>).detail
+      if (documentId === docIdRef.current) setForm(f => ({ ...f, buyerReference }))
+    }
     window.addEventListener(FLUSH_EDITS_EVENT, onFlush)
     window.addEventListener(ISSUE_DATE_EVENT, onIssueDate)
+    window.addEventListener(BUYER_REFERENCE_EVENT, onBuyerReference)
     return () => {
       window.removeEventListener(FLUSH_EDITS_EVENT, onFlush)
       window.removeEventListener(ISSUE_DATE_EVENT, onIssueDate)
+      window.removeEventListener(BUYER_REFERENCE_EVENT, onBuyerReference)
     }
   }, [])
 

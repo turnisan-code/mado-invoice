@@ -1,6 +1,6 @@
 import { getDict, makeT } from '@/lib/i18n'
 import { clientDisplayName, type NamedClient } from '@/lib/utils/clients'
-import { addDays, skontoAmount, skontoDeadline, viennaDate } from '@/lib/utils/document'
+import { addDays, formatMoney, skontoAmount, skontoDeadline, viennaDate } from '@/lib/utils/document'
 import type { DocumentType, EmailTemplateKind, Language, Settings } from '@/types'
 
 // The one engine behind every email the app writes: document emails from the builder, manual and
@@ -109,7 +109,7 @@ export function templateDate(value: string | null | undefined, lang: Language): 
 }
 
 export function templateMoney(amount: number, lang: Language, currency: string | null = 'EUR'): string {
-  return new Intl.NumberFormat(lang === 'en' ? 'en-GB' : 'de-AT', { style: 'currency', currency: currency || 'EUR' }).format(amount)
+  return formatMoney(amount, currency || 'EUR', lang)
 }
 
 export function templatePercent(value: number, lang: Language): string {

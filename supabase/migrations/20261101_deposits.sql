@@ -161,7 +161,8 @@ create trigger documents_deposit_delete
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
 -- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
--- unnumbered draft dated today, due after the client's payment days (settings default), with
+-- unnumbered draft dated today, due after the client's payment days and with the client's Skonto
+-- (each falling back to the settings default; stored only above 0 %, as the builder does), with
 -- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
 -- and partial invoices made from the quote are never its conversion, nor is an invoice cancelled
 -- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
@@ -176,6 +177,8 @@ declare
   inv_id uuid;
   today  date := (now() at time zone 'Europe/Vienna')::date;
   days   integer;
+  pct    numeric;
+  sdays  integer;
   linked integer := 0;
   adv    record;
 begin
@@ -204,7 +207,8 @@ begin
   end if;
 
   select * into s from settings limit 1;
-  select payment_days into days from clients where id = q.client_id;
+  select payment_days, skonto_percent, skonto_days into days, pct, sdays from clients where id = q.client_id;
+  pct := coalesce(pct, s.default_skonto_percent);
 
   insert into documents (
     type, invoice_kind, number, status, client_id, date, due_date, service_date, service_date_end,
@@ -215,7 +219,7 @@ begin
     today + coalesce(days, s.default_payment_days, 14),
     q.service_date, q.service_date_end, q.language, q.currency, q.tax_treatment, q.exchange_rate,
     q.notes, q.notes_internal, q.discount_type, q.discount_value,
-    s.default_skonto_percent, case when s.default_skonto_percent is not null then s.default_skonto_days end, q.id,
+    case when pct > 0 then pct end, case when pct > 0 then coalesce(sdays, s.default_skonto_days) end, q.id,
     q.buyer_reference
   ) returning id into inv_id;
 

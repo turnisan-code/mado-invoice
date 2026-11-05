@@ -273,11 +273,14 @@ export interface Document {
   drive_file_id?: string | null
   issued_at?: string | null
   pdf_path?: string | null
-  // The buyer's reference (Auftragsreferenz / order number) its e-invoices carry.
+  // The buyer's reference (Auftragsreferenz / order number) its PDF and e-invoices carry; null =
+  // never set (the corrected invoice's, else the client's default applies), '' = cleared on purpose.
   buyer_reference?: string | null
   invoice_kind?: InvoiceKind
   // On an advance or partial invoice: the final invoice that deducts it.
   final_invoice_id?: string | null
+  // The total it was issued with (src/lib/pdf/issue.ts); null before issuing and for older documents.
+  issued_total?: number | null
   items?: DocumentItem[]
   payments?: Payment[]
 }

@@ -22,6 +22,10 @@ export type EInvoiceErrorCode =
   | 'not_issued' | 'unsupported_type' | 'currency' | 'client_country'
   | 'buyer_reference' | 'buyer_endpoint' | 'seller_endpoint' | 'line_amount'
 
+export const EINVOICE_ERROR_CODES: readonly EInvoiceErrorCode[] = [
+  'not_issued', 'unsupported_type', 'currency', 'client_country', 'buyer_reference', 'buyer_endpoint', 'seller_endpoint', 'line_amount',
+]
+
 // A document that cannot become this e-invoice; the UI words the code (einvoice.errors.*).
 // 'line_amount' guards the line maths: quantity × price less the line discount must give the printed net.
 export class EInvoiceError extends Error {

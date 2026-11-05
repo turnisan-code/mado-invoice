@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/ConfirmDialog'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { useT } from '@/lib/i18n/client'
+import { knownApiError, requestErrorMessage } from '@/lib/api-errors'
 import { formatMoney, roundCents } from '@/lib/utils/document'
 
 type Mode = 'percent' | 'amount'
@@ -46,12 +47,13 @@ export default function AdvanceInvoiceButton({ quoteId, quoteTotal, advanced }: 
         body: JSON.stringify({ mode, value }),
       })
       const data = await res.json().catch(() => ({}))
-      if (!res.ok || typeof data.invoiceId !== 'string') { toast.error(data.error ?? t('common.unknownError')); return }
+      // Coded answers are worded here; the route words its own validation messages in the UI language.
+      if (!res.ok || typeof data.invoiceId !== 'string') { toast.error(knownApiError(t, data) ?? (typeof data.error === 'string' ? data.error : t('messages.generic'))); return }
       toast.success(t('deposits.quote.advanceCreated'))
       setOpen(false)
       router.push(`/invoices/${data.invoiceId}`)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.unknownError'))
+      toast.error(requestErrorMessage(t, err))
     } finally {
       setBusy(false)
     }
