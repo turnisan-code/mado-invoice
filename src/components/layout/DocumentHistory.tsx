@@ -89,6 +89,8 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
     }
     case 'portal_responded':
       return { text: d.action === 'accepted' ? t('lifecycle.history.portalAccepted') : d.action === 'rejected' ? t('lifecycle.history.portalRejected') : t('archive.events.portal_responded') }
+    case 'einvoice_exported':
+      return { text: t('einvoice.history.exported', { format: t(d.format === 'ubl' ? 'einvoice.formats.ubl' : 'einvoice.formats.ebinterface') }) }
     default:
       return { text: t(`archive.events.${event.type}`) }
   }

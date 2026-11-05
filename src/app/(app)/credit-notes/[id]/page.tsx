@@ -6,6 +6,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import EInvoiceButton from '@/components/layout/EInvoiceButton'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import CreditNoteSettlement from '@/components/layout/CreditNoteSettlement'
@@ -56,6 +57,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
           {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} initialToken={doc.share_token ?? null} driveConfigured={!!publicSettings.drive_folder_id} />}
+          {doc.number && <EInvoiceButton documentId={doc.id} compact />}
           <DuplicateDocumentButton docId={doc.id} docType="credit_note" backTo="/credit-notes" />
           <DeleteDocumentButton id={doc.id} backTo="/credit-notes" docNumber={doc.number} docType="credit_note" />
         </div>
