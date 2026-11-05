@@ -1,6 +1,6 @@
 export default function DashboardLoading() {
   return (
-    <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-8 animate-pulse">
+    <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6 animate-pulse">
       <div className="flex items-center justify-between">
         <div className="h-7 w-28 bg-neutral-200 dark:bg-neutral-800 rounded-md" />
         <div className="flex gap-2">
@@ -18,6 +18,18 @@ export default function DashboardLoading() {
             <div className="h-7 w-24 bg-neutral-100 dark:bg-neutral-800 rounded" />
           </div>
         ))}
+      </div>
+      {/* Revenue chart */}
+      <div className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">
+        <div className="px-5 py-4 border-b border-neutral-100 dark:border-neutral-800 flex justify-between">
+          <div className="h-4 w-40 bg-neutral-100 dark:bg-neutral-800 rounded" />
+          <div className="h-4 w-20 bg-neutral-100 dark:bg-neutral-800 rounded" />
+        </div>
+        <div className="px-5 pt-4 pb-3 flex items-end gap-1 h-40">
+          {[...Array(12)].map((_, i) => (
+            <div key={i} className="flex-1 bg-neutral-100 dark:bg-neutral-800 rounded-sm" style={{ height: `${30 + ((i * 37) % 60)}%` }} />
+          ))}
+        </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700">

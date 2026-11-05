@@ -6,6 +6,7 @@ import { Plus, FileX, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatMoney, calcTotals, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { creditNoteSettled, displayStatus, statusLabelKey } from '@/lib/status'
@@ -13,7 +14,7 @@ import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass,
+  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
 
 const STATUSES = ['draft', 'sent', 'cancelled'] as const
@@ -51,9 +52,11 @@ function isSettled(d: CreditNote) {
   return creditNoteSettled(docTotal(d), d.applied ?? 0, refunded)
 }
 
-const clientLabel = (d: CreditNote) => d.clients?.company ?? d.clients?.name ?? ''
+const clientLabel = (d: CreditNote) => clientDisplayName(d.clients)
+const shownStatus = (d: CreditNote, todayStr: string) =>
+  displayStatus({ type: 'credit_note', status: d.status, creditSettled: isSettled(d) }, todayStr)
 
-function exportCSV(docs: CreditNote[], t: TFn) {
+function exportCSV(docs: CreditNote[], t: TFn, todayStr: string) {
   const rows = docs.map(d => [
     d.number ?? '',
     d.clients?.name ?? '',
@@ -61,14 +64,14 @@ function exportCSV(docs: CreditNote[], t: TFn) {
     csvDate(d.date),
     docTotal(d),
     d.currency ?? 'EUR',
-    d.status,
+    t(statusLabelKey(shownStatus(d, todayStr))),
   ])
   const header = [t('csv.number'), t('csv.client'), t('csv.company'), t('csv.date'), t('csv.total'), t('csv.currency'), t('csv.status')]
-  downloadCsv(`credit-notes-${today()}.csv`, toCsv(header, rows))
+  downloadCsv(`credit-notes-${todayStr}.csv`, toCsv(header, rows))
 }
 
 export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
-  const { t } = useT()
+  const { t, lang } = useT()
   const list = useListState(LIST)
   const { status, q } = list.filters
   const { sort } = list
@@ -77,7 +80,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
   const docCount = (count: number) => n(count, t('creditNotes.countOne', { count }), t('creditNotes.countOther', { count }))
   const todayStr = today()
   const badge = (d: CreditNote) => {
-    const shown = displayStatus({ type: 'credit_note', status: d.status, creditSettled: isSettled(d) }, todayStr)
+    const shown = shownStatus(d, todayStr)
     return <StatusBadge status={shown} label={t(statusLabelKey(shown))} />
   }
 
@@ -110,7 +113,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
   }
 
   function handleExport(rows: CreditNote[], bulk: boolean) {
-    exportCSV(rows, t)
+    exportCSV(rows, t, todayStr)
     const count = rows.length
     toast.success(bulk
       ? n(count, t('creditNotes.bulkExportedOne', { count }), t('creditNotes.bulkExportedOther', { count }))
@@ -160,7 +163,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                       {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{doc.date ?? '—'}</p>
+                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -199,7 +202,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>
-                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">{doc.date ?? '—'}</td>
+                <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.date, lang)}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
                 <td className="px-4 py-3">
                   {badge(doc)}

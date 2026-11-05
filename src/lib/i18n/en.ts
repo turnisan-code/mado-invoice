@@ -234,6 +234,20 @@ export const en = {
     bulkFailed: 'Bulk update failed: {error}',
     deleteFailed: 'Delete failed: {error}',
   },
+  views: {
+    clients: {
+      searchPlaceholder: 'Name, no., VAT ID, email…',
+    },
+    chart: {
+      month: 'Month',
+      revenue: 'Revenue',
+    },
+    reports: {
+      vatAt: 'VAT {rate} %',
+      rateBase: '{rate} % — taxable base',
+      exemptBase: 'Tax-exempt turnover (0 %), base amount',
+    },
+  },
   csv: {
     number: 'Number',
     client: 'Client',

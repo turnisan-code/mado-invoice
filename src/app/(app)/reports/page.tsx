@@ -11,13 +11,13 @@ import { istTurnover, type InvoiceHistory } from './ist'
 import { creditNoteOpen } from '@/lib/status'
 import { unappliedCreditNotes } from '@/lib/credits'
 import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
+import { clientDisplayName as clientName } from '@/lib/utils/clients'
 
-// FinanzOnline field names stay German in both UI languages.
-const KZ: Record<number, { base: string; vat: string }> = {
-  20: { base: 'KZ 022 — 20 % Normalsteuersatz, Bemessungsgrundlage', vat: 'USt 20 %' },
-  13: { base: 'KZ 006 — 13 % ermäßigter Steuersatz, Bemessungsgrundlage', vat: 'USt 13 %' },
-  10: { base: 'KZ 029 — 10 % ermäßigter Steuersatz, Bemessungsgrundlage', vat: 'USt 10 %' },
-  0:  { base: 'Steuerfreie Umsätze 0 %, Bemessungsgrundlage', vat: 'USt 0 %' },
+// FinanzOnline field names stay German in both UI languages; everything else follows the UI.
+const KZ_BASE: Record<number, string> = {
+  20: 'KZ 022 — 20 % Normalsteuersatz, Bemessungsgrundlage',
+  13: 'KZ 006 — 13 % ermäßigter Steuersatz, Bemessungsgrundlage',
+  10: 'KZ 029 — 10 % ermäßigter Steuersatz, Bemessungsgrundlage',
 }
 
 type ClientRef = { name: string; company: string | null } | null
@@ -38,7 +38,6 @@ function docTotals(d: DocRow) {
     d.tax_treatment,
   )
 }
-const clientName = (c: ClientRef | undefined) => c ? c.company || c.name : ''
 
 const card = 'bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 overflow-hidden'
 const cardHead = 'px-5 py-4 border-b border-neutral-100 dark:border-neutral-800'
@@ -251,8 +250,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <Row label="KZ 000 — Gesamtbetrag der Bemessungsgrundlage (steuerbare Umsätze)" value={formatMoney(taxableBase)} />
           {rates.map(r => (
             <div key={r}>
-              <Row label={KZ[r]?.base ?? `${r} % — Bemessungsgrundlage`} value={formatMoney(roundCents(vat[r].base))} />
-              <Row label={KZ[r]?.vat ?? `USt ${r} %`} value={formatMoney(roundCents(vat[r].vat))} bold />
+              <Row label={KZ_BASE[r] ?? (r === 0 ? t('views.reports.exemptBase') : t('views.reports.rateBase', { rate: r }))} value={formatMoney(roundCents(vat[r].base))} />
+              <Row label={t('views.reports.vatAt', { rate: r })} value={formatMoney(roundCents(vat[r].vat))} bold />
             </div>
           ))}
           {rcBase !== 0 && <Row label={t('exports.uva.reverseCharge')} value={formatMoney(rcBase)} note={t('exports.uva.reverseChargeNote')} />}

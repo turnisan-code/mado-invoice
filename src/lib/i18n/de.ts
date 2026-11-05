@@ -236,6 +236,20 @@ export const de = {
     bulkFailed: 'Mehrfachaktion fehlgeschlagen: {error}',
     deleteFailed: 'Löschen fehlgeschlagen: {error}',
   },
+  views: {
+    clients: {
+      searchPlaceholder: 'Name, Nr., UID, E-Mail…',
+    },
+    chart: {
+      month: 'Monat',
+      revenue: 'Umsatz',
+    },
+    reports: {
+      vatAt: 'USt {rate} %',
+      rateBase: '{rate} % — Bemessungsgrundlage',
+      exemptBase: 'Steuerfreie Umsätze 0 %, Bemessungsgrundlage',
+    },
+  },
   csv: {
     number: 'Nummer',
     client: 'Kunde',

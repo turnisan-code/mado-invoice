@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { formatMoney } from '@/lib/utils/document'
+import { useT } from '@/lib/i18n/client'
 
 export interface MonthData {
   label: string   // "Jan", "Feb" …
@@ -11,6 +12,7 @@ export interface MonthData {
 }
 
 export default function RevenueChart({ months, currency = 'EUR', label }: { months: MonthData[]; currency?: string; label?: string }) {
+  const { t } = useT()
   const [hovered, setHovered] = useState<number | null>(null)
   const max = Math.max(...months.map(m => m.revenue), 1)
 
@@ -22,12 +24,25 @@ export default function RevenueChart({ months, currency = 'EUR', label }: { mont
 
   return (
     <div className="w-full" style={{ fontFamily: 'inherit' }}>
+      {/* Screen readers get the numbers as a table; the bars only repeat them. */}
+      <div className="sr-only">
+        <table>
+          {label && <caption>{label}</caption>}
+          <thead>
+            <tr><th scope="col">{t('views.chart.month')}</th><th scope="col">{t('views.chart.revenue')}</th></tr>
+          </thead>
+          <tbody>
+            {months.map(m => (
+              <tr key={m.yearMonth}><th scope="row">{m.label} {m.yearMonth.slice(0, 4)}</th><td>{formatMoney(m.revenue, currency)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <svg
         viewBox={`0 0 ${W} ${H + LABEL_H}`}
         className="w-full"
         style={{ overflow: 'visible' }}
-        role="img"
-        aria-label={`${label ? `${label}: ` : ''}${months.map(m => `${m.label} ${formatMoney(m.revenue, currency)}`).join(', ')}`}
+        aria-hidden="true"
         onMouseLeave={() => setHovered(null)}
       >
         {months.map((m, i) => {
