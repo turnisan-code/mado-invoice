@@ -46,6 +46,8 @@ create table if not exists public.mcp_grants (
   client_kind          text not null constraint mcp_grants_client_kind_check check (client_kind in ('claude_ai', 'claude_code', 'static')),
   scopes               text[] not null,
   resource             text not null,
+  -- SHA-256 of the signed authorization request the owner approved: one request, one grant.
+  consent_hash         text unique,
   -- The grant's own Supabase session; its tokens are AES-256-GCM encrypted by the app (AAD = id).
   sb_session_id        uuid unique,
   sb_access_enc        text,
@@ -84,7 +86,8 @@ create table if not exists public.mcp_tokens (
   kind        text not null constraint mcp_tokens_kind_check check (kind in ('access', 'refresh')),
   expires_at  timestamptz not null,
   created_at  timestamptz not null default now(),
-  -- A refresh token presented again after rotated_at is theft: the grant is revoked.
+  -- A refresh token presented again more than 10 s after rotated_at is theft: the grant is
+  -- revoked. Within the 10 s (concurrent refreshes, a retry) the app issues a fresh pair.
   rotated_at  timestamptz,
   parent_hash text
 );
@@ -193,7 +196,9 @@ $$;
 
 -- ─── Bearer token lookup (service role) ──────────────────────────────────────
 -- The live grant behind an unexpired access token, counted against the per-grant rate limit
--- (120 calls a minute, 3000 a day). No row: unknown, expired or revoked.
+-- (120 calls a minute, 3000 a day). No row: unknown, expired or revoked. A grant whose Supabase
+-- session no longer exists (signed out everywhere, password changed) is revoked here
+-- ('session_ended'), so its cached session JWT is not used for the rest of its hour.
 create or replace function public.mcp_authenticate(p_token_hash text)
 returns table (
   grant_id             uuid,
@@ -227,6 +232,15 @@ begin
   where gr.id = t.grant_id and gr.revoked_at is null and gr.expires_at > now() and gr.idle_expires_at > now()
   for update;
   if not found then return; end if;
+
+  if not exists (select 1 from auth.sessions s where s.id = g.sb_session_id and s.user_id = g.user_id) then
+    update public.mcp_grants gr set
+      revoked_at = now(), revoked_reason = 'session_ended',
+      sb_access_enc = null, sb_access_expires_at = null, sb_refresh_enc = null, sb_lease_until = null
+    where gr.id = g.id;
+    delete from public.mcp_tokens tk where tk.grant_id = g.id;
+    return;
+  end if;
 
   if g.rate_minute is distinct from v_minute then g.rate_minute := v_minute; g.rate_minute_count := 0; end if;
   if g.rate_day is distinct from v_day then g.rate_day := v_day; g.rate_day_count := 0; end if;

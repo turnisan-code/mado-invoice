@@ -19,9 +19,10 @@ export default function Sidebar() {
   const accountActive = isNavActive(pathname, ACCOUNT_ITEM.href)
 
   // A full load drops the client router cache, so Back cannot show cached app pages after sign-out.
+  // This device only: Claude's connections keep their own sessions (Account → Sign out everywhere ends them).
   async function signOut() {
     rememberUiLang(lang)
-    await createClient().auth.signOut()
+    await createClient().auth.signOut({ scope: 'local' })
     window.location.assign('/login')
   }
 

@@ -76,7 +76,7 @@ export default function LoginForm({ next, linkError, mfaFactorId }: { next: stri
   // Leaves no half-signed-in (aal1) session behind.
   async function cancelMfa() {
     setBusy(true)
-    await createClient().auth.signOut().catch(() => {})
+    await createClient().auth.signOut({ scope: 'local' }).catch(() => {})
     setBusy(false)
     setFactorId(null)
     setCode('')

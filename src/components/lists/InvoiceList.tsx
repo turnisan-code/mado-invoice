@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, FileText, Download, CheckCircle, Send, X, Trash2, Repeat, Landmark, FileWarning, BookCheck } from 'lucide-react'
 import { toast } from 'sonner'
-import { formatMoney, calcTotals, today } from '@/lib/utils/document'
+import { formatMoney, today } from '@/lib/utils/document'
 import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
@@ -16,7 +16,11 @@ import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { StatusBadge } from './StatusBadge'
-import { displayStatus, isOverdue, statusLabelKey } from '@/lib/status'
+import { statusLabelKey } from '@/lib/status'
+import {
+  invoiceBalance as docBalance, invoiceListStatus as listStatus, invoiceShownStatus as shownStatus,
+  invoiceTotal as docTotal, invoiceTotals as docTotals, isOpenInvoice as isOpen,
+} from '@/lib/services/queries'
 import { bookamatErrorMessage, bookamatState, formatBookings, hasMoneyToBook, requestBookamatSync } from '@/lib/bookamat-client'
 import { invoiceKindBadge } from '@/lib/document-labels'
 import { isIssuedNoteList, latestIssued, type IssuedNote } from '@/lib/utils/bulk-issue'
@@ -72,23 +76,7 @@ const BOOKAMAT_BADGE: Record<Exclude<BookamatState, 'none'>, string> = {
   failed: 'text-red-700 bg-red-50 dark:bg-red-950/60 dark:text-red-300',
 }
 
-function docTotals(d: Invoice) {
-  return calcTotals(d.document_items, d.payments ?? [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment)
-}
-const docTotal = (d: Invoice) => docTotals(d).total
-// Nothing is owed on a draft (not issued yet) or a cancelled invoice (settled by its Storno).
-const docBalance = (d: Invoice) => d.status === 'draft' || d.status === 'cancelled' ? 0 : docTotals(d).balance_due
-// Outstanding: issued and still owing something; a zero total or a settled balance never is.
-const isOpen = (d: Invoice) => (d.status === 'sent' || d.status === 'overdue') && docTotal(d) > 0.005 && docBalance(d) > 0.005
 const clientLabel = (d: Invoice) => clientDisplayName(d.clients)
-// Between sent and overdue the due date decides, as in the filters and on the dashboard: the daily
-// run only catches the stored status up, e.g. after a due date was extended.
-const listStatus = (d: Invoice, todayStr: string) =>
-  d.status === 'sent' || d.status === 'overdue' ? (isOpen(d) && isOverdue(d, todayStr) ? 'overdue' : 'sent') : d.status
-// Partly paid and written-off invoices show that instead of their stored status. Dunning fees
-// and interest are paid on top and never change it.
-const shownStatus = (d: Invoice, todayStr: string) =>
-  displayStatus({ type: 'invoice', status: listStatus(d, todayStr), total: docTotal(d), payments: (d.payments ?? []).filter(p => p.kind !== 'fee') }, todayStr)
 
 function exportCSV(invoices: Invoice[], t: TFn, todayStr: string) {
   const rows = invoices.map(inv => {

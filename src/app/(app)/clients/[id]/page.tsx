@@ -7,13 +7,14 @@ import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
+import { formatDate, formatMoney, today } from '@/lib/utils/document'
 import { countryName, countryOptions } from '@/lib/utils/country'
 import { CLIENT_DEFAULTS_COLUMNS, clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
 import { StatusBadge } from '@/components/lists/StatusBadge'
-import { creditNoteSettled, displayStatus, statusLabelKey } from '@/lib/status'
+import { statusLabelKey } from '@/lib/status'
+import { getClientDetail } from '@/lib/services/queries'
 
 const typeRoute: Record<string, string> = {
   invoice: 'invoices',
@@ -28,57 +29,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const statusLabel = (status: string) => t(`status.${status}` as DictKey)
   const now = today()
 
-  const { data: client } = await supabase.from('clients').select('*').eq('id', id).single()
-  if (!client) notFound()
-
-  // The history list shows the 50 latest documents; the stats aggregate every invoice.
-  const [{ data: documents }, { data: invoices }, { data: settings }, { data: refunds }, { data: catalogue }, { data: rates }] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('id, type, number, date, due_date, status, currency, tax_treatment, discount_type, discount_value, document_items(*), payments(*)')
-      .eq('client_id', id)
-      .order('date', { ascending: false })
-      .limit(50),
-    supabase
-      .from('documents')
-      .select('status, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
-      .eq('client_id', id)
-      .eq('type', 'invoice'),
-    supabase.from('settings').select(CLIENT_DEFAULTS_COLUMNS).maybeSingle(),
-    // Money paid back to the client on credit notes.
-    supabase.from('payments').select('amount, documents!inner(client_id)').eq('kind', 'refund').eq('documents.client_id', id),
-    supabase.from('catalogue_items').select('*').order('sort_order'),
-    supabase.from('client_rates').select('id, client_id, catalogue_item_id, price, note').eq('client_id', id),
-  ])
-
-  const allDocs = documents ?? []
-  const allInvoices = invoices ?? []
-  const docTotals = (d: (typeof allInvoices)[number]) => calcTotals(
-    d.document_items ?? [],
-    d.payments ?? [],
-    d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null,
-    d.tax_treatment,
-  )
-  // Revenue is money: payments received less refunds. Skonto, write-offs, applied credit notes and
-  // dunning fees are no revenue.
-  const received = allInvoices.reduce((s, d) => s + (d.payments ?? []).filter(p => p.kind === 'payment').reduce((a, p) => a + Number(p.amount), 0), 0)
-  const totalRevenue = roundCents(received - (refunds ?? []).reduce((s, r) => s + Number(r.amount), 0))
-  const openBalance = allInvoices
-    .filter(d => d.status === 'sent' || d.status === 'overdue')
-    .reduce((s, d) => s + docTotals(d).balance_due, 0)
-  const invoiceCount = allInvoices.length
-
-  // A credit note is settled by its refunds and by the 'credit' rows that apply it to its invoice.
-  const creditNoteIds = allDocs.filter(d => d.type === 'credit_note' && d.status === 'sent').map(d => d.id)
-  const { data: credits } = creditNoteIds.length
-    ? await supabase.from('payments').select('credit_note_id, amount').eq('kind', 'credit').in('credit_note_id', creditNoteIds)
-    : { data: [] }
-  const applied = new Map<string, number>()
-  for (const c of credits ?? []) applied.set(c.credit_note_id, (applied.get(c.credit_note_id) ?? 0) + Number(c.amount))
-  const settledCredit = (doc: (typeof allDocs)[number], total: number) => {
-    const refunded = (doc.payments ?? []).filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0)
-    return creditNoteSettled(total, applied.get(doc.id) ?? 0, refunded)
-  }
+  const detail = await getClientDetail<Parameters<typeof toClientDefaults>[0]>(supabase, id, now, CLIENT_DEFAULTS_COLUMNS)
+  if (!detail) notFound()
+  const { client, documents: allDocs, totalRevenue, openBalance, invoiceCount, settings, catalogue, rates } = detail
 
   const displayName = clientDisplayName(client)
   const subtitle = [client.client_number, client.company && client.name ? client.name : null].filter(Boolean).join(' · ')
@@ -158,14 +111,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                 </Link>
               </div>
             )}
-            {allDocs.map(doc => {
-              const totals = docTotals(doc)
-              // As in the lists: partly paid / written off from the payments, expired from the date,
-              // settled from refunds and applied credits.
-              const shown = displayStatus({
-                type: doc.type, status: doc.status, due_date: doc.due_date, total: totals.total, payments: doc.payments ?? [],
-                creditSettled: doc.type === 'credit_note' && settledCredit(doc, totals.total),
-              }, now)
+            {allDocs.map(({ doc, total, shown }) => {
               return (
                 <Link
                   key={doc.id}
@@ -178,7 +124,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                     </div>
                     <div className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{t(`docTypes.${doc.type}` as DictKey)} · {formatDate(doc.date, lang)}</div>
                   </div>
-                  <span className="text-sm font-medium shrink-0">{formatMoney(totals.total, doc.currency)}</span>
+                  <span className="text-sm font-medium shrink-0">{formatMoney(total, doc.currency)}</span>
                   <StatusBadge status={shown} label={t(statusLabelKey(shown))} className="shrink-0" />
                 </Link>
               )

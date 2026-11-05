@@ -8,6 +8,11 @@ const PUBLIC_PATHS = ['/login', '/favicon.ico', '/manifest.webmanifest']
 // /auth/callback turns the emailed recovery link into a session, so it runs before anyone is signed in.
 const PUBLIC_PREFIXES = ['/portal/', '/api/portal/', '/api/cron/', '/api/gmail/callback', '/auth/', '/_next/', '/icon', '/apple-icon']
 
+// The Claude connector's endpoints authenticate themselves (bearer token, OAuth client) or are
+// public metadata; the cookie session plays no part, and a login redirect would break discovery.
+// Exact paths only. The consent page stays behind sign-in and the second factor.
+const SELF_AUTHENTICATED = new Set(['/api/mcp', '/api/oauth/token', '/api/oauth/revoke', '/oauth/authorize'])
+
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some(prefix => pathname.startsWith(prefix))
 }
@@ -18,6 +23,9 @@ export async function proxy(request: NextRequest) {
   request.headers.delete(PORTAL_TOKEN_HEADER)
   const portalToken = portalPageToken(request.nextUrl.pathname)
   if (portalToken) request.headers.set(PORTAL_TOKEN_HEADER, portalToken)
+
+  const path = request.nextUrl.pathname
+  if (SELF_AUTHENTICATED.has(path) || path.startsWith('/.well-known/')) return NextResponse.next({ request })
 
   let response = NextResponse.next({ request })
 

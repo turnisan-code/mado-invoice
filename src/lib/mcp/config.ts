@@ -36,6 +36,10 @@ export const AUTH_REQUEST_TTL = 10 * 60
 export const CODE_TTL = 120
 export const ACCESS_TOKEN_TTL = 60 * 60
 export const REFRESH_IDLE_TTL = 30 * 24 * 60 * 60
+// A refresh token presented again within this many seconds of its rotation is a concurrent or
+// retried refresh (several Claude Code sessions sharing a credential, a lost response) and gets a
+// fresh pair; later it is theft and revokes the grant. Supabase's own reuse interval is 10 s too.
+export const REFRESH_REUSE_WINDOW = 10
 export const GRANT_TTL = 90 * 24 * 60 * 60
 export const ACTION_TTL = 15 * 60
 export const APPROVAL_CODE_MAX_AGE = 5 * 60

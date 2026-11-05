@@ -3,16 +3,13 @@ import { createClient } from '@/lib/supabase/server'
 import { getT } from '@/lib/i18n/server'
 import InvoiceList, { type Invoice } from '@/components/lists/InvoiceList'
 import { isBookamatConfigured } from '@/lib/public-settings'
+import { listDocuments } from '@/lib/services/queries'
 
 export default async function InvoicesPage() {
   const supabase = await createClient()
 
   const [{ data: docs, error: docsError }, { data: schedules }, { data: settings }, { t }] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('id, number, status, invoice_kind, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, pdf_path, bookamat_error, bookamat_booking_id, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind), bookamat_bookings(year, booking_id)')
-      .eq('type', 'invoice')
-      .order('date', { ascending: false }),
+    listDocuments(supabase, 'invoice'),
     supabase.from('recurring_schedules').select('source_document_id'),
     supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id').maybeSingle(),
     getT(),

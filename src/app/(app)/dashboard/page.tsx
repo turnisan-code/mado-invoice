@@ -1,41 +1,16 @@
 import Link from 'next/link'
 import { CheckCircle, AlertTriangle, TrendingUp, Wallet, MessageSquare } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
+import { formatDate, formatMoney, today } from '@/lib/utils/document'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import { buttonVariants } from '@/components/ui/button'
 import { getT } from '@/lib/i18n/server'
 import { n, type DictKey } from '@/lib/i18n'
 import { makePeriod, periodParams } from '@/app/(app)/reports/period'
-import { unappliedCreditNotes } from '@/lib/credits'
 import ApplyCreditNotesButton from '@/components/layout/ApplyCreditNotesButton'
 import { clientDisplayName as clientName } from '@/lib/utils/clients'
-import { isOverdue } from '@/lib/status'
-
-// Month keys come from the Vienna calendar date and are shifted in UTC, so neither the server's
-// time zone nor a 31st (setMonth overflow) can move a payment into the wrong month.
-function shiftMonth(ym: string, delta: number): string {
-  const [y, m] = ym.split('-').map(Number)
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1))
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
-type ClientRef = { name: string; company: string | null } | null
-type DocItems = Parameters<typeof calcTotals>[0]
-type InvoiceRow = {
-  id: string
-  number: string | null
-  status: string
-  due_date: string | null
-  currency: string
-  tax_treatment: string | null
-  discount_type: string | null
-  discount_value: number | null
-  clients: ClientRef
-  document_items: DocItems
-  payments: { amount: number; kind?: string | null }[]
-}
+import { dashboardInvoiceTotals as docTotals, loadDashboardFigures } from '@/lib/services/reports'
 
 const card = 'bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700'
 
@@ -44,120 +19,21 @@ export default async function DashboardPage() {
   const { t, lang } = await getT()
 
   const now = today()
-  const thisMonth = now.slice(0, 7)
-  const thisYear = now.slice(0, 4)
-  const lastMonth = shiftMonth(thisMonth, -1)
-  const chartMonths = Array.from({ length: 12 }, (_, i) => shiftMonth(thisMonth, i - 11))
-  // The earliest month any figure needs: the chart window, last month or 1 January.
-  const since = `${[chartMonths[0], lastMonth, `${thisYear}-01`].sort()[0]}-01`
-
-  const items = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
-  const invoiceCols = `id, number, status, due_date, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${items}, payments(amount, kind)`
-
-  const [{ data: activeInvoices }, { data: received }, { data: refundRows }, { data: paidPayments }, { data: quotes }, { data: responseEvents }, unapplied, { data: unarchived, count: unarchivedCount }] = await Promise.all([
-    supabase.from('documents').select(invoiceCols).eq('type', 'invoice').in('status', ['sent', 'overdue']),
-    // Revenue is cash-based (Ist-Besteuerung): every money payment counts on the day it arrived,
-    // whatever the invoice status; Skonto and write-offs close invoices without revenue.
-    supabase.from('payments').select('amount, date, document_id, documents!inner(type)').eq('documents.type', 'invoice').eq('kind', 'payment').gte('date', since),
-    // Money paid back on credit notes leaves again on the day it was paid.
-    supabase.from('payments').select('amount, date').eq('kind', 'refund').gte('date', since),
-    // Recently paid = the invoices whose latest payment is newest, not the newest invoices.
-    supabase
-      .from('payments')
-      .select(`id, date, document_id, documents!inner(type, ${invoiceCols})`)
-      .eq('documents.type', 'invoice')
-      .eq('documents.status', 'paid')
-      // An applied credit note is no money received and fees come on top; neither dates a payment here.
-      .in('kind', ['payment', 'skonto', 'writeoff'])
-      .order('date', { ascending: false })
-      .order('id', { ascending: false })
-      .limit(40),
-    supabase.from('documents').select('id, number, date, due_date, clients(name, company)').eq('type', 'quote').eq('status', 'sent').order('date', { ascending: false }).limit(5),
-    // Client answers in the portal stay here until the owner opens the quote.
-    supabase
-      .from('document_events')
-      .select('id, created_at, detail, documents!inner(id, number, clients(name, company))')
-      .eq('type', 'portal_responded')
-      .is('read_at', null)
-      .order('created_at', { ascending: false })
-      .limit(10),
-    // Credit notes that should already have reduced their invoice's balance.
-    unappliedCreditNotes(supabase).catch(err => {
-      console.error('[dashboard] unapplied credit notes:', err)
-      return []
-    }),
-    // Issued documents whose frozen PDF (the archive copy) was never stored.
-    supabase
-      .from('documents')
-      .select('id, type, number', { count: 'exact' })
-      .in('type', ['invoice', 'credit_note'])
-      .not('number', 'is', null)
-      .is('pdf_path', null)
-      .order('date', { ascending: false })
-      .limit(5),
-  ])
-  const responses = (responseEvents ?? []) as unknown as { id: string; created_at: string; detail: { action?: string }; documents: { id: string; number: string | null; clients: ClientRef } }[]
-
-  const active = (activeInvoices ?? []) as unknown as InvoiceRow[]
-  const payments = (received ?? []) as unknown as { amount: number; date: string; document_id: string }[]
-  // Revenue is money received less money paid back.
-  const moneyRows = [...payments, ...((refundRows ?? []) as { amount: number; date: string }[]).map(r => ({ amount: -r.amount, date: r.date }))]
-
-  const docTotals = (doc: InvoiceRow) => calcTotals(
-    doc.document_items ?? [],
-    doc.payments ?? [],
-    doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
-    doc.tax_treatment,
-  )
-
-  // Only what is still owed counts: an invoice with a zero total or a settled balance is neither
-  // outstanding nor overdue, and the due date decides which of the two (isOverdue).
-  const owing = active.filter(i => {
-    const totals = docTotals(i)
-    return totals.total > 0.005 && totals.balance_due > 0.005
-  })
-  const overdue = owing.filter(i => isOverdue(i, now))
-  const open = owing.filter(i => !isOverdue(i, now))
-
-  // Outstanding money is what is still unpaid, not the invoice totals
-  const overdueTotal = roundCents(overdue.reduce((s, d) => s + docTotals(d).balance_due, 0))
-  const openTotal = roundCents(open.reduce((s, d) => s + docTotals(d).balance_due, 0))
-  const outstanding = roundCents(overdueTotal + openTotal)
-  const outstandingCount = open.length + overdue.length
-
-  const withDueDate = overdue.filter(i => i.due_date)
-  const oldestOverdueDays = withDueDate.length
-    ? Math.max(...withDueDate.map(i => Math.floor((new Date(now).getTime() - new Date(i.due_date!).getTime()) / 86400000)))
-    : null
-
-  const inMonth = (m: string) => moneyRows.filter(p => p.date?.startsWith(m))
-  const sum = (ps: { amount: number }[]) => roundCents(ps.reduce((s, p) => s + p.amount, 0))
-  const revenueThisMonth = sum(inMonth(thisMonth))
-  const revenueLastMonth = sum(inMonth(lastMonth))
-  const paidThisMonthCount = new Set(payments.filter(p => p.date?.startsWith(thisMonth)).map(p => p.document_id)).size
-  const momDelta = revenueLastMonth > 0
-    ? Math.round(((revenueThisMonth - revenueLastMonth) / revenueLastMonth) * 100)
-    : null
-  const revenueThisYear = sum(moneyRows.filter(p => p.date?.startsWith(thisYear)))
-
-  const recentPaid: { doc: InvoiceRow; paidOn: string }[] = []
-  const seen = new Set<string>()
-  for (const p of (paidPayments ?? []) as unknown as { date: string; document_id: string; documents: InvoiceRow }[]) {
-    if (seen.has(p.document_id)) continue
-    seen.add(p.document_id)
-    recentPaid.push({ doc: p.documents, paidOn: p.date })
-    if (recentPaid.length === 6) break
-  }
+  const {
+    thisMonth, thisYear, overdue, overdueTotal, outstanding, outstandingCount, oldestOverdueDays,
+    revenueThisMonth, paidThisMonthCount, momDelta, revenueThisYear, recentPaid, chartTotal,
+    pendingQuotes: quotes, responses, unapplied, unarchived, unarchivedCount,
+    months: monthFigures,
+  } = await loadDashboardFigures(supabase, now)
 
   // Last 12 months bar chart from payment dates
   const monthLabels = t('dashboard.months').split(',')
-  const months: MonthData[] = chartMonths.map(key => ({
-    label: monthLabels[Number(key.slice(5, 7)) - 1],
-    yearMonth: key,
-    revenue: sum(inMonth(key)),
-    current: key === thisMonth,
+  const months: MonthData[] = monthFigures.map(m => ({
+    label: monthLabels[Number(m.yearMonth.slice(5, 7)) - 1],
+    yearMonth: m.yearMonth,
+    revenue: m.revenue,
+    current: m.current,
   }))
-  const chartTotal = sum(months.map(m => ({ amount: m.revenue })))
 
   const year = Number(thisYear)
   const monthReport = `/reports?${periodParams(makePeriod('month', year, Number(thisMonth.slice(5, 7))))}`
@@ -355,7 +231,7 @@ export default async function DashboardPage() {
               <p className="px-5 py-8 text-sm text-neutral-500 dark:text-neutral-400 text-center">{t('dashboard.noPendingQuotes')}</p>
             )}
             {quotes?.map(q => {
-              const name = clientName(q.clients as unknown as ClientRef)
+              const name = clientName(q.clients)
               const expired = !!q.due_date && q.due_date < now
               return (
                 <Link key={q.id} href={`/quotes/${q.id}`} className="flex items-center px-5 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors gap-3">

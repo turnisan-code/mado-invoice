@@ -128,13 +128,15 @@ Approvals: by default every irreversible action is approved in Mado. Claude show
 `/mcp/approve/<id>` with the summary; the page shows exactly what will happen and asks for a
 current authenticator code. Pending approvals are also listed at `/mcp/approve` and under Account
 → Connected apps, where each action kind can be switched to “Confirm in chat” (then the Claude
-app's prompt is the only gate). An email to any address that is not on the client record is
-always approved in Mado. A prepared action expires after 15 minutes.
+app's prompt is the only gate). Loosening these settings (a kind to chat, or the approval code
+off) asks for a current authenticator code; tightening them does not. An email to any address
+that is not on the client record is always approved in Mado. A prepared action expires after 15
+minutes.
 
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;
-“Sign out everywhere”, a password change or removing the connector in Claude also disconnects
-Claude. Limits per connection: an access token lasts 1 hour; the connection ends after 30 days without
+“Sign out everywhere” and removing the connector in Claude also disconnect Claude; so does a
+password change, on Claude's next request. Limits per connection: an access token lasts 1 hour; the connection ends after 30 days without
 use and after 90 days at most; 120 calls a minute and 3000 a day.
 
 ## Crons
