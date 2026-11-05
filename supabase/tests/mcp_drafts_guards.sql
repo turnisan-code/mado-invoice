@@ -1,6 +1,7 @@
 -- Checks the guards of supabase/migrations/20261105_mcp_drafts.sql: a Claude session writes the
--- lines of drafts only (MI044), and an address it put on a client sends an action naming it to
--- Mado for approval until the owner saves the client there.
+-- lines of drafts only (MI044), leaves the template of a schedule that issues automatically as it
+-- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
+-- until the owner saves the client there.
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
@@ -47,8 +48,12 @@ declare
   v_browser uuid := gen_random_uuid();
   v_claude  uuid := gen_random_uuid();
   v_client  uuid;
+  v_other   uuid;
   v_draft   uuid;
   v_issued  uuid;
+  v_tpl     uuid;
+  v_tpl_is  uuid;
+  v_tpl_dr  uuid;
   v_base    jsonb;
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
@@ -65,12 +70,31 @@ begin
   insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
   values (v_draft, 0, 'item', 'Draft line', 1, 'hour', 100, 20),
          (v_issued, 0, 'item', 'Issued line', 1, 'hour', 100, 20);
+
+  -- Templates: a draft of a paused 'issue' schedule, an issued one of an active 'issue' schedule,
+  -- and a draft of a 'draft' schedule.
+  insert into public.clients (name) values ('MCP draft guard test, other') returning id into v_other;
+  insert into public.documents (type, client_id, notes) values ('invoice', v_client, 'Template') returning id into v_tpl;
+  insert into public.documents (type, client_id, number, status, notes) values ('invoice', v_client, 'MCP-GUARD-TEST-2', 'sent', 'Template') returning id into v_tpl_is;
+  insert into public.documents (type, client_id, notes) values ('invoice', v_client, 'Template') returning id into v_tpl_dr;
+  insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
+  values (v_tpl, 0, 'item', 'Retainer', 1, 'month', 500, 20),
+         (v_tpl_is, 0, 'item', 'Retainer', 1, 'month', 500, 20),
+         (v_tpl_dr, 0, 'item', 'Retainer', 1, 'month', 500, 20);
+  insert into public.recurring_schedules (source_document_id, name, interval, anchor_day, next_date, mode, active)
+  values (v_tpl, 'MCP draft guard test, issue, paused', 'monthly', 1, current_date + 30, 'issue', false),
+         (v_tpl_is, 'MCP draft guard test, issue', 'monthly', 1, current_date + 30, 'issue', true),
+         (v_tpl_dr, 'MCP draft guard test, draft', 'monthly', 1, current_date + 30, 'draft', true);
   update public.settings set mcp_confirm_policy = '{"send_email": "chat", "send_reminder": "chat"}', mcp_approval_totp = true where id is not null;
 
   v_base := jsonb_build_object('sub', v_owner, 'role', 'authenticated', 'aud', 'authenticated', 'aal', 'aal2');
   perform set_config('mcp_test.client', v_client::text, true);
   perform set_config('mcp_test.draft', v_draft::text, true);
   perform set_config('mcp_test.issued', v_issued::text, true);
+  perform set_config('mcp_test.other', v_other::text, true);
+  perform set_config('mcp_test.tpl', v_tpl::text, true);
+  perform set_config('mcp_test.tpl_issued', v_tpl_is::text, true);
+  perform set_config('mcp_test.tpl_draft', v_tpl_dr::text, true);
   perform set_config('mcp_test.browser', (v_base || jsonb_build_object('session_id', v_browser,
     'amr', jsonb_build_array(jsonb_build_object('method', 'totp', 'timestamp', v_now - 60))))::text, true);
   perform set_config('mcp_test.claude', (v_base || jsonb_build_object('session_id', v_claude,
@@ -109,6 +133,55 @@ begin
     format($q$update public.document_items set document_id = %L where document_id = %L$q$, v_issued, v_draft), 'MI044');
   perform public.mcp_drafts_test_ok('the issued document''s line is unchanged',
     (select count(*) = 1 and bool_and(description = 'Issued line') from public.document_items where document_id = v_issued));
+end $$;
+
+-- ─── Claude: templates of schedules that issue automatically ─────────────────
+do $$
+declare
+  v_tpl    uuid := current_setting('mcp_test.tpl')::uuid;
+  v_tpl_is uuid := current_setting('mcp_test.tpl_issued')::uuid;
+  v_tpl_dr uuid := current_setting('mcp_test.tpl_draft')::uuid;
+  v_other  uuid := current_setting('mcp_test.other')::uuid;
+begin
+  perform public.mcp_drafts_test_raises('claude cannot change a paused issue template''s notes (MI045)',
+    format($q$update public.documents set notes = 'Pay to another account' where id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot change its discount (MI045)',
+    format($q$update public.documents set discount_type = 'percent', discount_value = 50 where id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot change its client (MI045)',
+    format($q$update public.documents set client_id = %L where id = %L$q$, v_other, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot change its tax treatment (MI045)',
+    format($q$update public.documents set tax_treatment = 'non_eu' where id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot replace its lines (MI045)',
+    format($q$select public.replace_document_items(%L, '[]'::jsonb)$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot add a line (MI045)',
+    format($q$insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit_price, vat_rate) values (%L, 1, 'item', 'Extra', 1, 9999, 20)$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot change a line (MI045)',
+    format($q$update public.document_items set unit_price = 5000 where document_id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot delete a line (MI045)',
+    format($q$delete from public.document_items where document_id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_raises('claude cannot delete the template (MI045)',
+    format($q$delete from public.documents where id = %L$q$, v_tpl), 'MI045');
+  perform public.mcp_drafts_test_ok('the paused template is as the owner left it',
+    (select notes = 'Template' and discount_type is null and client_id = current_setting('mcp_test.client')::uuid and tax_treatment = 'at_vat'
+       from public.documents where id = v_tpl)
+    and (select count(*) = 1 and bool_and(unit_price = 500) from public.document_items where document_id = v_tpl));
+  update public.documents set service_date = current_date where id = v_tpl;
+  perform public.mcp_drafts_test_ok('claude still sets what the cron does not copy',
+    (select service_date = current_date from public.documents where id = v_tpl));
+
+  perform public.mcp_drafts_test_raises('claude cannot change an issued issue template''s notes (MI045)',
+    format($q$update public.documents set notes = 'x' where id = %L$q$, v_tpl_is), 'MI045');
+  perform public.mcp_drafts_test_raises('an issued template''s line: MI044 first',
+    format($q$update public.document_items set unit_price = 1 where document_id = %L$q$, v_tpl_is), 'MI044');
+  update public.documents set reminder_level = 1, notes = notes where id = v_tpl_is;
+  perform public.mcp_drafts_test_ok('claude still records a reminder on an issued template',
+    (select reminder_level = 1 and notes = 'Template' from public.documents where id = v_tpl_is));
+
+  update public.documents set notes = 'Edited by Claude' where id = v_tpl_dr;
+  insert into public.document_items (document_id, sort_order, line_type, description) values (v_tpl_dr, 1, 'text', 'Note');
+  perform public.mcp_drafts_test_ok('a draft-mode schedule''s template stays editable',
+    (select notes = 'Edited by Claude' from public.documents where id = v_tpl_dr)
+    and (select count(*) = 2 from public.document_items where document_id = v_tpl_dr));
 end $$;
 
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
@@ -160,6 +233,12 @@ begin
   values (current_setting('mcp_test.issued')::uuid, 1, 'text', 'Owner note');
   perform public.mcp_drafts_test_ok('browser still writes an issued document''s lines',
     exists (select 1 from public.document_items where document_id = current_setting('mcp_test.issued')::uuid and description = 'Owner note'));
+
+  update public.documents set notes = 'Owner edit' where id = current_setting('mcp_test.tpl')::uuid;
+  insert into public.document_items (document_id, sort_order, line_type, description) values (current_setting('mcp_test.tpl')::uuid, 1, 'text', 'Owner note');
+  perform public.mcp_drafts_test_ok('browser still edits the template of an issue schedule',
+    (select notes = 'Owner edit' from public.documents where id = current_setting('mcp_test.tpl')::uuid)
+    and (select count(*) = 2 from public.document_items where document_id = current_setting('mcp_test.tpl')::uuid));
 
   update public.clients set phone = '+43 1 234' where id = v_client returning mcp_recipients into v_marks;
   perform public.mcp_drafts_test_ok('browser: another field saved, the marks stay', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));

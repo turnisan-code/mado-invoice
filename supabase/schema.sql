@@ -1913,7 +1913,10 @@ end;
 $$;
 
 -- Claude runs a 'chat' action: only the grant that prepared it, only once, only while pending
--- and unexpired.
+-- and unexpired, and only while the owner's policy still lets Claude confirm its kind. A kind
+-- switched back to approval in Mado since moves the pending action there: its approval becomes
+-- 'app', nothing is claimed and no row is returned (raising would undo the move), so the app
+-- answers with the approval link.
 create or replace function public.mcp_claim_action(p_handle_hash text)
 returns setof public.mcp_actions
 language plpgsql security definer
@@ -1924,6 +1927,12 @@ declare
   v_row   public.mcp_actions%rowtype;
 begin
   if v_grant is not null and public.is_app_user() then
+    update public.mcp_actions a set approval = 'app'
+    where a.handle_hash = p_handle_hash and a.grant_id = v_grant and a.approval = 'chat'
+      and a.status = 'pending' and a.expires_at > now()
+      and coalesce((select s.mcp_confirm_policy ->> a.kind from public.settings s limit 1), 'app') <> 'chat';
+    if found then return; end if;
+
     update public.mcp_actions a set
       status = 'running', claimed_at = now(), claimed_via = 'chat', claimed_session = public.mcp_jwt_session_id()
     where a.handle_hash = p_handle_hash and a.grant_id = v_grant and a.approval = 'chat'
@@ -2111,9 +2120,11 @@ revoke execute on function public.mcp_calls_prune() from public, anon, authentic
 -- ─── Claude connector: drafts only, recipients Claude wrote ──────────────────
 -- 20261105_mcp_drafts.sql. A Claude session writes the lines of drafts only (MI044), whichever
 -- path writes them; replace_document_items locks the document first, so a draft issued while
--- Claude saves it keeps the lines it was issued with. Addresses a Claude session put on a client
--- (clients.mcp_recipients) never count as on the client record until the owner saves the client
--- in Mado: an action whose arguments name one is approved in Mado whatever the policy says.
+-- Claude saves it keeps the lines it was issued with. It neither changes what the recurring cron
+-- copies from the template of a schedule in 'issue' mode (active or paused) nor deletes such a
+-- template (MI045). Addresses a Claude session put on a client (clients.mcp_recipients) never
+-- count as on the client record until the owner saves the client in Mado: an action whose
+-- arguments name one is approved in Mado whatever the policy says, and the reminder cron skips them.
 create or replace function public.document_items_mcp_guard()
 returns trigger
 language plpgsql security definer
@@ -2132,6 +2143,13 @@ begin
     ) then
       raise exception using errcode = 'MI044', message = 'Only a draft''s lines can be changed from a Claude connection.';
     end if;
+    if exists (
+      select 1 from public.recurring_schedules r
+      where r.source_document_id in (v_old, v_new) and r.mode = 'issue'
+    ) then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
   return new;
@@ -2142,6 +2160,42 @@ drop trigger if exists document_items_mcp_guard on public.document_items;
 create trigger document_items_mcp_guard
   before insert or update or delete on public.document_items
   for each row execute function public.document_items_mcp_guard();
+
+-- ─── Templates of schedules that issue automatically ─────────────────────────
+-- What the recurring cron copies into every period's invoice (insertPeriodInvoice in
+-- src/lib/utils/recurring.ts: the client, language, tax treatment, notes, discount, Skonto and
+-- the lines) stays as the owner left it while a schedule in 'issue' mode, active or paused, uses
+-- the document as its template; nor can a Claude session delete such a template. Paying,
+-- reminding, issuing, cancelling or a Storno of the template change none of it and stay possible.
+create or replace function public.documents_mcp_template_guard()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if public.is_mcp_session() and exists (
+    select 1 from public.recurring_schedules r where r.source_document_id = old.id and r.mode = 'issue'
+  ) then
+    if tg_op = 'DELETE' then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
+    if (new.client_id, new.language, new.tax_treatment, new.notes, new.discount_type, new.discount_value, new.skonto_percent, new.skonto_days)
+       is distinct from (old.client_id, old.language, old.tax_treatment, old.notes, old.discount_type, old.discount_value, old.skonto_percent, old.skonto_days) then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_mcp_template_guard on public.documents;
+create trigger documents_mcp_template_guard
+  before update of client_id, language, tax_treatment, notes, discount_type, discount_value, skonto_percent, skonto_days or delete
+  on public.documents
+  for each row execute function public.documents_mcp_template_guard();
 
 -- The addresses in a client's email field and CC list (or in any text), lower-case and split as
 -- the app splits address lists.
@@ -2237,6 +2291,7 @@ create trigger mcp_actions_recipients
 revoke execute on function public.mcp_address_set(text[]) from public, anon;
 grant execute on function public.mcp_address_set(text[]) to authenticated;
 revoke execute on function public.document_items_mcp_guard() from public, anon, authenticated;
+revoke execute on function public.documents_mcp_template_guard() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients_seen() from public, anon, authenticated;
 revoke execute on function public.mcp_actions_recipients() from public, anon, authenticated;

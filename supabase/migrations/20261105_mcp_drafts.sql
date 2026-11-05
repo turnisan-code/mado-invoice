@@ -4,12 +4,17 @@
 --     refused, whichever path writes it (replace_document_items, a final invoice's deduction
 --     lines). replace_document_items locks the document first, so a draft issued while Claude
 --     saves it keeps the lines it was issued with. The browser is not affected.
+--   * The template of a recurring schedule that issues automatically (mode 'issue', active or
+--     paused): a Claude session neither changes what the recurring cron copies from it nor deletes
+--     it (documents_mcp_template_guard, document_items_mcp_guard, MI045), so it cannot prime an
+--     invoice the cron numbers without anyone approving it. The browser is not affected.
 --   * clients.mcp_recipients: the addresses a Claude session put on a client's email or CC list,
 --     until the owner saves that client in Mado. They never count as on the client record: an
 --     action whose arguments name one of them is approved in Mado whatever the policy says
 --     (mcp_actions_recipients), so Claude cannot write an address onto a client and then send
---     there with only the chat prompt as the gate.
--- Error code: MI044 = only a draft's lines can be changed from a Claude connection.
+--     there with only the chat prompt as the gate. The reminder cron skips them too.
+-- Error codes: MI044 = only a draft's lines can be changed from a Claude connection, MI045 = the
+-- template of a schedule that issues automatically cannot be changed or deleted from one.
 -- Mirrored in supabase/schema.sql; supabase/tests/mcp_drafts_guards.sql checks the guards and
 -- rolls back. Idempotent — safe to re-run.
 
@@ -32,6 +37,13 @@ begin
     ) then
       raise exception using errcode = 'MI044', message = 'Only a draft''s lines can be changed from a Claude connection.';
     end if;
+    if exists (
+      select 1 from public.recurring_schedules r
+      where r.source_document_id in (v_old, v_new) and r.mode = 'issue'
+    ) then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
   end if;
   if tg_op = 'DELETE' then return old; end if;
   return new;
@@ -42,6 +54,42 @@ drop trigger if exists document_items_mcp_guard on public.document_items;
 create trigger document_items_mcp_guard
   before insert or update or delete on public.document_items
   for each row execute function public.document_items_mcp_guard();
+
+-- ─── Templates of schedules that issue automatically ─────────────────────────
+-- What the recurring cron copies into every period's invoice (insertPeriodInvoice in
+-- src/lib/utils/recurring.ts: the client, language, tax treatment, notes, discount, Skonto and
+-- the lines) stays as the owner left it while a schedule in 'issue' mode, active or paused, uses
+-- the document as its template; nor can a Claude session delete such a template. Paying,
+-- reminding, issuing, cancelling or a Storno of the template change none of it and stay possible.
+create or replace function public.documents_mcp_template_guard()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  if public.is_mcp_session() and exists (
+    select 1 from public.recurring_schedules r where r.source_document_id = old.id and r.mode = 'issue'
+  ) then
+    if tg_op = 'DELETE' then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
+    if (new.client_id, new.language, new.tax_treatment, new.notes, new.discount_type, new.discount_value, new.skonto_percent, new.skonto_days)
+       is distinct from (old.client_id, old.language, old.tax_treatment, old.notes, old.discount_type, old.discount_value, old.skonto_percent, old.skonto_days) then
+      raise exception using errcode = 'MI045',
+        message = 'The template of a recurring schedule that issues invoices automatically cannot be changed or deleted from a Claude connection.';
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_mcp_template_guard on public.documents;
+create trigger documents_mcp_template_guard
+  before update of client_id, language, tax_treatment, notes, discount_type, discount_value, skonto_percent, skonto_days or delete
+  on public.documents
+  for each row execute function public.documents_mcp_template_guard();
 
 -- ─── Recipients Claude wrote ─────────────────────────────────────────────────
 alter table public.clients add column if not exists mcp_recipients text[] not null default '{}';
@@ -141,6 +189,7 @@ create trigger mcp_actions_recipients
 revoke execute on function public.mcp_address_set(text[]) from public, anon;
 grant execute on function public.mcp_address_set(text[]) to authenticated;
 revoke execute on function public.document_items_mcp_guard() from public, anon, authenticated;
+revoke execute on function public.documents_mcp_template_guard() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients() from public, anon, authenticated;
 revoke execute on function public.clients_mcp_recipients_seen() from public, anon, authenticated;
 revoke execute on function public.mcp_actions_recipients() from public, anon, authenticated;

@@ -6,7 +6,8 @@
 --   * mcp_actions: irreversible actions Claude prepared (issue, send, remind, Storno, cancel,
 --     delete, Bookamat sync, issue and send). The approval channel is decided here from
 --     settings.mcp_confirm_policy ('app' unless the owner set the kind to 'chat'); only the grant
---     that prepared a 'chat' action can claim it, only a browser session can approve or reject.
+--     that prepared a 'chat' action can claim it, and only while its kind is still set to 'chat'
+--     (switched back, the action moves to Mado); only a browser session can approve or reject.
 --   * mcp_calls: the tool-call audit (tool, ok, error code, duration), kept 90 days.
 --   * settings.mcp_confirm_policy and settings.mcp_approval_totp (approving in Mado asks for a
 --     current authenticator code) cannot be changed from a Claude session, nor can it insert or
@@ -328,7 +329,10 @@ end;
 $$;
 
 -- Claude runs a 'chat' action: only the grant that prepared it, only once, only while pending
--- and unexpired.
+-- and unexpired, and only while the owner's policy still lets Claude confirm its kind. A kind
+-- switched back to approval in Mado since moves the pending action there: its approval becomes
+-- 'app', nothing is claimed and no row is returned (raising would undo the move), so the app
+-- answers with the approval link.
 create or replace function public.mcp_claim_action(p_handle_hash text)
 returns setof public.mcp_actions
 language plpgsql security definer
@@ -339,6 +343,12 @@ declare
   v_row   public.mcp_actions%rowtype;
 begin
   if v_grant is not null and public.is_app_user() then
+    update public.mcp_actions a set approval = 'app'
+    where a.handle_hash = p_handle_hash and a.grant_id = v_grant and a.approval = 'chat'
+      and a.status = 'pending' and a.expires_at > now()
+      and coalesce((select s.mcp_confirm_policy ->> a.kind from public.settings s limit 1), 'app') <> 'chat';
+    if found then return; end if;
+
     update public.mcp_actions a set
       status = 'running', claimed_at = now(), claimed_via = 'chat', claimed_session = public.mcp_jwt_session_id()
     where a.handle_hash = p_handle_hash and a.grant_id = v_grant and a.approval = 'chat'
