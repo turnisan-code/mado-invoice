@@ -13,8 +13,8 @@ import { Select } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import { formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
-import { creditNoteOpen, creditNoteSettled, lifecycleErrorMessage, paymentDateIssue } from '@/lib/status'
-import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
+import { creditNoteOpen, creditNoteSettled, paymentDateIssue } from '@/lib/status'
+import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, formatBookings, planBookings, requestBookamatSync, unbookedPlan, type BookingRow,
 } from '@/lib/bookamat-client'
@@ -153,7 +153,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     try {
       const row = { date, amount: amt, method, reference: reference.trim() || null, note: note.trim() || null }
       const { error } = await supabase.from('payments').insert({ document_id: creditNoteId, kind: 'refund', ...row })
-      if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+      if (error) { toast.error(dbErrorMessage(t, error)); return }
       await logEvent(supabase, creditNoteId, 'payment_added', { ...row, kind: 'refund', reference: row.reference ?? undefined })
       toast.success(t('lifecycle.credit.refundRecorded'))
       setAmount(null)
@@ -171,7 +171,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     setSaving(true)
     try {
       const { error } = await supabase.rpc('remove_payment', { p_payment_id: refund.id, p_reopen: false })
-      if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+      if (error) { toast.error(dbErrorMessage(t, error)); return }
       await logEvent(supabase, creditNoteId, 'payment_removed', { amount: refund.amount, date: refund.date, kind: 'refund', method: refund.method })
       setPendingRemove(null)
       router.refresh()

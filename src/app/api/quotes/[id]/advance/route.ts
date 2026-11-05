@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server'
-import { databaseError, invalidJson, isUuid, readJsonObject, requireUser } from '@/lib/auth'
+import { apiError, databaseError, invalidJson, isUuid, readJsonObject, requireUser } from '@/lib/auth'
 import { advanceItems, billedAmount, depositTotals, loadQuoteDeposits } from '@/lib/deposits'
 import { logEvent } from '@/lib/events'
-import { getT } from '@/lib/i18n/server'
+import { getUiLang } from '@/lib/i18n/server'
+import { asDbError } from '@/lib/status'
 import { addDays, formatMoney, roundCents, today } from '@/lib/utils/document'
 
 // An advance invoice (Anzahlungsrechnung) for part of a sent or accepted quote: { mode: 'percent',
@@ -14,47 +15,50 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const auth = await requireUser()
   if (!auth.ok) return auth.response
   const { supabase } = auth
-  const { t } = await getT()
   const { id } = await params
-  if (!isUuid(id)) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
+  if (!isUuid(id)) return apiError(404, 'not_found', 'Quote not found')
 
   const body = await readJsonObject(req)
   if (!body) return invalidJson()
   const mode = body.mode === 'percent' || body.mode === 'amount' ? body.mode : null
   const value = typeof body.value === 'number' && Number.isFinite(body.value) ? body.value : null
   if (!mode || value == null || value <= 0 || (mode === 'percent' && value > 100)) {
-    return NextResponse.json({ error: t('deposits.errors.badAmount') }, { status: 400 })
+    return apiError(400, 'deposit_bad_amount', 'Expected a percentage up to 100 or an amount above zero')
   }
 
   const { data: quote, error } = await supabase.from('documents')
     .select('id, number, status, date, client_id, service_date, service_date_end, language, tax_treatment, discount_type, discount_value, buyer_reference, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), clients(payment_days)')
     .eq('id', id).eq('type', 'quote').maybeSingle()
   if (error) return databaseError(error)
-  if (!quote) return NextResponse.json({ error: t('lifecycle.errors.notFound'), code: 'not_found' }, { status: 404 })
+  if (!quote) return apiError(404, 'not_found', 'Quote not found')
   if (quote.status !== 'sent' && quote.status !== 'accepted') {
-    return NextResponse.json({ error: t('lifecycle.errors.quoteNotConvertible') }, { status: 409 })
+    return apiError(409, 'MI016', 'Only a sent or accepted quote can be invoiced')
   }
 
   const quoteTotal = depositTotals(quote).total
   const gross = roundCents(mode === 'percent' ? quoteTotal * value / 100 : value)
-  if (quoteTotal <= 0 || gross <= 0) return NextResponse.json({ error: t('deposits.errors.emptyQuote') }, { status: 400 })
+  if (quoteTotal <= 0 || gross <= 0) return apiError(400, 'empty_quote', 'The quote has no amount to ask an advance payment for')
   const [deposits, { data: conversion, error: convErr }] = await Promise.all([
-    loadQuoteDeposits(supabase, id),
+    loadQuoteDeposits(supabase, id).then(list => ({ list, error: null }), (err: unknown) => ({ list: [], error: asDbError(err) })),
     supabase.from('documents').select('id').eq('converted_from_id', id).eq('type', 'invoice')
       .in('invoice_kind', ['standard', 'final']).neq('status', 'cancelled').limit(1).maybeSingle(),
   ])
+  if (deposits.error) return databaseError(deposits.error)
   if (convErr) return databaseError(convErr)
-  if (conversion) return NextResponse.json({ error: t('deposits.errors.quoteConverted') }, { status: 409 })
-  const earlier = deposits
+  if (conversion) return apiError(409, 'quote_converted', 'The quote already has its invoice')
+  const earlier = deposits.list
     .filter(d => d.invoice_kind === 'advance' && d.status !== 'cancelled')
     .reduce((s, d) => s + billedAmount(d), 0)
   if (roundCents(earlier + gross) > quoteTotal + 0.005) {
-    return NextResponse.json({ error: t('deposits.errors.exceedsQuote', { amount: formatMoney(roundCents(earlier + gross)), total: formatMoney(quoteTotal) }) }, { status: 409 })
+    const uiLang = await getUiLang()
+    return apiError(409, 'exceeds_quote', 'Advance invoices would exceed the quote total', {
+      details: { amount: formatMoney(roundCents(earlier + gross), 'EUR', uiLang), total: formatMoney(quoteTotal, 'EUR', uiLang) },
+    })
   }
 
   const lang = quote.language === 'en' ? 'en' : 'de'
   const lines = advanceItems(quote, gross, mode === 'percent' ? value : null, lang)
-  if (!lines.length) return NextResponse.json({ error: t('deposits.errors.emptyQuote') }, { status: 400 })
+  if (!lines.length) return apiError(400, 'empty_quote', 'The quote has no amount to ask an advance payment for')
 
   const { data: settings } = await supabase.from('settings').select('default_payment_days').maybeSingle()
   // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.

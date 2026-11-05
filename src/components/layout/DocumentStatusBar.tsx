@@ -10,11 +10,11 @@ import { StatusBadge, STATUS_TEXT } from '@/components/lists/StatusBadge'
 import { Select } from '@/components/ui/select'
 import { fieldClass } from '@/components/ui/control'
 import { toastApiError } from '@/lib/google/toast'
-import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
+import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { logEvent } from '@/lib/events'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { addDays, calcTotals, formatMoney, today } from '@/lib/utils/document'
-import { asDbError, displayStatus, lifecycleErrorMessage, statusLabelKey, statusMenuTargets } from '@/lib/status'
+import { displayStatus, statusLabelKey, statusMenuTargets } from '@/lib/status'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { DisplayStatus, DocumentStatus, DocumentType, IssueProblem, PaymentKind, PaymentMethod, Settings } from '@/types'
@@ -22,6 +22,7 @@ import { IssueDialog } from '@/components/forms/builder/IssueDialog'
 import ProjectLinkWarning from '@/components/projects/ProjectLinkWarning'
 import { isIssueProblems } from '@/components/forms/builder/IssueProblems'
 import { applyIssueDateInEditor } from '@/components/forms/builder/events'
+import { errorMessage } from '@/components/forms/builder/useDocumentForm'
 import { expectedNumber, termDays, type NumberingSettings } from '@/components/forms/builder/model'
 
 const DESTRUCTIVE = new Set(['cancelled', 'rejected'])
@@ -150,7 +151,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         supabase.from('documents').select('number, date').eq('type', type).not('number', 'is', null).neq('id', doc.id)
           .order('date', { ascending: false }).limit(1).maybeSingle(),
       ])
-      if (draft.error || !draft.data) { toast.error(draft.error ? lifecycleErrorMessage(draft.error, t) : t('messages.api.not_found')); return }
+      if (draft.error || !draft.data) { toast.error(draft.error ? dbErrorMessage(t, draft.error) : t('messages.api.not_found')); return }
       const d = draft.data
       const s = (settings.data ?? {}) as Partial<NumberingSettings & Pick<Settings, 'default_payment_days' | 'default_quote_validity_days'>>
       // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
@@ -196,14 +197,15 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         // Credit notes have no payment term to follow the new date.
         const todayDue = type === 'credit_note' ? undefined : prep.todayDue
         const handled = await applyIssueDateInEditor(doc.id, todayStr, todayDue).catch((err: unknown) => {
-          toast.error(t('builder.notSavedToast', { error: lifecycleErrorMessage(asDbError(err), t) }))
+          // The editor's save words its own failures (no connection, a coded refusal).
+          toast.error(t('builder.notSavedToast', { error: errorMessage(err, t) }))
           return null
         })
         if (handled === null) return
         if (!handled) {
           const { error } = await supabase.from('documents')
             .update({ date: todayStr, ...(todayDue === undefined ? {} : { due_date: todayDue }) }).eq('id', doc.id)
-          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+          if (error) { toast.error(dbErrorMessage(t, error)); return }
         }
       }
       const showProblems = (problems: IssueProblem[]) => setIssue(p => (p ? { ...p, problems } : p))
@@ -228,7 +230,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         const from = status === 'draft' ? 'sent' : status
         if (newStatus !== from) {
           const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+          if (error) { toast.error(dbErrorMessage(t, error)); return }
           await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
         }
       }
@@ -283,7 +285,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         const from = status
         if (newStatus !== from) {
           const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-          if (error) { toast.error(lifecycleErrorMessage(error, t)); return }
+          if (error) { toast.error(dbErrorMessage(t, error)); return }
           await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
         }
       }

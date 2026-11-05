@@ -41,7 +41,7 @@ const PAGE = 1000
 // Documents are dated up to two years before (billed in advance) or after (billed late) the
 // service they report; the window keeps the query bounded, buildZmRows picks the period exactly.
 // PostgREST returns at most 1000 rows per request, so the window is read in pages, in a stable
-// order, like the accounting export does.
+// order, like the accounting export does. `error` is the database's English text, for logs only.
 export async function fetchZmRows(supabase: SupabaseClient, start: string, end: string): Promise<{ rows: ZmRow[]; error: string | null }> {
   const docs: ZmDoc[] = []
   for (let from = 0; ; from += PAGE) {
@@ -55,7 +55,10 @@ export async function fetchZmRows(supabase: SupabaseClient, start: string, end: 
       .lte('date', addDays(end, 731))
       .order('id')
       .range(from, from + PAGE - 1)
-    if (error) return { rows: [], error: error.message }
+    if (error) {
+      console.error('[zm] documents not loaded:', error.code, error.message)
+      return { rows: [], error: error.message }
+    }
     docs.push(...((data ?? []) as unknown as ZmDoc[]))
     if ((data?.length ?? 0) < PAGE) break
   }

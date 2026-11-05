@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { useT } from '@/lib/i18n/client'
+import { dbErrorMessage } from '@/lib/api-errors'
 import {
-  deductionItems, deductionParts, depositErrorMessage, discountOf, linkDeposit, loadClientDeposits, loadQuoteInvoices, sameDeductions,
+  deductionItems, deductionParts, discountOf, linkDeposit, loadClientDeposits, loadQuoteInvoices, sameDeductions,
   unlinkDeposit, type DepositCheck, type DepositInvoice, type QuoteInvoice,
 } from '@/lib/deposits'
+import { asDbError } from '@/lib/status'
 import { lineAmount } from '@/lib/utils/document'
 import type { DocumentType, InvoiceKind } from '@/types'
 import { makeId, type EditorDocument, type FormState, type LineItem } from './model'
@@ -46,7 +48,8 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
       .then(([list, fromQuote]) => { if (current) setLoaded({ clientId, invoices: list, fromQuote }) })
       .catch(e => {
         if (!current) return
-        toast.error(t('deposits.builder.loadFailed', { error: e instanceof Error ? e.message : String(e) }))
+        console.error('[deposits] not loaded:', e)
+        toast.error(t('deposits.builder.loadFailed'), { description: dbErrorMessage(t, asDbError(e)) })
         setLoaded({ clientId, invoices: [], fromQuote: [] })
       })
     return () => { current = false }
@@ -87,7 +90,8 @@ export function useDeposits({ type, doc, docId, form, setLines, setKind, flush }
       done = await action()
       setVersion(v => v + 1)
     } catch (e) {
-      toast.error(t('deposits.builder.failed', { error: depositErrorMessage(e, t) }))
+      console.error('[deposits] link not changed:', e)
+      toast.error(t('deposits.builder.failed'), { description: dbErrorMessage(t, asDbError(e)) })
     } finally {
       if (kind && !done && before !== kind) setKind(before)
       setBusy(false)
