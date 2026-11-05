@@ -545,7 +545,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
             )}
           </section>
 
-          <div className="sticky bottom-0 z-10 -mx-4 sm:mx-0 px-4 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t sm:border sm:rounded-xl border-neutral-200 dark:border-neutral-700 flex items-center justify-between gap-3">
+          <div className="sticky bottom-[calc(3.5rem_+_env(safe-area-inset-bottom))] md:bottom-0 z-10 -mx-4 sm:mx-0 px-4 py-3 bg-white/95 dark:bg-neutral-900/95 backdrop-blur border-t sm:border sm:rounded-xl border-neutral-200 dark:border-neutral-700 flex items-center justify-between gap-3">
             <p className="text-sm min-w-0 truncate">
               <span className="font-medium">{plural(chosen.length, 'bankImport.selectedOne', 'bankImport.selectedOther')}</span>
               <span className="text-neutral-500 dark:text-neutral-400"> · {money(chosenTotal, currency)}</span>
