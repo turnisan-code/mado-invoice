@@ -204,6 +204,18 @@ begin
   perform public.mcp_drafts_test_ok('a client claude creates: its addresses marked', public.mcp_drafts_test_same(v_marks, array['new-cc@example.test', 'new@example.test']));
   update public.clients set email = 'New2@example.test' where id = v_new returning mcp_recipients into v_marks;
   perform public.mcp_drafts_test_ok('claude replaces an email: the new one marked, the old mark gone', public.mcp_drafts_test_same(v_marks, array['new-cc@example.test', 'new2@example.test']));
+  -- Only A-Z are lower-cased and only JavaScript's \s and , ; < > split, whatever the database
+  -- locale, so the reminder cron's copy in the app gives the same marks (lower() would turn U+0130
+  -- into 'i' here and 'i' + U+0307 there; U+0085 is no \s, U+00A0 is).
+  perform public.mcp_drafts_test_ok('the address set splits on ASCII and Unicode spaces and , ; < >, not on U+0085',
+    public.mcp_drafts_test_same(public.mcp_address_set(array['A@B.at' || chr(9) || 'c@d.at' || chr(11) || 'E@F.at, g@h.at;<I@J.at>' || chr(160) || 'k@l.at' || chr(12288) || 'm' || chr(133) || '@N.at']),
+      array['a@b.at', 'c@d.at', 'e@f.at', 'g@h.at', 'i@j.at', 'k@l.at', 'm' || chr(133) || '@n.at']));
+  insert into public.clients (name, email, cc_emails) values ('MCP draft guard test 4', 'İ@Example.test', array['ΚΑΣ@Example.test', 'odd' || chr(133) || '@Example.test'])
+    returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('non-ASCII addresses claude writes: marked with only A-Z lower-cased',
+    public.mcp_drafts_test_same(v_marks, array['İ@example.test', 'ΚΑΣ@example.test', 'odd' || chr(133) || '@example.test']));
+  select * into v from public.mcp_create_action('h-nonascii', 'send_email', jsonb_build_object('document_id', gen_random_uuid(), 'to', jsonb_build_array('İ@EXAMPLE.TEST'), 'cc', '[]'::jsonb, 'bcc', '[]'::jsonb, 'subject', 'Invoice', 'body', 'Hello'), 'ah', 'fp', 'Send', '{}', false);
+  perform public.mcp_drafts_test_ok('a non-ASCII address claude wrote, other case: approved in Mado', v.approval = 'app');
 
   select * into v from public.mcp_create_action('h-known', 'send_email', jsonb_build_object('document_id', gen_random_uuid(), 'to', jsonb_build_array('known@example.test'), 'cc', '[]'::jsonb, 'bcc', '[]'::jsonb, 'subject', 'Invoice', 'body', 'Hello'), 'ah', 'fp', 'Send', '{}', false);
   perform public.mcp_drafts_test_ok('the owner''s address: the chat policy holds', v.approval = 'chat');

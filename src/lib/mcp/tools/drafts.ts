@@ -119,7 +119,7 @@ const suggestion = (v: ClientValues) => suggestTaxTreatment(v.country, isValidVa
 // clients.mcp_recipients (20261105_mcp_drafts.sql): an address a Claude session writes onto a
 // client is marked until the owner saves the client in Mado; an email naming it is approved in
 // Mado whatever the confirmation policy says, and the automatic reminders leave it out.
-const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado, and automatic reminders skip it (a client whose email Claude wrote gets none; a CC Claude wrote is left out).'
+const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado, and automatic reminders skip it (a client whose email Claude wrote gets none; a CC Claude wrote is left out; until then they also skip any address on that client that is not plain ASCII).'
 
 // The addresses this write put on the client, as the database marks them.
 function writtenAddresses(before: Pick<Client, 'email' | 'cc_emails'> | null, after: Client): string[] {

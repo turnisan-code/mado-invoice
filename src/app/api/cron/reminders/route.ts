@@ -9,9 +9,9 @@ import { markOverdueInvoices } from '@/lib/utils/overdue'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import type { PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, renderReminderPdf } from '@/lib/pdf/reminder'
-import { fillSubject, fillTemplate, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
+import { fillSubject, fillTemplate, templateLang, usesVariable } from '@/lib/templates'
 import { logEvent } from '@/lib/events'
-import { claudeWrittenAddresses } from '@/lib/services/email-compose'
+import { heldBackAddress, unattendedCopies } from '@/lib/services/email-compose'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
@@ -21,6 +21,11 @@ import { autoSyncBookamat, type AutoSyncResult } from '@/lib/bookamat'
 export const maxDuration = 60
 
 type Skipped = { number: string; reason: string }
+
+const HELD_BACK = {
+  written: 'address written by Claude: save the client in Mado to confirm it',
+  unchecked: 'address not plain ASCII on a client with addresses written by Claude: save the client in Mado to confirm it',
+} as const
 
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
 // result in the log. Runs before the reminders, whatever their settings, and every Bookamat call
@@ -101,9 +106,11 @@ export async function GET(req: NextRequest) {
     if (client.reminders_opt_out) { skipped.push({ number: invoice.number, reason: 'client is excluded from automatic reminders' }); continue }
     if (!client.email) { skipped.push({ number: invoice.number, reason: 'client has no email address' }); continue }
     // An address a Claude session wrote onto the client gets no unattended mail until the owner
-    // saves the client in Mado (clients.mcp_recipients); its CC addresses are left out below.
-    if (claudeWrittenAddresses(client)(client.email)) {
-      skipped.push({ number: invoice.number, reason: 'address written by Claude: save the client in Mado to confirm it' })
+    // saves the client in Mado (clients.mcp_recipients), nor does one on such a client the app
+    // cannot compare with the marks for certain (not printable ASCII); CC entries are left out below.
+    const held = heldBackAddress(client)(client.email)
+    if (held) {
+      skipped.push({ number: invoice.number, reason: HELD_BACK[held] })
       continue
     }
     if (invoiceTotals(invoice).balance_due <= 0.005) { skipped.push({ number: invoice.number, reason: 'nothing outstanding' }); continue }
@@ -173,11 +180,9 @@ export async function GET(req: NextRequest) {
     const figures = reminderFigures({ dueDate: invoice.due_date, balance: totals.balance_due, issuer: settings, level, lang })
     const vars = reminderVariables({ doc: invoice, client, issuer: settings, totals, figures, portalLink })
     const subject = fillSubject(tpl.subject, vars)
-    const writtenByClaude = claudeWrittenAddresses(client)
-    const listed = parseEmailList(client.cc_emails ?? []).emails
-    const cc = listed.filter(a => !writtenByClaude(a))
-    if (cc.length < listed.length) {
-      console.log(`[cron/reminders] ${number}: ${listed.length - cc.length} CC address(es) written by Claude left out; save the client in Mado to confirm them`)
+    const { cc, heldBack } = unattendedCopies(client)
+    if (heldBack) {
+      console.log(`[cron/reminders] ${number}: ${heldBack} CC address(es) written by Claude (or not plain ASCII on a client with such addresses) left out; save the client in Mado to confirm them`)
     }
 
     try {

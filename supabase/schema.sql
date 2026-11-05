@@ -2197,8 +2197,12 @@ create trigger documents_mcp_template_guard
   on public.documents
   for each row execute function public.documents_mcp_template_guard();
 
--- The addresses in a client's email field and CC list (or in any text), lower-case and split as
--- the app splits address lists.
+-- The addresses in a client's email field and CC list (or in any text): split on what JavaScript's
+-- \s matches and on , ; < >, with A-Z lower-cased and nothing else. Both are spelled out rather
+-- than left to the database locale (lower() folds U+0130 'İ' to 'i' under glibc but to 'i' + U+0307
+-- in JavaScript; [[:space:]] matches U+0085 under ICU but not in JavaScript), because the reminder
+-- cron repeats this in the app (mcpAddressSet in src/lib/services/email-compose.ts) to compare the
+-- marks, and the app's address checks split on \s.
 create or replace function public.mcp_address_set(p_values text[])
 returns text[]
 language sql immutable
@@ -2206,7 +2210,9 @@ set search_path = ''
 as $$
   select coalesce(array_agg(distinct a.addr order by a.addr), '{}')
   from unnest(coalesce(p_values, '{}')) v(val),
-       regexp_split_to_table(lower(coalesce(v.val, '')), '[[:space:],;<>]+') a(addr)
+       regexp_split_to_table(
+         translate(coalesce(v.val, ''), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'),
+         '[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff,;<>]+') a(addr)
   where a.addr like '_%@_%'
 $$;
 

@@ -136,7 +136,8 @@ is set to, these are always approved in Mado:
 - an email or reminder to an address that is not on the client record;
 - one to an address Claude wrote onto a client (`create_client`, `update_client`), until the owner
   saves that client in Mado; the automatic reminders skip such addresses too (a client whose email
-  Claude wrote gets none, a CC Claude wrote is left out);
+  Claude wrote gets none, a CC Claude wrote is left out; until then they also skip any address on
+  that client that is not plain ASCII, as the app cannot match it against the marks for certain);
 - one to an address on the client record that the owner has never emailed from Mado for that client;
 - on Claude Code connections (and an own OAuth client, which has Claude Code's shorter time limit):
   a Bookamat sync, and issuing more than 3 documents at once;
