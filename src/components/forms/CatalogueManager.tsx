@@ -1,15 +1,17 @@
 'use client'
 
-import { useId, useState, useRef } from 'react'
+import { useEffect, useId, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, Search } from 'lucide-react'
+import { Plus, Trash2, GripVertical, Check, X, Eye, EyeOff, Copy, Pencil, ChevronRight, ChevronUp, ChevronDown, Search } from 'lucide-react'
 import { formatMoney } from '@/lib/utils/document'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import type { CatalogueItem, Unit, VatRate } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
+import { dropIndex, moveItem, type DropEdge } from './builder/model'
+import { useReorder } from './builder/useReorder'
 
 const UNITS: Unit[] = ['hour', 'day', 'session', 'flat', 'piece', 'month']
 const VAT_RATES: VatRate[] = [0, 10, 13, 20]
@@ -123,7 +125,6 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   const [adding, setAdding] = useState<AddingState | null>(null)
   const [addDraft, setAddDraft] = useState<Draft>({})
   const [formError, setFormError] = useState<string | null>(null)
-  const [dragOver, setDragOver] = useState<string | null>(null)
   const [renamingCat, setRenamingCat] = useState<string | null>(null)
   const [catRenameVal, setCatRenameVal] = useState('')
   const [pendingCats, setPendingCats] = useState<string[]>([])
@@ -133,7 +134,8 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
   const [showHidden, setShowHidden] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const dragId = useRef<string | null>(null)
+  // The control a keyboard or button move came from, focused again once the item has moved.
+  const refocus = useRef<{ id: string; control: 'handle' | 'up' | 'down' } | null>(null)
   const renameInFlight = useRef(false)
   const supabase = createClient()
   const { t } = useT()
@@ -217,17 +219,20 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     setItems(items.map(i => i.id === item.id ? { ...i, active: !item.active } : i))
   }
 
-  async function handleDrop(targetId: string) {
-    const sourceId = dragId.current
-    dragId.current = null
-    setDragOver(null)
-    if (!sourceId || sourceId === targetId) return
-    const from = items.findIndex(i => i.id === sourceId)
-    const to = items.findIndex(i => i.id === targetId)
-    if (from < 0 || to < 0) return
-    const next = [...items]
-    const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved)
+  const indexOf = (id: string) => items.findIndex(i => i.id === id)
+  const sameSection = (a: string, b: string) => (items[indexOf(a)]?.category ?? null) === (items[indexOf(b)]?.category ?? null)
+  // The visible items of an item's section, in order: what the arrows move it among.
+  const sectionOf = (id: string) => items.filter(i => (i.category ?? null) === (items[indexOf(id)]?.category ?? null) && isVisible(i))
+
+  // Moves an item to that edge of another one: exactly where the drag indicator is drawn.
+  async function reorderItems(sourceId: string, targetId: string, edge: DropEdge) {
+    const from = indexOf(sourceId)
+    const over = indexOf(targetId)
+    if (from < 0 || over < 0) return
+    const next = moveItem(items, from, dropIndex(from, over, edge))
+    if (next === items) return
+    const section = next.filter(i => (i.category ?? null) === (items[from].category ?? null) && isVisible(i))
+    reorder.announce(t('editor.reorder.moved', { position: section.findIndex(i => i.id === sourceId) + 1, count: section.length }))
     const withOrder = next.map((item, idx) => ({ ...item, sort_order: idx * 10 }))
     const previous = items
     setItems(withOrder)
@@ -235,6 +240,36 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
     const { error } = await supabase.rpc('reorder_catalogue_items', { p_ids: withOrder.map(i => i.id) })
     if (error) { setItems(previous); toast.error(t('catalogue.orderFailed', { error: error.message })) }
   }
+
+  function step(id: string, delta: -1 | 1, control: 'handle' | 'up' | 'down') {
+    const section = sectionOf(id)
+    const neighbour = section[section.findIndex(i => i.id === id) + delta]
+    if (!neighbour) return
+    refocus.current = { id, control }
+    void reorderItems(id, neighbour.id, delta < 0 ? 'before' : 'after')
+  }
+
+  const reorder = useReorder({
+    isNoop: (from, over, edge) => { const f = indexOf(from); return dropIndex(f, indexOf(over), edge) === f },
+    canDrop: sameSection,
+    onDrop: (from, over, edge) => void reorderItems(from, over, edge),
+    onStep: (id, delta) => step(id, delta, 'handle'),
+  })
+
+  useEffect(() => {
+    const target = refocus.current
+    if (!target) return
+    refocus.current = null
+    const row = document.querySelector(`[data-catalogue-item="${target.id}"]`)
+    if (target.control === 'handle') {
+      row?.querySelector<HTMLElement>('[draggable="true"]')?.focus()
+      return
+    }
+    // At the top or bottom that arrow is disabled; the other one keeps the focus on the item.
+    const [up, down] = Array.from(row?.querySelectorAll<HTMLButtonElement>('button[data-move]') ?? [])
+    const preferred = target.control === 'up' ? up : down
+    ;(preferred && !preferred.disabled ? preferred : target.control === 'up' ? down : up)?.focus()
+  }, [items])
 
   function startRenameCat(cat: string) { setRenamingCat(cat); setCatRenameVal(cat) }
   function cancelRenameCat() { setRenamingCat(null) }
@@ -291,6 +326,7 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
 
   return (
     <div className="space-y-3">
+      <p aria-live="polite" className="sr-only">{reorder.announcement}</p>
 
       {/* Search + hidden toggle */}
       <div className="flex flex-wrap items-center gap-3">
@@ -357,15 +393,12 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
 
             {/* Items */}
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800/80">
-              {group.map(item => (
+              {group.map((item, position) => (
                 <div
                   key={item.id}
-                  draggable
-                  onDragStart={() => { dragId.current = item.id }}
-                  onDragOver={e => { e.preventDefault(); setDragOver(item.id) }}
-                  onDrop={() => handleDrop(item.id)}
-                  onDragEnd={() => { dragId.current = null; setDragOver(null) }}
-                  className={dragOver === item.id ? 'border-t-2 border-blue-400' : ''}
+                  data-catalogue-item={item.id}
+                  {...reorder.rowProps(item.id)}
+                  className={`${reorder.indicatorCls(item.id)} ${reorder.dragging === item.id ? 'opacity-50' : ''}`}
                 >
                   {/* Row */}
                   <div
@@ -377,20 +410,26 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                       if (e.target !== e.currentTarget) return
                       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (editingId === item.id) cancelEdit(); else startEdit(item) }
                     }}
-                    className={`flex items-center gap-3 px-4 py-3.5 cursor-pointer group/row transition-colors
+                    className={`flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 px-4 py-3.5 cursor-pointer group/row transition-colors
                       ${editingId === item.id ? 'bg-neutral-50 dark:bg-neutral-800/60' : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/40'}
                       ${!item.active ? 'opacity-50' : ''}`}
                   >
-                    {/* Drag handle */}
-                    <GripVertical
-                      size={15}
-                      aria-hidden="true"
-                      className="shrink-0 text-neutral-300 dark:text-neutral-600 group-hover/row:text-neutral-500 dark:group-hover/row:text-neutral-400 cursor-grab transition-colors"
+                    {/* Drag handle; Alt+↑/↓ moves the item too. On phones the arrows below do.
+                        Not a <button>: Firefox does not start a drag from one. */}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      {...reorder.handleProps(item.id)}
                       onClick={e => e.stopPropagation()}
-                    />
+                      aria-label={t('editor.reorder.itemHandle', { name: item.name_de })}
+                      title={t('editor.reorder.hint')}
+                      className="hidden sm:flex h-7 w-4 -mx-0.5 shrink-0 items-center justify-center rounded text-neutral-300 dark:text-neutral-600 group-hover/row:text-neutral-500 dark:group-hover/row:text-neutral-400 cursor-grab active:cursor-grabbing transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400"
+                    >
+                      <GripVertical size={15} aria-hidden="true" />
+                    </span>
 
-                    {/* Name */}
-                    <div className="flex-1 min-w-0">
+                    {/* Name: a line of its own on phones */}
+                    <div className="w-full sm:w-auto sm:flex-1 min-w-0">
                       <p className={`text-sm font-medium leading-snug ${!item.active ? 'line-through' : 'text-neutral-900 dark:text-neutral-100'}`}>
                         {item.name_de}
                       </p>
@@ -408,8 +447,8 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                     </div>
 
                     {/* Price + meta */}
-                    <div className="flex items-center gap-2.5 shrink-0">
-                      <span className="text-sm font-semibold tabular-nums text-neutral-900 dark:text-neutral-100 min-w-[72px] text-right">
+                    <div className="flex items-center gap-2.5 w-full sm:w-auto sm:shrink-0">
+                      <span className="mr-auto sm:mr-0 text-sm font-semibold tabular-nums text-neutral-900 dark:text-neutral-100 sm:min-w-[72px] sm:text-right">
                         {formatMoney(item.default_price)}
                       </span>
                       <span className="hidden sm:inline-block text-xs text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 rounded-md px-2 py-0.5 font-medium">
@@ -425,6 +464,16 @@ export default function CatalogueManager({ initialItems, usage }: Props) {
                         onClick={e => e.stopPropagation()}
                         onKeyDown={e => e.stopPropagation()}
                       >
+                        <button type="button" data-move onClick={() => step(item.id, -1, 'up')} disabled={position === 0}
+                          aria-label={t('editor.reorder.itemUp', { name: item.name_de })}
+                          className={`${iconBtn} sm:hidden text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 disabled:opacity-30`}>
+                          <ChevronUp size={14} />
+                        </button>
+                        <button type="button" data-move onClick={() => step(item.id, 1, 'down')} disabled={position === group.length - 1}
+                          aria-label={t('editor.reorder.itemDown', { name: item.name_de })}
+                          className={`${iconBtn} sm:hidden text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 disabled:opacity-30`}>
+                          <ChevronDown size={14} />
+                        </button>
                         <button type="button" onClick={() => duplicateItem(item)} title={t('catalogue.duplicate')} aria-label={t('catalogue.duplicateItem', { name: item.name_de })} className={`${iconBtn} text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700`}>
                           <Copy size={13} />
                         </button>

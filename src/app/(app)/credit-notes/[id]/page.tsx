@@ -12,7 +12,7 @@ import CreditNoteSettlement from '@/components/layout/CreditNoteSettlement'
 import { loadCreditNoteSettlement } from '@/lib/credits'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
-import { fetchReference } from '@/lib/utils/document-reference'
+import { fetchCreditReference } from '@/lib/utils/document-reference'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
@@ -33,7 +33,8 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   if (!settings) return <SettingsMissing />
 
   const publicSettings = toPublicSettings(settings)
-  const reference = await fetchReference(supabase, doc)
+  // A Storno prints the cancelled invoice, a plain credit note the invoice it corrects.
+  const reference = await fetchCreditReference(supabase, doc)
   const settlement = await loadCreditNoteSettlement(supabase, doc)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
 
@@ -48,7 +49,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
             <h1 className="text-xl sm:text-2xl font-semibold truncate">{doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}</h1>
             {doc.issued_at && <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('documents.issued', { date: formatDate(doc.issued_at, lang) })}</p>}
           </div>
-          {reference && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
+          {reference && reference.kind !== 'correction' && <span className="text-xs text-neutral-400 dark:text-neutral-500 shrink-0">{t('documents.stornoOf', { number: reference.number })}</span>}
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} display={settlement.settled ? 'settled' : undefined} />

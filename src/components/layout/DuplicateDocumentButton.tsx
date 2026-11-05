@@ -39,7 +39,9 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
         due_date: null,
         service_date: null,
         language: doc.language,
-        currency: doc.currency,
+        // EUR only: a copy of an old USD/GBP document starts as a EUR draft.
+        currency: 'EUR',
+        exchange_rate: 1,
         tax_treatment: doc.tax_treatment,
         notes: doc.notes,
         notes_internal: null,

@@ -242,11 +242,20 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
               const quantity = `${formatQuantity(item.quantity, lang)}${item.unit ? ` ${unitLabel(t, item.unit, item.quantity)}` : ''}`
               const unitPrice = formatSignedMoney(item.unit_price, currency)
               const rate = item.vat_rate != null ? pct(item.vat_rate) : ''
+              // The line's own discount, already taken off its amount (as on the PDF).
+              const lineOff = lineAmount({ quantity: item.quantity, unit_price: item.unit_price }) - lineAmount(item)
               return (
                 <tr key={i} className="border-b border-neutral-100">
                   <td className="px-4 py-3 align-top">
                     <div className="text-neutral-900 whitespace-pre-line break-words">{item.description}</div>
                     {period && <div className="text-xs text-neutral-500 mt-0.5">{period.text}</div>}
+                    {lineOff > 0 && (
+                      <div className="text-xs text-neutral-500 mt-0.5">
+                        {item.discount_type === 'percent'
+                          ? t('editor.doc.lineDiscountPercent', { percent: pct(clampPercent(item.discount_value)), amount: money(-lineOff) })
+                          : t('editor.doc.lineDiscount', { amount: money(-lineOff) })}
+                      </div>
+                    )}
                     <div className="sm:hidden text-xs text-neutral-500 mt-0.5">
                       {quantity} × {unitPrice}{showVatColumn && rate ? ` · ${t('pdfPortal.columns.vat')} ${rate}` : ''}
                     </div>

@@ -1,14 +1,19 @@
-// What a document needs before it may get a number. Pure (type-only imports), so the builder runs
-// it on the editor state, the server on the stored document, and node can verify it directly.
-// issue_document (supabase/migrations/20261030_issue_checks.sql) enforces the same rules in SQL.
+// What a document needs before it may get a number. Pure (only type imports and the totals
+// maths), so the builder runs it on the editor state, the server on the stored document, and node
+// can verify it directly. issue_document (supabase/migrations/20261031_editor.sql) enforces the
+// same rules in SQL.
 import type { TFn } from '@/lib/i18n'
 import type { DocumentType, IssueProblem, IssuerField } from '@/types'
+import { calcTotals, lineDiscountOutOfRange } from './document'
 
 export interface IssueCheckItem {
   line_type?: string | null
   description: string | null
   quantity: number | null
   unit_price: number | null
+  vat_rate?: number | null
+  discount_type?: string | null
+  discount_value?: number | null
   service_date: string | null
   service_date_end?: string | null
 }
@@ -83,6 +88,7 @@ export function issueProblems(input: IssueCheckInput): IssueProblem[] {
     if (blank(item.description)) problems.push({ code: 'blankDescription', ...line })
     if (item.quantity == null || !(item.quantity > 0)) problems.push({ code: 'badQuantity', ...line })
     if (item.unit_price == null || !Number.isFinite(item.unit_price)) problems.push({ code: 'missingPrice', ...line })
+    if (lineDiscountOutOfRange(item)) problems.push({ code: 'badDiscount', ...line })
     if (!item.service_date && item.service_date_end) problems.push({ code: 'periodStartMissing', ...line })
     else if (item.service_date && item.service_date_end && item.service_date_end < item.service_date) problems.push({ code: 'periodEndBeforeStart', ...line })
   })
@@ -90,7 +96,16 @@ export function issueProblems(input: IssueCheckInput): IssueProblem[] {
   if (invoiceLike && items.length && !input.serviceDate && items.some(({ item }) => !item.service_date)) {
     problems.push({ code: 'noServiceDate' })
   }
+  // Money going back is a credit note. A document discount never changes the sign of the
+  // total (it is capped at the net), so the lines decide.
+  if (input.type !== 'credit_note' && items.length && issueTotal(input) < 0) problems.push({ code: 'negativeTotal' })
   return problems
+}
+
+// The document's total before its document-level discount, as calcTotals computes it.
+export function issueTotal(input: Pick<IssueCheckInput, 'items' | 'taxTreatment'>): number {
+  const lines = input.items.map(i => ({ ...i, vat_rate: i.vat_rate ?? null }))
+  return calcTotals(lines, [], null, input.taxTreatment).total
 }
 
 export function issueProblemMessage(p: IssueProblem, t: TFn): string {
@@ -104,6 +119,10 @@ export function issueProblemMessage(p: IssueProblem, t: TFn): string {
     case 'periodStartMissing':
     case 'periodEndBeforeStart':
       return p.position ? t(`issueChecks.problems.${p.code}Line`, { position: p.position }) : t(`issueChecks.problems.${p.code}`)
+    case 'badDiscount':
+      return t('editor.problems.badDiscount', { position: p.position })
+    case 'negativeTotal':
+      return t('editor.problems.negativeTotal')
     default:
       return t(`issueChecks.problems.${p.code}`)
   }
