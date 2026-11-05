@@ -161,7 +161,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
     <div className="py-16 px-6 text-center">
       <Repeat size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
       <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('recurring.empty')}</p>
-      <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('recurring.emptyHint')}</p>
+      <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('recurring.emptyHint')}</p>
       <Link href="/invoices" className="mt-3 inline-block text-sm text-neutral-600 dark:text-neutral-400 underline underline-offset-2">
         {t('recurring.goToInvoices')}
       </Link>
@@ -243,7 +243,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                     <StatusBadge status={status} label={statusLabel(status)} />
                   </td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">
-                    {s.last ? <Link href={`/invoices/${s.last.id}`} className={`font-medium ${linkClass}`}>{docLabel(s.last)}</Link> : <span className="text-neutral-400 dark:text-neutral-500">{t('recurring.noLastInvoice')}</span>}
+                    {s.last ? <Link href={`/invoices/${s.last.id}`} className={`font-medium ${linkClass}`}>{docLabel(s.last)}</Link> : <span className="text-neutral-500 dark:text-neutral-500">{t('recurring.noLastInvoice')}</span>}
                   </td>
                   <td data-row-ignore className="px-2 py-2 text-right">{renderActions(s)}</td>
                 </>

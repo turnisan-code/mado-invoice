@@ -79,7 +79,7 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
       </div>
 
       {/* Billing settings */}
-      <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5 pt-4 border-t border-neutral-100 dark:border-neutral-800">
         <Stat label={t('clients.tax')} value={t(`taxTreatments.${client.tax_treatment}` as DictKey)} />
         <Stat label={t('clientData.clientNumber')} value={client.client_number ?? '—'} />
         <Stat
@@ -128,7 +128,7 @@ export default function ClientEditSection({ client, countryLabel, defaults, coun
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[10px] text-neutral-400 dark:text-neutral-500 uppercase tracking-wide mb-1">{label}</p>
+      <p className="text-[10px] text-neutral-500 dark:text-neutral-500 uppercase tracking-wide mb-1">{label}</p>
       <p className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">{value}</p>
     </div>
   )

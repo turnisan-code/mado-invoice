@@ -27,7 +27,7 @@ export default function StatementDialog({ clientId, onClose }: { clientId: strin
   return (
     <Dialog open onClose={onClose} title={t('projects.statement.title')} description={t('projects.statement.desc')} panelClassName="max-w-md">
       <form onSubmit={e => { e.preventDefault(); open() }} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor={`${id}-from`} className={labelClass}>{t('projects.statement.from')}</label>
             <input id={`${id}-from`} type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} disabled={openOnly} className={inputClass} />

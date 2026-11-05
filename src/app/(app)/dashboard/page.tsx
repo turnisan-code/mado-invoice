@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { calcTotals, formatDate, formatMoney, roundCents, today } from '@/lib/utils/document'
 import RevenueChart, { type MonthData } from '@/components/charts/RevenueChart'
 import { StatusBadge } from '@/components/lists/StatusBadge'
+import { buttonVariants } from '@/components/ui/button'
 import { getT } from '@/lib/i18n/server'
 import { n, type DictKey } from '@/lib/i18n'
 import { makePeriod, periodParams } from '@/app/(app)/reports/period'
@@ -205,10 +206,10 @@ export default async function DashboardPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-semibold">{t('dashboard.title')}</h1>
         <div className="flex gap-2">
-          <Link href="/quotes/new" className="text-sm px-3 py-2 rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+          <Link href="/quotes/new" className={buttonVariants({ variant: 'outline' })}>
             {t('dashboard.newQuote')}
           </Link>
-          <Link href="/invoices/new" className="text-sm px-3 py-2 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors">
+          <Link href="/invoices/new" className={buttonVariants()}>
             {t('dashboard.newInvoice')}
           </Link>
         </div>

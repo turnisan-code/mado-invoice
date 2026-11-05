@@ -2,6 +2,7 @@
 
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { Select } from '@/components/ui/select'
 import { useT } from '@/lib/i18n/client'
 import { today } from '@/lib/utils/document'
 import { makePeriod, monthName, periodParams, type Period, type PeriodKind } from '@/app/(app)/reports/period'
@@ -13,14 +14,13 @@ interface Props {
 
 const KINDS: PeriodKind[] = ['month', 'quarter', 'year']
 
+// Inside the group's 1 px border, so the group is as tall as the selects next to it.
 const segment = (active: boolean, first: boolean) =>
-  `px-3 py-2 sm:py-1.5 text-sm font-medium transition-colors focus-visible:outline-offset-[-2px] ${
+  `px-3 h-9.5 sm:h-7.5 text-sm font-medium transition-colors focus-visible:outline-offset-[-2px] ${
     active
       ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900'
       : 'text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
   } ${first ? '' : 'border-l border-neutral-200 dark:border-neutral-700'}`
-
-const selectClass = 'text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100'
 
 export default function ReportControls({ period, years }: Props) {
   const router = useRouter()
@@ -48,9 +48,9 @@ export default function ReportControls({ period, years }: Props) {
         ))}
       </div>
       {period.kind === 'month' && (
-        <select aria-label={t('exports.period.month')} value={period.month} onChange={e => go(makePeriod('month', period.year, Number(e.target.value)))} className={selectClass}>
+        <Select aria-label={t('exports.period.month')} value={period.month} onChange={e => go(makePeriod('month', period.year, Number(e.target.value)))} className="w-auto">
           {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{monthName(m, lang)}</option>)}
-        </select>
+        </Select>
       )}
       {period.kind === 'quarter' && (
         <div role="group" aria-label={t('exports.period.quarter')} className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
@@ -61,9 +61,9 @@ export default function ReportControls({ period, years }: Props) {
           ))}
         </div>
       )}
-      <select aria-label={t('reports.year')} value={period.year} onChange={e => go(makePeriod(period.kind, Number(e.target.value), indexFor(period.kind)))} className={selectClass}>
+      <Select aria-label={t('reports.year')} value={period.year} onChange={e => go(makePeriod(period.kind, Number(e.target.value), indexFor(period.kind)))} className="w-auto">
         {years.map(y => <option key={y} value={y}>{y}</option>)}
-      </select>
+      </Select>
     </div>
   )
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { FileText, Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { formatMoney } from '@/lib/utils/document'
 import { formatDuration } from '@/lib/projects'
 import { useT } from '@/lib/i18n/client'
@@ -13,8 +14,6 @@ import { TimerDot } from './ProjectTimer'
 import { cardClass, projectStatusColor } from './ui'
 
 export type ClientProjectRow = { id: string; name: string; status: ProjectStatus; unbilledMinutes: number; unbilledAmount: number }
-
-const buttonClass = 'flex items-center gap-1 text-xs px-2.5 h-9 sm:h-auto sm:py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors dark:text-neutral-300'
 
 // The client page's projects (with what is still unbilled) and its statement of account.
 export default function ClientProjectsPanel({ client, projects }: { client: ClientOption; projects: ClientProjectRow[] }) {
@@ -30,15 +29,15 @@ export default function ClientProjectsPanel({ client, projects }: { client: Clie
         <div className="min-w-0">
           <span className="text-sm font-medium">{t('projects.client.title')}</span>
           {unbilled > 0 && <span className="ml-2 text-xs text-amber-600 tabular-nums">{t('projects.client.unbilled', { amount: formatMoney(unbilled) })}</span>}
-          {!projects.length && <span className="block text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{t('projects.client.none')}</span>}
+          {!projects.length && <span className="block text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{t('projects.client.none')}</span>}
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setStatement(true)} className={buttonClass}>
-            <FileText size={11} /> {t('projects.statement.button')}
-          </button>
-          <button type="button" onClick={() => setCreating(true)} className={buttonClass}>
-            <Plus size={11} /> {t('projects.new')}
-          </button>
+          <Button type="button" variant="outline" onClick={() => setStatement(true)} className="text-xs">
+            <FileText size={12} /> {t('projects.statement.button')}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setCreating(true)} className="text-xs">
+            <Plus size={12} /> {t('projects.new')}
+          </Button>
         </div>
       </div>
       {projects.length > 0 && (

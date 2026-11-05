@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Copy } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { today } from '@/lib/utils/document'
 import { clientTerms } from '@/components/forms/builder/model'
@@ -85,14 +86,8 @@ export default function DuplicateDocumentButton({ docId, backTo }: Props) {
   }
 
   return (
-    <button
-      type="button"
-      onClick={duplicate}
-      disabled={loading}
-      title={t('documents.duplicateTitle')}
-      className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors disabled:opacity-50"
-    >
+    <Button type="button" variant="outline" onClick={duplicate} disabled={loading} title={t('documents.duplicateTitle')}>
       <Copy size={14} /> <span className="sr-only sm:not-sr-only">{loading ? t('documents.duplicating') : t('documents.duplicate')}</span>
-    </button>
+    </Button>
   )
 }

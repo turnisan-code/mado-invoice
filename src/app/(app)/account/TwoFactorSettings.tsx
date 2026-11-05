@@ -158,7 +158,7 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
                   type="button"
                   onClick={() => setRemoving(factor)}
                   aria-label={`${t('account.factorRemove')}: ${factor.friendly_name || t('account.factorDefaultName')}`}
-                  className="h-11 w-11 sm:h-9 sm:w-9 -mr-2 shrink-0 flex items-center justify-center rounded-md text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+                  className="h-11 w-11 sm:h-9 sm:w-9 -mr-2 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -169,7 +169,7 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
 
         {!naming && !enrollment && (
           <div className="space-y-3">
-            <Button type="button" variant={active ? 'outline' : 'default'} className="h-10 px-4" onClick={openNaming}>
+            <Button type="button" variant={active ? 'outline' : 'default'} className="h-10 sm:h-10 px-4" onClick={openNaming}>
               {active ? t('account.mfaAddAnother') : t('account.mfaSetUp')}
             </Button>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('account.mfaBackupTip')}</p>
@@ -182,7 +182,7 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
               <Label htmlFor="factor-name">{t('account.factorName')}</Label>
               <Input
                 id="factor-name"
-                className="h-10"
+                className="h-10 sm:h-10"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 maxLength={60}
@@ -192,8 +192,8 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
             </div>
             <FormError message={error} />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="h-10 px-4" disabled={busy}>{busy ? t('common.working') : t('account.mfaContinue')}</Button>
-              <Button type="button" variant="outline" className="h-10 px-4" onClick={cancelSetup} disabled={busy}>{t('common.cancel')}</Button>
+              <Button type="submit" className="h-10 sm:h-10 px-4" disabled={busy}>{busy ? t('common.working') : t('account.mfaContinue')}</Button>
+              <Button type="button" variant="outline" className="h-10 sm:h-10 px-4" onClick={cancelSetup} disabled={busy}>{t('common.cancel')}</Button>
             </div>
           </form>
         )}
@@ -233,7 +233,7 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
                 autoComplete="one-time-code"
                 pattern="[0-9]{6}"
                 maxLength={6}
-                className="h-10 text-center text-lg tracking-[0.4em] font-mono"
+                className="h-10 sm:h-10 text-center text-lg tracking-[0.4em] font-mono"
                 value={code}
                 onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 required
@@ -241,10 +241,10 @@ export default function TwoFactorSettings({ initialFactors }: { initialFactors: 
             </div>
             <FormError message={error} />
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" className="h-10 px-4" disabled={busy || code.length !== 6}>
+              <Button type="submit" className="h-10 sm:h-10 px-4" disabled={busy || code.length !== 6}>
                 {busy ? t('account.verifying') : t('account.activate')}
               </Button>
-              <Button type="button" variant="outline" className="h-10 px-4" onClick={cancelSetup} disabled={busy}>{t('common.cancel')}</Button>
+              <Button type="button" variant="outline" className="h-10 sm:h-10 px-4" onClick={cancelSetup} disabled={busy}>{t('common.cancel')}</Button>
             </div>
           </form>
         )}

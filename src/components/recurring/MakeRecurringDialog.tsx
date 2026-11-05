@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { fieldClass } from '@/components/ui/control'
 import { formatDate, today } from '@/lib/utils/document'
 import { dayOfMonth, defaultNextDate, servicePeriod } from '@/lib/utils/recurring'
 import { useT } from '@/lib/i18n/client'
@@ -24,7 +26,7 @@ export interface ScheduleFormValues {
   mode: RecurringMode
 }
 
-const inputClass = 'w-full text-base md:text-sm border border-neutral-200 dark:border-neutral-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 disabled:opacity-50'
+const inputClass = fieldClass
 const labelClass = 'block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1'
 
 export function validateSchedule(v: ScheduleFormValues): DictKey | null {
@@ -50,12 +52,12 @@ export function ScheduleFormFields({ values, onChange, disabled = false }: {
         <label htmlFor={`${id}-name`} className={labelClass}>{t('recurring.name')}</label>
         <input id={`${id}-name`} type="text" value={values.name} onChange={e => onChange({ name: e.target.value })} maxLength={120} disabled={disabled} className={inputClass} />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label htmlFor={`${id}-interval`} className={labelClass}>{t('recurring.interval')}</label>
-          <select id={`${id}-interval`} value={values.interval} onChange={e => onChange({ interval: e.target.value as RecurringInterval })} disabled={disabled} className={inputClass}>
+          <Select id={`${id}-interval`} value={values.interval} onChange={e => onChange({ interval: e.target.value as RecurringInterval })} disabled={disabled}>
             {INTERVALS.map(i => <option key={i} value={i}>{t(`recurring.intervals.${i}` as DictKey)}</option>)}
-          </select>
+          </Select>
         </div>
         <div>
           <label htmlFor={`${id}-next`} className={labelClass}>{t('recurring.nextDate')}</label>
@@ -122,14 +124,9 @@ export default function MakeRecurringDialog({ invoiceId, defaultName }: { invoic
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title={t('recurring.makeRecurring')}
-        className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
-      >
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} title={t('recurring.makeRecurring')}>
         <Repeat size={14} /> <span className="sr-only sm:not-sr-only">{t('recurring.makeRecurring')}</span>
-      </button>
+      </Button>
       <Dialog open={open} onClose={() => setOpen(false)} title={t('recurring.dialogTitle')} description={t('recurring.dialogDesc')} busy={saving} panelClassName="max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <form onSubmit={e => { e.preventDefault(); void create() }} className="space-y-4">
           <ScheduleFormFields values={values} onChange={patch => setValues(v => ({ ...v, ...patch }))} disabled={saving} />

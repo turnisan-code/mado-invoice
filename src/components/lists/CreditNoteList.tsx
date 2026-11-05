@@ -14,8 +14,9 @@ import { StatusBadge } from './StatusBadge'
 import { useListState, useSelection, paginate, compareBy, type ListConfig } from './useListState'
 import {
   SortableTh, SelectToggle, ClickableRow, EmptyState, Pagination, BulkBar, BulkButton, ExportButton,
-  inputClass, searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
+  searchClass, primaryLinkClass, listCardClass, theadClass, rowStateClass, listDate,
 } from './ListParts'
+import { Select } from '@/components/ui/select'
 
 const STATUSES = ['draft', 'sent', 'cancelled'] as const
 
@@ -142,10 +143,10 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
 
       <div className="flex gap-3 flex-wrap">
         <input type="search" aria-label={t('creditNotes.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('lists.searchPlaceholder')} className={searchClass} />
-        <select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className={inputClass}>
+        <Select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className="w-auto">
           <option value="">{t('status.allStatuses')}</option>
           {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-        </select>
+        </Select>
       </div>
 
       <div className={listCardClass}>
@@ -163,7 +164,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                       {doc.number ?? <span className="text-neutral-500 dark:text-neutral-400">{t('common.draft')}</span>}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -198,7 +199,7 @@ export default function CreditNoteList({ docs }: { docs: CreditNote[] }) {
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/credit-notes/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{clientLabel(doc) || '—'}</td>

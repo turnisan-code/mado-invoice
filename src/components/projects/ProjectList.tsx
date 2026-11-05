@@ -12,7 +12,10 @@ import type { ProjectStatus } from '@/types'
 import ProjectDialog, { type ClientOption } from './ProjectDialog'
 import TimeEntryDialog, { type ProjectOption } from './TimeEntryDialog'
 import { TimerDot } from './ProjectTimer'
-import { budgetBarColor, cardClass, inputClass, outlineButtonClass, primaryButtonClass, projectStatusColor } from './ui'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import { budgetBarColor, cardClass, inputClass, projectStatusColor } from './ui'
 
 export interface ProjectRow {
   id: string
@@ -48,7 +51,7 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
   const statusBadge = (s: ProjectStatus) => (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${projectStatusColor[s]}`}>{t(`projects.statuses.${s}`)}</span>
   )
-  const budget = (p: ProjectRow) => p.budgetShare === null ? <span className="text-neutral-400 dark:text-neutral-500">—</span> : (
+  const budget = (p: ProjectRow) => p.budgetShare === null ? <span className="text-neutral-500 dark:text-neutral-500">—</span> : (
     <span className="inline-flex items-center gap-2 tabular-nums">
       <span className="h-1.5 w-14 rounded-full bg-neutral-100 dark:bg-neutral-800 overflow-hidden" aria-hidden>
         <span className={`block h-full rounded-full ${budgetBarColor(p.budgetShare)}`} style={{ width: `${Math.min(100, p.budgetShare * 100)}%` }} />
@@ -61,7 +64,7 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
     <div className="py-16 px-6 text-center">
       <FolderKanban size={32} className="mx-auto mb-3 text-neutral-200 dark:text-neutral-700" />
       <p className="text-sm text-neutral-500 dark:text-neutral-400">{projects.length ? t('projects.noMatch') : t('projects.empty')}</p>
-      {!projects.length && <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('projects.emptyHint')}</p>}
+      {!projects.length && <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-1 max-w-sm mx-auto">{t('projects.emptyHint')}</p>}
     </div>
   )
 
@@ -70,17 +73,17 @@ export default function ProjectList({ projects, clients }: { projects: ProjectRo
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-semibold">{t('projects.title')}</h1>
         <div className="flex gap-2">
-          <button type="button" onClick={() => setLogging(true)} className={outlineButtonClass}><Timer size={14} /> {t('projects.logTime')}</button>
-          <button type="button" onClick={() => setCreating(true)} className={primaryButtonClass}><Plus size={14} /> {t('projects.new')}</button>
+          <Button type="button" variant="outline" onClick={() => setLogging(true)}><Timer size={14} /> {t('projects.logTime')}</Button>
+          <Button type="button" onClick={() => setCreating(true)}><Plus size={14} /> {t('projects.new')}</Button>
         </div>
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={t('projects.searchPlaceholder')} aria-label={t('projects.searchLabel')} className={`${inputClass} flex-1 min-w-48 sm:max-w-sm`} />
-        <select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} aria-label={t('projects.columns.status')} className={`${inputClass} w-auto`}>
+        <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={t('projects.searchPlaceholder')} aria-label={t('projects.searchLabel')} className={cn(inputClass, 'flex-1 min-w-48 sm:max-w-sm')} />
+        <Select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} aria-label={t('projects.columns.status')} className="w-auto">
           {PROJECT_STATUSES.map(s => <option key={s} value={s}>{t(`projects.statuses.${s}`)}</option>)}
           <option value="all">{t('common.all')}</option>
-        </select>
+        </Select>
       </div>
 
       <div className={`${cardClass} overflow-hidden`}>

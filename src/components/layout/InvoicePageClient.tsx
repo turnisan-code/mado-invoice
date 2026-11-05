@@ -84,9 +84,9 @@ export default function InvoicePageClient({
             <div className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
               {reminderLog.map(entry => (
                 <div key={entry.id} className="flex items-center py-2 gap-3">
-                  <span className="text-neutral-400 dark:text-neutral-500 w-24 shrink-0">{formatDate(entry.sent_at, lang)}</span>
+                  <span className="text-neutral-500 dark:text-neutral-500 w-24 shrink-0">{formatDate(entry.sent_at, lang)}</span>
                   <span className="font-medium">{reminderTitle(entry.level, lang)}</span>
-                  {entry.to_email && <span className="text-neutral-400 dark:text-neutral-500 flex-1 truncate">{entry.to_email}</span>}
+                  {entry.to_email && <span className="text-neutral-500 dark:text-neutral-500 flex-1 truncate">{entry.to_email}</span>}
                 </div>
               ))}
             </div>

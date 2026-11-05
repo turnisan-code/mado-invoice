@@ -6,6 +6,9 @@ import { toast } from 'sonner'
 import { toastApiError } from '@/lib/google/toast'
 import { knownApiError, requestErrorMessage } from '@/lib/api-errors'
 import { Dialog } from '@/components/ui/ConfirmDialog'
+import { Button } from '@/components/ui/button'
+import { fieldClass } from '@/components/ui/control'
+import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n/client'
 import { formatDate } from '@/lib/utils/document'
 import { isShareExpired } from '@/lib/share'
@@ -25,8 +28,8 @@ interface Props {
 
 type ShareState = { token: string | null; expiresAt: string | null; viewedAt: string | null }
 
-const smallBtn = 'text-xs px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
-const actionBtn = 'inline-flex items-center gap-1.5 text-sm px-3 min-h-11 sm:min-h-9 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50'
+// Same size as the outline buttons next to it in the document header.
+const triggerBtn = 'h-10 w-10 sm:h-8 sm:w-8 flex items-center justify-center rounded-md transition-colors'
 
 export default function ShareLinkButton({ documentId, number, kind, language, initialToken, driveReady }: Props) {
   const [share, setShare] = useState<ShareState>({ token: initialToken, expiresAt: null, viewedAt: null })
@@ -193,7 +196,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
           onClick={openDialog}
           title={t('share.active')}
           aria-label={t('share.activeAria')}
-          className="h-9 w-9 flex items-center justify-center rounded-md text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950 transition-colors"
+          className={`${triggerBtn} text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950`}
         >
           <Link2 size={15} />
         </button>
@@ -204,7 +207,7 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
           disabled={loading}
           title={t('share.share')}
           aria-label={t('share.share')}
-          className="h-9 w-9 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-50"
+          className={`${triggerBtn} text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-50`}
         >
           {loading ? <Loader2 size={15} className="animate-spin" /> : <Link2 size={15} />}
         </button>
@@ -239,31 +242,27 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
             readOnly
             aria-label={t('share.urlLabel')}
             value={portalUrl ?? ''}
-            className={`flex-1 min-w-0 text-xs bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md px-2.5 py-1.5 font-mono truncate ${expired ? 'text-neutral-400 dark:text-neutral-500 line-through' : 'text-neutral-700 dark:text-neutral-300'}`}
+            className={cn(fieldClass, 'flex-1 text-xs md:text-xs font-mono truncate bg-neutral-50 dark:bg-neutral-800', expired ? 'text-neutral-400 dark:text-neutral-500 line-through' : 'text-neutral-700 dark:text-neutral-300')}
           />
-          <button
-            type="button"
-            onClick={copyLink}
-            className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded-md hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
-          >
+          <Button type="button" onClick={copyLink} className="shrink-0 text-xs">
             {copied && <Check size={12} aria-hidden="true" />}
             {copied ? t('common.copied') : t('common.copy')}
-          </button>
+          </Button>
         </div>
 
         {(canShare || driveReady) && (
           <div className="flex flex-wrap gap-2">
             {canShare && (
-              <button type="button" onClick={shareLink} disabled={busy} className={actionBtn}>
+              <Button type="button" variant="outline" onClick={shareLink} disabled={busy}>
                 <Share2 size={14} aria-hidden="true" />
                 {t('share.share')}
-              </button>
+              </Button>
             )}
             {driveReady && (
-              <button type="button" onClick={uploadToDrive} disabled={busy} className={actionBtn}>
+              <Button type="button" variant="outline" onClick={uploadToDrive} disabled={busy}>
                 {driveUploading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <HardDrive size={14} aria-hidden="true" />}
                 {driveUploading ? t('common.saving') : t('docs.share.saveToDrive')}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -289,39 +288,34 @@ export default function ShareLinkButton({ documentId, number, kind, language, in
               {confirm === 'revoke' ? t('share.revokeQuestion') : t('pdfPortal.share.rotateQuestion')}
             </p>
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirm(null)} disabled={busy} className={smallBtn}>
+              <Button type="button" variant="outline" onClick={() => setConfirm(null)} disabled={busy} className="text-xs">
                 {confirm === 'revoke' ? t('share.keepLink') : t('common.cancel')}
-              </button>
+              </Button>
               {confirm === 'revoke' ? (
-                <button
+                <Button
                   type="button"
                   onClick={revokeLink}
                   disabled={busy}
-                  className="text-xs px-2.5 py-1.5 rounded-md bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                  className="text-xs bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/40"
                 >
                   {loading ? t('share.revoking') : t('share.revokeLink')}
-                </button>
+                </Button>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => changeLink('rotate')}
-                  disabled={busy}
-                  className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-100 transition-colors disabled:opacity-50"
-                >
+                <Button type="button" onClick={() => changeLink('rotate')} disabled={busy} className="text-xs">
                   {loading && <Loader2 size={12} className="animate-spin" />}
                   {t('pdfPortal.share.rotateConfirm')}
-                </button>
+                </Button>
               )}
             </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button type="button" onClick={() => changeLink('extend')} disabled={busy} className={smallBtn}>
+            <Button type="button" variant="outline" onClick={() => changeLink('extend')} disabled={busy} className="text-xs">
               {t('pdfPortal.share.extend')}
-            </button>
-            <button type="button" onClick={() => setConfirm('rotate')} disabled={busy} className={smallBtn}>
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setConfirm('rotate')} disabled={busy} className="text-xs">
               {t('pdfPortal.share.rotate')}
-            </button>
+            </Button>
             <button
               type="button"
               onClick={() => setConfirm('revoke')}

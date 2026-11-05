@@ -4,7 +4,10 @@ import { useId, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
 import { formatMoney } from '@/lib/utils/document'
 import { catalogueName, cataloguePrice, type RateMap } from '@/lib/utils/catalogue'
 import { useT } from '@/lib/i18n/client'
@@ -14,7 +17,6 @@ import { AutoTextarea } from './AutoTextarea'
 import { UNITS, VAT_RATES } from './model'
 
 const POPUP_HEIGHT = 288
-const fieldCls = 'text-base md:text-xs border border-neutral-200 dark:border-neutral-700 rounded px-2 py-1 w-full bg-white dark:bg-neutral-900 dark:text-neutral-100'
 const EMPTY_DRAFT = { name_de: '', name_en: '', default_price: 0, unit: 'flat' as Unit, vat_rate: 20 as VatRate, category: '' }
 
 type Position = { top?: number; bottom?: number; left: number; width?: string }
@@ -164,22 +166,22 @@ export function CatalogueField({ value, language, items, rates, invalid, classNa
             {adding ? (
               <div className="p-3 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={draft.name_de} onChange={e => setDraft(d => ({ ...d, name_de: e.target.value }))} placeholder={t('builder.nameDe')} aria-label={t('builder.nameDeLabel')} autoFocus className={fieldCls} />
-                  <input value={draft.name_en} onChange={e => setDraft(d => ({ ...d, name_en: e.target.value }))} placeholder={t('builder.nameEn')} aria-label={t('builder.nameEnLabel')} className={fieldCls} />
+                  <Input value={draft.name_de} onChange={e => setDraft(d => ({ ...d, name_de: e.target.value }))} placeholder={t('builder.nameDe')} aria-label={t('builder.nameDeLabel')} autoFocus />
+                  <Input value={draft.name_en} onChange={e => setDraft(d => ({ ...d, name_en: e.target.value }))} placeholder={t('builder.nameEn')} aria-label={t('builder.nameEnLabel')} />
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <MoneyInput value={draft.default_price} onValueChange={n => setDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder={t('builder.price')} aria-label={t('builder.price')} className="h-7 px-2 md:text-xs" />
-                  <select value={draft.unit} onChange={e => setDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label={t('builder.unit')} className={`${fieldCls} px-1`}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <MoneyInput value={draft.default_price} onValueChange={n => setDraft(d => ({ ...d, default_price: n ?? 0 }))} placeholder={t('builder.price')} aria-label={t('builder.price')} className="col-span-2 sm:col-span-1" />
+                  <Select value={draft.unit} onChange={e => setDraft(d => ({ ...d, unit: e.target.value as Unit }))} aria-label={t('builder.unit')}>
                     {UNITS.map(u => <option key={u} value={u}>{t(`units.${u}`)}</option>)}
-                  </select>
-                  <select value={draft.vat_rate} onChange={e => setDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} aria-label={t('builder.vatRate')} className={`${fieldCls} px-1`}>
+                  </Select>
+                  <Select value={draft.vat_rate} onChange={e => setDraft(d => ({ ...d, vat_rate: parseInt(e.target.value) as VatRate }))} aria-label={t('builder.vatRate')}>
                     {VAT_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                  </select>
+                  </Select>
                 </div>
-                <input value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))} placeholder={t('builder.category')} aria-label={t('builder.category')} className={fieldCls} />
+                <Input value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value }))} placeholder={t('builder.category')} aria-label={t('builder.category')} />
                 <div className="flex gap-2">
-                  <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => void createItem()} className="text-xs px-2.5 py-1.5 bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 rounded hover:bg-neutral-700 dark:hover:bg-neutral-200">{t('builder.addAndUse')}</button>
-                  <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => setAdding(false)} className="text-xs px-2.5 py-1.5 border border-neutral-200 dark:border-neutral-700 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800">{t('common.cancel')}</button>
+                  <Button type="button" onMouseDown={e => e.preventDefault()} onClick={() => void createItem()}>{t('builder.addAndUse')}</Button>
+                  <Button type="button" variant="outline" onMouseDown={e => e.preventDefault()} onClick={() => setAdding(false)}>{t('common.cancel')}</Button>
                 </div>
               </div>
             ) : (

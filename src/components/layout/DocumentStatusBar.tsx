@@ -7,7 +7,8 @@ import { useRouter } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { StatusBadge, STATUS_TEXT } from '@/components/lists/StatusBadge'
-import { inputClass } from '@/components/lists/ListParts'
+import { Select } from '@/components/ui/select'
+import { fieldClass } from '@/components/ui/control'
 import { toastApiError } from '@/lib/google/toast'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { logEvent } from '@/lib/events'
@@ -307,7 +308,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
   }
 
   const paymentFields = (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div className="space-y-1">
         <label htmlFor={`${uid}-paid-date`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentDate')}</label>
         <input
@@ -319,17 +320,17 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
           aria-invalid={paidDateInvalid || undefined}
           aria-describedby={paidDateInvalid ? `${uid}-paid-date-error` : undefined}
           onChange={e => { setPaidDate(e.target.value); setPaidDateInvalid(false) }}
-          className={`w-full ${inputClass} ${paidDateInvalid ? 'border-red-500 dark:border-red-500' : ''}`}
+          className={fieldClass}
         />
       </div>
       <div className="space-y-1">
         <label htmlFor={`${uid}-paid-method`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentMethod')}</label>
-        <select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)} className={`w-full ${inputClass}`}>
+        <Select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)}>
           <option value="bank">{t('payments.methodBank')}</option>
           <option value="cash">{t('payments.methodCash')}</option>
-        </select>
+        </Select>
       </div>
-      {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
+      {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="sm:col-span-2 text-xs text-red-600 dark:text-red-400">{t('lifecycle.paymentDateInvalid')}</p>}
     </div>
   )
 
@@ -391,7 +392,7 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
               maxLength={500}
               placeholder={t('lifecycle.storno.reasonPlaceholder')}
               onChange={e => setStornoReason(e.target.value)}
-              className={`w-full ${inputClass}`}
+              className={fieldClass}
             />
           </div>
         )}

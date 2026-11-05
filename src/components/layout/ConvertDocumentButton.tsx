@@ -77,7 +77,7 @@ export default function ConvertDocumentButton({ kind, sourceId }: { kind: keyof 
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setConfirming(true)} disabled={loading} className="flex items-center gap-1.5">
+      <Button type="button" variant="outline" onClick={() => setConfirming(true)} disabled={loading}>
         <Icon size={14} />
         <span className="sr-only sm:not-sr-only">{loading ? t(k.busy) : t(k.label)}</span>
       </Button>

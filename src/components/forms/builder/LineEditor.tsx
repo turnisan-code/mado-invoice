@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import { Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { useT } from '@/lib/i18n/client'
 import type { PublicSettings } from '@/lib/public-settings'
 import type { CatalogueItem, Currency, Language, LineType } from '@/types'
@@ -19,7 +20,7 @@ const SPECIAL_LINES: [LineType, 'builder.heading' | 'builder.note' | 'builder.di
 ]
 
 // The document's lines, reordered by drag and drop, Alt+↑/↓ on a handle or the arrows on a phone.
-export function LineEditor({ lines, setLines, updateLine, settings, currency, language, vatApplies, lineIssues, catalogue, clientRates, onCatalogueItemCreated }: {
+export function LineEditor({ lines, setLines, updateLine, settings, currency, language, vatApplies, lineIssues, error, catalogue, clientRates, onCatalogueItemCreated }: {
   lines: LineItem[]
   setLines: (fn: (lines: LineItem[]) => LineItem[]) => void
   updateLine: (id: string, patch: Partial<LineItem>) => void
@@ -28,12 +29,15 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
   language: Language
   vatApplies: boolean
   lineIssues: (index: number) => LineIssues
+  // Why the lines block issuing (no item line at all), shown next to "Add line".
+  error?: string
   catalogue: CatalogueItem[]
   // The selected client's own prices for catalogue items.
   clientRates: RateMap
   onCatalogueItemCreated: (item: CatalogueItem) => void
 }) {
   const { t } = useT()
+  const uid = useId()
   const listRef = useRef<HTMLDivElement>(null)
   // The control a keyboard or button move came from, focused again once the row has moved.
   const refocus = useRef<{ id: string; control: 'handle' | 'up' | 'down' } | null>(null)
@@ -68,7 +72,7 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
 
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">{t('builder.lineItems')}</p>
+      <p id={`${uid}-caption`} className="text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider mb-3">{t('builder.lineItems')}</p>
       <p aria-live="polite" className="sr-only">{reorder.announcement}</p>
       <div className="sm:overflow-x-auto sm:-mx-1 sm:px-1">
         <div className="sm:min-w-[560px]">
@@ -77,7 +81,8 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
             {vatApplies && <span>{t('builder.vat')}</span>}
             <span /><span /><span />
           </div>
-          <div ref={listRef} className="sm:space-y-1">
+          {/* aria-invalid is not defined for a group or a button, so the message is tied in by aria-describedby */}
+          <div ref={listRef} role="group" aria-labelledby={`${uid}-caption`} aria-describedby={error ? `${uid}-error` : undefined} className="sm:space-y-1">
             {lines.map((line, idx) => (
               <div key={line.id} data-line={line.id}>
                 <LineRow
@@ -104,10 +109,10 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
       </div>
 
       <div className="flex items-center gap-1 pt-3 flex-wrap">
-        <button type="button" onClick={() => setLines(ls => [...ls, blankLine(settings)])}
-          className="flex items-center gap-1.5 text-sm px-2.5 py-2 sm:py-1 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors">
+        <Button type="button" variant="outline" onClick={() => setLines(ls => [...ls, blankLine(settings)])}
+          aria-describedby={error ? `${uid}-error` : undefined} className={error ? 'border-destructive dark:border-destructive/50' : undefined}>
           <Plus size={13} /> {t('builder.addLine')}
-        </button>
+        </Button>
         <div className="w-px h-4 bg-neutral-200 dark:bg-neutral-700 mx-1.5" />
         {SPECIAL_LINES.map(([lt, label]) => (
           <button key={lt} type="button" onClick={() => setLines(ls => [...ls, blankSpecial(lt)])}
@@ -116,6 +121,7 @@ export function LineEditor({ lines, setLines, updateLine, settings, currency, la
           </button>
         ))}
       </div>
+      {error && <p id={`${uid}-error`} className="text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }

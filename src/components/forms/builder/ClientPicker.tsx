@@ -2,13 +2,12 @@
 
 import { useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
+import { fieldClass } from '@/components/ui/control'
 import { clientLabel } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
 import type { Client, ClientStatus } from '@/types'
 
 const CLIENT_GROUPS: ClientStatus[] = ['active', 'lead', 'inactive']
-export const SELECT_CLS = 'w-full border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-2 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100'
-const INVALID_CLS = 'border-red-400 dark:border-red-500'
 
 // Searchable client combobox: active clients first, then leads, then inactive ones; the last
 // entry creates a new client from what was typed.
@@ -79,7 +78,7 @@ export function ClientPicker({ id, clients, value, onChange, onCreate, invalid, 
         onClick={() => setOpen(true)}
         onChange={e => { setQuery(e.target.value); setOpen(true); setHighlight(0) }}
         onKeyDown={onKeyDown}
-        className={`${SELECT_CLS} ${invalid ? INVALID_CLS : ''} disabled:opacity-60`}
+        className={fieldClass}
       />
       {open && !disabled && (
         <div id={listId} role="listbox" aria-label={t('builder.client')}

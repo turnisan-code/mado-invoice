@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,8 +34,6 @@ interface Props {
 }
 
 const TAX_OPTIONS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
-
-const SELECT_CLS = 'w-full h-8 border border-neutral-200 dark:border-neutral-700 rounded-lg px-2.5 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400 aria-invalid:border-red-500'
 
 // Postgres foreign_key_violation: documents.client_id is "on delete restrict".
 const FK_VIOLATION = '23503'
@@ -163,7 +162,7 @@ function TagInput({ value, onChange }: { value: string[]; onChange: (tags: strin
     <div className="space-y-1.5">
       <Label htmlFor={inputId}>{t('clients.form.tags')}</Label>
       <div
-        className="flex flex-wrap gap-1.5 min-h-8 px-2 py-1 border border-neutral-200 dark:border-neutral-700 rounded-lg bg-white dark:bg-neutral-900 cursor-text focus-within:ring-1 focus-within:ring-neutral-400"
+        className="flex flex-wrap items-center gap-1.5 min-h-10 sm:min-h-8 px-2 py-1 border border-input rounded-lg bg-transparent dark:bg-input/30 cursor-text transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
         onClick={e => (e.currentTarget.querySelector('input') as HTMLInputElement)?.focus()}
       >
         {value.map(tag => (
@@ -287,38 +286,42 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
   const busy = isSubmitting || saving
   const id = (field: keyof Values) => `${uid}-${field}`
   const errorOf = (field: keyof Values) => errors[field]?.message
+  // The message Field shows under a control: its error, or else its hint.
+  const messageId = (field: keyof Values, hint = false) => errors[field] || hint ? `${id(field)}-msg` : undefined
+  // Name or company: both fields carry the error and the rule.
+  const nameDescribedBy = [messageId('name'), `${uid}-name-rule`].filter(Boolean).join(' ')
 
   return (
     <form onSubmit={handleSubmit(onValid)} noValidate className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field id={id('name')} label={t('clients.form.name')} error={errorOf('name')}>
-          <Input id={id('name')} {...register('name')} placeholder={t('clients.form.namePlaceholder')} aria-invalid={!!errors.name || undefined} />
+          <Input id={id('name')} {...register('name')} placeholder={t('clients.form.namePlaceholder')} aria-invalid={!!errors.name || undefined} aria-describedby={nameDescribedBy} />
         </Field>
         <Field id={id('company')} label={t('clients.form.company')}>
-          <Input id={id('company')} {...register('company')} placeholder={t('clients.form.companyPlaceholder')} />
+          <Input id={id('company')} {...register('company')} placeholder={t('clients.form.companyPlaceholder')} aria-invalid={!!errors.name || undefined} aria-describedby={nameDescribedBy} />
         </Field>
       </div>
-      <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-2">{t('clients.form.nameOrCompany')}</p>
+      <p id={`${uid}-name-rule`} className="text-xs text-neutral-500 dark:text-neutral-400 -mt-2">{t('clients.form.nameOrCompany')}</p>
       <Field id={id('address_line1')} label={t('clients.form.address')}>
         <Input id={id('address_line1')} {...register('address_line1')} autoComplete="address-line1" />
       </Field>
       <Field id={id('address_line2')} label={t('clients.form.addressLine2')}>
         <Input id={id('address_line2')} {...register('address_line2')} autoComplete="address-line2" />
       </Field>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field id={id('zip')} label={t('clients.form.zip')}>
           <Input id={id('zip')} {...register('zip')} autoComplete="postal-code" />
         </Field>
-        <Field id={id('city')} label={t('clients.form.city')} className="col-span-2">
+        <Field id={id('city')} label={t('clients.form.city')} className="sm:col-span-2">
           <Input id={id('city')} {...register('city')} autoComplete="address-level2" />
         </Field>
       </div>
       <Field id={id('country')} label={t('clients.form.country')} error={errorOf('country')}>
-        <select
+        <Select
           id={id('country')}
           {...register('country', { onChange: e => applySuggestion(e.target.value, getValues('uid_number')) })}
-          className={SELECT_CLS}
           aria-invalid={!!errors.country || undefined}
+          aria-describedby={messageId('country')}
         >
           {legacyCountry && <option value={legacyCountry}>{legacyCountry}</option>}
           <optgroup label={t('clientData.form.countryEu')}>
@@ -327,21 +330,21 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           <optgroup label={t('clientData.form.countryOther')}>
             {countries.filter(c => !c.eu).map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
           </optgroup>
-        </select>
+        </Select>
         {legacyCountry && country === legacyCountry && !errors.country && (
           <p className="text-xs text-amber-700 dark:text-amber-400">{t('clientData.form.countryUnknown', { value: legacyCountry })}</p>
         )}
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field id={id('email')} label={t('clients.form.email')} error={errorOf('email')}>
-          <Input id={id('email')} type="email" inputMode="email" autoComplete="email" {...register('email')} aria-invalid={!!errors.email || undefined} />
+          <Input id={id('email')} type="email" inputMode="email" autoComplete="email" {...register('email')} aria-invalid={!!errors.email || undefined} aria-describedby={messageId('email')} />
         </Field>
         <Field id={id('phone')} label={t('clients.form.phone')}>
           <Input id={id('phone')} type="tel" autoComplete="tel" {...register('phone')} />
         </Field>
       </div>
       <Field id={id('cc_emails')} label={t('dunning.clientCc')} error={errorOf('cc_emails')} hint={t('dunning.clientCcHint')}>
-        <Input id={id('cc_emails')} inputMode="email" autoComplete="off" {...register('cc_emails')} aria-invalid={!!errors.cc_emails || undefined} />
+        <Input id={id('cc_emails')} inputMode="email" autoComplete="off" {...register('cc_emails')} aria-invalid={!!errors.cc_emails || undefined} aria-describedby={messageId('cc_emails', true)} />
       </Field>
       <Field id={id('uid_number')} label={t('clients.form.uid')} error={errorOf('uid_number')}>
         <Input
@@ -350,14 +353,15 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           placeholder={t('clients.form.uidPlaceholder')}
           autoCapitalize="characters"
           aria-invalid={!!errors.uid_number || undefined}
+          aria-describedby={messageId('uid_number')}
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field id={id('tax_treatment')} label={t('clients.form.taxTreatment')}>
-          <select id={id('tax_treatment')} {...register('tax_treatment', { onChange: () => setTaxManual(true) })} className={SELECT_CLS}>
+          <Select id={id('tax_treatment')} {...register('tax_treatment', { onChange: () => setTaxManual(true) })}>
             {TAX_OPTIONS.map(o => <option key={o} value={o}>{t(`taxTreatments.${o}`)}</option>)}
-          </select>
+          </Select>
           {suggestion && suggestion !== taxTreatment && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
               {t('clientData.form.taxSuggested', { treatment: t(`taxTreatments.${suggestion}`) })}{' '}
@@ -368,14 +372,14 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
           )}
         </Field>
         <Field id={id('language')} label={t('clients.form.language')}>
-          <select id={id('language')} {...register('language')} className={SELECT_CLS}>
+          <Select id={id('language')} {...register('language')}>
             <option value="de">{t('common.german')}</option>
             <option value="en">{t('common.english')}</option>
-          </select>
+          </Select>
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field id={id('payment_days')} label={t('clients.form.paymentDays')} error={errorOf('payment_days')} hint={t('clientData.form.paymentDaysHint')}>
           <Controller
             control={control}
@@ -389,20 +393,21 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
                 onBlur={field.onBlur}
                 placeholder={t('clientData.form.paymentDaysPlaceholder', { days: defaults.payment_days })}
                 aria-invalid={!!errors.payment_days || undefined}
+                aria-describedby={messageId('payment_days', true)}
               />
             )}
           />
         </Field>
         <Field id={id('status')} label={t('clients.form.status')}>
-          <select id={id('status')} {...register('status')} className={SELECT_CLS}>
+          <Select id={id('status')} {...register('status')}>
             <option value="active">{t('status.active')}</option>
             <option value="inactive">{t('status.inactive')}</option>
             <option value="lead">{t('status.lead')}</option>
-          </select>
+          </Select>
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field id={id('skonto_percent')} label={t('rates.skontoPercent')} error={errorOf('skonto_percent')}>
           <Controller
             control={control}
@@ -415,7 +420,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
                 onBlur={field.onBlur}
                 placeholder={t('rates.skontoDefault', { value: defaults.skonto_percent ? `${formatLocaleNumber(defaults.skonto_percent, 2)} %` : t('rates.skontoNone') })}
                 aria-invalid={!!errors.skonto_percent || undefined}
-                aria-describedby={`${uid}-skonto-hint`}
+                aria-describedby={[messageId('skonto_percent'), `${uid}-skonto-hint`].filter(Boolean).join(' ')}
               />
             )}
           />
@@ -433,7 +438,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
                 onBlur={field.onBlur}
                 placeholder={t('rates.skontoDefault', { value: defaults.skonto_days != null ? String(defaults.skonto_days) : t('rates.skontoNone') })}
                 aria-invalid={!!errors.skonto_days || undefined}
-                aria-describedby={`${uid}-skonto-hint`}
+                aria-describedby={[messageId('skonto_days'), `${uid}-skonto-hint`].filter(Boolean).join(' ')}
               />
             )}
           />
@@ -468,33 +473,33 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
         </summary>
         <div className="px-3 pb-3 space-y-3">
           <Field id={id('einvoice_format')} label={t('einvoice.client.format')}>
-            <select id={id('einvoice_format')} {...register('einvoice_format')} className={SELECT_CLS}>
+            <Select id={id('einvoice_format')} {...register('einvoice_format')}>
               <option value="">{t('einvoice.client.formatNone')}</option>
               <option value="ebinterface">{t('einvoice.formats.ebinterface')}</option>
               <option value="ubl">{t('einvoice.formats.ubl')}</option>
-            </select>
+            </Select>
           </Field>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field id={id('peppol_scheme')} label={t('einvoice.client.peppolScheme')} error={errorOf('peppol_scheme')}>
-              <Input id={id('peppol_scheme')} inputMode="numeric" autoComplete="off" placeholder="9915" {...register('peppol_scheme')} aria-invalid={!!errors.peppol_scheme || undefined} />
+              <Input id={id('peppol_scheme')} inputMode="numeric" autoComplete="off" placeholder="9915" {...register('peppol_scheme')} aria-invalid={!!errors.peppol_scheme || undefined} aria-describedby={messageId('peppol_scheme')} />
             </Field>
-            <Field id={id('peppol_id')} label={t('einvoice.client.peppolId')} error={errorOf('peppol_id')} className="col-span-2">
-              <Input id={id('peppol_id')} autoComplete="off" autoCapitalize="none" {...register('peppol_id')} aria-invalid={!!errors.peppol_id || undefined} />
+            <Field id={id('peppol_id')} label={t('einvoice.client.peppolId')} error={errorOf('peppol_id')} className="sm:col-span-2">
+              <Input id={id('peppol_id')} autoComplete="off" autoCapitalize="none" {...register('peppol_id')} aria-invalid={!!errors.peppol_id || undefined} aria-describedby={messageId('peppol_id')} />
             </Field>
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1.5">{t('einvoice.client.peppolHint')}</p>
           <Field id={id('buyer_reference')} label={t('einvoice.client.buyerReference')} hint={t('einvoice.client.buyerReferenceHint')}>
-            <Input id={id('buyer_reference')} autoComplete="off" {...register('buyer_reference')} />
+            <Input id={id('buyer_reference')} autoComplete="off" {...register('buyer_reference')} aria-describedby={messageId('buyer_reference', true)} />
           </Field>
           <Field id={id('supplier_number')} label={t('einvoice.client.supplierNumber')} hint={t('einvoice.client.supplierNumberHint')}>
-            <Input id={id('supplier_number')} autoComplete="off" {...register('supplier_number')} />
+            <Input id={id('supplier_number')} autoComplete="off" {...register('supplier_number')} aria-describedby={messageId('supplier_number', true)} />
           </Field>
         </div>
       </details>
 
       <div className="flex flex-wrap items-center gap-2 pt-2">
         {client && (
-          <Button type="button" variant="destructive" size="sm" onClick={() => setConfirmDelete(true)} disabled={deleting || busy}>
+          <Button type="button" variant="destructive" onClick={() => setConfirmDelete(true)} disabled={deleting || busy}>
             {deleting ? t('common.deleting') : t('clients.form.deleteClient')}
           </Button>
         )}
@@ -555,8 +560,8 @@ function Field({ id, label, error, hint, className = '', children }: {
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error
-        ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
-        : hint && <p className="text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
+        ? <p id={`${id}-msg`} className="text-xs text-red-600 dark:text-red-400">{error}</p>
+        : hint && <p id={`${id}-msg`} className="text-xs text-neutral-500 dark:text-neutral-400">{hint}</p>}
     </div>
   )
 }

@@ -99,7 +99,7 @@ export async function QuoteDepositList({ quote }: { quote: Quote }) {
                 )}
               </div>
               <div className="text-right shrink-0">
-                <p className={`font-medium ${live(d) ? '' : 'line-through text-neutral-400 dark:text-neutral-500'}`}>{formatMoney(depositTotals(d).total, currency)}</p>
+                <p className={`font-medium ${live(d) ? '' : 'line-through text-neutral-500 dark:text-neutral-500'}`}>{formatMoney(depositTotals(d).total, currency)}</p>
                 <p className={`text-xs ${live(d) && d.number && open > 0.005 ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400'}`}>{state}</p>
               </div>
             </li>

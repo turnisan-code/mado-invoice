@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { MoneyInput } from '@/components/ui/MoneyInput'
+import { Select } from '@/components/ui/select'
 import { formatMoney } from '@/lib/utils/document'
 import { catalogueName } from '@/lib/utils/catalogue'
 import { useT } from '@/lib/i18n/client'
@@ -17,7 +18,6 @@ import type { CatalogueItem, ClientRate } from '@/types'
 
 // Postgres unique_violation: one rate per client and catalogue item.
 const UNIQUE_VIOLATION = '23505'
-const SELECT_CLS = 'w-full h-8 border border-neutral-200 dark:border-neutral-700 rounded-lg px-2.5 text-base md:text-sm bg-white dark:bg-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-neutral-400'
 
 // id null = a new rate.
 type Draft = { id: string | null; itemId: string; price: number | null; note: string }
@@ -93,7 +93,7 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
       {draft.id === null ? (
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-item`}>{t('rates.item')}</Label>
-          <select
+          <Select
             id={`${uid}-item`}
             value={draft.itemId}
             autoFocus
@@ -108,7 +108,6 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
               })
             }}
             aria-invalid={(!!error && !draft.itemId) || undefined}
-            className={SELECT_CLS}
           >
             <option value="">{t('rates.chooseItem')}</option>
             {categories.map(cat => (
@@ -117,7 +116,7 @@ export default function ClientRates({ clientId, catalogue, initialRates }: {
               </optgroup>
             ))}
             {available.filter(i => !i.category).map(i => <option key={i.id} value={i.id}>{catalogueName(i, lang)}</option>)}
-          </select>
+          </Select>
         </div>
       ) : draftItem && (
         <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{catalogueName(draftItem, lang)}</p>

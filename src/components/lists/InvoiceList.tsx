@@ -10,6 +10,8 @@ import { toCsv, csvDate, downloadCsv } from '@/lib/utils/csv'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { fieldClass } from '@/components/ui/control'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage, requestErrorMessage } from '@/lib/api-errors'
@@ -350,19 +352,19 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
 
       <div className="flex gap-3 flex-wrap items-center">
         <input type="search" aria-label={t('invoices.searchLabel')} value={q} onChange={e => setFilters({ q: e.target.value })} placeholder={t('lists.searchPlaceholder')} className={searchClass} />
-        <select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className={inputClass}>
+        <Select aria-label={t('common.status')} value={status} onChange={e => setFilters({ status: e.target.value })} className="w-auto">
           <option value="">{t('status.allStatuses')}</option>
           {STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-        </select>
-        <select aria-label={t('common.client')} value={client} onChange={e => setFilters({ client: e.target.value })} className={`${inputClass} max-w-48`}>
+        </Select>
+        <Select aria-label={t('common.client')} value={client} onChange={e => setFilters({ client: e.target.value })} className="w-auto max-w-48">
           <option value="">{t('lists.allClients')}</option>
           {clientOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
+        </Select>
         {bookamatConfigured && (
-          <select aria-label={t('books.sync.filterLabel')} value={bookamat} onChange={e => setFilters({ bookamat: e.target.value })} className={inputClass}>
+          <Select aria-label={t('books.sync.filterLabel')} value={bookamat} onChange={e => setFilters({ bookamat: e.target.value })} className="w-auto">
             <option value="">{t('books.sync.filterAll')}</option>
             {BOOKAMAT_FILTERS.map(f => <option key={f} value={f}>{t(`books.state.${f}`)}</option>)}
-          </select>
+          </Select>
         )}
         <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
           <input type="date" value={from} max={to || undefined} onChange={e => setFilters({ from: e.target.value })} aria-label={t('lists.fromDate')} className={inputClass} />
@@ -370,13 +372,14 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
           <input type="date" value={to} min={from || undefined} onChange={e => setFilters({ to: e.target.value })} aria-label={t('lists.toDate')} className={inputClass} />
         </div>
         {list.hasFilters && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => { selection.clear(); list.clearFilters() }}
-            className="flex items-center gap-1 text-xs px-2 py-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+            className="text-xs text-neutral-500 dark:text-neutral-400"
           >
             <X size={12} /> {t('lists.clearFilters')}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -397,7 +400,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                       {markers(doc)}
                     </p>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">{clientLabel(doc) || '—'}</p>
-                    <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{listDate(doc.date, lang)}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <p className="font-semibold text-sm">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</p>
@@ -444,7 +447,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 </td>
                 <td className="px-4 py-3">
                   <Link href={`/invoices/${doc.id}`} className="font-medium hover:underline">
-                    {doc.number ?? <span className="text-neutral-400 dark:text-neutral-500">{t('common.draft')}</span>}
+                    {doc.number ?? <span className="text-neutral-500 dark:text-neutral-500">{t('common.draft')}</span>}
                   </Link>
                   {markers(doc)}
                 </td>
@@ -452,7 +455,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.date, lang)}</td>
                 <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{listDate(doc.due_date, lang)}</td>
                 <td className="px-4 py-3 text-right font-medium">{formatMoney(docTotal(doc), doc.currency ?? undefined)}</td>
-                <td className={`px-4 py-3 text-right ${isOpen(doc) && docBalance(doc) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                <td className={`px-4 py-3 text-right ${isOpen(doc) && docBalance(doc) > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-500'}`}>
                   {doc.status === 'draft' || doc.status === 'cancelled' ? '—' : formatMoney(docBalance(doc), doc.currency ?? undefined)}
                 </td>
                 <td className="px-4 py-3">
@@ -472,7 +475,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 </td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.total, currency)}</td>
                 <td className="px-4 py-2.5 text-right font-semibold">{formatMoney(totals.open, currency)}</td>
-                <td className="px-4 py-2.5 text-neutral-400 dark:text-neutral-500">{t('invoices.open')}</td>
+                <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-500">{t('invoices.open')}</td>
               </tr>
             </tfoot>
           )}
@@ -503,7 +506,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
         onCancel={() => setBulkConfirm(null)}
       >
         {bulkConfirm === 'paid' && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label htmlFor={`${uid}-paid-date`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentDate')}</label>
               <input
@@ -515,17 +518,17 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
                 aria-invalid={paidDateInvalid || undefined}
                 aria-describedby={paidDateInvalid ? `${uid}-paid-date-error` : undefined}
                 onChange={e => { setPaidDate(e.target.value); setPaidDateInvalid(false) }}
-                className={`w-full ${inputClass} ${paidDateInvalid ? 'border-red-500 dark:border-red-500' : ''}`}
+                className={fieldClass}
               />
             </div>
             <div className="space-y-1">
               <label htmlFor={`${uid}-paid-method`} className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{t('payments.paymentMethod')}</label>
-              <select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)} className={`w-full ${inputClass}`}>
+              <Select id={`${uid}-paid-method`} value={paidMethod} onChange={e => setPaidMethod(e.target.value as PaymentMethod)}>
                 <option value="bank">{t('payments.methodBank')}</option>
                 <option value="cash">{t('payments.methodCash')}</option>
-              </select>
+              </Select>
             </div>
-            {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="col-span-2 text-xs text-red-600 dark:text-red-400">{t('exports.lists.paidDateInvalid')}</p>}
+            {paidDateInvalid && <p id={`${uid}-paid-date-error`} role="alert" className="sm:col-span-2 text-xs text-red-600 dark:text-red-400">{t('exports.lists.paidDateInvalid')}</p>}
           </div>
         )}
       </ConfirmDialog>
