@@ -104,17 +104,26 @@ export function googleNotConnected(settings?: Pick<Settings, 'gmail_email'> | nu
   return NextResponse.json({ error: expired ? GOOGLE_REAUTH_MESSAGE : GOOGLE_NOT_CONNECTED_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: expired ? 401 : 400 })
 }
 
-export async function googleErrorResponse(err: unknown, supabase: SupabaseClient, settingsId: string, context: string) {
+export type GoogleFailure = { status: number; error: string; code: typeof GOOGLE_REAUTH_CODE | 'google_failed' }
+
+// A failed Google call, recorded: an expired grant clears the tokens, a missing permission or any
+// other failure is saved as the last Google error. `error` is the message the UI words.
+export async function googleFailure(err: unknown, supabase: SupabaseClient, settingsId: string, context: string): Promise<GoogleFailure> {
   if (isGoogleAuthError(err)) {
     await clearGoogleTokens(supabase, settingsId)
-    return NextResponse.json({ error: GOOGLE_REAUTH_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: 401 })
+    return { status: 401, error: GOOGLE_REAUTH_MESSAGE, code: GOOGLE_REAUTH_CODE }
   }
   if (isGoogleScopeError(err)) {
     await recordGoogleError(supabase, settingsId, GOOGLE_SCOPE_MESSAGE)
-    return NextResponse.json({ error: GOOGLE_SCOPE_MESSAGE, code: GOOGLE_REAUTH_CODE }, { status: 403 })
+    return { status: 403, error: GOOGLE_SCOPE_MESSAGE, code: GOOGLE_REAUTH_CODE }
   }
   const message = googleErrorMessage(err)
   console.error(`[${context}]`, message)
   await recordGoogleError(supabase, settingsId, message)
-  return NextResponse.json({ error: message, code: 'google_failed' }, { status: 502 })
+  return { status: 502, error: message, code: 'google_failed' }
+}
+
+export async function googleErrorResponse(err: unknown, supabase: SupabaseClient, settingsId: string, context: string) {
+  const { status, error, code } = await googleFailure(err, supabase, settingsId, context)
+  return NextResponse.json({ error, code }, { status })
 }

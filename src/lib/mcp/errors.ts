@@ -75,8 +75,10 @@ function isProblemList(value: unknown): value is IssueProblem[] {
   return Array.isArray(value) && value.length > 0 && value.every(p => !!p && typeof p === 'object' && typeof (p as { code?: unknown }).code === 'string')
 }
 
-function problemsError(problems: IssueProblem[], t: TFn): ToolError {
-  return { code: 'incomplete', message: problems.map(p => issueProblemMessage(p, t)).join(' '), details: { problems } }
+// `extra` says which document they belong to when several were checked.
+function problemsError(problems: IssueProblem[], t: TFn, extra?: unknown): ToolError {
+  const which = extra && typeof extra === 'object' && !Array.isArray(extra) ? extra as Record<string, unknown> : {}
+  return { code: 'incomplete', message: problems.map(p => issueProblemMessage(p, t)).join(' '), details: { ...which, problems } }
 }
 
 function zodIssues(err: ZodError): string {
@@ -135,7 +137,7 @@ export function toToolError(err: unknown, t: TFn): ToolError {
   if (err instanceof ZodError) return { code: 'invalid_input', message: `${t('mcp.errors.invalidInput')} ${zodIssues(err)}` }
   if (err && typeof err === 'object') {
     const e = err as CodedError
-    if (isProblemList(e.problems)) return problemsError(e.problems, t)
+    if (isProblemList(e.problems)) return problemsError(e.problems, t, e.details)
     if (typeof e.code === 'string' && e.code) return codedError(e, t)
     // DocumentNotFoundError (src/lib/pdf/render.ts), told apart without importing the PDF renderer.
     if (err instanceof Error && err.message === 'Document not found') return { code: 'not_found', message: t('mcp.errors.notFound') }
