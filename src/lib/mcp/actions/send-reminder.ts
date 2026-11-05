@@ -99,7 +99,7 @@ export async function resolveSendReminder(ctx: ToolContext, input: ReminderInput
   }
 }
 
-export const sendReminderAction = defineAction<Args>({
+export const sendReminderAction = defineAction<Args, string>({
   kind: 'send_reminder',
   argsSchema,
   async prepare(ctx, args) {
@@ -150,8 +150,18 @@ export const sendReminderAction = defineAction<Args>({
   async fingerprint(ctx, args) {
     return fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id, args.mode), args.mode))
   },
-  async execute(ctx, args) {
+  async approvedState(ctx, args) {
+    const fingerprint = fingerprintOf(reminderState(await loadInvoice(ctx, args.invoice_id, args.mode), args.mode))
+    return { fingerprint, state: fingerprint }
+  },
+  // The Mahnung is rendered from the read below, not from the one the state was compared on. A run
+  // confirmed in the chat runs on Claude's session, where nothing holds the invoice: a payment Claude
+  // records in a parallel call between the two reads would change the figures it prints. So the
+  // read it is rendered from is compared with the approved state again, and a change stops it.
+  async execute(ctx, args, approved) {
+    if (approved === undefined) throw new McpToolError('internal')
     const loaded = await loadInvoice(ctx, args.invoice_id, args.mode)
+    if (fingerprintOf(reminderState(loaded, args.mode)) !== approved) throw new McpToolError('state_changed')
     const sent = await sendReminder(ctx.supabase, loaded, {
       mode: args.mode, to: args.to, cc: args.cc, bcc: args.bcc, subject: args.subject, body: args.body,
       portalOrigin: APP_URL, fillPortalLink: true,
