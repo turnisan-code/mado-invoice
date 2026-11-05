@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import ClientRates from '@/components/layout/ClientRates'
 import ClientEditSection from '@/components/layout/ClientEditSection'
+import ClientProjects from '@/components/projects/ClientProjects'
 import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { calcTotals, formatDate, formatMoney, roundCents } from '@/lib/utils/document'
@@ -120,6 +121,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <p className="text-lg font-semibold">{invoiceCount}</p>
         </div>
       </div>
+
+      {/* Projects (unbilled time and expenses) and the statement of account */}
+      <ClientProjects client={client} />
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">

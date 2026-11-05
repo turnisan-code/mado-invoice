@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, FileText, MessageSquareQuote, FileX, Repeat,
-  BookOpen, BarChart3, Settings, ShieldCheck, type LucideIcon,
+  BookOpen, BarChart3, Settings, ShieldCheck, FolderKanban, type LucideIcon,
 } from 'lucide-react'
 import type { DictKey } from '@/lib/i18n'
 
@@ -16,6 +16,7 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard',    label: 'nav.dashboard',   icon: LayoutDashboard, tab: 0 },
   { href: '/clients',      label: 'nav.clients',     icon: Users,           tab: 2 },
+  { href: '/projects',     label: 'projects.nav',    icon: FolderKanban },
   { href: '/invoices',     label: 'nav.invoices',    icon: FileText,        tab: 1 },
   { href: '/quotes',       label: 'nav.quotes',      icon: MessageSquareQuote, tab: 3 },
   { href: '/credit-notes', label: 'nav.creditNotes', icon: FileX },

@@ -412,3 +412,53 @@ export interface RecurringSchedule {
   last_generated_at: string | null
   last_document_id: string | null
 }
+
+export type ProjectStatus = 'active' | 'done' | 'archived'
+
+export interface Project {
+  id: string
+  created_at: string
+  client_id: string
+  name: string
+  status: ProjectStatus
+  // Net hourly rate of time entries without their own rate.
+  hourly_rate: number | null
+  budget_hours: number | null
+  // Net budget for all billable time and expenses.
+  budget_amount: number | null
+  notes: string | null
+}
+
+export interface TimeEntry {
+  id: string
+  created_at: string
+  project_id: string
+  date: string
+  minutes: number
+  description: string
+  billable: boolean
+  // null = the project's hourly rate.
+  rate: number | null
+  invoiced_document_id: string | null
+  document_item_id: string | null
+  // The hourly rate it was billed at; only meaningful while invoiced_document_id is set.
+  billed_rate: number | null
+}
+
+// A cost passed on to the client (input VAT stays in Bookamat), billed at net plus markup.
+export interface ProjectExpense {
+  id: string
+  created_at: string
+  project_id: string
+  date: string
+  description: string
+  net_amount: number
+  vat_rate: VatRate
+  billable: boolean
+  markup_percent: number | null
+  invoiced_document_id: string | null
+  document_item_id: string | null
+}
+
+// How "Invoice unbilled" turns time entries into lines: one per entry, per description or per day.
+export type InvoiceGrouping = 'entry' | 'description' | 'day'
