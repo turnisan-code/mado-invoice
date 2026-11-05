@@ -1,7 +1,7 @@
 -- Checks the guards of supabase/migrations/20261105_mcp_drafts.sql: a Claude session writes the
 -- lines of drafts only (MI044), leaves the template of a schedule that issues automatically as it
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
--- until the owner saves the client there.
+-- until the owner saves the client there; a client it changed keeps mcp_written_at until then.
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
@@ -54,6 +54,7 @@ declare
   v_tpl     uuid;
   v_tpl_is  uuid;
   v_tpl_dr  uuid;
+  v_stale   uuid;
   v_base    jsonb;
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
@@ -87,6 +88,13 @@ begin
          (v_tpl_dr, 'MCP draft guard test, draft', 'monthly', 1, current_date + 30, 'draft', true);
   update public.settings set mcp_confirm_policy = '{"send_email": "chat", "send_reminder": "chat"}', mcp_approval_totp = true where id is not null;
 
+  -- A client as an earlier version of mcp_address_set (lower()) left it: Claude wrote the email and
+  -- the mark has the earlier, glibc lower() form. The trigger is bypassed to store that mark.
+  alter table public.clients disable trigger clients_mcp_recipients;
+  insert into public.clients (name, email, mcp_recipients)
+  values ('MCP draft guard test, earlier mark', 'İnfo@attacker.example', array['info@attacker.example']) returning id into v_stale;
+  alter table public.clients enable trigger clients_mcp_recipients;
+
   v_base := jsonb_build_object('sub', v_owner, 'role', 'authenticated', 'aud', 'authenticated', 'aal', 'aal2');
   perform set_config('mcp_test.client', v_client::text, true);
   perform set_config('mcp_test.draft', v_draft::text, true);
@@ -95,6 +103,7 @@ begin
   perform set_config('mcp_test.tpl', v_tpl::text, true);
   perform set_config('mcp_test.tpl_issued', v_tpl_is::text, true);
   perform set_config('mcp_test.tpl_draft', v_tpl_dr::text, true);
+  perform set_config('mcp_test.stale', v_stale::text, true);
   perform set_config('mcp_test.browser', (v_base || jsonb_build_object('session_id', v_browser,
     'amr', jsonb_build_array(jsonb_build_object('method', 'totp', 'timestamp', v_now - 60))))::text, true);
   perform set_config('mcp_test.claude', (v_base || jsonb_build_object('session_id', v_claude,
@@ -187,21 +196,42 @@ end $$;
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
 do $$
 declare
-  v_client uuid := current_setting('mcp_test.client')::uuid;
-  v_marks  text[];
-  v_new    uuid;
-  v        record;
+  v_client  uuid := current_setting('mcp_test.client')::uuid;
+  v_other   uuid := current_setting('mcp_test.other')::uuid;
+  v_stale   uuid := current_setting('mcp_test.stale')::uuid;
+  v_marks   text[];
+  v_written timestamptz;
+  v_new     uuid;
+  v         record;
 begin
-  update public.clients set cc_emails = array['Evil@Example.test'] where id = v_client returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('a client claude has not changed: no mcp_written_at',
+    (select mcp_written_at is null from public.clients where id = v_client));
+  update public.clients set cc_emails = array['Evil@Example.test'] where id = v_client returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('claude adds a CC: marked, lower-case; the owner''s email is not', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));
+  perform public.mcp_drafts_test_ok('claude changed the client: mcp_written_at set', v_written is not null);
+  update public.clients set mcp_written_at = null where id = v_client returning mcp_written_at into v_written;
+  perform public.mcp_drafts_test_ok('claude cannot clear mcp_written_at', v_written is not null);
+  update public.clients set name = name, email = email where id = v_other returning mcp_written_at into v_written;
+  perform public.mcp_drafts_test_ok('a claude write that changes nothing leaves mcp_written_at unset', v_written is null);
+  update public.clients set company = 'ACME - NEW BANK DETAILS', payment_days = 0 where id = v_other returning mcp_written_at into v_written;
+  perform public.mcp_drafts_test_ok('claude changes the company and terms: mcp_written_at set', v_written is not null);
+
+  -- The earlier mark names no address as mcp_address_set gives them now: every address on the
+  -- client stays marked through a write that does not touch them.
+  update public.clients set phone = '+43 1 555' where id = v_stale returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('a mark in the earlier form: claude changes the phone, the address stays marked',
+    public.mcp_drafts_test_same(v_marks, array['İnfo@attacker.example']));
+  select * into v from public.mcp_create_action('h-stale', 'send_email', jsonb_build_object('to', jsonb_build_array('İnfo@attacker.example')), 'ah', 'fp', 'Send', '{}', false);
+  perform public.mcp_drafts_test_ok('the address behind the earlier mark: approved in Mado', v.approval = 'app');
   update public.clients set mcp_recipients = '{}' where id = v_client returning mcp_recipients into v_marks;
   perform public.mcp_drafts_test_ok('claude cannot clear the marks', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));
   update public.clients set phone = '+43 1 000' where id = v_client returning mcp_recipients into v_marks;
   perform public.mcp_drafts_test_ok('claude changes another field: the marks stay', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));
 
-  insert into public.clients (name, email, cc_emails, mcp_recipients) values ('MCP draft guard test 2', 'new@example.test', array['new-cc@example.test'], '{}')
-    returning id, mcp_recipients into v_new, v_marks;
+  insert into public.clients (name, email, cc_emails, mcp_recipients, mcp_written_at) values ('MCP draft guard test 2', 'new@example.test', array['new-cc@example.test'], '{}', null)
+    returning id, mcp_recipients, mcp_written_at into v_new, v_marks, v_written;
   perform public.mcp_drafts_test_ok('a client claude creates: its addresses marked', public.mcp_drafts_test_same(v_marks, array['new-cc@example.test', 'new@example.test']));
+  perform public.mcp_drafts_test_ok('a client claude creates: mcp_written_at set', v_written is not null);
   update public.clients set email = 'New2@example.test' where id = v_new returning mcp_recipients into v_marks;
   perform public.mcp_drafts_test_ok('claude replaces an email: the new one marked, the old mark gone', public.mcp_drafts_test_same(v_marks, array['new-cc@example.test', 'new2@example.test']));
   -- Only A-Z are lower-cased and only JavaScript's \s and , ; < > split, whatever the database
@@ -237,8 +267,9 @@ set local role authenticated;
 
 do $$
 declare
-  v_client uuid := current_setting('mcp_test.client')::uuid;
-  v_marks  text[];
+  v_client  uuid := current_setting('mcp_test.client')::uuid;
+  v_marks   text[];
+  v_written timestamptz;
 begin
   perform public.mcp_drafts_test_ok('browser: not a Claude session', not public.is_mcp_session());
   insert into public.document_items (document_id, sort_order, line_type, description)
@@ -252,14 +283,21 @@ begin
     (select notes = 'Owner edit' from public.documents where id = current_setting('mcp_test.tpl')::uuid)
     and (select count(*) = 2 from public.document_items where document_id = current_setting('mcp_test.tpl')::uuid));
 
-  update public.clients set phone = '+43 1 234' where id = v_client returning mcp_recipients into v_marks;
+  update public.clients set phone = '+43 1 234' where id = v_client returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('browser: another field saved, the marks stay', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));
-  update public.clients set mcp_recipients = '{}' where id = v_client returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('browser: another field saved, mcp_written_at stays', v_written is not null);
+  update public.clients set mcp_recipients = '{}', mcp_written_at = null where id = v_client returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('browser: the marks are not written directly', public.mcp_drafts_test_same(v_marks, array['evil@example.test']));
-  update public.clients set email = email, cc_emails = cc_emails where id = v_client returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('browser: mcp_written_at is not cleared directly', v_written is not null);
+  update public.clients set email = email, cc_emails = cc_emails where id = v_client returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('browser: the client form saved, the marks are cleared', cardinality(v_marks) = 0);
-  insert into public.clients (name, email) values ('MCP draft guard test 3', 'owner-new@example.test') returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('browser: the client form saved, mcp_written_at cleared', v_written is null);
+  update public.clients set email = email, cc_emails = cc_emails where id = current_setting('mcp_test.stale')::uuid returning mcp_recipients into v_marks;
+  perform public.mcp_drafts_test_ok('browser: the client form saved, the earlier mark is cleared too', cardinality(v_marks) = 0);
+  insert into public.clients (name, email, mcp_recipients, mcp_written_at) values ('MCP draft guard test 3', 'owner-new@example.test', array['owner-new@example.test'], now())
+    returning mcp_recipients, mcp_written_at into v_marks, v_written;
   perform public.mcp_drafts_test_ok('browser: a new client has no marks', cardinality(v_marks) = 0);
+  perform public.mcp_drafts_test_ok('browser: a new client has no mcp_written_at', v_written is null);
 end $$;
 
 -- ─── Claude after the owner saved the client ─────────────────────────────────

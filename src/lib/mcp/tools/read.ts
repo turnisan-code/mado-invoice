@@ -1,5 +1,6 @@
 // Read-only tools (scope mado:read), in the order tools/list shows them. They read through the
 // same services as the pages, so Claude sees the figures and statuses the owner sees.
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { expectedNumber } from '@/components/forms/builder/model'
 import { bookamatState } from '@/lib/bookamat-client'
@@ -668,21 +669,35 @@ const getClientStatement = defineTool({
   },
 })
 
+// The templates (of these ids) whose client a Claude session changed since the owner last saved it
+// in Mado (clients.mcp_written_at): their 'issue' schedules create drafts meanwhile
+// (src/lib/utils/recurring.ts). The whole client row is read, so a database without the column
+// gives none.
+async function clientsChangedByClaude(supabase: SupabaseClient, templateIds: readonly string[]): Promise<Set<string>> {
+  if (!templateIds.length) return new Set()
+  const { data, error } = await supabase.from('documents').select('id, clients(*)').in('id', [...templateIds])
+  if (error) throw error
+  const rows = (data ?? []) as unknown as { id: string; clients: { mcp_written_at?: string | null } | null }[]
+  return new Set(rows.filter(r => r.clients?.mcp_written_at).map(r => r.id))
+}
+
 const listRecurring = defineTool({
   name: 'list_recurring',
   title: 'Recurring schedules',
-  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. A schedule that issues invoices automatically (mode 'issue', template_locked: true, active or paused) numbers what it copies from its template without an approval, so Claude cannot change that template and deleting it is approved in Mado: ask the owner to edit it there.",
+  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. A schedule that issues invoices automatically (mode 'issue', template_locked: true, active or paused) numbers what it copies from its template without an approval, so Claude cannot change that template and deleting it is approved in Mado: ask the owner to edit it there. held_until_client_saved: true when Claude changed the template's client and the owner has not saved it in Mado since; until then the schedule creates drafts instead of issuing.",
   scope: 'mado:read',
   inputSchema: z.object({}),
   hints: READ,
   async run(_args, ctx) {
     const rows = await listRecurringSchedules(ctx.supabase)
+    const held = await clientsChangedByClaude(ctx.supabase, rows.filter(s => s.mode === 'issue').map(s => s.source_document_id))
     return {
       summary: shown(rows.length, rows.length, 'recurring schedules'),
       data: {
         schedules: rows.map(s => ({
           id: s.id, name: s.name, interval: s.interval, anchor_day: s.anchor_day, next_date: s.next_date, end_date: s.end_date,
           mode: s.mode, in_advance: s.in_advance, template_locked: s.mode === 'issue',
+          ...(s.mode === 'issue' ? { held_until_client_saved: held.has(s.source_document_id) } : {}),
           state: s.active ? 'active' : s.end_date && s.next_date > s.end_date ? 'ended' : 'paused',
           last_generated_at: s.last_generated_at,
           template: s.source && { ...s.source, app_url: documentUrl('invoice', s.source.id) },

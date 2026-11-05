@@ -342,6 +342,7 @@ export const de = {
     recurring: {
       dateTaken: '{date}: als Entwurf erstellt, nicht ausgestellt – das heutige Datum ist für eine andere Rechnung dieses Zeitplans vorgesehen. Auf der Rechnungsseite mit ihrem eigenen Datum ausstellen.',
       dateHeld: '{date}: Eine andere Rechnung dieses Zeitplans hat schon dieses Datum. Die Rechnung für diesen Zeitraum wurde deshalb als Entwurf mit Datum {draftDate} erstellt. Bitte prüfen und auf der Rechnungsseite ausstellen.',
+      clientChanged: '{date}: als Entwurf erstellt, nicht ausgestellt – die Kundendaten wurden über eine Claude-Verbindung geändert. Den Kunden prüfen und in Mado speichern, dann die Rechnung auf ihrer Seite ausstellen.',
     },
     clientDelete: {
       desc: 'Das kann nicht rückgängig gemacht werden. Kunden mit Belegen oder Projekten können nicht gelöscht werden — stattdessen auf inaktiv setzen.',

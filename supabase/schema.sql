@@ -192,7 +192,10 @@ create table clients (
   -- Claude connector (20261105_mcp_drafts.sql): the addresses a Claude session put on email or
   -- cc_emails, until the owner saves the client in Mado; an email to one of them is approved in
   -- Mado (clients_mcp_recipients, mcp_actions_recipients).
-  mcp_recipients  text[] not null default '{}'
+  mcp_recipients  text[] not null default '{}',
+  -- When a Claude session last changed the client, until the owner saves it in Mado; a recurring
+  -- schedule that issues automatically creates drafts for it meanwhile (src/lib/utils/recurring.ts).
+  mcp_written_at  timestamptz
 );
 
 create or replace function format_client_number(n integer)
@@ -2125,6 +2128,8 @@ revoke execute on function public.mcp_calls_prune() from public, anon, authentic
 -- template (MI045). Addresses a Claude session put on a client (clients.mcp_recipients) never
 -- count as on the client record until the owner saves the client in Mado: an action whose
 -- arguments name one is approved in Mado whatever the policy says, and the reminder cron skips them.
+-- A client a Claude session changed (clients.mcp_written_at) gets drafts, not issued invoices, from
+-- a schedule that issues automatically until the owner saves it in Mado.
 create or replace function public.document_items_mcp_guard()
 returns trigger
 language plpgsql security definer
@@ -2167,6 +2172,8 @@ create trigger document_items_mcp_guard
 -- the lines) stays as the owner left it while a schedule in 'issue' mode, active or paused, uses
 -- the document as its template; nor can a Claude session delete such a template. Paying,
 -- reminding, issuing, cancelling or a Storno of the template change none of it and stay possible.
+-- The client record the template names (its terms give the due date, its address the recipient
+-- block) stays writable; the cron leaves the invoice a draft while clients.mcp_written_at is set.
 create or replace function public.documents_mcp_template_guard()
 returns trigger
 language plpgsql security definer
@@ -2216,9 +2223,60 @@ as $$
   where a.addr like '_%@_%'
 $$;
 
--- A Claude session: the addresses it adds are marked; marked ones that stay keep their mark.
--- The browser: a new client has none; an update keeps the marks of the addresses still there
--- (clients_mcp_recipients_seen clears them when the owner saves the address fields).
+-- An earlier version of this migration folded the addresses with lower() and split them on the
+-- locale's [[:space:]]. Where one was applied (clients.mcp_recipients exists, mcp_written_at not
+-- yet), the marks it stored are redone once here, failing closed until the owner saves the client
+-- in Mado. Marked are: every address on a client with a mark that names none of its addresses as
+-- mcp_address_set now gives them (a mark in the earlier form, its address unknown;
+-- clients_mcp_recipients does the same on the client's next write); an address with a character
+-- that [[:space:]] matches and \s does not (U+0085 under ICU), where the earlier split cut it and
+-- may have left it unmarked; an address that lower() changes or makes equal to another one on the
+-- client, which the earlier fold may have taken for an address already there and left unmarked.
+-- The two triggers below are bypassed for this one update, inside this statement.
+do $$
+declare
+  v_triggers text[];
+  v_trigger  text;
+begin
+  if not exists (select 1 from pg_catalog.pg_attribute
+                 where attrelid = 'public.clients'::regclass and attname = 'mcp_recipients' and not attisdropped)
+     or exists (select 1 from pg_catalog.pg_attribute
+                where attrelid = 'public.clients'::regclass and attname = 'mcp_written_at' and not attisdropped) then
+    return;
+  end if;
+  v_triggers := array(
+    select t.tgname::text from pg_catalog.pg_trigger t
+    where t.tgrelid = 'public.clients'::regclass and t.tgenabled <> 'D'
+      and t.tgname in ('clients_mcp_recipients', 'clients_mcp_recipients_seen'));
+  foreach v_trigger in array v_triggers loop
+    execute format('alter table public.clients disable trigger %I', v_trigger);
+  end loop;
+  update public.clients c set mcp_recipients = r.marks
+  from (
+    select c2.id, array(
+      select a from unnest(s.addrs) a
+      where a = any(c2.mcp_recipients)
+         or not c2.mcp_recipients <@ s.addrs
+         or a ~ '[[:space:]]'
+         or lower(a) <> a
+         or exists (select 1 from unnest(s.addrs) b where b <> a and lower(b) = lower(a))
+      order by a) as marks
+    from public.clients c2,
+         lateral (select public.mcp_address_set(array[c2.email] || coalesce(c2.cc_emails, '{}')) as addrs) s
+  ) r
+  where r.id = c.id and c.mcp_recipients is distinct from r.marks;
+  foreach v_trigger in array v_triggers loop
+    execute format('alter table public.clients enable trigger %I', v_trigger);
+  end loop;
+end;
+$$;
+
+-- A Claude session: the addresses it adds are marked, marked ones that stay keep their mark, and
+-- a write that changes the client sets mcp_written_at. The browser (and the service role): a new
+-- client has neither; an update keeps the marks of the addresses still there and mcp_written_at
+-- (clients_mcp_recipients_seen clears both when the owner saves the address fields). A mark that
+-- names none of the client's addresses was stored by an earlier version of mcp_address_set (see
+-- above): the address it stood for is unknown, so every address on the client counts as marked.
 create or replace function public.clients_mcp_recipients()
 returns trigger
 language plpgsql security definer
@@ -2232,28 +2290,40 @@ begin
   if tg_op = 'UPDATE' then
     v_before := public.mcp_address_set(array[old.email] || coalesce(old.cc_emails, '{}'));
     v_marked := coalesce(old.mcp_recipients, '{}');
+    if not v_marked <@ v_before then v_marked := v_before; end if;
   end if;
   if public.is_mcp_session() then
     new.mcp_recipients := array(select a from unnest(v_now) a where a = any(v_marked) or not a = any(v_before) order by a);
+    new.mcp_written_at := now();
+    if tg_op = 'UPDATE' then
+      if (to_jsonb(new) - 'mcp_recipients' - 'mcp_written_at') is not distinct from (to_jsonb(old) - 'mcp_recipients' - 'mcp_written_at') then
+        new.mcp_written_at := old.mcp_written_at;
+      end if;
+    end if;
   elsif tg_op = 'INSERT' then
     new.mcp_recipients := '{}';
+    new.mcp_written_at := null;
   else
     new.mcp_recipients := array(select a from unnest(v_now) a where a = any(v_marked) order by a);
+    new.mcp_written_at := old.mcp_written_at;
   end if;
   return new;
 end;
 $$;
 
 -- The owner saved the client's address fields in Mado (the client form always sends both): the
--- addresses on it are the owner's now. Runs after clients_mcp_recipients (triggers run in name
--- order).
+-- addresses on it, and the rest of what Claude wrote there, are the owner's now. Runs after
+-- clients_mcp_recipients (triggers run in name order).
 create or replace function public.clients_mcp_recipients_seen()
 returns trigger
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
-  if not public.is_mcp_session() then new.mcp_recipients := '{}'; end if;
+  if not public.is_mcp_session() then
+    new.mcp_recipients := '{}';
+    new.mcp_written_at := null;
+  end if;
   return new;
 end;
 $$;

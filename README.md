@@ -144,6 +144,12 @@ is set to, these are always approved in Mado:
 - deleting the template of a recurring schedule that issues invoices automatically. Claude cannot
   change what such a template bills (active or paused schedule alike); the owner edits it in Mado.
 
+A client Claude created or changed (`create_client`, `update_client`) also stays unconfirmed until
+the owner saves it in Mado: meanwhile a recurring schedule that issues invoices automatically
+creates that client's invoices as drafts, with the reason in the cron log (or the warning of
+“Generate now”), since an issued invoice would carry the recipient block and payment terms Claude
+wrote.
+
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
 
@@ -159,7 +165,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 
 | Path | Schedule (UTC) | Does |
 |---|---|---|
-| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules. |
+| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts. |
 | `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.

@@ -28,13 +28,13 @@ import { suggestTaxTreatment } from '@/lib/utils/country'
 import { formatMoney, roundCents, today } from '@/lib/utils/document'
 import { isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import type { Client, Payment, PaymentMethod, Project, ProjectExpense, TimeEntry, VatRate } from '@/types'
-import { clientUrl, projectUrl } from '../config'
+import { appUrl, clientUrl, projectUrl } from '../config'
 import {
   applyClientChange, applyHeader, applyLineOps, describeDocument, headerInput, id, isoDate, lineInput, lineOpsInput, loadCatalogue,
   MAX_AMOUNT, MAX_LINES, newLines, replaceLines, type LineInput,
 } from '../draft-form'
 import { McpToolError } from '../errors'
-import { refuseIssueTemplate } from '../recurring'
+import { issueSchedulesOfClient, refuseIssueTemplate, type IssueSchedule } from '../recurring'
 import { defineTool, type AnyToolDef, type ToolContext } from '../types'
 
 const WRITE = { readOnlyHint: false, openWorldHint: false } as const
@@ -121,6 +121,21 @@ const suggestion = (v: ClientValues) => suggestTaxTreatment(v.country, isValidVa
 // Mado whatever the confirmation policy says, and the automatic reminders leave it out.
 const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado, and automatic reminders skip it (a client whose email Claude wrote gets none; a CC Claude wrote is left out; until then they also skip any address on that client that is not plain ASCII).'
 
+// clients.mcp_written_at (20261105_mcp_drafts.sql): a client a Claude session changed gets no
+// invoice numbered automatically until the owner saves it in Mado (src/lib/utils/recurring.ts).
+const AUTO_ISSUE_NOTE = 'Until the owner saves the client in Mado, a recurring schedule that issues invoices automatically for this client creates them as drafts instead: an invoice numbered without approval never carries client data Claude wrote.'
+
+// The schedules that issue automatically for a client Claude has just changed: they now create
+// drafts. Only for the reply; a failed lookup leaves the note out.
+async function heldSchedules(supabase: SupabaseClient, client: Client): Promise<IssueSchedule[]> {
+  if (!client.mcp_written_at) return []
+  try {
+    return await issueSchedulesOfClient(supabase, client.id)
+  } catch {
+    return []
+  }
+}
+
 // The addresses this write put on the client, as the database marks them.
 function writtenAddresses(before: Pick<Client, 'email' | 'cc_emails'> | null, after: Client): string[] {
   const list = (c: Pick<Client, 'email' | 'cc_emails'>) => [c.email ?? '', ...(c.cc_emails ?? [])].map(a => a.trim().toLowerCase()).filter(Boolean)
@@ -135,17 +150,19 @@ async function duplicatesOf(supabase: SupabaseClient, email: string | null, uid:
   return found.map(d => ({ id: d.client.id, client: clientWithNumber(d.client), reasons: d.reasons }))
 }
 
-function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}, written: string[] = []) {
+function clientReply(client: Client, lead: string, extra: Record<string, unknown> = {}, written: string[] = [], held: IssueSchedule[] = []) {
   return {
     summary: [
       `${lead} ${clientWithNumber(client)}.`,
       written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado and automatic reminders skip these addresses.` : '',
+      held.length ? `Until the owner saves this client in Mado, ${held.length === 1 ? 'the schedule' : 'the schedules'} ${held.map(h => `"${h.name}"`).join(', ')}, which ${held.length === 1 ? 'issues' : 'issue'} invoices for it automatically, ${held.length === 1 ? 'creates' : 'create'} drafts instead; tell the owner.` : '',
     ].filter(Boolean).join(' '),
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
       cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
       language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
       ...(written.length ? { approved_in_mado: written } : {}),
+      ...(held.length ? { auto_issue_held: held.map(h => ({ schedule_id: h.id, name: h.name, app_url: appUrl('/recurring') })) } : {}),
     },
   }
 }
@@ -153,7 +170,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
 const createClient = defineTool({
   name: 'create_client',
   title: 'Create client',
-  description: `Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client). ${RECIPIENTS_NOTE}`,
+  description: `Create a client. The client number is assigned by Mado. Without tax_treatment it follows the country and VAT ID. A client with the same email address or VAT ID is refused unless allow_duplicate is true (prefer the existing client). ${RECIPIENTS_NOTE} ${AUTO_ISSUE_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ ...clientFields, country: clientFields.country.unwrap(), allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: false, idempotentHint: false },
@@ -176,7 +193,7 @@ const createClient = defineTool({
 const updateClient = defineTool({
   name: 'update_client',
   title: 'Update client',
-  description: `Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. A new email or CC list applies to every later email to the client, from Mado too. An email address or VAT ID another client has is refused unless allow_duplicate is true. ${RECIPIENTS_NOTE}`,
+  description: `Change a client's fields; only the fields in patch change. The new values apply to documents created later; existing documents keep theirs. A new email or CC list applies to every later email to the client, from Mado too. An email address or VAT ID another client has is refused unless allow_duplicate is true. ${RECIPIENTS_NOTE} ${AUTO_ISSUE_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ id, patch: clientPatch, allow_duplicate: z.boolean().optional() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -197,7 +214,7 @@ const updateClient = defineTool({
     if (error) throw error
     if (!client) throw notFound()
     const suggested = suggestion(values)
-    return clientReply(client, 'Updated client', suggested && suggested !== client.tax_treatment ? { suggested_tax_treatment: suggested } : {}, writtenAddresses(current, client))
+    return clientReply(client, 'Updated client', suggested && suggested !== client.tax_treatment ? { suggested_tax_treatment: suggested } : {}, writtenAddresses(current, client), await heldSchedules(ctx.supabase, client))
   },
 })
 

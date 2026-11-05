@@ -18,6 +18,25 @@ export async function issueSchedules(supabase: SupabaseClient, documentIds: read
   return ((data ?? []) as IssueSchedule[]).sort((a, b) => a.id.localeCompare(b.id))
 }
 
+// The schedules in 'issue' mode, active or paused, whose template bills this client. While a
+// Claude session's change to the client is not saved by the owner in Mado (clients.mcp_written_at),
+// they create the client's invoices as drafts (src/lib/utils/recurring.ts).
+export async function issueSchedulesOfClient(supabase: SupabaseClient, clientId: string): Promise<IssueSchedule[]> {
+  const { data, error } = await supabase.from('recurring_schedules')
+    .select('id, name, active, source_document_id')
+    .eq('mode', 'issue')
+  if (error) throw error
+  const schedules = (data ?? []) as IssueSchedule[]
+  if (!schedules.length) return []
+  const { data: templates, error: templatesErr } = await supabase.from('documents')
+    .select('id')
+    .in('id', schedules.map(s => s.source_document_id))
+    .eq('client_id', clientId)
+  if (templatesErr) throw templatesErr
+  const ids = new Set(((templates ?? []) as { id: string }[]).map(d => d.id))
+  return schedules.filter(s => ids.has(s.source_document_id)).sort((a, b) => a.id.localeCompare(b.id))
+}
+
 // The refusal as the database words it (errors.ts maps MI045), naming the schedule.
 export function templateLocked(schedule: IssueSchedule): Error {
   return Object.assign(new Error('MI045'), { code: 'MI045', details: schedule.id })

@@ -340,6 +340,7 @@ export const en = {
     recurring: {
       dateTaken: '{date}: created as a draft, not issued — today’s date is reserved for another invoice of this schedule. Issue it from its page with its own date.',
       dateHeld: '{date}: another invoice of this schedule already has this date, so the invoice for this period was created as a draft dated {draftDate}. Check it and issue it from its page.',
+      clientChanged: '{date}: created as a draft, not issued — the client’s details were changed from a Claude connection. Check the client and save it in Mado, then issue the invoice from its page.',
     },
     clientDelete: {
       desc: 'This cannot be undone. Clients with documents or projects cannot be deleted — set them to inactive instead.',
