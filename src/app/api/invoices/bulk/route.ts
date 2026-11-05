@@ -1,5 +1,6 @@
-import { issueDocument } from '@/lib/pdf/issue'
 import { NextResponse } from 'next/server'
+import { issueBulkDraft, startBulkIssue, type BulkDraft } from '@/lib/pdf/bulk'
+import { issueOrder, type IssuedNote } from '@/lib/utils/bulk-issue'
 import { apiError, databaseError, invalidJson, isUuidList, issueFailure, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { canTransition, DOCUMENT_STATUSES } from '@/lib/status'
@@ -41,6 +42,9 @@ export async function PATCH(req: Request) {
   const ids = body.ids
   const target = TARGETS.find(s => s === body.status)
   if (!target) return apiError(400, 'invalid_status', 'Invalid status')
+  // The lists move drafts dated before today to today (their confirm says so); the status menu
+  // has asked about the date itself before it sends one draft here.
+  const redate = body.redate === true
   const paidDate: unknown = body.paidDate ?? today()
   const method: unknown = body.method ?? 'bank'
   if (target === 'paid' && (!isPastIsoDate(paidDate) || (method !== 'bank' && method !== 'cash'))) {
@@ -49,31 +53,35 @@ export async function PATCH(req: Request) {
 
   const { data: docs, error: lookupErr } = await supabase
     .from('documents')
-    .select(`id, number, status, date, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEM_COLS}, payments(amount, kind)`)
+    .select(`id, number, status, date, due_date, created_at, recurring_schedule_id, tax_treatment, discount_type, discount_value, clients(name, company, payment_days), ${ITEM_COLS}, payments(amount, kind)`)
     .in('id', ids)
     .eq('type', 'invoice')
     .in('status', sourcesFor(target))
   if (lookupErr) return databaseError(lookupErr)
   const invoices = docs ?? []
 
-  // Drafts get a number assigned (sequentially) first, plus their archive copy; issuing also sets them to 'sent'.
-  // The first incomplete draft stops the run: 422 says which one and why (problems, see issue-checks.ts).
-  let issued = 0
-  for (const d of invoices.filter(d => !d.number || d.status === 'draft')) {
+  // Drafts get the next number in date order, plus their archive copy; issuing also sets them to
+  // 'sent'. Each one's archive, Drive and project-link problems come back in `documents`. The first
+  // incomplete draft stops the run: 422 says which one and why (problems, see issue-checks.ts).
+  const notes: IssuedNote[] = []
+  const drafts = issueOrder(invoices.filter(d => !d.number || d.status === 'draft'))
+  const started = drafts.length ? await startBulkIssue(supabase, 'invoice', redate, today()) : null
+  if (started && 'error' in started) return databaseError(started.error)
+  for (const d of drafts) {
     try {
-      await issueDocument(supabase, d.id)
-      issued++
+      // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
+      notes.push(await issueBulkDraft(supabase, started!.batch, d as unknown as BulkDraft))
       if (d.status === 'draft') d.status = 'sent'
     } catch (err) {
+      const issued = notes.length
       if (err instanceof IssueCheckError) {
         // The toast's title names the draft, so it is worded here in the UI language.
         const { t, lang } = await getT()
-        // Many-to-one: PostgREST returns the client as an object, the untyped client infers an array.
         const client = clientDisplayName(d.clients as unknown as NamedClient | null)
         const document = d.number ?? t('editor.bulk.draft', { client, date: formatDate(d.date, lang) })
-        return apiError(422, 'incomplete', t('editor.bulk.incomplete', { document }), { problems: err.problems, documentId: d.id, issued })
+        return apiError(422, 'incomplete', t('editor.bulk.incomplete', { document }), { problems: err.problems, documentId: d.id, issued, documents: notes })
       }
-      return issueFailure(err, 'issue_failed', { issued })
+      return issueFailure(err, 'issue_failed', { issued, documents: notes })
     }
   }
 
@@ -116,7 +124,7 @@ export async function PATCH(req: Request) {
     }
   }
 
-  return NextResponse.json({ updated: invoices.length, skipped: ids.length - invoices.length })
+  return NextResponse.json({ updated: invoices.length, skipped: ids.length - invoices.length, documents: notes })
 }
 
 // Only drafts can be deleted; issued invoices must be kept and are skipped (documents_delete_guard

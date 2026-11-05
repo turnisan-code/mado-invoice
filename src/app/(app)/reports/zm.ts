@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { addDays, calcTotals, roundCents } from '@/lib/utils/document'
 import { normalizeVatId } from '@/lib/utils/validation'
 import { clientDisplayName } from '@/lib/utils/clients'
+import { toCountryCode } from '@/lib/utils/country'
 
 // Zusammenfassende Meldung: reverse-charge services to EU businesses are reported per recipient
 // UID in the period the service was performed (§ 21 Abs 3 UStG), not when the money arrived.
@@ -35,19 +36,38 @@ export interface ZmRow {
 
 const ZM_COLUMNS = 'id, type, number, status, date, service_date, service_date_end, converted_from_id, client_id, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), clients(name, company, uid_number, country)'
 
+const PAGE = 1000
+
 // Documents are dated up to two years before (billed in advance) or after (billed late) the
 // service they report; the window keeps the query bounded, buildZmRows picks the period exactly.
+// PostgREST returns at most 1000 rows per request, so the window is read in pages, in a stable
+// order, like the accounting export does.
 export async function fetchZmRows(supabase: SupabaseClient, start: string, end: string): Promise<{ rows: ZmRow[]; error: string | null }> {
-  const { data, error } = await supabase
-    .from('documents')
-    .select(ZM_COLUMNS)
-    .in('type', ['invoice', 'credit_note'])
-    .eq('tax_treatment', 'eu_reverse_charge')
-    .not('number', 'is', null)
-    .gte('date', addDays(start, -731))
-    .lte('date', addDays(end, 731))
-  if (error) return { rows: [], error: error.message }
-  return { rows: buildZmRows((data ?? []) as unknown as ZmDoc[], start, end), error: null }
+  const docs: ZmDoc[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('documents')
+      .select(ZM_COLUMNS)
+      .in('type', ['invoice', 'credit_note'])
+      .eq('tax_treatment', 'eu_reverse_charge')
+      .not('number', 'is', null)
+      .gte('date', addDays(start, -731))
+      .lte('date', addDays(end, 731))
+      .order('id')
+      .range(from, from + PAGE - 1)
+    if (error) return { rows: [], error: error.message }
+    docs.push(...((data ?? []) as unknown as ZmDoc[]))
+    if ((data?.length ?? 0) < PAGE) break
+  }
+  return { rows: buildZmRows(docs, start, end), error: null }
+}
+
+// The country a ZM row names: the UID's prefix, or without a UID the client's country, written
+// the way VAT IDs write it (Greece is EL).
+function zmCountry(uid: string | null, country: string | null | undefined): string {
+  if (uid) return uid.slice(0, 2)
+  const code = toCountryCode(country)
+  return code === 'GR' ? 'EL' : code ?? ''
 }
 
 export function attributionDate(d: Pick<ZmDoc, 'date' | 'service_date' | 'service_date_end'>): string {
@@ -75,7 +95,7 @@ export function buildZmRows(docs: ZmDoc[], start: string, end: string): ZmRow[] 
     const key = uid ?? `client:${d.client_id}`
     const row = rows.get(key) ?? {
       key,
-      country: uid ? uid.slice(0, 2) : '',
+      country: zmCountry(uid, d.clients?.country),
       uid,
       client: clientDisplayName(d.clients),
       net: 0,

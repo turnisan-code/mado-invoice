@@ -83,6 +83,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   const [saveError, setSaveError] = useState<string | null>(null)
   const [docId, setDocId] = useState<string | null>(doc?.id ?? null)
   const [restoreOffer, setRestoreOffer] = useState<Backup | null>(null)
+  // Save draft (or Cmd+S) without a client: the picker shows why, next to it.
+  const [clientRequested, setClientRequested] = useState(false)
 
   const formKey = savedKeyOf(type, form)
   const contentKey = contentKeyOf(form)
@@ -235,7 +237,11 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   }
 
   async function saveDraft() {
-    if (!formRef.current.clientId) { toast.error(t('builder.selectClient')); return }
+    if (!formRef.current.clientId) {
+      setClientRequested(true)
+      toast.error(t('builder.selectClient'))
+      return
+    }
     cancelAutoSave()
     setSaving(true)
     try {
@@ -402,7 +408,7 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
 
   return {
     form, formKey, patch, setLines, updateLine,
-    docId, saving, setSaving, saveStatus,
+    docId, saving, setSaving, saveStatus, clientRequested,
     restoreOffer, restoreBackup, discardBackup,
     formRef, docIdRef, savedKeyRef, issuingRef,
     persist, flush, serialized, cancelAutoSave, saveDraft, applyOverrides,

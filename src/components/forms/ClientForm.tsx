@@ -19,7 +19,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ChevronDown, X } from 'lucide-react'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { isCountryCode, suggestTaxTreatment, toCountryCode } from '@/lib/utils/country'
-import { clientDisplayName } from '@/lib/utils/clients'
+import { clientDisplayName, clientWithNumber, findDuplicateClients } from '@/lib/utils/clients'
 import { parseEmailList } from '@/lib/templates'
 import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/types'
 import type { TFn } from '@/lib/i18n'
@@ -37,7 +37,7 @@ interface Props {
 
 const TAX_OPTIONS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
 
-// Postgres foreign_key_violation: documents.client_id is "on delete restrict".
+// Postgres foreign_key_violation: documents.client_id and projects.client_id are "on delete restrict".
 const FK_VIOLATION = '23503'
 
 function makeSchema(t: TFn) {
@@ -141,9 +141,6 @@ function toPayload(v: Values) {
 type Payload = ReturnType<typeof toPayload>
 type Duplicate = { id: string; label: string; reasons: string[] }
 
-// ilike treats % and _ as wildcards; an email may contain both.
-const escapeLike = (v: string) => v.replace(/[\\%_]/g, ch => `\\${ch}`)
-
 function TagInput({ value, onChange }: { value: string[]; onChange: (tags: string[]) => void }) {
   const [input, setInput] = useState('')
   const inputId = useId()
@@ -222,27 +219,15 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
 
   // Only a warning, and only when the email or UID is new or changed: a failed lookup never blocks saving.
   async function findDuplicates(p: Payload): Promise<Duplicate[]> {
-    async function lookup(column: 'email' | 'uid_number', value: string, reason: string) {
-      let q = supabase.from('clients').select('id, name, company, client_number')
-      q = column === 'email' ? q.ilike('email', escapeLike(value)) : q.eq('uid_number', value)
-      if (client) q = q.neq('id', client.id)
-      const { data } = await q.limit(5)
-      return (data ?? []).map(row => ({ row, reason }))
-    }
-    const lookups = []
-    if (p.email && p.email.toLowerCase() !== (client?.email ?? '').toLowerCase()) {
-      lookups.push(lookup('email', p.email, t('clientData.form.duplicateEmail')))
-    }
-    if (p.uid_number && p.uid_number !== client?.uid_number) {
-      lookups.push(lookup('uid_number', p.uid_number, t('clientData.form.duplicateUid')))
-    }
-    const found = new Map<string, Duplicate>()
-    for (const { row, reason } of (await Promise.all(lookups)).flat()) {
-      const entry: Duplicate = found.get(row.id) ?? { id: row.id, label: [row.client_number, clientDisplayName(row)].filter(Boolean).join(' · '), reasons: [] }
-      entry.reasons.push(reason)
-      found.set(row.id, entry)
-    }
-    return [...found.values()]
+    const found = await findDuplicateClients(supabase, {
+      email: p.email && p.email.toLowerCase() !== (client?.email ?? '').toLowerCase() ? p.email : null,
+      uid: p.uid_number && p.uid_number !== client?.uid_number ? p.uid_number : null,
+    }, client?.id)
+    return found.map(d => ({
+      id: d.client.id,
+      label: clientWithNumber(d.client),
+      reasons: d.reasons.map(r => t(r === 'email' ? 'clientData.form.duplicateEmail' : 'clientData.form.duplicateUid')),
+    }))
   }
 
   // The database's own text goes to the console; the toast is worded in the UI language.
@@ -280,8 +265,11 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
     setDeleting(true)
     const { error } = await supabase.from('clients').delete().eq('id', client.id)
     if (error) {
-      if (error.code === FK_VIOLATION) toast.error(t('clients.form.hasDocuments'))
-      else failed(error)
+      if (error.code === FK_VIOLATION) {
+        // The violated constraint names the table that still refers to the client.
+        const projects = /"projects"/.test(`${error.message} ${error.details ?? ''}`)
+        toast.error(t(projects ? 'views.clientDelete.hasProjects' : 'clients.form.hasDocuments'))
+      } else failed(error)
       setDeleting(false)
       setConfirmDelete(false)
       return
@@ -547,7 +535,7 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
         <ConfirmDialog
           open={confirmDelete}
           title={t('clients.form.deleteTitle', { name: clientDisplayName(client) })}
-          description={t('clients.form.deleteDesc')}
+          description={t('views.clientDelete.desc')}
           confirmLabel={deleting ? t('common.deleting') : t('clients.form.deleteClient')}
           destructive
           busy={deleting}

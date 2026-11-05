@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Dialog } from '@/components/ui/ConfirmDialog'
 import { countryOptions, isCountryCode, suggestTaxTreatment } from '@/lib/utils/country'
-import { clientDisplayName, toClientDefaults } from '@/lib/utils/clients'
+import { clientDisplayName, clientWithNumber, findDuplicateClients, toClientDefaults, type ClientDuplicate } from '@/lib/utils/clients'
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
@@ -22,7 +22,9 @@ type Errors = Partial<Record<'name' | 'country' | 'email' | 'uid', string>>
 
 // A client created without leaving the editor: who it is, where (for the tax treatment) and the
 // UID. The client number comes from the database like for every other new client; address and
-// further details are added on the client's page later.
+// further details are added on the client's page later. A client that already has the email or
+// UID is offered first, as ClientForm warns about it, so a known client is picked instead of
+// created twice.
 export function QuickAddClient({ open, initialName, settings, language, onClose, onCreated }: {
   open: boolean
   initialName: string
@@ -44,6 +46,8 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
   const [tax, setTax] = useState<TaxTreatment>(defaults.tax_treatment)
   const [taxManual, setTaxManual] = useState(false)
   const [errors, setErrors] = useState<Errors>({})
+  // The clients found for the email and UID entered; null until checked (again after an edit).
+  const [duplicates, setDuplicates] = useState<ClientDuplicate[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [wasOpen, setWasOpen] = useState(false)
 
@@ -58,6 +62,7 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
       setTax(suggestTaxTreatment(defaults.country, false) ?? defaults.tax_treatment)
       setTaxManual(false)
       setErrors({})
+      setDuplicates(null)
     }
   }
 
@@ -80,7 +85,16 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
     setErrors(found)
     if (Object.keys(found).length) return
     setBusy(true)
-    const { data, error } = await createClient().from('clients').insert({
+    const supabase = createClient()
+    if (!duplicates) {
+      const existing = await findDuplicateClients(supabase, { email, uid: normalizeVatId(vatId) || null })
+      if (existing.length) {
+        setBusy(false)
+        setDuplicates(existing)
+        return
+      }
+    }
+    const { data, error } = await supabase.from('clients').insert({
       name: name.trim(),
       company: company.trim() || null,
       email: email.trim(),
@@ -100,6 +114,11 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
     }
     toast.success(t('editor.client.created', { name: clientDisplayName(data) }))
     onCreated(data as Client)
+  }
+
+  function pickExisting(client: Client) {
+    toast.success(t('views.quickAdd.selected', { name: clientDisplayName(client) }))
+    onCreated(client)
   }
 
   const field = (key: keyof Errors) => ({
@@ -126,7 +145,7 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
         {errorText('name') || <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1">{t('clients.form.nameOrCompany')}</p>}
         <div className="space-y-1.5">
           <Label htmlFor={`${uid}-email`}>{t('clients.form.email')}</Label>
-          <Input id={`${uid}-email`} type="email" inputMode="email" autoComplete="off" value={email} onChange={e => setEmail(e.target.value)} {...field('email')} />
+          <Input id={`${uid}-email`} type="email" inputMode="email" autoComplete="off" value={email} onChange={e => { setEmail(e.target.value); setDuplicates(null) }} {...field('email')} />
           {errorText('email')}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -144,7 +163,7 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`${uid}-uid`}>{t('clients.form.uid')}</Label>
-            <Input id={`${uid}-uid`} value={vatId} onChange={e => { setVatId(e.target.value); follow(country, e.target.value) }} placeholder={t('clients.form.uidPlaceholder')} autoCapitalize="characters" {...field('uid')} />
+            <Input id={`${uid}-uid`} value={vatId} onChange={e => { setVatId(e.target.value); follow(country, e.target.value); setDuplicates(null) }} placeholder={t('clients.form.uidPlaceholder')} autoCapitalize="characters" {...field('uid')} />
             {errorText('uid')}
           </div>
         </div>
@@ -160,9 +179,29 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
             </p>
           )}
         </div>
+        {!!duplicates?.length && (
+          <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-200 space-y-2">
+            <p className="font-medium">{t('views.quickAdd.duplicates')}</p>
+            <ul className="space-y-2">
+              {duplicates.map(d => (
+                <li key={d.client.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                  <span className="min-w-0 break-words">
+                    <span className="font-medium">{clientWithNumber(d.client)}</span>
+                    {' · '}{d.reasons.map(r => t(r === 'email' ? 'clientData.form.duplicateEmail' : 'clientData.form.duplicateUid')).join(', ')}
+                  </span>
+                  <Button type="button" variant="outline" onClick={() => pickExisting(d.client)} disabled={busy} className="bg-white dark:bg-neutral-900">
+                    {t('views.quickAdd.useExisting')}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="flex gap-2 justify-end pt-1">
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>{t('common.cancel')}</Button>
-          <Button type="submit" disabled={busy}>{busy ? t('common.saving') : t('editor.client.create')}</Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? t('common.saving') : duplicates?.length ? t('views.quickAdd.createAnyway') : t('editor.client.create')}
+          </Button>
         </div>
       </form>
     </Dialog>

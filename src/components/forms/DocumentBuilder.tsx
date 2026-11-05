@@ -584,7 +584,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
   }
 
   const captionCls = 'text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider'
-  const clientMissing = !client && (clientTried || shownProblems.some(p => p.code === 'noClient'))
+  const clientMissing = !client && (clientTried || editor.clientRequested || shownProblems.some(p => p.code === 'noClient'))
   const needsClient = (action: () => void) => () => { if (!client) setClientTried(true); action() }
   const nextNumber = doc?.number ? '' : expectedNumber(settings, type, date || today())
   const restoreTime = editor.restoreOffer

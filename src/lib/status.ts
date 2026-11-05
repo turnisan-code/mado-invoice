@@ -54,10 +54,11 @@ export function isExpired(doc: { type: string; status: string; due_date: string 
   return doc.type === 'quote' && doc.status === 'sent' && !!doc.due_date && doc.due_date < today
 }
 
-// The cron marks past-due invoices 'overdue' once a day; until then a 'sent' one past its due
-// date already is.
+// The date decides, whatever the stored status says: the cron marks past-due invoices 'overdue'
+// once a day and moves one whose due date was extended back to 'sent' (overdue.ts), so in between
+// a 'sent' one past its due date already is overdue and an 'overdue' one due later is not.
 export function isOverdue(doc: { status: string; due_date: string | null }, today: string): boolean {
-  return doc.status === 'overdue' || (doc.status === 'sent' && !!doc.due_date && doc.due_date < today)
+  return (doc.status === 'sent' || doc.status === 'overdue') && !!doc.due_date && doc.due_date < today
 }
 
 export function canRemind(doc: { type: string; number: string | null; status: string; due_date: string | null }, balance: number, today: string): boolean {

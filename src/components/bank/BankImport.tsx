@@ -15,6 +15,7 @@ import { Select } from '@/components/ui/select'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { apiErrorMessage } from '@/lib/api-errors'
+import { clientDisplayName } from '@/lib/utils/clients'
 
 interface Props {
   invoices: OpenInvoice[]
@@ -252,7 +253,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     // Snapshot the labels now: router.refresh() below drops the invoices this import pays off.
     const labels: InvoiceLabel[] = [...new Set(payload.map(p => p.document_id))].flatMap(id => {
       const inv = invoiceById.get(id)
-      return inv ? [{ id, number: inv.number, client: inv.clientCompany || inv.clientName }] : []
+      return inv ? [{ id, number: inv.number, client: clientDisplayName({ company: inv.clientCompany, name: inv.clientName }) }] : []
     })
     setBusy(true)
     const res = await fetch('/api/payments/import', {
@@ -291,7 +292,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
         <option value="">{t('bankImport.skip')}</option>
         {invoices.map(inv => (
           <option key={inv.id} value={inv.id}>
-            {t('bankImport.invoiceOption', { number: inv.number, client: inv.clientCompany || inv.clientName, balance: money(inv.balance, null) })}
+            {t('bankImport.invoiceOption', { number: inv.number, client: clientDisplayName({ company: inv.clientCompany, name: inv.clientName }), balance: money(inv.balance, null) })}
           </option>
         ))}
       </Select>

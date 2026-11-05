@@ -10,6 +10,7 @@ import DocumentHistory from '@/components/layout/DocumentHistory'
 import ConvertDocumentButton from '@/components/layout/ConvertDocumentButton'
 import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
 import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
+import { clientDisplayName } from '@/lib/utils/clients'
 import { toPublicSettings } from '@/lib/public-settings'
 import SettingsMissing from '@/components/layout/SettingsMissing'
 import Link from 'next/link'
@@ -57,7 +58,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   const client = (clients ?? []).find(c => c.id === doc.client_id)
   const firstItem = orderItems<{ line_type?: string | null; description?: string | null }>(doc.document_items ?? []).find(i => (i.line_type ?? 'item') === 'item')
-  const recurringName = [client?.company || client?.name, firstItem?.description].filter(Boolean).join(' – ').slice(0, 60)
+  const recurringName = [clientDisplayName(client), firstItem?.description].filter(Boolean).join(' – ').slice(0, 60)
 
   return (
     <div className="p-4 sm:p-8 max-w-4xl mx-auto space-y-6">
