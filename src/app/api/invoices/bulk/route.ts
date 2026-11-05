@@ -6,8 +6,8 @@ import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { canTransition, DOCUMENT_STATUSES } from '@/lib/status'
 import { IssueCheckError } from '@/lib/utils/issue-checks'
 import { clientDisplayName, type NamedClient } from '@/lib/utils/clients'
-import { logEvent } from '@/lib/events'
 import { deleteDrafts } from '@/lib/services/lifecycle'
+import { insertPayments, markPaid } from '@/lib/services/payments'
 import { getT } from '@/lib/i18n/server'
 import type { DocumentStatus } from '@/types'
 
@@ -106,23 +106,11 @@ export async function PATCH(req: Request) {
       }))
       .filter(r => r.amount > 0)
     if (rows.length) {
-      const { error: payErr } = await supabase.from('payments').insert(rows)
+      const { error: payErr } = await insertPayments(supabase, rows)
       if (payErr) return databaseError(payErr)
-      for (const r of rows) {
-        await logEvent(supabase, r.document_id, 'payment_added', { amount: r.amount, date: r.date, kind: r.kind, method: r.method })
-      }
     }
-    const { data: updated, error } = await supabase
-      .from('documents')
-      .update({ status: 'paid' })
-      .in('id', invoices.map(d => d.id))
-      .in('status', DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid')))
-      .select('id')
+    const { error } = await markPaid(supabase, invoices)
     if (error) return databaseError(error)
-    const from = new Map(invoices.map(d => [d.id, d.status]))
-    for (const { id } of updated ?? []) {
-      await logEvent(supabase, id, 'status_changed', { from: from.get(id), to: 'paid' })
-    }
   }
 
   return NextResponse.json({ updated: invoices.length, skipped: ids.length - invoices.length, documents: notes })

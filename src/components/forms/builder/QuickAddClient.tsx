@@ -13,6 +13,7 @@ import { clientDisplayName, clientWithNumber, findDuplicateClients, toClientDefa
 import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
+import { quickClientPayload, saveClient } from '@/lib/services/clients'
 import type { PublicSettings } from '@/lib/public-settings'
 import type { Client, Language, TaxTreatment } from '@/types'
 
@@ -94,26 +95,15 @@ export function QuickAddClient({ open, initialName, settings, language, onClose,
         return
       }
     }
-    const { data, error } = await supabase.from('clients').insert({
-      name: name.trim(),
-      company: company.trim() || null,
-      email: email.trim(),
-      country,
-      uid_number: normalizeVatId(vatId) || null,
-      tax_treatment: tax,
-      language,
-      currency: 'EUR',
-      payment_days: null,
-      status: 'active',
-    }).select('*').single()
+    const { client: data, error } = await saveClient(supabase, quickClientPayload({ name, company, email, country, vatId, tax, language }))
     setBusy(false)
-    if (error) {
-      console.error('[editor] client not created:', error.code, error.message)
-      toast.error(dbErrorMessage(t, error))
+    if (error || !data) {
+      if (error) console.error('[editor] client not created:', error.code, error.message)
+      toast.error(error ? dbErrorMessage(t, error) : t('messages.generic'))
       return
     }
     toast.success(t('editor.client.created', { name: clientDisplayName(data) }))
-    onCreated(data as Client)
+    onCreated(data)
   }
 
   function pickExisting(client: Client) {

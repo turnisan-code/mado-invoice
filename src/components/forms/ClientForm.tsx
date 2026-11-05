@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
 import type { PostgrestError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
@@ -17,15 +16,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { MoneyInput, formatLocaleNumber } from '@/components/ui/MoneyInput'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ChevronDown, X } from 'lucide-react'
-import { isValidEmail, isValidVatId, normalizeVatId } from '@/lib/utils/validation'
-import { isCountryCode, suggestTaxTreatment, toCountryCode } from '@/lib/utils/country'
+import { isValidVatId, normalizeVatId } from '@/lib/utils/validation'
+import { isCountryCode, suggestTaxTreatment } from '@/lib/utils/country'
 import { clientDisplayName, clientWithNumber, findDuplicateClients } from '@/lib/utils/clients'
-import { parseEmailList } from '@/lib/templates'
 import type { Client, ClientDefaults, CountryOption, TaxTreatment } from '@/types'
-import type { TFn } from '@/lib/i18n'
 import { useT } from '@/lib/i18n/client'
 import { dbErrorMessage } from '@/lib/api-errors'
 import { deleteClient } from '@/lib/services/lifecycle'
+import { clientSchema, saveClient, toClientPayload, toClientValues, type ClientPayload, type ClientValues } from '@/lib/services/clients'
 
 interface Props {
   client?: Client
@@ -38,105 +36,8 @@ interface Props {
 
 const TAX_OPTIONS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
 
-function makeSchema(t: TFn) {
-  return z.object({
-    name: z.string(),
-    company: z.string(),
-    address_line1: z.string(),
-    address_line2: z.string(),
-    zip: z.string(),
-    city: z.string(),
-    country: z.string().refine(isCountryCode, t('clients.form.countryRequired')),
-    email: z.string().refine(v => !v.trim() || isValidEmail(v), t('clients.form.emailInvalid')),
-    phone: z.string(),
-    uid_number: z.string().refine(v => !normalizeVatId(v) || isValidVatId(v), t('clients.form.uidInvalid')),
-    tax_treatment: z.enum(['at_vat', 'eu_reverse_charge', 'non_eu']),
-    language: z.enum(['de', 'en']),
-    payment_days: z.number().int(t('clients.form.paymentDaysInvalid')).min(0, t('clients.form.paymentDaysInvalid')).max(365, t('clients.form.paymentDaysInvalid')).nullable(),
-    skonto_percent: z.number().min(0, t('rates.skontoPercentInvalid')).max(100, t('rates.skontoPercentInvalid')).nullable(),
-    skonto_days: z.number().int(t('rates.skontoDaysInvalid')).min(0, t('rates.skontoDaysInvalid')).max(365, t('rates.skontoDaysInvalid')).nullable(),
-    status: z.enum(['active', 'inactive', 'lead']),
-    tags: z.array(z.string()),
-    notes: z.string(),
-    reminders_opt_out: z.boolean(),
-    cc_emails: z.string().superRefine((v, ctx) => {
-      const { invalid } = parseEmailList(v)
-      if (invalid.length) ctx.addIssue({ code: 'custom', message: t('dunning.invalidAddresses', { list: invalid.join(', ') }) })
-    }),
-    einvoice_format: z.enum(['', 'ebinterface', 'ubl']),
-    peppol_scheme: z.string().refine(v => !v.trim() || /^\d{4}$/.test(v.trim()), t('einvoice.client.schemeInvalid')),
-    peppol_id: z.string(),
-    buyer_reference: z.string(),
-    supplier_number: z.string(),
-  }).refine(v => v.name.trim() || v.company.trim(), { path: ['name'], message: t('clients.form.nameRequired') })
-    .refine(v => !v.peppol_scheme.trim() === !v.peppol_id.trim(), { path: ['peppol_id'], message: t('einvoice.client.incomplete') })
-}
-
-type Values = z.infer<ReturnType<typeof makeSchema>>
-
-function toValues(client: Client | undefined, defaults: ClientDefaults): Values {
-  return {
-    name: client?.name ?? '',
-    company: client?.company ?? '',
-    address_line1: client?.address_line1 ?? '',
-    address_line2: client?.address_line2 ?? '',
-    zip: client?.zip ?? '',
-    city: client?.city ?? '',
-    // An old free-text country that maps to a code is corrected silently; anything else stays visible.
-    country: client ? toCountryCode(client.country) ?? client.country : defaults.country,
-    email: client?.email ?? '',
-    phone: client?.phone ?? '',
-    uid_number: client?.uid_number ?? '',
-    tax_treatment: client?.tax_treatment ?? defaults.tax_treatment,
-    language: client?.language ?? defaults.language,
-    payment_days: client ? client.payment_days : null,
-    skonto_percent: client?.skonto_percent ?? null,
-    skonto_days: client?.skonto_days ?? null,
-    status: client?.status ?? 'active',
-    tags: client?.tags ?? [],
-    notes: client?.notes ?? '',
-    reminders_opt_out: client?.reminders_opt_out ?? false,
-    cc_emails: (client?.cc_emails ?? []).join(', '),
-    einvoice_format: client?.einvoice_format ?? '',
-    peppol_scheme: client?.peppol_scheme ?? '',
-    peppol_id: client?.peppol_id ?? '',
-    buyer_reference: client?.buyer_reference ?? '',
-    supplier_number: client?.supplier_number ?? '',
-  }
-}
-
-function toPayload(v: Values) {
-  return {
-    name: v.name.trim(),
-    company: v.company.trim() || null,
-    address_line1: v.address_line1.trim(),
-    address_line2: v.address_line2.trim() || null,
-    zip: v.zip.trim(),
-    city: v.city.trim(),
-    country: v.country,
-    email: v.email.trim(),
-    phone: v.phone.trim() || null,
-    uid_number: normalizeVatId(v.uid_number) || null,
-    tax_treatment: v.tax_treatment,
-    language: v.language,
-    currency: 'EUR' as const,
-    payment_days: v.payment_days,
-    skonto_percent: v.skonto_percent,
-    skonto_days: v.skonto_days,
-    status: v.status,
-    tags: v.tags,
-    notes: v.notes.trim() || null,
-    reminders_opt_out: v.reminders_opt_out,
-    cc_emails: parseEmailList(v.cc_emails).emails,
-    einvoice_format: v.einvoice_format || null,
-    peppol_scheme: v.peppol_scheme.trim() || null,
-    peppol_id: v.peppol_id.trim() || null,
-    buyer_reference: v.buyer_reference.trim() || null,
-    supplier_number: v.supplier_number.trim() || null,
-  }
-}
-
-type Payload = ReturnType<typeof toPayload>
+type Values = ClientValues
+type Payload = ClientPayload
 type Duplicate = { id: string; label: string; reasons: string[] }
 
 function TagInput({ value, onChange }: { value: string[]; onChange: (tags: string[]) => void }) {
@@ -190,8 +91,8 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
   const supabase = createClient()
   const uid = useId()
   const { t } = useT()
-  const schema = useMemo(() => makeSchema(t), [t])
-  const initial = useMemo(() => toValues(client, defaults), [client, defaults])
+  const schema = useMemo(() => clientSchema(t), [t])
+  const initial = useMemo(() => toClientValues(client, defaults), [client, defaults])
   const { register, control, handleSubmit, setValue, getValues, formState: { errors, isSubmitting } } = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: initial,
@@ -237,22 +138,22 @@ export default function ClientForm({ client, defaults, countries, onSaved, onCan
   async function save(payload: Payload) {
     setSaving(true)
     if (client) {
-      const { error } = await supabase.from('clients').update(payload).eq('id', client.id)
+      const { error } = await saveClient(supabase, payload, client.id)
       setSaving(false)
       if (error) { failed(error); return }
       toast.success(t('clients.form.updated'))
       onSaved?.()
       router.refresh()
     } else {
-      const { data, error } = await supabase.from('clients').insert(payload).select('id').single()
-      if (error) { setSaving(false); failed(error); return }
+      const { client: created, error } = await saveClient(supabase, payload)
+      if (error || !created) { setSaving(false); if (error) failed(error); return }
       toast.success(t('clients.form.created'))
-      router.push(`/clients/${data.id}`)
+      router.push(`/clients/${created.id}`)
     }
   }
 
   async function onValid(values: Values) {
-    const payload = toPayload(values)
+    const payload = toClientPayload(values)
     const duplicates = await findDuplicates(payload)
     if (duplicates.length) { setPending({ payload, duplicates }); return }
     await save(payload)

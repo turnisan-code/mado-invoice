@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import { formatDate, formatMoney, today, roundCents, settlesBalance, skontoAmount, skontoDeadline } from '@/lib/utils/document'
+import { formatDate, formatMoney, today, roundCents, settlesBalance } from '@/lib/utils/document'
 import { Trash2, Plus, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,11 +16,11 @@ import { StatusBadge } from '@/components/lists/StatusBadge'
 import type { BookamatPending, Currency, PaymentKind, PaymentMethod } from '@/types'
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
-import { logEvent } from '@/lib/events'
-import { canTransition, DOCUMENT_STATUSES, paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
+import { paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
 import { dbErrorMessage } from '@/lib/api-errors'
 import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
 import { loadMoneyLock } from '@/lib/deposits'
+import { paymentRows, recordInvoicePayments, removePayment as removePaymentRow, reopensOnRemoval, settledSum, settlementRow, skontoOffered } from '@/lib/services/payments'
 
 interface Payment {
   id: string
@@ -34,9 +34,6 @@ interface Payment {
 }
 
 type NewPayment = Omit<Payment, 'id' | 'credit_note_id'>
-
-// Statuses a settled invoice moves to 'paid' from.
-const PAYABLE: readonly string[] = DOCUMENT_STATUSES.invoice.filter(s => canTransition('invoice', s, 'paid'))
 
 // `pending`: bookings a sync posted but could not record or confirm; the next sync settles them.
 type BookamatInfo = { bookings: BookingRow[]; error: string | null; pending: BookamatPending[] }
@@ -54,8 +51,6 @@ async function fetchBookamatInfo(documentId: string): Promise<BookamatInfo | nul
     pending: Array.isArray(data.bookamat_pending) ? data.bookamat_pending as BookamatPending[] : [],
   }
 }
-
-const settledSum = (rows: { amount: number; kind?: string | null }[]) => roundCents(rows.filter(settlesBalance).reduce((s, p) => s + p.amount, 0))
 
 interface Props {
   documentId: string
@@ -131,10 +126,7 @@ export default function PaymentPanel({
 
   // Skonto may be taken when the money arrived within the Skonto window and covers the total
   // less the Skonto; tiny leftovers (bank fees, rounding) can be written off instead.
-  const skonto = skontoAmount(total, skontoPercent)
-  const skontoDue = skontoDays != null ? skontoDeadline(date, skontoDays) : null
-  const lastReceived = payments.filter(p => p.kind === 'payment').map(p => p.date).sort().at(-1) ?? null
-  const offerSkonto = canRecord && !fullyPaid && skonto > 0 && !!skontoDue && !!lastReceived && lastReceived <= skontoDue && balanceDue <= skonto + 0.01
+  const offerSkonto = canRecord && !fullyPaid && skontoOffered({ total, date, skontoPercent, skontoDays, payments })
   // Under a euro left over is a rounding or bank-fee difference, closed in one click; a larger
   // uncollectible balance is written off with a reason.
   const offerWriteoff = canRecord && !fullyPaid && balanceDue < SMALL_DIFFERENCE
@@ -183,26 +175,18 @@ export default function PaymentPanel({
   async function recordRows(rows: NewPayment[]): Promise<boolean> {
     setSaving(true)
     try {
-      const { data, error } = await supabase
-        .from('payments')
-        .insert(rows.map(row => ({ document_id: documentId, ...row })))
-        .select()
+      let next = payments
+      const { error, settled, statusError } = await recordInvoicePayments(supabase, { id: documentId, status, total, payments }, rows, {
+        onInserted: added => { next = [...payments, ...added]; setPayments(next) },
+      })
       if (error) { toast.error(dbErrorMessage(t, error)); return false }
-
-      const next = [...payments, ...(data ?? [])]
-      setPayments(next)
-      for (const row of rows) {
-        await logEvent(supabase, documentId, 'payment_added', { amount: row.amount, date: row.date, kind: row.kind, method: row.method, reference: row.reference ?? undefined })
-      }
 
       const fee = rows.find(r => r.kind === 'fee')
       const kind = rows[0].kind
       const label = fee && rows.length > 1 ? t('books.fees.recordedSplit', { amount: formatMoney(fee.amount, currency) })
         : kind === 'skonto' ? t('payments.skontoRecorded') : kind === 'writeoff' ? t('payments.writtenOffRecorded') : t('payments.paymentRecorded')
-      if (settledSum(next) >= total - 0.005 && PAYABLE.includes(status)) {
-        const { data: updated, error: statusErr } = await supabase.from('documents').update({ status: 'paid' }).eq('id', documentId).in('status', PAYABLE).select('id')
-        if (statusErr) toast.error(dbErrorMessage(t, statusErr))
-        else if (updated?.length) await logEvent(supabase, documentId, 'status_changed', { from: status, to: 'paid' })
+      if (settled) {
+        if (statusError) toast.error(dbErrorMessage(t, statusError))
         toast.success(t('payments.recordedAndPaid', { label }))
         // Only money is booked: an invoice closed by a write-off or a credit note has nothing to sync.
         if (!synced && bookamatConfigured && hasMoneyToBook({ number, status: 'paid', payments: next })) setShowBookamatPrompt(true)
@@ -243,18 +227,12 @@ export default function PaymentPanel({
 
   async function confirmOverpay() {
     if (!overpay) return
-    const open = Math.max(0, balanceDue)
-    const excess = roundCents(overpay.amount - open)
-    const rows = overpay.choice === 'payment' || excess <= 0.005
-      ? [paymentRow(overpay.amount)]
-      : [...(open > 0.005 ? [paymentRow(open)] : []), paymentRow(excess, 'fee')]
-    await submitPayment(rows)
+    await submitPayment(paymentRows(overpay.amount, balanceDue, overpay.choice, paymentRow))
   }
 
   async function settleRemaining(kind: 'skonto' | 'writeoff', reason: string | null = null): Promise<boolean> {
     if (balanceDue <= 0.005) return false
-    const settleNote = kind === 'skonto' ? `Skonto ${skontoPercent} %` : reason
-    return recordRows([{ date: today(), amount: balanceDue, note: settleNote, kind, method: 'bank' }])
+    return recordRows([settlementRow(kind, balanceDue, today(), { skontoPercent, reason })])
   }
 
   async function writeOffUncollectible() {
@@ -269,14 +247,9 @@ export default function PaymentPanel({
   async function removePayment(id: string) {
     const removed = payments.find(p => p.id === id)
     const next = payments.filter(p => p.id !== id)
-    const reopen = status === 'paid' && settledSum(next) < total - 0.005
     setRemoving(true)
-    // One transaction: the row goes and a paid invoice that is open again reopens (the only way
-    // the lifecycle trigger lets paid go back to sent/overdue).
-    const { data: reopened, error } = await supabase.rpc('remove_payment', { p_payment_id: id, p_reopen: reopen })
+    const { error } = await removePaymentRow(supabase, documentId, id, { reopen: reopensOnRemoval(status, total, next), removed })
     if (error) { toast.error(dbErrorMessage(t, error)); setRemoving(false); return }
-    if (removed) await logEvent(supabase, documentId, 'payment_removed', { amount: removed.amount, date: removed.date, kind: removed.kind, method: removed.method })
-    if (reopened) await logEvent(supabase, documentId, 'status_changed', { from: 'paid', to: reopened })
     setPayments(next)
 
     setRemoving(false)
