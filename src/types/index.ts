@@ -294,9 +294,10 @@ export interface Document {
   final_invoice_id?: string | null
   // The total it was issued with (src/lib/pdf/issue.ts); null before issuing and for older documents.
   issued_total?: number | null
-  // When a Claude session last recorded, changed or removed a payment row of the invoice, until the
-  // owner confirms its payments on the invoice page (20261105_mcp_drafts.sql); meanwhile the
-  // reminder cron skips it. Absent before that migration.
+  // When a Claude session last recorded, changed or removed a payment row of the invoice or a refund
+  // of the credit note, until the owner confirms its payments on its page (20261105_mcp_drafts.sql);
+  // meanwhile the reminder cron and the automatic Bookamat step skip it, no archive copy is made of
+  // it and the portal shows no payments on it. Absent before that migration.
   mcp_payments_at?: string | null
   items?: DocumentItem[]
   payments?: Payment[]

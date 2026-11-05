@@ -2,7 +2,8 @@
 -- lines of drafts only (MI044), leaves the template of a recurring schedule of either mode as it
 -- is (MI045), and an address it put on a client sends an action naming it to Mado for approval
 -- until the owner saves the client there; a client it changed keeps mcp_written_at until then, and
--- an invoice whose payments it changed keeps mcp_payments_at until the owner confirms them.
+-- an invoice or credit note whose payments or refunds it changed keeps mcp_payments_at until the
+-- owner confirms them.
 -- Run it in the Supabase SQL editor (postgres role) after both 20261105 migrations; the owner must
 -- be in app_users. Everything happens in one transaction that is rolled back. Sessions are
 -- simulated as in mcp_guards.sql ('browser' is the owner's browser at aal2, 'claude' a seeded
@@ -58,6 +59,7 @@ declare
   v_stale   uuid;
   v_paid    uuid;
   v_pay     uuid;
+  v_cn      uuid;
   v_base    jsonb;
 begin
   if v_owner is null then raise exception 'FAIL setup: app_users is empty; add the owner first'; end if;
@@ -97,6 +99,10 @@ begin
   values (v_paid, 0, 'item', 'Paid line', 1, 'hour', 100, 20);
   insert into public.payments (document_id, date, amount, kind, method) values (v_paid, current_date - 20, 120, 'payment', 'bank') returning id into v_pay;
   update public.documents set status = 'paid' where id = v_paid;
+  -- An issued credit note of that invoice, nothing paid back yet.
+  insert into public.documents (type, client_id, number, status, converted_from_id) values ('credit_note', v_other, 'MCP-GUARD-TEST-CN-1', 'sent', v_paid) returning id into v_cn;
+  insert into public.document_items (document_id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate)
+  values (v_cn, 0, 'item', 'Credited line', 1, 'hour', 100, 20);
 
   -- A client as an earlier version of mcp_address_set (lower()) left it: Claude wrote the email and
   -- the mark has the earlier, glibc lower() form. The trigger is bypassed to store that mark.
@@ -116,6 +122,7 @@ begin
   perform set_config('mcp_test.stale', v_stale::text, true);
   perform set_config('mcp_test.paid', v_paid::text, true);
   perform set_config('mcp_test.payment', v_pay::text, true);
+  perform set_config('mcp_test.credit_note', v_cn::text, true);
   perform set_config('mcp_test.browser', (v_base || jsonb_build_object('session_id', v_browser,
     'amr', jsonb_build_array(jsonb_build_object('method', 'totp', 'timestamp', v_now - 60))))::text, true);
   perform set_config('mcp_test.claude', (v_base || jsonb_build_object('session_id', v_claude,
@@ -218,6 +225,7 @@ do $$
 declare
   v_paid   uuid := current_setting('mcp_test.paid')::uuid;
   v_issued uuid := current_setting('mcp_test.issued')::uuid;
+  v_cn     uuid := current_setting('mcp_test.credit_note')::uuid;
   v_status text;
   v_at     timestamptz;
 begin
@@ -236,6 +244,14 @@ begin
   insert into public.payments (document_id, date, amount, kind, method) values (v_issued, current_date, 10, 'payment', 'bank');
   perform public.mcp_drafts_test_ok('claude records a payment: mcp_payments_at set',
     (select mcp_payments_at is not null from public.documents where id = v_issued));
+  -- The automatic Bookamat step books a credit note's refunds with their date, amount and account.
+  perform public.mcp_drafts_test_ok('a credit note claude has not refunded: no mcp_payments_at',
+    (select mcp_payments_at is null from public.documents where id = v_cn));
+  insert into public.payments (document_id, date, amount, kind, method) values (v_cn, current_date - 3, 120, 'refund', 'cash');
+  select mcp_payments_at into v_at from public.documents where id = v_cn;
+  perform public.mcp_drafts_test_ok('claude records a refund on a credit note: mcp_payments_at set', v_at is not null);
+  update public.documents set mcp_payments_at = null where id = v_cn returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('claude cannot clear a credit note''s mcp_payments_at', v_at is not null);
 end $$;
 
 -- ─── Claude: addresses it writes are marked ──────────────────────────────────
@@ -324,6 +340,11 @@ begin
   insert into public.payments (document_id, date, amount, kind, method) values (v_paid, current_date, 120, 'payment', 'bank');
   perform public.mcp_drafts_test_ok('browser: a payment the owner records sets no mcp_payments_at',
     (select mcp_payments_at is null from public.documents where id = v_paid));
+  update public.documents set mcp_payments_at = null where id = current_setting('mcp_test.credit_note')::uuid returning mcp_payments_at into v_at;
+  perform public.mcp_drafts_test_ok('browser: the owner confirms a credit note''s refunds, mcp_payments_at cleared', v_at is null);
+  delete from public.payments where document_id = current_setting('mcp_test.credit_note')::uuid and kind = 'refund';
+  perform public.mcp_drafts_test_ok('browser: a refund the owner removes sets no mcp_payments_at',
+    (select mcp_payments_at is null from public.documents where id = current_setting('mcp_test.credit_note')::uuid));
   insert into public.document_items (document_id, sort_order, line_type, description)
   values (current_setting('mcp_test.issued')::uuid, 1, 'text', 'Owner note');
   perform public.mcp_drafts_test_ok('browser still writes an issued document''s lines',

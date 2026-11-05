@@ -32,7 +32,8 @@ const HELD_BACK = {
 // Settings → Bookamat → sync automatically: paid invoices and refunds not in Bookamat yet, each
 // result in the log. Runs before the reminders, whatever their settings, and every Bookamat call
 // ends by the step's deadline, so the reminders keep more than half of the function's time. A
-// document of a client Claude changed is held back (autoSyncBookamat), as its reminders are below.
+// document of a client Claude changed, or one whose payments or refunds Claude changed, is held
+// back until the owner confirms it in Mado (autoSyncBookamat), as its reminders are below.
 async function bookamatStep(supabase: ReturnType<typeof createServiceClient>, settings: Settings): Promise<AutoSyncResult[] | { error: string }> {
   if (!isBookamatConfigured(settings)) {
     console.warn('[cron/bookamat] skipped: automatic sync is on, but Bookamat is not fully configured')

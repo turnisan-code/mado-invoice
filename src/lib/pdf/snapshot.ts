@@ -7,7 +7,7 @@ import type { Settings } from '@/types'
 const BUCKET = 'documents'
 
 // Failures the UI words itself (archive.errors.*); any other failure carries the raw message.
-export type ArchiveErrorCode = 'not_issued' | 'stored_unreadable' | 'client_changed'
+export type ArchiveErrorCode = 'not_issued' | 'stored_unreadable' | 'client_changed' | 'payments_changed'
 
 export class ArchiveError extends Error {
   constructor(readonly code: ArchiveErrorCode, message: string) {
@@ -64,9 +64,12 @@ export type IssuedPdf = {
 // Except at issue, no copy is rendered while a Claude session's change to the client is not saved
 // by the owner in Mado (clients.mcp_written_at, 20261105_mcp_drafts.sql): the copy keeps the
 // recipient block for good, and the crons, the portal and every later email reuse it, so client
-// data Claude wrote would become the numbered document without anyone approving it. It fails
-// closed like an unreadable copy; a stored copy is still served. A client read without the column
-// (that migration not applied) has not been changed by Claude.
+// data Claude wrote would become the numbered document without anyone approving it. Nor while the
+// owner has not confirmed the payments a Claude session recorded, changed or removed on the
+// document (documents.mcp_payments_at): the copy keeps the payments dated up to the issue day
+// (asIssued), so a payment Claude dated that day, or one it removed, would be frozen into it. It
+// fails closed like an unreadable copy; a stored copy is still served. A row read without the
+// columns (that migration not applied) has nothing from Claude.
 export async function getIssuedPdf(
   supabase: SupabaseClient,
   documentId: string,
@@ -86,6 +89,9 @@ export async function getIssuedPdf(
 
   if (source !== 'issue' && doc.clients?.mcp_written_at) {
     throw new ArchiveError('client_changed', 'The client was changed from a Claude connection and not saved in Mado since; no archive copy is made from it')
+  }
+  if (source !== 'issue' && doc.mcp_payments_at) {
+    throw new ArchiveError('payments_changed', 'Payments were changed from a Claude connection and not confirmed in Mado since; no archive copy is made with them')
   }
   const path = doc.pdf_path ?? storageKey(doc.date, doc.number)
   let buffer = await renderLoadedPdf(supabase, asIssued(doc), settings, { includeQr: true })

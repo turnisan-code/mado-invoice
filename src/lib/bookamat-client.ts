@@ -9,11 +9,12 @@ import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/type
 
 // Failures the UI words itself (books.errors.<code>, with `detail` as variables). 'bookamat'
 // carries Bookamat's own message: why it refused a booking is the most useful thing to show.
+// 'held' only ever comes back to the cron (autoSyncBookamat), which logs it as held back.
 export type BookamatErrorCode =
   | 'not_configured' | 'not_found' | 'not_issued' | 'not_eur' | 'not_settled' | 'nothing_to_book' | 'no_items'
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
-  | 'unknown_outcome'
+  | 'unknown_outcome' | 'held'
 
 export type ErrorDetail = Record<string, string | number>
 

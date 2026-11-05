@@ -164,10 +164,21 @@ client is saved any address on it that is not plain ASCII, as the app cannot mat
 marks for certain).
 
 An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
-applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`) gets no
-automatic reminders until the owner confirms its payments on the invoice page (“Payments are
-correct”): removing a payment reopens a paid invoice or raises what is open, and the Mahnung would
-otherwise ask the client, unattended, for money it paid.
+applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
+credit note on which it recorded or removed a refund (`record_refund`, `remove_payment`), stays
+unconfirmed until the owner confirms its payments on its page (“Payments are correct”, “Refunds are
+correct”; the notice shows whatever the status, also on a paid invoice). Meanwhile the automatic
+reminders skip the invoice and the automatic Bookamat sync skips the document, each with the reason
+in the cron log: removing a payment reopens a paid invoice or raises what is open, so the Mahnung
+would ask the client, unattended, for money it paid, and a booking takes its date, its amount per
+year and its account (bank or Kassa) from those rows, so Claude's payments would become Bookamat
+bookings no one approved (a write-off or Skonto alone makes an invoice paid, so bookable). No
+archive copy is made of such a document either (downloads, emails and the portal's PDF of one that
+has none yet fail with a notice), as the copy keeps the payments up to its issue date for good, and
+its share link shows the issued total only, without the payments, the balance due, a paid or
+overdue status and the payment details. Where an earlier version of `20261105_mcp_drafts.sql` was
+applied (no mark yet, or invoices only), the migration marks every invoice and credit note with a
+payment or refund recorded or removed from a Claude connection once.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
@@ -185,7 +196,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 | Path | Schedule (UTC) | Does |
 |---|---|---|
 | `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts. |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice whose payments Claude changed until the owner confirms them. |
+| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 

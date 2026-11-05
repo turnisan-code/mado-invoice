@@ -103,8 +103,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           </span>
         </p>
       )}
-      {/* Payments a Claude session changed hold the automatic reminders until confirmed here. */}
-      {doc.mcp_payments_at && (doc.status === 'sent' || doc.status === 'overdue') && <ClaudePaymentsNotice documentId={doc.id} />}
+      {/* Payments a Claude session changed hold the automatic reminders and Bookamat sync until
+          confirmed here, also on a paid or cancelled invoice. */}
+      {doc.mcp_payments_at && doc.number && <ClaudePaymentsNotice documentId={doc.id} kind="invoice" />}
       <InvoicePageClient
         type="invoice"
         settings={publicSettings}

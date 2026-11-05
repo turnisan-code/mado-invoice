@@ -130,12 +130,25 @@ const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on 
 const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms).'
 
 // documents.mcp_payments_at (20261105_mcp_drafts.sql): a payment row a Claude session records,
-// changes or removes on an invoice holds its automatic reminders until the owner confirms the
-// payments on the invoice page in Mado (src/app/api/cron/reminders/route.ts).
-const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice holds its automatic reminders until the owner confirms its payments on the invoice in Mado, so no Mahnung goes out unattended on payments Claude wrote.'
-const PAYMENTS_HELD = 'Until the owner confirms the payments on the invoice in Mado, automatic reminders skip it; tell the owner.'
-// The reminder cron only looks at invoices that are open.
-const remindable = (type: string, status: string) => type === 'invoice' && (status === 'sent' || status === 'overdue')
+// changes or removes on an invoice, or a refund on a credit note, holds the document's automatic
+// reminders and its automatic Bookamat sync until the owner confirms its payments on its page in
+// Mado (src/app/api/cron/reminders/route.ts, autoSyncBookamat); meanwhile no archive copy is made
+// of it (getIssuedPdf) and its share link shows no payments.
+const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice, or a refund on a credit note, holds its automatic reminders and its automatic Bookamat sync until the owner confirms its payments on its page in Mado, so no Mahnung or Bookamat booking is made unattended from payments Claude wrote; meanwhile no archive copy (frozen PDF) is made of it and its share link shows no payments, balance or payment details.'
+// What the mark holds for the document as it is now: reminders only while an invoice is open (the
+// reminder cron looks at no other), the Bookamat sync always (it books paid invoices, cancelled
+// ones and refunded credit notes).
+function paymentsHeld(type: string, status: string) {
+  const reminders = type === 'invoice' && (status === 'sent' || status === 'overdue')
+  return {
+    summary: reminders
+      ? 'Until the owner confirms its payments in Mado, automatic reminders and the automatic Bookamat sync skip it; tell the owner.'
+      : 'Until the owner confirms its payments in Mado, the automatic Bookamat sync skips it; tell the owner.',
+    data: { ...(reminders ? { reminders_held: true } : {}), bookamat_sync_held: true },
+  }
+}
+// apply_credit_note: the credit goes onto the invoice, which is marked.
+const INVOICE_PAYMENTS_HELD = 'Until the owner confirms the invoice\'s payments in Mado, its automatic reminders and the automatic Bookamat sync skip it; tell the owner.'
 
 // The schedules that issue automatically for a client Claude has just changed: they now create
 // drafts. Only for the reply; a failed lookup leaves the note out.
@@ -549,19 +562,19 @@ function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], { becameP
   const what = added.map(p => `${money(p.amount, doc.currency)}${p.kind === 'fee' ? ' as fees' : ''}`).join(' and ')
   const warning = failed ? NOT_MARKED_PAID : null
   // Set by the database on every payment row a Claude session writes (documents.mcp_payments_at).
-  const held = !repeated && remindable(doc.type, status)
+  const held = repeated ? null : paymentsHeld(doc.type, status)
   return {
     summary: [
       repeated ? `Already recorded with this idempotency key on ${doc.number}: ${what}.` : `Recorded ${what} on ${doc.number}.`,
       becamePaid ? 'The invoice is paid.' : !repeated && balance > 0.005 ? `Open: ${money(balance, doc.currency)}.` : '',
-      held ? PAYMENTS_HELD : '',
+      held?.summary ?? '',
       warning ?? '',
     ].filter(Boolean).join(' '),
     data: {
       invoice_id: doc.id, number: doc.number, added: added.map(shortPayment), repeated,
       total, balance_due: balance, status, became_paid: becamePaid,
       payment_state: paymentState(total, all),
-      ...(held ? { reminders_held: true } : {}),
+      ...held?.data,
       ...(warning ? { warnings: [warning] } : {}),
     },
   }
@@ -586,14 +599,14 @@ const removePaymentTool = defineTool({
     const { reopened, error: removeErr } = await removePayment(ctx.supabase, doc.id, row.id, { reopen, removed: row as RemovedPayment })
     if (removeErr) throw removeErr
     const status = reopened ?? doc.status
-    const held = remindable(doc.type, status)
+    const held = paymentsHeld(doc.type, status)
     return {
-      summary: `Removed ${money(row.amount, doc.currency)} (${row.kind}) from ${doc.number ?? 'the document'}.${reopened ? ` It is ${reopened} again.` : ''}${held ? ` ${PAYMENTS_HELD}` : ''}`,
+      summary: `Removed ${money(row.amount, doc.currency)} (${row.kind}) from ${doc.number ?? 'the document'}.${reopened ? ` It is ${reopened} again.` : ''} ${held.summary}`,
       data: {
         removed: { id: row.id, date: row.date, amount: row.amount, kind: row.kind, method: row.method },
         document_id: doc.id, number: doc.number, status, reopened: !!reopened,
         ...(doc.type === 'invoice' ? { balance_due: balanceOf(total, remaining) } : {}),
-        ...(held ? { reminders_held: true } : {}),
+        ...held.data,
       },
     }
   },
@@ -639,9 +652,12 @@ const applyCreditNoteTool = defineTool({
       const result = await applyCreditNote(ctx.supabase, args.credit_note_id)
       return {
         summary: result.applied
-          ? `Applied ${money(result.applied)} to ${result.invoiceNumber}.`
+          ? `Applied ${money(result.applied)} to ${result.invoiceNumber}. ${INVOICE_PAYMENTS_HELD}`
           : 'Nothing to apply: the credit note is applied already, not issued, or its invoice has nothing open.',
-        data: { credit_note_id: args.credit_note_id, applied: result.applied, invoice_id: result.invoiceId, invoice_number: result.invoiceNumber },
+        data: {
+          credit_note_id: args.credit_note_id, applied: result.applied, invoice_id: result.invoiceId, invoice_number: result.invoiceNumber,
+          ...(result.applied ? { reminders_held: true, bookamat_sync_held: true } : {}),
+        },
       }
     }
     const pending = await unappliedCreditNotes(ctx.supabase)
@@ -658,9 +674,9 @@ const applyCreditNoteTool = defineTool({
     }
     return {
       summary: applied.length || failed.length
-        ? `Applied ${applied.length} credit note(s).${failed.length ? ` Not applied: ${failed.join(', ')}.` : ''}`
+        ? `Applied ${applied.length} credit note(s).${failed.length ? ` Not applied: ${failed.join(', ')}.` : ''}${applied.length ? ' Until the owner confirms the payments of those invoices in Mado, their automatic reminders and the automatic Bookamat sync skip them; tell the owner.' : ''}`
         : 'Every issued credit note is applied already.',
-      data: { applied, failed },
+      data: { applied, failed, ...(applied.length ? { reminders_held: true, bookamat_sync_held: true } : {}) },
     }
   },
 })
@@ -668,7 +684,7 @@ const applyCreditNoteTool = defineTool({
 const recordRefundTool = defineTool({
   name: 'record_refund',
   title: 'Record refund',
-  description: 'Record money paid back to the client on an ISSUED credit note. More than is still open on the credit note needs allow_over_open: true.',
+  description: `Record money paid back to the client on an ISSUED credit note. More than is still open on the credit note needs allow_over_open: true. ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({
     credit_note_id: id,
@@ -701,9 +717,11 @@ const recordRefundTool = defineTool({
     })
     if (insErr) throw insErr
     const left = Math.max(0, roundCents(open - amount))
+    // Set by the database on the refund row (documents.mcp_payments_at).
+    const held = paymentsHeld(cn.type, cn.status)
     return {
-      summary: `Recorded a refund of ${money(amount, cn.currency)} on ${cn.number}. ${left > 0.005 ? `Still open: ${money(left, cn.currency)}.` : 'The credit note is settled.'}`,
-      data: { credit_note_id: cn.id, number: cn.number, refund: refund && shortPayment(refund), open: left },
+      summary: `Recorded a refund of ${money(amount, cn.currency)} on ${cn.number}. ${left > 0.005 ? `Still open: ${money(left, cn.currency)}.` : 'The credit note is settled.'} ${held.summary}`,
+      data: { credit_note_id: cn.id, number: cn.number, refund: refund && shortPayment(refund), open: left, ...held.data },
     }
   },
 })

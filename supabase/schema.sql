@@ -347,8 +347,9 @@ create table documents (
   -- draft final invoice frees it, so does a Storno of the final invoice (documents_deposit_release).
   final_invoice_id    uuid references documents(id) on delete set null,
   -- Claude connector (20261105_mcp_drafts.sql): when a Claude session last recorded, changed or
-  -- removed a payment row of the invoice, until the owner confirms its payments on the invoice
-  -- page; meanwhile the reminder cron skips it (payments_mcp_mark, documents_mcp_payments_guard).
+  -- removed a payment row of the invoice or a refund of the credit note, until the owner confirms
+  -- its payments on its page; meanwhile the reminder cron and the automatic Bookamat step skip it
+  -- and no archive copy is made of it (payments_mcp_mark, documents_mcp_payments_guard).
   mcp_payments_at     timestamptz,
   constraint documents_invoice_kind_check
     check (invoice_kind in ('standard', 'advance', 'partial', 'final') and (type = 'invoice' or invoice_kind = 'standard')),
@@ -2385,13 +2386,41 @@ create trigger mcp_actions_recipients
   for each row execute function public.mcp_actions_recipients();
 
 -- ─── Payments Claude changed ─────────────────────────────────────────────────
--- A payment, fee, Skonto, write-off or applied credit that a Claude session records, changes or
--- removes on an invoice sets documents.mcp_payments_at, until the owner confirms the invoice's
--- payments on its page in Mado. Meanwhile the reminder cron skips the invoice
--- (src/app/api/cron/reminders/route.ts): a removed row reopens a paid invoice or raises what is
--- open, and a recorded one is listed as received, so an automatic Mahnung would ask the client for
--- money by what Claude wrote, without anyone approving it. A Claude session only ever sets or
--- moves the mark forward (documents_mcp_payments_guard); the owner's browser clears it.
+-- A payment, fee, Skonto, write-off or applied credit on an invoice, or a refund on a credit note,
+-- that a Claude session records, changes or removes sets documents.mcp_payments_at on that
+-- document, until the owner confirms its payments on its page in Mado. Meanwhile the reminder cron
+-- skips the invoice and its automatic Bookamat step the document
+-- (src/app/api/cron/reminders/route.ts, autoSyncBookamat in src/lib/bookamat.ts), no archive copy
+-- is made of it (getIssuedPdf in src/lib/pdf/snapshot.ts) and the portal shows no payments,
+-- balance or payment details on it: a removed row reopens a paid invoice or raises what is open, a
+-- recorded one is listed as received, and a booking takes its date, its amount and its account
+-- (bank or Kassa) from the rows, so a Mahnung, a booking or a frozen PDF would carry what Claude
+-- wrote without anyone approving it. A Claude session only ever sets or moves the mark forward
+-- (documents_mcp_payments_guard); the owner's browser clears it.
+-- An earlier version of this migration had no mark, or marked invoices only. Where one was
+-- applied, every invoice and credit note with a payment or refund recorded or removed from a
+-- Claude connection (document_events.actor) is marked once here, so the crons hold it until the
+-- owner confirms its payments in Mado (also one confirmed before: confirming now releases the
+-- Bookamat sync as well).
+do $$
+begin
+  if exists (select 1 from pg_catalog.pg_attribute
+             where attrelid = 'public.documents'::regclass and attname = 'mcp_payments_at' and not attisdropped)
+     and not exists (select 1 from pg_catalog.pg_proc p
+                     where p.oid = to_regprocedure('public.payments_mcp_mark()')
+                       and p.prosrc like '%d.type = ''invoice''%') then
+    return;
+  end if;
+  alter table public.documents add column if not exists mcp_payments_at timestamptz;
+  execute $q$
+    update public.documents d set mcp_payments_at = now()
+    where d.type in ('invoice', 'credit_note') and d.mcp_payments_at is null
+      and exists (select 1 from public.document_events e
+                  where e.document_id = d.id and e.actor is not null
+                    and e.type in ('payment_added', 'payment_removed'))
+  $q$;
+end;
+$$;
 create or replace function public.payments_mcp_mark()
 returns trigger
 language plpgsql security definer
@@ -2405,7 +2434,7 @@ begin
     if tg_op <> 'INSERT' then v_old := old.document_id; end if;
     if tg_op <> 'DELETE' then v_new := new.document_id; end if;
     update public.documents d set mcp_payments_at = now()
-    where d.id in (v_old, v_new) and d.type = 'invoice';
+    where d.id in (v_old, v_new);
   end if;
   return null;
 end;

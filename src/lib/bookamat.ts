@@ -336,9 +336,14 @@ async function findBooking(creds: BookamatCredentials, entry: BookamatPending, d
   return items.map(i => validId(i.id)).filter((id): id is string => !!id).sort((a, b) => Number(a) - Number(b))[0] ?? null
 }
 
+const SYNC_DOC_RELATIONS = `document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
+  payments(date, amount, kind, method), bookamat_bookings(${BOOKING_COLUMNS})`
 const SYNC_DOC_COLS = `id, type, number, status, currency, date, service_date, service_date_end, tax_treatment, discount_type, discount_value,
-  document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
-  payments(date, amount, kind, method), clients(name, company, uid_number), bookamat_pending, bookamat_bookings(${BOOKING_COLUMNS})`
+  ${SYNC_DOC_RELATIONS}, clients(name, company, uid_number), bookamat_pending`
+// The cron's read (opts.unattended): whole rows, so the Claude marks (heldBack below) come from the
+// same read as the payments and the client the bookings are made of, and a database without the
+// columns holds nothing.
+const UNATTENDED_DOC_COLS = `*, ${SYNC_DOC_RELATIONS}, clients(*)`
 
 type SyncDoc = {
   id: string
@@ -373,21 +378,25 @@ const MIN_ATTACH_MS = 10_000
 // must succeed) it first settles what an earlier attempt left in documents.bookamat_pending or
 // the client hands back as `adopt` (record a booking Bookamat accepted, or look up a post whose
 // answer was lost), then journals each post before sending it. Every write is checked, and the
-// frozen PDF is attached to each booking recorded.
+// frozen PDF is attached to each booking recorded. `unattended` (the cron): a document with
+// something from a Claude connection the owner has not confirmed (heldBack) is left as it is,
+// 'held', before anything is claimed or booked.
 export async function syncBookamatDocument(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  opts: { adopt?: AdoptBooking[]; loadPdf?: LoadPdf; resolver?: AccountResolver; deadline?: number } = {},
+  opts: { adopt?: AdoptBooking[]; loadPdf?: LoadPdf; resolver?: AccountResolver; deadline?: number; unattended?: boolean } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   if (!isBookamatConfigured(settings)) return fail(400, 'not_configured', 'Bookamat is not fully configured')
   const t = settingsT(settings)
   const adopt = opts.adopt ?? []
 
-  const { data, error: docErr } = await supabase.from('documents').select(SYNC_DOC_COLS).eq('id', documentId).maybeSingle()
+  const { data, error: docErr } = await supabase.from('documents').select(opts.unattended ? UNATTENDED_DOC_COLS : SYNC_DOC_COLS).eq('id', documentId).maybeSingle()
   if (docErr) return fail(500, 'database', docErr.message)
   const doc = data as unknown as SyncDoc | null
   if (!doc) return fail(404, 'not_found', 'Document not found')
+  const held = opts.unattended ? heldBack(data as unknown as ClaudeMarks) : null
+  if (held) return fail(409, 'held', held)
   if ((doc.type !== 'invoice' && doc.type !== 'credit_note') || !doc.number) return fail(400, 'not_issued', 'Only issued invoices and credit notes can be synced')
   if ((doc.currency ?? 'EUR') !== 'EUR') return fail(400, 'not_eur', `${doc.number} is in ${doc.currency}; Bookamat only receives EUR documents`, { detail: { currency: doc.currency ?? '' } })
 
@@ -682,20 +691,28 @@ export async function resetBookamatSync(supabase: SupabaseClient, documentId: st
 // `held`: why the document was left for a later run (neither synced nor failed).
 export type AutoSyncResult = { number: string; ok: boolean; bookings?: string[]; error?: string; held?: string }
 
-// A document whose client a Claude session created or changed, and the owner has not saved in Mado
-// since (clients.mcp_written_at, 20261105_mcp_drafts.sql), is not booked unattended: the booking's
-// title carries the client's name, its UID goes to Bookamat as the booking's vatin (reverse charge,
-// ZM), and a document issued before archive copies existed would get its frozen PDF rendered from
-// that client. The owner's own sync in Mado is not held. The whole client row is read, so a
-// database without the column holds nothing.
-const AUTO_SYNC_HELD = 'client changed from a Claude connection: save the client in Mado to confirm it'
-type ClientMark = { clients: { mcp_written_at?: string | null } | null }
-const changedByClaude = (row: ClientMark | null) => !!row?.clients?.mcp_written_at
+// Nothing a Claude session wrote is booked unattended (20261105_mcp_drafts.sql), the marks are read
+// with whole rows, so a database without the columns holds nothing; the owner's own sync in Mado
+// is not held:
+// - the document's client was created or changed by Claude and not saved by the owner in Mado
+//   since (clients.mcp_written_at): the booking's title carries the client's name, its UID goes to
+//   Bookamat as the booking's vatin (reverse charge, ZM), and a document issued before archive
+//   copies existed would get its frozen PDF rendered from that client;
+// - Claude recorded, changed or removed a payment of the invoice or a refund of the credit note,
+//   and the owner has not confirmed them on its page in Mado since (documents.mcp_payments_at):
+//   the bookings take their date, their amount per year and their account (bank or Kassa) from
+//   those rows, and a write-off or Skonto Claude recorded makes an invoice paid, so bookable.
+const HELD_CLIENT = 'client changed from a Claude connection: save the client in Mado to confirm it'
+const HELD_PAYMENTS = 'payments changed from a Claude connection: confirm them on the document in Mado'
+type ClaudeMarks = { mcp_payments_at?: string | null; clients: { mcp_written_at?: string | null } | null }
+const heldBack = (row: ClaudeMarks | null): string | null =>
+  row?.clients?.mcp_written_at ? HELD_CLIENT : row?.mcp_payments_at ? HELD_PAYMENTS : null
 
 // The daily cron step: paid invoices and refunded credit notes from this and last year that have
 // no booking yet, failed before or have pending bookings, oldest first, documents that failed
-// before last; those of a client Claude changed are listed as held. It ends by `deadline`, so the
-// cron keeps its time for the reminders.
+// before last; those with something from a Claude connection the owner has not confirmed
+// (heldBack) are listed as held. It ends by `deadline`, so the cron keeps its time for the
+// reminders.
 export async function autoSyncBookamat(
   supabase: SupabaseClient,
   settings: BookamatSettings,
@@ -706,7 +723,7 @@ export async function autoSyncBookamat(
   const since = `${year - 1}-01-01`
   const { data, error } = await supabase
     .from('documents')
-    .select('id, type, number, status, date, bookamat_error, bookamat_booking_id, bookamat_pending, bookamat_bookings(id), payments(kind, amount), clients(*)')
+    .select('*, bookamat_bookings(id), payments(kind, amount), clients(*)')
     .in('type', ['invoice', 'credit_note'])
     .not('number', 'is', null)
     .in('status', ['paid', 'cancelled', 'sent'])
@@ -716,28 +733,28 @@ export async function autoSyncBookamat(
   if (error) throw new Error(error.message)
 
   const t = settingsT(settings)
-  const candidates = ((data ?? []) as unknown as (StateInput & ClientMark & { id: string; number: string; bookamat_pending: unknown })[])
+  const candidates = ((data ?? []) as unknown as (StateInput & ClaudeMarks & { id: string; number: string; bookamat_pending: unknown })[])
     .filter(d => parsePending(d.bookamat_pending).length > 0 || ((!d.bookamat_bookings?.length || !!d.bookamat_error) && hasMoneyToBook(d)))
     .sort((a, b) => Number(!!a.bookamat_error) - Number(!!b.bookamat_error))
 
   // Held ones take no place in this run's limit; a pending booking of theirs waits as well.
-  const results: AutoSyncResult[] = candidates.filter(changedByClaude).map(d => ({ number: d.number, ok: false, held: AUTO_SYNC_HELD }))
+  const results: AutoSyncResult[] = candidates.flatMap(d => {
+    const held = heldBack(d)
+    return held ? [{ number: d.number, ok: false, held }] : []
+  })
   const resolver = new AccountResolver(credentialsOf(settings), settings.bookamat_accounts_year, deadline)
-  for (const doc of candidates.filter(d => !changedByClaude(d)).slice(0, limit)) {
+  for (const doc of candidates.filter(d => !heldBack(d)).slice(0, limit)) {
     if (deadline - Date.now() < MIN_POST_MS) break
-    // Read again just before booking: the client may have been changed since the list was read.
-    const { data: fresh, error: freshErr } = await supabase.from('documents').select('clients(*)').eq('id', doc.id).maybeSingle()
-    if (freshErr) {
-      results.push({ number: doc.number, ok: false, error: freshErr.message })
-      continue
-    }
-    if (changedByClaude(fresh as ClientMark | null)) {
-      results.push({ number: doc.number, ok: false, held: AUTO_SYNC_HELD })
-      continue
-    }
-    let outcome = await syncBookamatDocument(supabase, settings, doc.id, { loadPdf, resolver, deadline })
+    // `unattended`: the marks are read again with the rows the bookings are made of, as Claude may
+    // have changed the client or the payments since the list was read; the hand-back as well, as it
+    // books what is still missing too.
+    let outcome = await syncBookamatDocument(supabase, settings, doc.id, { loadPdf, resolver, deadline, unattended: true })
     // Bookamat has the booking but the database did not take it: hand it straight back.
-    if (!outcome.ok && outcome.pending?.length) outcome = await syncBookamatDocument(supabase, settings, doc.id, { adopt: outcome.pending, loadPdf, resolver, deadline })
+    if (!outcome.ok && outcome.pending?.length) outcome = await syncBookamatDocument(supabase, settings, doc.id, { adopt: outcome.pending, loadPdf, resolver, deadline, unattended: true })
+    if (!outcome.ok && outcome.code === 'held') {
+      results.push({ number: doc.number, ok: false, held: outcome.error })
+      continue
+    }
     results.push(outcome.ok
       ? { number: doc.number, ok: true, bookings: outcome.created.map(c => `${c.bookingId} (${c.year})`) }
       : { number: doc.number, ok: false, error: bookamatErrorMessage(t, outcome) })
