@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { documentLanguage, documentT } from '@/lib/document-labels'
 import { loadPdfDocument, loadSettings } from '@/lib/pdf/render'
-import { getIssuedPdf } from '@/lib/pdf/snapshot'
+import { ArchiveError, getIssuedPdf, type ArchiveErrorCode } from '@/lib/pdf/snapshot'
 import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
 import type { EInvoiceFormat } from '@/types'
 import { EInvoiceError, buildEInvoice, einvoiceFilename, withAttachment, type PrecedingInvoice } from './common'
@@ -12,7 +12,9 @@ import { toUbl } from './ubl'
 // with the buyer reference the PDF and the portal print (fetchBuyerReference). Peppol embeds the
 // issued PDF; it is only fetched (and, for a document issued before archive copies existed, stored)
 // once the XML is known to be valid. With { pdf: false } nothing is fetched or stored: the XML is
-// only built, to learn whether it can be (a preview before sending).
+// only built, to learn whether it can be (a preview before sending). A UBL whose PDF could not be
+// had goes without it; `pdfError` says why (the archive's code, e.g. a client or payments Claude
+// changed and the owner has not saved or confirmed, else 'pdf_failed'), so the download can say so.
 export async function exportEInvoice(supabase: SupabaseClient, documentId: string, format: EInvoiceFormat, { pdf: withPdf = true }: { pdf?: boolean } = {}) {
   const [doc, settings] = await Promise.all([loadPdfDocument(supabase, documentId), loadSettings(supabase)])
   if (!doc.clients) throw new Error('Document has no client')
@@ -43,6 +45,7 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
 
   let xml: string
   let attached = false
+  let pdfError: ArchiveErrorCode | 'pdf_failed' | null = null
   if (format === 'ubl') {
     toUbl(inv)
     let pdf: { filename: string; base64: string } | null = null
@@ -51,6 +54,7 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
         const issued = await getIssuedPdf(supabase, documentId, 'on_demand')
         pdf = { filename: issued.filename, base64: issued.buffer.toString('base64') }
       } catch (err) {
+        pdfError = err instanceof ArchiveError ? err.code : 'pdf_failed'
         console.error(`[einvoice] ${doc.number}: issued PDF unavailable, exported without it:`, err)
       }
     }
@@ -60,5 +64,5 @@ export async function exportEInvoice(supabase: SupabaseClient, documentId: strin
     xml = toEbInterface(inv)
   }
 
-  return { xml, filename: einvoiceFilename(doc.number, format), number: doc.number, attached }
+  return { xml, filename: einvoiceFilename(doc.number, format), number: doc.number, attached, pdfError }
 }

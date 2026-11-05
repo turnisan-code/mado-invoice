@@ -40,7 +40,9 @@ export default function ApproveForm({ id, requireCode, canApprove }: { id: strin
     startTransition(async () => {
       const result = await (which === 'approve' ? approve(id, code) : reject(id)).catch((): ApproveFormResult => ({ ok: false, reason: 'error' }))
       if (!result.ok) {
-        setError(t(REASON_KEYS[result.reason]))
+        // A changed state is shown by the page itself once it reloads, with what can be done about
+        // it (a client or payments Claude changed are cleared in Mado), so it is not repeated here.
+        if (result.reason !== 'state_changed') setError(t(REASON_KEYS[result.reason]))
         if (result.reason === 'invalid_code' || result.reason === 'fresh_code') setCode('')
       }
       setBusy(null)

@@ -165,11 +165,17 @@ leaves the recipient block out. Addresses Claude wrote are skipped by the remind
 as well (a client whose email Claude wrote gets none, a CC Claude wrote is left out, and until the
 client is saved any address on it that is not plain ASCII, as the app cannot match it against the
 marks for certain). The pages of its issued invoices, credit notes and quotes say so as well, with
-a link to the client. A reminder sent from Gmail, a Storno or a Bookamat sync that Claude prepares
-is refused for such a client until it is saved: the Mahnung prints its name and address, the Storno
-credit note is archived with its name, address and VAT ID for good, the bookings carry its name and
-VAT ID, and the approval page shows only its name. A change Claude makes to the client after
-preparing one of these makes the approval page say it changed, and the action cannot run.
+a link to the client. A reminder sent from Gmail, a Storno, a Bookamat sync or an email with an
+e-invoice that Claude prepares is refused for such a client until it is saved: the Mahnung prints
+its name and address, the Storno credit note is archived with its name, address and VAT ID for
+good, the bookings carry its name and VAT ID, the e-invoice its name, address, VAT ID and buyer
+reference, and the approval page shows only its name. A change Claude makes to the client after
+preparing one of these makes the approval page say so, with a link to the client, and the action
+cannot run. Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
+client Claude has just created is the usual way; the approval page then shows the recipient block
+and VAT ID the document is numbered and archived with for good. A Peppol UBL downloaded in Mado for
+a document without an archive copy goes without its PDF while such a client is not saved, and the
+download says why.
 
 An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
 applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
@@ -186,8 +192,11 @@ bookings no one approved (a write-off or Skonto alone makes an invoice paid, so 
 archive copy is made of such a document either (downloads, emails and the portal's PDF of one that
 has none yet fail with a notice), as the copy keeps the payments up to its issue date for good, and
 its share link shows the issued total only, without the payments, the balance due, a paid or
-overdue status and the payment details. A credit note Claude applied to its invoice
-(`apply_credit_note`) is held the same way as the invoice: the credit settles the credit note, and
+overdue status and the payment details. Nor can Claude email such an invoice with an e-invoice
+(`prepare_send_email` is refused, and a change after preparing is shown on the approval page with a
+link to the invoice), as the e-invoice states the payments up to its issue date as already paid. A
+credit note Claude applied to its invoice (`apply_credit_note`) is held the same way as the
+invoice: the credit settles the credit note, and
 the Bookamat sync books a settled credit note's refunds. Where an earlier version of
 `20261105_mcp_drafts.sql` was applied (no mark yet, or invoices only), the migration marks every
 invoice and credit note with a payment or refund recorded or removed from a Claude connection

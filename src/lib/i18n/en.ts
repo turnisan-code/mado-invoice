@@ -1738,10 +1738,10 @@ export const en = {
   payments: {
     title: 'Payments',
     claudeChanged: {
-      notice: 'Claude recorded, changed or removed a payment on this invoice. Until you have checked its payments and confirm them here, automatic reminders and the automatic Bookamat sync skip it, and no archive copy is made of it.',
+      notice: 'Claude recorded, changed or removed a payment on this invoice. Until you have checked its payments and confirm them here, automatic reminders and the automatic Bookamat sync skip it, no archive copy is made of it, and its share link shows no payments, balance or payment details.',
       confirm: 'Payments are correct',
       confirmed: 'Automatic reminders and the Bookamat sync include this invoice again.',
-      noticeCreditNote: 'Claude recorded or removed a refund on this credit note, or applied it to its invoice. Until you have checked its refunds and the credit and confirm them here, the automatic Bookamat sync skips it, and no archive copy is made of it.',
+      noticeCreditNote: 'Claude recorded or removed a refund on this credit note, or applied it to its invoice. Until you have checked its refunds and the credit and confirm them here, the automatic Bookamat sync skips it, no archive copy is made of it, and its share link shows no refunds.',
       confirmCreditNote: 'Refunds are correct',
       confirmedCreditNote: 'The automatic Bookamat sync includes this credit note again.',
       changedAgain: 'Claude changed the payments again since this page was loaded, so nothing was confirmed. Check them once more.',
@@ -2371,6 +2371,7 @@ export const en = {
     download: 'Download XML',
     downloading: 'Creating…',
     downloaded: '{file} downloaded.',
+    downloadedWithoutPdf: '{file} downloaded without the issued PDF. {reason}',
     failed: 'Could not create the e-invoice: {error}',
     saveFailed: 'Could not save the buyer reference: {error}',
     errors: {
@@ -2722,7 +2723,7 @@ export const en = {
       approvalsCountOther: '{count} actions waiting',
       approvalsOpen: 'Open approvals',
       policyTitle: 'How irreversible actions are approved',
-      policyHint: '“Confirm in Claude” makes the Claude app’s own prompt the only check for that action. Always approved in Mado, whatever is set here: an email or reminder to an address that is not on the client record, to an address Claude wrote onto the client (until you save the client in Mado), or to an address on the record you have never emailed from Mado for that client; on Claude Code connections (and an own OAuth client), a Bookamat sync or issuing more than 3 documents at once; and deleting the template of a recurring schedule. Until you save a client Claude created or changed in Mado, it gets no automatic reminders, no automatic Bookamat sync and no automatically issued invoices, no archive copy is made from it, share links leave out its name and address, and Claude cannot prepare a reminder email, a Storno or a Bookamat sync for its documents. An invoice whose payments Claude recorded, changed or removed, or a credit note whose refunds it did or which it applied to its invoice, gets no automatic reminders and no automatic Bookamat sync, no archive copy is made of it, and its share link shows no payments or payment details, until you confirm its payments on its page.',
+      policyHint: '“Confirm in Claude” makes the Claude app’s own prompt the only check for that action. Always approved in Mado, whatever is set here: an email or reminder to an address that is not on the client record, to an address Claude wrote onto the client (until you save the client in Mado), or to an address on the record you have never emailed from Mado for that client; on Claude Code connections (and an own OAuth client), a Bookamat sync or issuing more than 3 documents at once; and deleting the template of a recurring schedule. Until you save a client Claude created or changed in Mado, it gets no automatic reminders, no automatic Bookamat sync and no automatically issued invoices, no archive copy is made from it, share links leave out its name and address, and Claude cannot prepare a reminder email, a Storno, a Bookamat sync or an email with an e-invoice for its documents. An invoice whose payments Claude recorded, changed or removed, or a credit note whose refunds it did or which it applied to its invoice, gets no automatic reminders and no automatic Bookamat sync, no archive copy is made of it, and its share link shows no payments or payment details, and Claude cannot email such an invoice with an e-invoice, until you confirm its payments on its page.',
       channelApp: 'Approve in Mado',
       channelChat: 'Confirm in Claude',
       approvalCode: 'Ask for a code from the authenticator app when approving in Mado',
@@ -2790,6 +2791,8 @@ export const en = {
       noticesHeading: 'Please note',
       open: 'Open',
       openPdf: 'PDF',
+      openClient: 'Open the client',
+      openDocument: 'Open the document',
       errors: {
         invalidCode: 'The code is not valid. Enter the current code from your authenticator app.',
         noFactor: 'Approving needs a code from an authenticator app, but none is set up. Set one up under Account.',
@@ -2855,6 +2858,7 @@ export const en = {
         zeroTotal: '{number} has a total of zero.',
         unlinked: '{number} no longer has a line for entries billed on it: {entries}.',
         creditApplied: '{number} takes its amount off the open balance of {invoice}.',
+        clientChanged: '{number} is for a client Claude created or changed, not saved in Mado since. It is numbered and archived for good with this recipient block and VAT ID: {details}.',
         drive: 'The PDF is archived to your Drive folder.',
         foreign: 'Not on the client record: {addresses}. Emails to other addresses are always approved in Mado.',
         unconfirmed: 'Never emailed from Mado for this client: {addresses}. The first email to an address is always approved in Mado.',
@@ -2906,6 +2910,8 @@ export const en = {
         clientChangedReminder: 'Claude created or changed this invoice’s client, and it has not been saved in Mado since: the Mahnung would print the name and address Claude wrote without anyone approving them. Check the client and save it in Mado, then prepare the reminder again.',
         clientChangedStorno: 'Claude created or changed this invoice’s client, and it has not been saved in Mado since: the Storno credit note would be numbered and archived for good with the name, address and VAT ID Claude wrote. Check the client and save it in Mado, then prepare the Storno again.',
         clientChangedBookamat: 'Claude created or changed this document’s client, and it has not been saved in Mado since: the Bookamat bookings would carry the name and VAT ID Claude wrote. Check the client and save it in Mado, then prepare the sync again.',
+        clientChangedEInvoice: 'Claude created or changed this document’s client, and it has not been saved in Mado since: the e-invoice would carry the name, address, VAT ID and buyer reference Claude wrote without anyone approving them. Check the client and save it in Mado, then prepare the email again, or send it without the e-invoice.',
+        paymentsChangedEInvoice: 'Claude recorded, changed or removed a payment on this invoice, and its payments have not been confirmed in Mado since: the e-invoice would state them as already paid without anyone approving them. Check the payments and confirm them on the invoice’s page in Mado, then prepare the email again, or send it without the e-invoice.',
       },
       result: {
         issued: 'Issued {numbers}.',

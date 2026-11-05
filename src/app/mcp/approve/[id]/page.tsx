@@ -5,6 +5,7 @@ import { getT } from '@/lib/i18n/server'
 import { makeT } from '@/lib/i18n'
 import { isUuid } from '@/lib/auth'
 import { actionKind } from '@/lib/mcp/actions'
+import { ownerHold, type OwnerHold } from '@/lib/mcp/actions/common'
 import { isWorded, word } from '@/lib/mcp/actions/words'
 import { actionState, readAction } from '@/lib/mcp/confirm'
 import type { ServiceContext } from '@/lib/mcp/types'
@@ -34,8 +35,10 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
   const state = actionState(row)
 
   // The state is compared again now, so a document edited since Claude prepared this is caught
-  // before the owner types a code.
+  // before the owner types a code. A refusal only the owner lifts in Mado (a client Claude wrote,
+  // payments Claude changed) is shown as it is, with the page where: preparing again would not help.
   let changed = false
+  let hold: OwnerHold | null = null
   if (state === 'pending') {
     const ctx: ServiceContext = {
       supabase,
@@ -49,8 +52,9 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
     try {
       const def = actionKind(row.kind)
       changed = !def || await def.fingerprint(ctx, def.argsSchema.parse(row.args)) !== row.fingerprint
-    } catch {
+    } catch (err) {
       changed = true
+      hold = ownerHold(err)
     }
   }
 
@@ -86,7 +90,19 @@ export default async function ApprovalPage({ params }: { params: Promise<{ id: s
 
       {state === 'pending' && (
         changed
-          ? <p role="alert" className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-300">{t('mcp.approve.changed')}</p>
+          ? (
+            <p role="alert" className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-800 dark:text-red-300">
+              {hold ? word(t, lang, hold.worded) : t('mcp.approve.changed')}
+              {hold?.link && (
+                <>
+                  {' '}
+                  <a href={hold.link.href} className="font-medium underline underline-offset-2">
+                    {t(hold.link.target === 'client' ? 'mcp.approve.openClient' : 'mcp.approve.openDocument')}
+                  </a>
+                </>
+              )}
+            </p>
+          )
           : (
             <>
               {revoked && <p className="text-sm text-neutral-600 dark:text-neutral-300">{t('mcp.approve.revoked')}</p>}

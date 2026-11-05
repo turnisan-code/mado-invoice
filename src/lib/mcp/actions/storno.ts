@@ -7,7 +7,7 @@ import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals, roundCents, settlesBalance, today } from '@/lib/utils/document'
 import { documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { cents, fingerprintOf } from '../fingerprint'
+import { exact, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { claudeWrittenAt, codedError, itemsState, notice, paymentsState, printedClient, refuseClaudeClient } from './common'
 import { clip, entries, money, word, type Worded } from './words'
@@ -78,7 +78,7 @@ async function loadStorno(ctx: ServiceContext, invoiceId: string) {
     today: day,
     invoice: {
       id: invoice.id, number: invoice.number, status: invoice.status, invoice_kind: invoice.invoice_kind, final_invoice_id: invoice.final_invoice_id,
-      final, tax_treatment: invoice.tax_treatment, discount_type: invoice.discount_type, discount_value: cents(invoice.discount_value),
+      final, tax_treatment: invoice.tax_treatment, discount_type: invoice.discount_type, discount_value: exact(invoice.discount_value),
       items: itemsState(invoice.document_items), payments: paymentsState(invoice.payments),
     },
     // As the credit note prints it, and Claude's mark (a write after prepare is a change).

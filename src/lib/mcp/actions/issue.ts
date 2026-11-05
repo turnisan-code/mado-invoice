@@ -9,9 +9,9 @@ import type { MovedDates } from '@/lib/pdf/bulk'
 import type { DocumentType } from '@/types'
 import { documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { canonicalJson, cents, fingerprintOf } from '../fingerprint'
+import { canonicalJson, exact, fingerprintOf } from '../fingerprint'
 import { defineAction, type ActionOutcome, type ServiceContext, type ToolContext } from '../types'
-import { itemsState, mayOutlastClient, notice, paymentsState, refuse, storedError } from './common'
+import { itemsState, mayOutlastClient, notice, paymentsState, printedClient, refuse, storedError } from './common'
 import { clip, entries, money, word, type Worded } from './words'
 
 export const MAX_ISSUE_DOCUMENTS = 10
@@ -20,10 +20,13 @@ function draftState(d: IssueDraftRow) {
   return {
     id: d.id, type: d.type, number: d.number, status: d.status, date: d.date, due_date: d.due_date, client_id: d.client_id,
     language: d.language, currency: d.currency, tax_treatment: d.tax_treatment, service_date: d.service_date,
-    service_date_end: d.service_date_end, notes: d.notes, discount_type: d.discount_type, discount_value: cents(d.discount_value),
-    skonto_percent: cents(d.skonto_percent), skonto_days: d.skonto_days, invoice_kind: d.invoice_kind, buyer_reference: d.buyer_reference,
+    service_date_end: d.service_date_end, notes: d.notes, discount_type: d.discount_type, discount_value: exact(d.discount_value),
+    skonto_percent: exact(d.skonto_percent), skonto_days: d.skonto_days, invoice_kind: d.invoice_kind, buyer_reference: d.buyer_reference,
     converted_from_id: d.converted_from_id, cancels_document_id: d.cancels_document_id, recurring_schedule_id: d.recurring_schedule_id,
-    client: d.clients, items: itemsState(d.document_items), payments: paymentsState(d.payments),
+    // The client's terms and what prints of it, as before the whole row was read (Claude's mark is
+    // shown, not compared: what prints is).
+    client: d.clients ? { id: d.clients.id, payment_days: d.clients.payment_days, ...printedClient(d.clients) } : null,
+    items: itemsState(d.document_items), payments: paymentsState(d.payments),
   }
 }
 
@@ -69,6 +72,9 @@ export function issueNotices(preview: IssuePreview): Worded[] {
     if (d.zero_total) out.push(notice('mcp.approve.notices.zeroTotal', { number }))
     if (d.unlinked) out.push(notice('mcp.approve.notices.unlinked', { number, entries: entries(d.unlinked.time, d.unlinked.expenses) }))
     if (d.credits) out.push(notice('mcp.approve.notices.creditApplied', { number, invoice: d.credits.number ?? '' }))
+    // Not refused (issuing for a client Claude just created is the usual way), but the owner sees
+    // what is numbered and archived for good.
+    if (d.claude_client) out.push(notice('mcp.approve.notices.clientChanged', { number, details: clip(d.claude_client, 240) }))
   }
   if (preview.drive) out.push(notice('mcp.approve.notices.drive'))
   return out

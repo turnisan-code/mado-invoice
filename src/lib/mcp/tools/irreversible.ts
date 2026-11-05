@@ -29,7 +29,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_issue',
     title: 'Prepare: issue documents',
-    description: `Prepare issuing 1 to ${MAX_ISSUE_DOCUMENTS} drafts (invoices, quotes, credit notes). Issuing assigns the next gapless legal numbers, freezes the PDF, archives it to Drive and applies a credit note to its invoice. The preview lists per draft the expected number, issue date, due date, client and gross total, with warnings (numbers out of date order, zero total, lost project links). An incomplete draft is refused with its problems. ${APPROVAL}`,
+    description: `Prepare issuing 1 to ${MAX_ISSUE_DOCUMENTS} drafts (invoices, quotes, credit notes). Issuing assigns the next gapless legal numbers, freezes the PDF, archives it to Drive and applies a credit note to its invoice. The preview lists per draft the expected number, issue date, due date, client and gross total, with warnings (numbers out of date order, zero total, lost project links). An incomplete draft is refused with its problems. A draft for a client Claude created or changed and the owner has not saved in Mado since is not refused: the preview shows the recipient block and VAT ID it is numbered and archived with. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_ids: z.array(z.uuid()).min(1).max(MAX_ISSUE_DOCUMENTS).describe('Draft ids, each once.'),
@@ -41,7 +41,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_issue_and_send',
     title: 'Prepare: issue and email a draft',
-    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
+    description: `Prepare issuing one draft and emailing it from the connected Gmail account, with a single approval. The preview shows the expected number, recipients, subject, text and attachments (the frozen PDF, optionally the e-invoice). It issues first, then sends; if sending fails, the document stays issued and the result says why. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. A draft for a client Claude created or changed and the owner has not saved in Mado since is not refused: the preview shows the recipient block and VAT ID it is numbered and archived with. An e-invoice is refused for such a client: it is built from the client as it is when sent; attach_einvoice 'none' sends the PDF alone. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid().describe('The draft.'),
@@ -59,7 +59,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_email',
     title: 'Prepare: email a document',
-    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. ${APPROVAL}`,
+    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. An e-invoice is refused while the client was created or changed from Claude and not saved in Mado since, or while payments Claude recorded, changed or removed on the invoice are not confirmed there: it is built from both as they are when sent; attach_einvoice 'none' sends the frozen PDF alone. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid(),

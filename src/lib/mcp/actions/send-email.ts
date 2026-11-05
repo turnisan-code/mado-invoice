@@ -8,22 +8,26 @@ import {
   composeDocumentEmail, documentEmailTemplate, hasPortalLinkToken, sendDocumentEmail,
   type EmailFailure,
 } from '@/lib/services/email'
-import { PRINTED_CLIENT_COLUMNS, type PrintedClient } from '@/lib/services/issue'
+import type { PrintedClient } from '@/lib/services/issue'
 import { parseEmailList, templateLang } from '@/lib/templates'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
 import type { DocumentType, EInvoiceFormat, InvoiceKind, Settings } from '@/types'
 import { APP_URL, documentPdfUrl, documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { cents, fingerprintOf } from '../fingerprint'
+import { cents, exact, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext, type ToolContext } from '../types'
-import { checkAddresses, codedError, emailArgs, gmailConnected, itemsState, newRecipients, notice, paymentsState, printedClient, refuse, uniqueAddresses } from './common'
+import {
+  checkAddresses, claudeWrittenAt, codedError, emailArgs, gmailConnected, itemsState, newRecipients, notice, paymentsState, printedClient, refuse,
+  refuseClaudeClient, refuseClaudePayments, uniqueAddresses,
+} from './common'
 import { clip, money, word, type Worded } from './words'
 
 const EMAIL_DOC_COLUMNS = [
-  'id', 'type', 'number', 'status', 'date', 'due_date', 'language', 'currency', 'tax_treatment', 'discount_type', 'discount_value',
-  'skonto_percent', 'skonto_days', 'invoice_kind', 'issued_total', 'drive_file_id', 'service_date', 'service_date_end', 'buyer_reference', 'notes',
-  `clients(id, cc_emails, einvoice_format, ${PRINTED_CLIENT_COLUMNS})`,
+  // The whole rows: Claude's marks (documents.mcp_payments_at, clients.mcp_written_at) are read
+  // without naming the columns (a database without them has nothing from Claude).
+  '*',
+  'clients(*)',
   'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)',
   'payments(id, date, amount, kind, method)',
 ].join(', ')
@@ -51,6 +55,8 @@ export type EmailDoc = {
   service_date_end: string | null
   buyer_reference: string | null
   notes: string | null
+  // Set while payments a Claude session recorded, changed or removed are not confirmed in Mado.
+  mcp_payments_at?: string | null
   clients: EmailClient | null
   document_items: Record<string, unknown>[] | null
   payments: { id: string; date: string; amount: number; kind: string | null; method: string | null }[] | null
@@ -116,17 +122,31 @@ export function emailState(doc: EmailDoc, settings: Settings) {
   }
 }
 
+// The e-invoice is built from the client and an invoice's payments as they are when it is sent
+// (the buyer block, the UID, the buyer reference, the amount already paid; a credit note's carries
+// no refunds), and the approval page shows neither. Like the archive copy (getIssuedPdf), it waits
+// while a client Claude created or changed is not saved in Mado and while payments Claude recorded,
+// changed or removed on the invoice are not confirmed there: refused when prepared, and again when
+// the state is compared before the run.
+export function refuseClaudeEInvoice(ctx: ServiceContext, doc: EmailDoc): void {
+  refuseClaudeClient(ctx, doc.clients, 'mcp.approve.refusals.clientChangedEInvoice')
+  if (doc.type === 'invoice') refuseClaudePayments(ctx, doc, 'mcp.approve.refusals.paymentsChangedEInvoice')
+}
+
 // What a document email depends on: where it goes and from where, the document's state, and the
-// content the e-invoice is built from when one is attached (with the client as it prints).
+// content the e-invoice is built from when one is attached (with the client as it prints, and
+// Claude's marks on what it carries, left out while unset).
 function sendState(doc: EmailDoc, settings: Settings, einvoice: boolean) {
   return {
     document: { id: doc.id, type: doc.type, number: doc.number, status: doc.status, currency: doc.currency, issued_total: cents(doc.issued_total), total: docTotals(doc, false).total },
     ...emailState(doc, settings),
     content: einvoice ? {
-      date: doc.date, due_date: doc.due_date, tax_treatment: doc.tax_treatment, discount_type: doc.discount_type, discount_value: cents(doc.discount_value),
+      date: doc.date, due_date: doc.due_date, tax_treatment: doc.tax_treatment, discount_type: doc.discount_type, discount_value: exact(doc.discount_value),
       service_date: doc.service_date, service_date_end: doc.service_date_end, buyer_reference: doc.buyer_reference, notes: doc.notes,
       items: itemsState(doc.document_items), payments: paymentsState(doc.payments),
       client: printedClient(doc.clients),
+      client_written_at: claudeWrittenAt(doc.clients) ?? undefined,
+      payments_at: (doc.type === 'invoice' && doc.mcp_payments_at) || undefined,
     } : null,
   }
 }
@@ -184,8 +204,11 @@ export const sendEmailAction = defineAction<Args>({
     if (!doc.number) throw refuse(ctx, 'mcp.approve.refusals.notIssued', undefined, 'invalid_input', { document_id: doc.id })
     if (!gmailConnected(settings)) throw refuse(ctx, 'mcp.approve.refusals.gmailNotConnected')
     checkAddresses(ctx, args)
-    // Built (not stored, nothing fetched) to learn now whether it can be.
-    if (args.einvoice) await exportEInvoice(ctx.supabase, doc.id, args.einvoice, { pdf: false })
+    if (args.einvoice) {
+      refuseClaudeEInvoice(ctx, doc)
+      // Built (not stored, nothing fetched) to learn now whether it can be.
+      await exportEInvoice(ctx.supabase, doc.id, args.einvoice, { pdf: false })
+    }
 
     const recipientsCheck = await newRecipients(ctx, [...args.to, ...args.cc, ...args.bcc], doc.clients)
     const total = docTotals(doc).total
@@ -216,6 +239,7 @@ export const sendEmailAction = defineAction<Args>({
   },
   async fingerprint(ctx, args) {
     const [doc, settings] = await Promise.all([loadEmailDoc(ctx, args.document_id), ctx.settings()])
+    if (args.einvoice) refuseClaudeEInvoice(ctx, doc)
     return fingerprintOf(sendState(doc, settings, !!args.einvoice))
   },
   async execute(ctx, args) {

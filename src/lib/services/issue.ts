@@ -105,7 +105,8 @@ export const ISSUE_DRAFT_COLUMNS = [
   'id', 'type', 'number', 'status', 'date', 'due_date', 'created_at', 'client_id', 'language', 'currency', 'tax_treatment',
   'service_date', 'service_date_end', 'notes', 'discount_type', 'discount_value', 'skonto_percent', 'skonto_days',
   'invoice_kind', 'buyer_reference', 'converted_from_id', 'cancels_document_id', 'recurring_schedule_id',
-  `clients(id, payment_days, ${PRINTED_CLIENT_COLUMNS})`,
+  // The whole row: Claude's mark (clients.mcp_written_at) is read without naming the column.
+  'clients(*)',
   'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)',
   'payments(id, date, amount, kind)',
 ].join(', ')
@@ -134,7 +135,7 @@ export type IssueDraftRow = {
   converted_from_id: string | null
   cancels_document_id: string | null
   recurring_schedule_id: string | null
-  clients: (PrintedClient & { id: string; payment_days: number | null }) | null
+  clients: (PrintedClient & { id: string; payment_days: number | null; mcp_written_at?: string | null }) | null
   document_items: IssueDraftItem[] | null
   payments: { id: string; date: string; amount: number; kind: string | null }[] | null
 }
@@ -260,6 +261,10 @@ export interface IssuePreviewDoc {
   zero_total: boolean
   // A credit note takes its amount off this invoice's open balance when issued.
   credits: { id: string; number: string | null } | null
+  // A client a Claude session created or changed and the owner has not saved in Mado since
+  // (clients.mcp_written_at): the recipient block and UID the document is numbered and archived
+  // with, on one line.
+  claude_client: string | null
 }
 
 export interface IssuePreview {
@@ -268,6 +273,12 @@ export interface IssuePreview {
   total_gross: number
   // Issuing archives each PDF to the Drive folder.
   drive: boolean
+}
+
+// The recipient block and UID as the PDF prints them (InvoiceDocument), on one line.
+function printedRecipient(c: PrintedClient): string {
+  return [c.company, c.name, c.address_line1, c.address_line2, [c.zip, c.city].filter(Boolean).join(' '), c.country, c.uid_number]
+    .map(v => v?.trim()).filter(Boolean).join(', ')
 }
 
 export class IssueRefusal extends Error {
@@ -354,6 +365,7 @@ export async function issuePreview(
       unlinked: d.type === 'invoice' ? await lostEntries(supabase, d.id) : null,
       zero_total: gross === 0,
       credits,
+      claude_client: d.clients?.mcp_written_at ? printedRecipient(d.clients) : null,
     })
   }
   return {

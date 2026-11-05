@@ -10,7 +10,7 @@ import { calcTotals } from '@/lib/utils/document'
 import type { DocumentType } from '@/types'
 import { clientUrl, documentUrl, projectUrl } from '../config'
 import { McpToolError } from '../errors'
-import { cents, fingerprintOf } from '../fingerprint'
+import { cents, exact, fingerprintOf } from '../fingerprint'
 import { templateSchedules } from '../recurring'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, ITEMS_STATE_EMBED, itemsState, notice } from './common'
@@ -66,7 +66,7 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
       // What the label shows (client and gross) and what it is computed from.
       state: {
         number: doc.number, status: doc.status, type: doc.type, client_id: doc.client_id, client, currency: doc.currency ?? 'EUR',
-        tax_treatment: doc.tax_treatment, discount: { type: doc.discount_type, value: cents(doc.discount_value) },
+        tax_treatment: doc.tax_treatment, discount: { type: doc.discount_type, value: exact(doc.discount_value) },
         items: itemsState(doc.document_items), gross: cents(gross), cascades, schedule_template: scheduleTemplate,
       },
       forceApp: scheduleTemplate.length > 0,

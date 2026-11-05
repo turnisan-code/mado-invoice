@@ -6,10 +6,10 @@ import { clientAddresses } from '@/lib/services/email-compose'
 import { PRINTED_CLIENT_COLUMNS } from '@/lib/services/issue'
 import { isPlainAddress, parseEmailList } from '@/lib/templates'
 import { orderItems } from '@/lib/utils/document'
-import type { Settings } from '@/types'
-import { clientUrl, LONG_ACTION_DOCUMENTS, TOOL_DEADLINE_MS } from '../config'
+import type { DocumentType, Settings } from '@/types'
+import { clientUrl, documentUrl, LONG_ACTION_DOCUMENTS, TOOL_DEADLINE_MS } from '../config'
 import { McpToolError, toToolError, type McpErrorCode } from '../errors'
-import { cents } from '../fingerprint'
+import { cents, exact, fourDecimals } from '../fingerprint'
 import type { ServiceContext, ToolContext } from '../types'
 import { isWorded, type StoredError, type Worded } from './words'
 
@@ -137,13 +137,37 @@ export function claudeWrittenAt(client: object | null | undefined): string | nul
 }
 
 // A reminder, a Storno or a Bookamat sync prints or books the client as it is when it runs, and
-// the approval page shows only its name. Like the crons (the reminders, the Bookamat step, the
-// archive copy), they wait while a client Claude created or changed is not saved in Mado: refused
-// when prepared, and a Claude write to the client after that is refused again when the state is
-// compared before the run (the approval page then says it changed).
+// the approval page shows only its name; so does an email's e-invoice. Like the crons (the
+// reminders, the Bookamat step, the archive copy), they wait while a client Claude created or
+// changed is not saved in Mado: refused when prepared, and a Claude write to the client after that
+// is refused again when the state is compared before the run (the approval page then shows the
+// refusal).
 export function refuseClaudeClient(ctx: ServiceContext, client: { id?: string | null } | null | undefined, key: DictKey): void {
   if (!claudeWrittenAt(client)) return
-  throw refuse(ctx, key, undefined, 'invalid_input', client?.id ? { client_id: client.id, client_url: clientUrl(client.id) } : undefined)
+  throw ownerHolds(refuse(ctx, key, undefined, 'invalid_input', client?.id ? { client_id: client.id, client_url: clientUrl(client.id) } : undefined))
+}
+
+// The same for payments a Claude session recorded, changed or removed on a document and the owner
+// has not confirmed on its page in Mado since (documents.mcp_payments_at, read from the whole row).
+export function refuseClaudePayments(ctx: ServiceContext, doc: { id: string; type: DocumentType; mcp_payments_at?: string | null }, key: DictKey): void {
+  if (!doc.mcp_payments_at) return
+  throw ownerHolds(refuse(ctx, key, undefined, 'invalid_input', { document_id: doc.id, document_url: documentUrl(doc.type, doc.id) }))
+}
+
+// A refusal only the owner lifts, in Mado (saving the client, confirming the payments): preparing
+// the action again does not help before that, so the approval page shows it, with a link to the
+// page where, instead of "changed".
+const ownerHolds = (err: McpToolError) => Object.assign(err, { ownerHold: true as const })
+
+export type OwnerHold = { worded: Worded; link: { href: string; target: 'client' | 'document' } | null }
+
+export function ownerHold(err: unknown): OwnerHold | null {
+  if (!err || typeof err !== 'object' || (err as { ownerHold?: unknown }).ownerHold !== true) return null
+  const { worded, details } = err as { worded?: unknown; details?: Record<string, unknown> }
+  if (!isWorded(worded)) return null
+  const href = (key: string) => (typeof details?.[key] === 'string' ? details[key] as string : null)
+  const client = href('client_url'), document = href('document_url')
+  return { worded, link: client ? { href: client, target: 'client' } : document ? { href: document, target: 'document' } : null }
 }
 
 // ─── Fingerprint rows ────────────────────────────────────────────────────────
@@ -153,18 +177,19 @@ type ItemRow = Record<string, unknown> & { sort_order?: number | null }
 // The line columns itemsState hashes, as a documents embed (the same columns issue.ts reads).
 export const ITEMS_STATE_EMBED = 'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)'
 
-// A document's lines as they print: every content column, in their order, amounts in cents.
+// A document's lines as they print: every content column, in their order, each number as precise
+// as it is stored (fingerprint.ts).
 export function itemsState(items: readonly ItemRow[] | null | undefined) {
   return orderItems([...(items ?? [])]).map(i => ({
     id: i.id ?? null,
     line_type: i.line_type ?? 'item',
     description: i.description ?? null,
-    quantity: cents(i.quantity),
+    quantity: fourDecimals(i.quantity),
     unit: i.unit ?? null,
     unit_price: cents(i.unit_price),
     vat_rate: cents(i.vat_rate),
     discount_type: i.discount_type ?? null,
-    discount_value: cents(i.discount_value),
+    discount_value: exact(i.discount_value),
     service_date: i.service_date ?? null,
     service_date_end: i.service_date_end ?? null,
     catalogue_item_id: i.catalogue_item_id ?? null,

@@ -6,7 +6,7 @@ import { invoiceTotals, reminderFilename } from '@/lib/pdf/reminder'
 import { composeReminder, loadReminderInvoice, reminderLevel, sendReminder, type LoadedReminder } from '@/lib/services/reminders'
 import { parseEmailList, templateLang } from '@/lib/templates'
 import { clientDisplayName } from '@/lib/utils/clients'
-import { cents, fingerprintOf } from '../fingerprint'
+import { cents, exact, fingerprintOf } from '../fingerprint'
 import { reminderFigures } from '@/lib/utils/reminder-templates'
 import { today } from '@/lib/utils/document'
 import type { Settings } from '@/types'
@@ -41,13 +41,13 @@ function reminderState({ invoice, settings }: LoadedReminder) {
     invoice: {
       id: invoice.id, number: invoice.number, status: invoice.status, due_date: invoice.due_date, reminder_level: invoice.reminder_level ?? 0,
       language: invoice.language, currency: invoice.currency, tax_treatment: invoice.tax_treatment, discount_type: invoice.discount_type,
-      discount_value: cents(invoice.discount_value), items: itemsState(invoice.document_items as unknown as Record<string, unknown>[]),
+      discount_value: exact(invoice.discount_value), items: itemsState(invoice.document_items as unknown as Record<string, unknown>[]),
       payments: paymentsState(invoice.payments as unknown as Record<string, unknown>[]),
     },
     // As the Mahnung prints it, the copies, and Claude's mark (a write after prepare is a change).
     client: { ...printedClient(invoice.clients), cc_emails: invoice.clients?.cc_emails ?? [], mcp_written_at: claudeWrittenAt(invoice.clients) },
     settings: {
-      max_level: settings.reminder_max_level ?? null, fee: cents(settings.reminder_fee), interest: cents(settings.reminder_interest_rate),
+      max_level: settings.reminder_max_level ?? null, fee: cents(settings.reminder_fee), interest: exact(settings.reminder_interest_rate),
       grace_days: settings.reminder_grace_days ?? null, sender: settings.gmail_email ?? null, connected: !!settings.gmail_refresh_token,
     },
   }

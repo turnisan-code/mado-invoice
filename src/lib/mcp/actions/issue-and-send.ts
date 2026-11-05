@@ -17,7 +17,7 @@ import {
   approvedDrafts, issueNotices, issueOutcome, loadIssueState, previewIssue, runIssue, stillApproved, withLinks, type ApprovedDrafts,
 } from './issue'
 import {
-  clientEInvoice, composeFor, emailFailureError, emailNotices, emailState, loadEmailDoc, recipients, type EmailInput,
+  clientEInvoice, composeFor, emailFailureError, emailNotices, emailState, loadEmailDoc, recipients, refuseClaudeEInvoice, type EmailInput,
 } from './send-email'
 import { clip, money, word, type StoredError, type Worded } from './words'
 
@@ -31,8 +31,12 @@ const argsSchema = z.object({
 })
 type Args = z.output<typeof argsSchema>
 
-async function loadState(ctx: ServiceContext, args: Pick<Args, 'document_id' | 'redate_to_today'>) {
+// With an e-invoice, refused while the client or the payments carry Claude's mark (send-email.ts):
+// the e-invoice is built from them as it is sent. Checked when prepared and whenever the state is
+// compared again.
+async function loadState(ctx: ServiceContext, args: Pick<Args, 'document_id' | 'redate_to_today'> & { einvoice?: EInvoiceFormat | null }) {
   const [issue, doc] = await Promise.all([loadIssueState(ctx, [args.document_id], args.redate_to_today), loadEmailDoc(ctx, args.document_id)])
+  if (args.einvoice) refuseClaudeEInvoice(ctx, doc)
   return { issue, doc, fingerprint: fingerprintOf({ issue: issue.fingerprint, email: emailState(doc, issue.settings) }) }
 }
 

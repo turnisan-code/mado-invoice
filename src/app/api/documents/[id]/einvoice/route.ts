@@ -8,7 +8,8 @@ import { exportEInvoice } from '@/lib/einvoice/export'
 export const maxDuration = 60
 
 // ?format=ebinterface|ubl — the structured e-invoice of an issued invoice or credit note as a
-// download. Refusals answer 422 with a code the dialog words (einvoice.errors.*).
+// download. Refusals answer 422 with a code the dialog words (einvoice.errors.*). A UBL exported
+// without its PDF says why in X-Pdf-Error (an archive code, worded by archiveErrorMessage).
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const format = req.nextUrl.searchParams.get('format')
@@ -22,13 +23,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   try {
-    const { xml, filename, number, attached } = await exportEInvoice(supabase, id, format)
+    const { xml, filename, number, attached, pdfError } = await exportEInvoice(supabase, id, format)
     await logEvent(supabase, id, 'einvoice_exported', { format, number, pdf: attached })
     return new NextResponse(xml, {
       headers: {
         'Content-Type': 'application/xml; charset=utf-8',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'private, no-store',
+        ...(pdfError ? { 'X-Pdf-Error': pdfError } : {}),
       },
     })
   } catch (err) {

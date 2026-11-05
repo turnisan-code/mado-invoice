@@ -8,7 +8,7 @@ import { calcTotals } from '@/lib/utils/document'
 import type { DocumentStatus, DocumentType } from '@/types'
 import { documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { cents, fingerprintOf } from '../fingerprint'
+import { cents, exact, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
 import { codedError, ITEMS_STATE_EMBED, itemsState, notice, refuse } from './common'
 import { clip, entries, money, word, type Worded } from './words'
@@ -56,7 +56,7 @@ async function loadCancel(ctx: ServiceContext, id: string) {
   const fingerprint = fingerprintOf({
     id: doc.id, type: doc.type, number: doc.number, status: doc.status, released,
     client_id: doc.client_id, client, currency: doc.currency ?? 'EUR', tax_treatment: doc.tax_treatment,
-    discount: { type: doc.discount_type, value: cents(doc.discount_value) }, items: itemsState(doc.document_items), gross: cents(gross),
+    discount: { type: doc.discount_type, value: exact(doc.discount_value) }, items: itemsState(doc.document_items), gross: cents(gross),
   })
   return { doc, released, gross, client, fingerprint }
 }

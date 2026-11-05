@@ -9,7 +9,7 @@ import { Dialog } from '@/components/ui/ConfirmDialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
-import { flushPendingEdits } from '@/lib/issued-pdf'
+import { archiveErrorMessage, flushPendingEdits } from '@/lib/issued-pdf'
 import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import { applyBuyerReferenceInEditor } from '@/components/forms/builder/events'
 import { EINVOICE_ERROR_CODES, vatEndpoint } from '@/lib/einvoice/common'
@@ -133,7 +133,11 @@ export default function EInvoiceButton({ documentId, compact = false }: { docume
       a.click()
       a.remove()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
-      toast.success(t('einvoice.downloaded', { file: filename }))
+      // A UBL whose issued PDF could not be had (e.g. no archive copy while a client or payments
+      // Claude changed wait for the owner) comes without it, and the reason.
+      const pdfError = res.headers.get('X-Pdf-Error')
+      if (pdfError) toast.warning(t('einvoice.downloadedWithoutPdf', { file: filename, reason: archiveErrorMessage(t, { code: pdfError }, t('messages.generic')) }))
+      else toast.success(t('einvoice.downloaded', { file: filename }))
       setOpen(false)
       refresh = true
     } catch (err) {

@@ -126,27 +126,29 @@ const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on 
 // invoices and its Bookamat step the client's documents (src/app/api/cron/reminders/route.ts,
 // autoSyncBookamat), a schedule that issues automatically creates its invoices as drafts
 // (src/lib/utils/recurring.ts), no archive copy is rendered from it (getIssuedPdf) and the portal
-// leaves its recipient block out. A reminder sent from Gmail, a Storno or a Bookamat sync for its
-// documents is refused when prepared (refuseClaudeClient, actions/common.ts).
-const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms). For the same reason prepare_send_reminder (gmail), prepare_storno and prepare_bookamat_sync refuse its documents until then.'
+// leaves its recipient block out. A reminder sent from Gmail, a Storno, a Bookamat sync or an
+// email's e-invoice for its documents is refused when prepared (refuseClaudeClient,
+// actions/common.ts); issuing is not, and its preview shows what prints of the client.
+const UNATTENDED_NOTE = 'Until the owner saves the client in Mado, nothing goes out for it unattended: automatic reminders skip its invoices, the automatic Bookamat sync skips its documents, a recurring schedule that issues invoices automatically for it creates them as drafts instead, no archive copy (the frozen PDF) of its issued documents is made from it, and share links leave its name and address out, so no reminder, booking, numbered invoice or frozen PDF made without approval carries client data Claude wrote (name, company, address, VAT ID, terms). For the same reason prepare_send_reminder (gmail), prepare_storno, prepare_bookamat_sync and an e-invoice in prepare_send_email or prepare_issue_and_send are refused for its documents until then; prepare_issue is not, and its preview shows the recipient block and VAT ID the documents are numbered with.'
 
 // documents.mcp_payments_at (20261105_mcp_drafts.sql): a payment row a Claude session records,
 // changes or removes on an invoice, or a refund on a credit note, holds the document's automatic
 // reminders and its automatic Bookamat sync until the owner confirms its payments on its page in
 // Mado (src/app/api/cron/reminders/route.ts, autoSyncBookamat); meanwhile no archive copy is made
-// of it (getIssuedPdf) and its share link shows no payments. An applied credit marks the credit
-// note it names as well: it settles the credit note, whose refunds are then booked.
-const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice, or a refund on a credit note, holds its automatic reminders and its automatic Bookamat sync until the owner confirms its payments on its page in Mado (an applied credit holds the credit note as well), so no Mahnung or Bookamat booking is made unattended from payments Claude wrote; meanwhile no archive copy (frozen PDF) is made of it and its share link shows no payments, balance or payment details.'
+// of it (getIssuedPdf), its share link shows no payments and an invoice's e-invoice is refused when
+// prepared (refuseClaudePayments). An applied credit marks the credit note it names as well: it
+// settles the credit note, whose refunds are then booked.
+const PAYMENTS_NOTE = 'Recording, settling or removing money on an invoice, or a refund on a credit note, holds its automatic reminders and its automatic Bookamat sync until the owner confirms its payments on its page in Mado (an applied credit holds the credit note as well), so no Mahnung or Bookamat booking is made unattended from payments Claude wrote; meanwhile no archive copy (frozen PDF) is made of it, its share link shows no payments, balance or payment details, and prepare_send_email refuses to attach an invoice\'s e-invoice.'
 // What the mark holds for the document as it is now: reminders only while an invoice is open (the
 // reminder cron looks at no other), the Bookamat sync always (it books paid invoices, cancelled
-// ones and refunded credit notes).
+// ones and refunded credit notes), an invoice's e-invoice in prepare_send_email.
 function paymentsHeld(type: string, status: string) {
   const reminders = type === 'invoice' && (status === 'sent' || status === 'overdue')
   return {
     summary: reminders
       ? 'Until the owner confirms its payments in Mado, automatic reminders and the automatic Bookamat sync skip it; tell the owner.'
       : 'Until the owner confirms its payments in Mado, the automatic Bookamat sync skips it; tell the owner.',
-    data: { ...(reminders ? { reminders_held: true } : {}), bookamat_sync_held: true },
+    data: { ...(reminders ? { reminders_held: true } : {}), bookamat_sync_held: true, ...(type === 'invoice' ? { einvoice_refused: true } : {}) },
   }
 }
 // apply_credit_note: the credit goes onto the invoice, and both the invoice and the credit note it
@@ -195,7 +197,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
       cc_emails: client.cc_emails ?? [], country: client.country, vat_id: client.uid_number, tax_treatment: client.tax_treatment,
       language: client.language, payment_terms_days: client.payment_days, status: client.status, app_url: clientUrl(client.id), ...extra,
       ...(written.length ? { approved_in_mado: written } : {}),
-      ...(changed ? { reminders_held: true, bookamat_sync_held: true, prepare_refused: ['send_reminder', 'storno', 'bookamat_sync'] } : {}),
+      ...(changed ? { reminders_held: true, bookamat_sync_held: true, prepare_refused: ['send_reminder', 'storno', 'bookamat_sync'], einvoice_refused: true } : {}),
       ...(held.length ? { auto_issue_held: held.map(h => ({ schedule_id: h.id, name: h.name, app_url: appUrl('/recurring') })) } : {}),
     },
   }
