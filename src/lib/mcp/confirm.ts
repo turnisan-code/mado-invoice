@@ -179,6 +179,9 @@ export async function confirmAction(ctx: ToolContext, input: { confirmation_id: 
   if (row.kind !== input.action || row.label !== input.label) throw new McpToolError('label_mismatch')
   if (row.approval !== 'chat' || actionState(row) !== 'pending') return describeAction(row, ctx.t, input.confirmation_id)
 
+  // MI046: an action the owner approved in Mado runs on what this one names; this one would run on
+  // Claude's session, where the database refuses the record of what it sent
+  // (mcp_actions_chat_claim_guard), so it does not start and stays pending.
   const { data, error } = await ctx.supabase.rpc('mcp_claim_action', { p_handle_hash: row.handle_hash })
   if (error) {
     // Claimed by a parallel call, expired or rejected since it was read.

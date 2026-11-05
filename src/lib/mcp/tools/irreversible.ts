@@ -23,7 +23,7 @@ const einvoice = z.enum(['ebinterface', 'ubl', 'none']).optional()
 const subject = z.string().max(MAX_SUBJECT).optional().describe('Default: the email template filled in for this document.')
 const body = z.string().max(MAX_BODY).optional().describe('Default: the email template filled in for this document. {{portal_link}} becomes the client-portal link when it is sent.')
 
-const APPROVAL = "Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status. If approval is 'chat' instead, ask the owner, then call confirm_action with the same confirmation_id, action and label. While an action approved in Mado runs, the documents it names, their lines and payments, the advance and partial invoices a final invoice among them deducts (linking, unlinking, payments) and their clients cannot be changed from Claude (MI046), and a draft or client that changed after the approval stops the run: wait until get_action_status says it finished."
+const APPROVAL = "Nothing changes yet: it returns a confirmation_id, the label and, unless the owner allowed confirming this kind in chat, an approve_url. Show the owner the label and approve_url verbatim; they approve in Mado. Then read the outcome with get_action_status. If approval is 'chat' instead, ask the owner, then call confirm_action with the same confirmation_id, action and label. While an action approved in Mado runs, the documents it names, their lines and payments, the advance and partial invoices a final invoice among them deducts (linking, unlinking, payments) and their clients cannot be changed from Claude, nor does confirm_action start an action on them (MI046; it stays pending), and a draft or client that changed after the approval stops the run: wait until get_action_status says it finished."
 
 export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
@@ -136,7 +136,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'confirm_action',
     title: 'Confirm prepared action',
-    description: "Run a prepared action the owner allowed to be confirmed in chat (approval 'chat'). Pass the confirmation_id, the action and the label exactly as prepare returned them. The server checks that the action belongs to this connection, is unchanged, pending and not expired, then runs it once; a repeated call returns the stored result. An action with approval 'app' is never run here: the answer is its status and approve_url.",
+    description: "Run a prepared action the owner allowed to be confirmed in chat (approval 'chat'). Pass the confirmation_id, the action and the label exactly as prepare returned them. The server checks that the action belongs to this connection, is unchanged, pending and not expired, then runs it once; a repeated call returns the stored result. An action with approval 'app' is never run here: the answer is its status and approve_url. While an action the owner approved in Mado runs on a document or client this one names (or on the final invoice that deducts one), it does not start (MI046) and stays pending: call again once that action has finished.",
     scope: 'mado:irreversible',
     inputSchema: z.object({
       confirmation_id: handle,

@@ -16,9 +16,11 @@ import { dbErrorMessage } from '@/lib/api-errors'
 // is what the Bookamat step books). Confirming clears the mark; a Claude session cannot
 // (documents_mcp_payments_guard). Only the mark the page was rendered with (`seenAt`, read with the
 // payments it lists) is cleared: a later change from Claude moves it forward, and that one the
-// owner has not seen, so the page reloads instead. `clientHeld`: the document's client carries
-// Claude's mark too (clients.mcp_written_at, shown by ClaudeClientNotice), so the reminders and
-// the Bookamat sync still wait for the client to be saved, and the toast says so.
+// owner has not seen, so the page reloads instead. A mark already cleared (confirmed in another tab
+// or on another device since this page was loaded) is said to be so, not as a change from Claude.
+// `clientHeld`: the document's client carries Claude's mark too (clients.mcp_written_at, shown by
+// ClaudeClientNotice), so the reminders and the Bookamat sync still wait for the client to be
+// saved, and the toast says so.
 export default function ClaudePaymentsNotice({ documentId, kind, seenAt, clientHeld = false }: { documentId: string; kind: 'invoice' | 'credit_note'; seenAt: string; clientHeld?: boolean }) {
   const [busy, setBusy] = useState(false)
   const router = useRouter()
@@ -26,14 +28,21 @@ export default function ClaudePaymentsNotice({ documentId, kind, seenAt, clientH
 
   async function confirm() {
     setBusy(true)
-    const { data, error } = await createClient().from('documents').update({ mcp_payments_at: null }).eq('id', documentId).eq('mcp_payments_at', seenAt).select('id')
-    setBusy(false)
-    if (error) { toast.error(dbErrorMessage(t, error)); return }
+    const supabase = createClient()
+    const { data, error } = await supabase.from('documents').update({ mcp_payments_at: null }).eq('id', documentId).eq('mcp_payments_at', seenAt).select('id')
+    if (error) { setBusy(false); toast.error(dbErrorMessage(t, error)); return }
     if (!data?.length) {
-      toast.error(t(kind === 'invoice' ? 'payments.claudeChanged.changedAgain' : 'payments.claudeChanged.changedAgainCreditNote'))
+      // Not the mark this page shows: confirmed meanwhile (no mark left), or Claude changed the
+      // payments again (a newer one).
+      const { data: now, error: readError } = await supabase.from('documents').select('mcp_payments_at').eq('id', documentId).maybeSingle()
+      setBusy(false)
+      if (readError) toast.error(dbErrorMessage(t, readError))
+      else if (now && now.mcp_payments_at === null) toast.info(t(kind === 'invoice' ? 'payments.claudeChanged.alreadyConfirmed' : 'payments.claudeChanged.alreadyConfirmedCreditNote'))
+      else toast.error(t(kind === 'invoice' ? 'payments.claudeChanged.changedAgain' : 'payments.claudeChanged.changedAgainCreditNote'))
       router.refresh()
       return
     }
+    setBusy(false)
     toast.success(t(kind === 'invoice'
       ? (clientHeld ? 'payments.claudeChanged.confirmedClientHeld' : 'payments.claudeChanged.confirmed')
       : (clientHeld ? 'payments.claudeChanged.confirmedCreditNoteClientHeld' : 'payments.claudeChanged.confirmedCreditNote')))

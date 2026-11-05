@@ -12,7 +12,7 @@ import { McpToolError } from '../errors'
 import { canonicalJson, exact, fingerprintOf } from '../fingerprint'
 import { defineAction, type ActionOutcome, type ServiceContext, type ToolContext } from '../types'
 import { itemsState, mayOutlastClient, notice, paymentsState, printedClient, refuse, storedError } from './common'
-import { clip, entries, money, word, type Worded } from './words'
+import { clip, entries, money, oneLine, word, type Worded } from './words'
 
 export const MAX_ISSUE_DOCUMENTS = 10
 
@@ -74,11 +74,13 @@ export function issueNotices(preview: IssuePreview): Worded[] {
     if (d.credits) out.push(notice('mcp.approve.notices.creditApplied', { number, invoice: d.credits.number ?? '' }))
     // Not refused (issuing for a client Claude just created is the usual way), but the owner sees
     // what is numbered and archived for good: the recipient block, the UID and a buyer reference
-    // that comes from the client (or a credit note's invoice), not from the draft.
+    // that comes from the client (or a credit note's invoice), not from the draft. Whole, never
+    // clipped: nothing else on the approval page shows them, and a long company name Claude wrote
+    // would otherwise push the city and the UID out of sight.
     if (d.claude_client && d.claude_buyer_reference) {
-      out.push(notice('mcp.approve.notices.clientChangedReference', { number, details: clip(d.claude_client, 240), reference: clip(d.claude_buyer_reference, 120) }))
+      out.push(notice('mcp.approve.notices.clientChangedReference', { number, details: oneLine(d.claude_client), reference: oneLine(d.claude_buyer_reference) }))
     } else if (d.claude_client) {
-      out.push(notice('mcp.approve.notices.clientChanged', { number, details: clip(d.claude_client, 240) }))
+      out.push(notice('mcp.approve.notices.clientChanged', { number, details: oneLine(d.claude_client) }))
     }
   }
   if (preview.drive) out.push(notice('mcp.approve.notices.drive'))

@@ -177,9 +177,9 @@ refused, and neither a change to the client nor the owner saving it stops it.
 Issuing (also issue-and-send without an e-invoice) is not refused, as issuing for a
 client Claude has just created is the usual way; the approval page then shows the recipient block
 and VAT ID the document is numbered and archived with for good, and the buyer reference the PDF
-prints from the client (or a credit note's invoice) when the draft has none of its own. A Peppol
-UBL downloaded in Mado for a document without an archive copy goes without its PDF while such a
-client is not saved, and the download says why.
+prints from the client (or a credit note's invoice) when the draft has none of its own, each in
+full, however long. A Peppol UBL downloaded in Mado for a document without an archive copy goes
+without its PDF while such a client is not saved, and the download says why.
 
 An invoice on which Claude recorded, changed or removed a payment, fee, Skonto, write-off or
 applied credit (`record_payment`, `remove_payment`, `settle_balance`, `apply_credit_note`), and a
@@ -187,8 +187,9 @@ credit note on which it recorded or removed a refund (`record_refund`, `remove_p
 unconfirmed until the owner confirms its payments on its page (“Payments are correct”, “Refunds are
 correct”; the notice shows whatever the status, also on a paid invoice). Confirming covers what the
 page showed: should Claude change the payments again after the page was loaded, nothing is
-confirmed and the page reloads with them. Meanwhile the automatic
-reminders skip the invoice and the automatic Bookamat sync skips the document, each with the reason
+confirmed and the page reloads with them; payments already confirmed in another tab or on another
+device are said to be so. Meanwhile the automatic reminders skip the invoice and the automatic
+Bookamat sync skips the document, each with the reason
 in the cron log: removing a payment reopens a paid invoice or raises what is open, so the Mahnung
 would ask the client, unattended, for money it paid, and a booking takes its date, its amount per
 year and its account (bank or Kassa) from those rows, so Claude's payments would become Bookamat
@@ -216,7 +217,11 @@ just before its number is taken, and an issue-and-send the document and client b
 goes out; one that changed after the approval stops the run there, what was issued before stays
 issued and the result lists the rest as not issued. An action Claude confirms in chat runs on
 Claude's own connection, which the database cannot tell apart from Claude's other changes, so
-there that comparison is the check.
+there that comparison is the check. Nor does such an action start while an action approved in Mado
+runs on a document or client it names, or on the final invoice that deducts one (MI046; it stays
+prepared and Claude confirms it again afterwards): the database would refuse what it records after
+sending (the email's sent date, the reminder's level), and the automatic reminders would then send
+the same Mahnung again.
 
 An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
 back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.

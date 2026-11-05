@@ -62,9 +62,14 @@ export const money = (amount: number, currency?: string | null): WordValue => ({
 export const entries = (time: number, expenses: number): WordValue => ({ entries: { time, expenses } })
 
 // Stored text is untrusted (client names come from the database, addresses and subjects from
-// Claude): one line, and short enough for a label.
+// Claude): one line.
+export function oneLine(text: string | null | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim()
+}
+
+// One line, and short enough for a label.
 export function clip(text: string | null | undefined, max = 60): string {
-  const line = (text ?? '').replace(/\s+/g, ' ').trim()
+  const line = oneLine(text)
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
