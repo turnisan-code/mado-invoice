@@ -1,6 +1,7 @@
 // Reversible writes (scope mado:write): drafts, clients, payments, projects and time, in the order
 // tools/list shows them. Drafts only: every document edit refuses a document that has a number or
-// is not a draft; issued documents are corrected with a credit note or a Storno.
+// is not a draft; issued documents are corrected with a credit note or a Storno. The template of a
+// recurring schedule that issues automatically is never edited here (MI045, src/lib/mcp/recurring.ts).
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { z } from 'zod'
 import { initialForm, linesFromItems, type FormState } from '@/components/forms/builder/model'
@@ -33,6 +34,7 @@ import {
   MAX_AMOUNT, MAX_LINES, newLines, replaceLines, type LineInput,
 } from '../draft-form'
 import { McpToolError } from '../errors'
+import { refuseIssueTemplate } from '../recurring'
 import { defineTool, type AnyToolDef, type ToolContext } from '../types'
 
 const WRITE = { readOnlyHint: false, openWorldHint: false } as const
@@ -115,9 +117,9 @@ function withPatch(values: ClientValues, p: ClientPatch): ClientValues {
 const suggestion = (v: ClientValues) => suggestTaxTreatment(v.country, isValidVatId(normalizeVatId(v.uid_number)))
 
 // clients.mcp_recipients (20261105_mcp_drafts.sql): an address a Claude session writes onto a
-// client is marked until the owner saves the client in Mado, and an email naming it is approved
-// in Mado whatever the confirmation policy says.
-const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record: emails to it are approved in Mado until the owner saves the client there.'
+// client is marked until the owner saves the client in Mado; an email naming it is approved in
+// Mado whatever the confirmation policy says, and the automatic reminders leave it out.
+const RECIPIENTS_NOTE = 'An email address or CC written here never counts as on the client record until the owner saves the client in Mado: emails to it are approved in Mado, and automatic reminders skip it (a client whose email Claude wrote gets none; a CC Claude wrote is left out).'
 
 // The addresses this write put on the client, as the database marks them.
 function writtenAddresses(before: Pick<Client, 'email' | 'cc_emails'> | null, after: Client): string[] {
@@ -137,7 +139,7 @@ function clientReply(client: Client, lead: string, extra: Record<string, unknown
   return {
     summary: [
       `${lead} ${clientWithNumber(client)}.`,
-      written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado.` : '',
+      written.length ? `Every later email to the client goes to ${written.join(', ')} too; until the owner saves this client in Mado, those emails are approved in Mado and automatic reminders skip these addresses.` : '',
     ].filter(Boolean).join(' '),
     data: {
       id: client.id, client_number: client.client_number, name: client.name, company: client.company, email: client.email,
@@ -238,7 +240,7 @@ const createDocument = defineTool({
 const updateDocument = defineTool({
   name: 'update_document',
   title: 'Update draft',
-  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited. If the owner has the draft open in Mado's editor, its next autosave writes the editor's version back; ask them to close it first.",
+  description: "Edit a DRAFT invoice, quote or credit note; anything with a number is refused (correct issued documents with a credit note or Storno). Header fields change only when given; a new client brings its language, tax treatment and terms. Lines: either `lines` (the full new list; give a line's id to keep it) or `line_ops`. A final invoice's deduction lines follow its deposits and cannot be edited. If the owner has the draft open in Mado's editor, its next autosave writes the editor's version back; ask them to close it first. The template of a recurring schedule that issues invoices automatically (get_document shows recurring_template) is refused: ask the owner to edit it in Mado.",
   scope: 'mado:write',
   inputSchema: z.object({
     id,
@@ -259,6 +261,7 @@ const updateDocument = defineTool({
     if (error) throw error
     if (!doc) throw notFound()
     if (doc.number || doc.status !== 'draft') throw new McpToolError('draft_only')
+    await refuseIssueTemplate(ctx.supabase, doc.id)
     const header = args.header ?? {}
     if (header.invoice_kind && doc.type !== 'invoice') throw invalid('Only invoices have a kind.')
     const ids = [...new Set([doc.client_id as string, header.client_id].filter((v): v is string => !!v))]
@@ -376,7 +379,7 @@ const setQuoteStatus = defineTool({
 const linkDeposit = defineTool({
   name: 'link_deposit',
   title: 'Link deposit',
-  description: "Deduct an issued advance or partial invoice of the same client on a final-invoice DRAFT (linked: true; the draft becomes a final invoice), or stop deducting it (linked: false). The draft's deduction lines are rewritten.",
+  description: "Deduct an issued advance or partial invoice of the same client on a final-invoice DRAFT (linked: true; the draft becomes a final invoice), or stop deducting it (linked: false). The draft's deduction lines are rewritten. A draft that is the template of a recurring schedule issuing invoices automatically is refused.",
   scope: 'mado:write',
   inputSchema: z.object({ final_invoice_id: id, invoice_id: id, linked: z.boolean() }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },
@@ -388,6 +391,7 @@ const linkDeposit = defineTool({
     if (!final || !deposit) throw notFound()
     if (final.type !== 'invoice') throw invalid(ctx.t('deposits.errors.invalidLink'))
     if (final.number || final.status !== 'draft') throw new McpToolError('draft_only')
+    await refuseIssueTemplate(ctx.supabase, final.id)
     if (args.linked && (deposit.type !== 'invoice' || !deposit.number || deposit.status === 'cancelled' || !['advance', 'partial'].includes(deposit.invoice_kind) || deposit.client_id !== final.client_id)) {
       throw invalid(ctx.t('deposits.errors.invalidLink'))
     }

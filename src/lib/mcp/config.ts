@@ -47,6 +47,9 @@ export const APPROVAL_CODE_MAX_AGE = 5 * 60
 // by one request at a time (the lease).
 export const SESSION_REFRESH_MARGIN = 5 * 60
 export const SESSION_REFRESH_LEASE = 20
+// While another request refreshes, the old token is used only if it stays valid this long past
+// the request's tool deadline (TOOL_DEADLINE_MS); otherwise the request waits for the new one.
+export const SESSION_DEADLINE_MARGIN = 30
 
 export const RATE_LIMIT_PER_MINUTE = 120
 export const RATE_LIMIT_PER_DAY = 3000

@@ -166,7 +166,9 @@ export async function runClaimed(ctx: ServiceContext, row: McpAction): Promise<R
 // ─── Chat channel: confirm_action ────────────────────────────────────────────
 
 // Runs a 'chat' action after Claude's own prompt was answered. An 'app' action is never run here,
-// only described (with its approval link); a repeated call returns what the first one stored.
+// only described (with its approval link), and so is a 'chat' action whose kind the owner set back
+// to approval in Mado since (the database moves it there); a repeated call returns what the first
+// one stored.
 export async function confirmAction(ctx: ToolContext, input: { confirmation_id: string; action: McpActionKind; label: string }): Promise<ToolResult> {
   const row = await ownAction(ctx, input.confirmation_id)
   if (row.kind !== input.action || row.label !== input.label) throw new McpToolError('label_mismatch')
@@ -178,8 +180,11 @@ export async function confirmAction(ctx: ToolContext, input: { confirmation_id: 
     if (error.code !== 'MI041') throw error
     return describeAction(await ownAction(ctx, input.confirmation_id), ctx.t, input.confirmation_id)
   }
-  const claimed = (Array.isArray(data) ? data[0] : data) as McpAction | undefined
-  if (!claimed) throw new McpToolError('internal')
+  const claimed = (Array.isArray(data) ? data[0] : data) as McpAction | null | undefined
+  // No row: the owner set this kind back to approval in Mado since it was prepared, and
+  // mcp_claim_action moved the action there instead of claiming it. It is described as it is now
+  // (pending, with its approval link).
+  if (!claimed) return describeAction(await ownAction(ctx, input.confirmation_id), ctx.t, input.confirmation_id)
   const run = await runClaimed(ctx, claimed)
   if (!run.ok) throw run.thrown
   const done = await readAction(ctx.supabase, claimed.id)

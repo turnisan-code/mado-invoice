@@ -150,7 +150,7 @@ const searchDocuments = defineTool({
 const getDocument = defineTool({
   name: 'get_document',
   title: 'Get document',
-  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
+  description: 'One invoice, quote or credit note in full: client, lines in order, display_status (as search_documents shows it), totals, payments and payment state, the total it was issued with, history (newest 50, with actor: claude_ai, claude_code or null for the app), reminders, deposits, credit-note settlement and Bookamat state. For a draft: the problems that block issuing and the number it would get if issued today. recurring_template: the recurring schedule it is the template of; when that schedule issues invoices automatically (locked: true), Claude cannot change the document and deleting it is approved in Mado: ask the owner to edit it there. app_url opens it in Mado; pdf_url (issued only) opens the stored PDF in the owner\'s browser.',
   scope: 'mado:read',
   inputSchema: z.object({ id: uuid('Document id') }),
   hints: READ,
@@ -271,6 +271,21 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
     }
   }
 
+  // The template of a recurring schedule: what the cron copies from it. One that issues
+  // automatically is locked for Claude (MI045, src/lib/mcp/recurring.ts).
+  const { data: schedule, error: scheduleErr } = await supabase.from('recurring_schedules')
+    .select('id, name, mode, active, next_date, end_date').eq('source_document_id', doc.id).maybeSingle()
+  if (scheduleErr) throw scheduleErr
+  const recurringTemplate = schedule && {
+    schedule_id: schedule.id as string,
+    name: schedule.name as string,
+    mode: schedule.mode as string,
+    state: schedule.active ? 'active' : schedule.end_date && schedule.next_date > schedule.end_date ? 'ended' : 'paused',
+    locked: schedule.mode === 'issue',
+    ...(schedule.mode === 'issue' ? { note: 'This schedule issues invoices automatically, so Claude cannot change its template, and deleting it is approved in Mado; ask the owner to edit it there.' } : {}),
+    app_url: appUrl('/recurring'),
+  }
+
   let deposits: Record<string, unknown> | undefined
   if (doc.type === 'quote') {
     const invoices = await loadQuoteDeposits(supabase, doc.id)
@@ -297,6 +312,7 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
     ...(draft ? { draft } : {}),
     ...(deposits ? { deposits } : {}),
     ...(creditSettlement ? { credit_settlement: creditSettlement } : {}),
+    ...(recurringTemplate ? { recurring_template: recurringTemplate } : {}),
   }
 }
 
@@ -655,7 +671,7 @@ const getClientStatement = defineTool({
 const listRecurring = defineTool({
   name: 'list_recurring',
   title: 'Recurring schedules',
-  description: 'Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one.',
+  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. A schedule that issues invoices automatically (mode 'issue', template_locked: true, active or paused) numbers what it copies from its template without an approval, so Claude cannot change that template and deleting it is approved in Mado: ask the owner to edit it there.",
   scope: 'mado:read',
   inputSchema: z.object({}),
   hints: READ,
@@ -666,7 +682,7 @@ const listRecurring = defineTool({
       data: {
         schedules: rows.map(s => ({
           id: s.id, name: s.name, interval: s.interval, anchor_day: s.anchor_day, next_date: s.next_date, end_date: s.end_date,
-          mode: s.mode, in_advance: s.in_advance,
+          mode: s.mode, in_advance: s.in_advance, template_locked: s.mode === 'issue',
           state: s.active ? 'active' : s.end_date && s.next_date > s.end_date ? 'ended' : 'paused',
           last_generated_at: s.last_generated_at,
           template: s.source && { ...s.source, app_url: documentUrl('invoice', s.source.id) },

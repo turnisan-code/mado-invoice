@@ -182,6 +182,9 @@ export interface Client {
   reminders_opt_out: boolean
   // Further recipients (e.g. an accounting mailbox), prefilled as CC on every email to the client.
   cc_emails: string[]
+  // Addresses a Claude session put on email or cc_emails, kept by the database until the owner
+  // saves the client in Mado (20261105_mcp_drafts.sql); absent before that migration.
+  mcp_recipients?: string[]
   // E-invoicing: the preferred format, the client's Peppol address (empty = derived from its UID),
   // the buyer reference prefilled on its e-invoices and the supplier number it assigned to the studio.
   einvoice_format?: EInvoiceFormat | null

@@ -8,9 +8,9 @@ import { calcTotals } from '@/lib/utils/document'
 import type { DocumentStatus, DocumentType } from '@/types'
 import { documentUrl } from '../config'
 import { McpToolError } from '../errors'
-import { fingerprintOf } from '../fingerprint'
+import { cents, fingerprintOf } from '../fingerprint'
 import { defineAction, type ServiceContext } from '../types'
-import { codedError, notice, refuse } from './common'
+import { codedError, ITEMS_STATE_EMBED, itemsState, notice, refuse } from './common'
 import { clip, entries, money, word, type Worded } from './words'
 
 type CancelDoc = {
@@ -18,13 +18,14 @@ type CancelDoc = {
   type: DocumentType
   number: string | null
   status: DocumentStatus
+  client_id: string | null
   currency: string | null
   tax_treatment: string | null
   discount_type: 'percent' | 'fixed' | null
   discount_value: number | null
   invoice_kind: string | null
   clients: { name: string; company: string | null } | null
-  document_items: Parameters<typeof calcTotals>[0] | null
+  document_items: (Parameters<typeof calcTotals>[0][number] & Record<string, unknown>)[] | null
 }
 
 async function ids(ctx: ServiceContext, table: string, column: string, id: string): Promise<string[]> {
@@ -35,7 +36,7 @@ async function ids(ctx: ServiceContext, table: string, column: string, id: strin
 
 async function loadCancel(ctx: ServiceContext, id: string) {
   const { data, error } = await ctx.supabase.from('documents')
-    .select('id, type, number, status, currency, tax_treatment, discount_type, discount_value, invoice_kind, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)')
+    .select(`id, type, number, status, client_id, currency, tax_treatment, discount_type, discount_value, invoice_kind, clients(name, company), ${ITEMS_STATE_EMBED}`)
     .eq('id', id).maybeSingle()
   if (error) throw error
   const doc = data as unknown as CancelDoc | null
@@ -48,7 +49,16 @@ async function loadCancel(ctx: ServiceContext, id: string) {
   const released = doc.type === 'invoice'
     ? { time: await ids(ctx, 'time_entries', 'invoiced_document_id', id), expenses: await ids(ctx, 'project_expenses', 'invoiced_document_id', id), deposits: await ids(ctx, 'documents', 'final_invoice_id', id) }
     : { time: [], expenses: [], deposits: [] }
-  return { doc, released, fingerprint: fingerprintOf({ id: doc.id, type: doc.type, number: doc.number, status: doc.status, released }) }
+  const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
+  const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
+  const client = clip(clientDisplayName(doc.clients))
+  // What the label shows (number or client and gross) and what it is computed from.
+  const fingerprint = fingerprintOf({
+    id: doc.id, type: doc.type, number: doc.number, status: doc.status, released,
+    client_id: doc.client_id, client, currency: doc.currency ?? 'EUR', tax_treatment: doc.tax_treatment,
+    discount: { type: doc.discount_type, value: cents(doc.discount_value) }, items: itemsState(doc.document_items), gross: cents(gross),
+  })
+  return { doc, released, gross, client, fingerprint }
 }
 
 const argsSchema = z.object({ document_id: z.uuid() })
@@ -58,10 +68,7 @@ export const cancelAction = defineAction<Args>({
   kind: 'cancel',
   argsSchema,
   async prepare(ctx, args) {
-    const { doc, released, fingerprint } = await loadCancel(ctx, args.document_id)
-    const discount = doc.discount_type && doc.discount_value ? { type: doc.discount_type, value: doc.discount_value } : null
-    const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
-    const client = clip(clientDisplayName(doc.clients))
+    const { doc, released, gross, client, fingerprint } = await loadCancel(ctx, args.document_id)
     const notices: Worded[] = [notice('mcp.approve.notices.cancelFinal')]
     if (released.time.length || released.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { entries: entries(released.time.length, released.expenses.length) }))
     if (released.deposits.length) notices.push(notice(released.deposits.length === 1 ? 'mcp.approve.notices.releasesDepositsOne' : 'mcp.approve.notices.releasesDeposits', { count: released.deposits.length }))

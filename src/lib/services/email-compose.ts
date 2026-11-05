@@ -58,3 +58,22 @@ export function clientAddresses(client: { email?: string | null; cc_emails?: rea
   const { emails } = parseEmailList([client?.email ?? '', ...(client?.cc_emails ?? [])])
   return new Set(emails.map(a => a.toLowerCase()))
 }
+
+// The addresses in these values, split and lower-cased exactly as public.mcp_address_set
+// (20261105_mcp_drafts.sql) does, so they compare with clients.mcp_recipients.
+export function mcpAddressSet(values: readonly (string | null | undefined)[]): Set<string> {
+  const out = new Set<string>()
+  for (const value of values) {
+    for (const part of (value ?? '').toLowerCase().split(/[\s,;<>]+/)) if (/^.+@.+$/.test(part)) out.add(part)
+  }
+  return out
+}
+
+// Whether an address is one a Claude session wrote onto the client's email or CC list
+// (clients.mcp_recipients, kept until the owner saves the client in Mado); nothing is sent to such
+// an address unattended. A client read without the column (20261105_mcp_drafts.sql not applied)
+// has none. (Parts are split on whitespace first, so '.' matches any character left.)
+export function claudeWrittenAddresses(client: { mcp_recipients?: readonly string[] | null } | null | undefined): (value: string | null | undefined) => boolean {
+  const marked = mcpAddressSet(Array.isArray(client?.mcp_recipients) ? client.mcp_recipients : [])
+  return value => marked.size > 0 && [...mcpAddressSet([value])].some(a => marked.has(a))
+}

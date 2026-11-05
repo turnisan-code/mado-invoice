@@ -92,7 +92,7 @@ export async function authenticateRequest(req: Request): Promise<AuthOutcome> {
   const clientKind = CLIENT_KINDS.find(k => k === row.client_kind)
   if (!clientKind) return invalid('Unknown client')
 
-  const access = await grantAccessToken(service, row.grant_id, row)
+  const access = await grantAccessToken(service, row.grant_id, row, clientKind)
   if (!access.ok) {
     if (access.reason === 'unavailable') return { ok: false, response: unavailable(access.retryAfter) }
     await revokeGrant(service, row.grant_id, 'session_ended')

@@ -11,6 +11,7 @@ import type { PdfDocument } from '@/lib/pdf/render'
 import { invoiceTotals, renderReminderPdf } from '@/lib/pdf/reminder'
 import { fillSubject, fillTemplate, parseEmailList, templateLang, usesVariable } from '@/lib/templates'
 import { logEvent } from '@/lib/events'
+import { claudeWrittenAddresses } from '@/lib/services/email-compose'
 import type { Settings } from '@/types'
 import { clearGoogleTokens, getAuthorizedGoogle, isGoogleAuthError } from '@/lib/google/client'
 import { GOOGLE_REAUTH_CODE, GOOGLE_REAUTH_MESSAGE } from '@/lib/google/reauth'
@@ -99,6 +100,12 @@ export async function GET(req: NextRequest) {
     if (!client) { skipped.push({ number: invoice.number, reason: 'no client' }); continue }
     if (client.reminders_opt_out) { skipped.push({ number: invoice.number, reason: 'client is excluded from automatic reminders' }); continue }
     if (!client.email) { skipped.push({ number: invoice.number, reason: 'client has no email address' }); continue }
+    // An address a Claude session wrote onto the client gets no unattended mail until the owner
+    // saves the client in Mado (clients.mcp_recipients); its CC addresses are left out below.
+    if (claudeWrittenAddresses(client)(client.email)) {
+      skipped.push({ number: invoice.number, reason: 'address written by Claude: save the client in Mado to confirm it' })
+      continue
+    }
     if (invoiceTotals(invoice).balance_due <= 0.005) { skipped.push({ number: invoice.number, reason: 'nothing outstanding' }); continue }
     due.push({ invoice, level })
   }
@@ -166,7 +173,12 @@ export async function GET(req: NextRequest) {
     const figures = reminderFigures({ dueDate: invoice.due_date, balance: totals.balance_due, issuer: settings, level, lang })
     const vars = reminderVariables({ doc: invoice, client, issuer: settings, totals, figures, portalLink })
     const subject = fillSubject(tpl.subject, vars)
-    const cc = parseEmailList(client.cc_emails ?? []).emails
+    const writtenByClaude = claudeWrittenAddresses(client)
+    const listed = parseEmailList(client.cc_emails ?? []).emails
+    const cc = listed.filter(a => !writtenByClaude(a))
+    if (cc.length < listed.length) {
+      console.log(`[cron/reminders] ${number}: ${listed.length - cc.length} CC address(es) written by Claude left out; save the client in Mado to confirm them`)
+    }
 
     try {
       await sendGmail(auth, {

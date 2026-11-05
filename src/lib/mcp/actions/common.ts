@@ -122,6 +122,9 @@ export async function newRecipients(
 
 type ItemRow = Record<string, unknown> & { sort_order?: number | null }
 
+// The line columns itemsState hashes, as a documents embed (the same columns issue.ts reads).
+export const ITEMS_STATE_EMBED = 'document_items(id, sort_order, line_type, description, quantity, unit, unit_price, vat_rate, discount_type, discount_value, service_date, service_date_end, catalogue_item_id)'
+
 // A document's lines as they print: every content column, in their order, amounts in cents.
 export function itemsState(items: readonly ItemRow[] | null | undefined) {
   return orderItems([...(items ?? [])]).map(i => ({

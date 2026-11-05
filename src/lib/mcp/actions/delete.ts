@@ -1,6 +1,7 @@
 // Permanent deletes: a draft (with its lines, payments, history, reminders and a recurring
 // schedule it is the template of), a client without documents or projects, a project without
-// billed entries (with its unbilled ones).
+// billed entries (with its unbilled ones). The template of a schedule that issues automatically
+// is deleted only with the owner's approval in Mado: a Claude session cannot delete it (MI045).
 import { z } from 'zod'
 import { deleteClient, deleteDraft, deleteProject } from '@/lib/services/lifecycle'
 import { clientDisplayName } from '@/lib/utils/clients'
@@ -8,9 +9,10 @@ import { calcTotals } from '@/lib/utils/document'
 import type { DocumentType } from '@/types'
 import { clientUrl, documentUrl, projectUrl } from '../config'
 import { McpToolError } from '../errors'
-import { fingerprintOf } from '../fingerprint'
+import { cents, fingerprintOf } from '../fingerprint'
+import { issueSchedules } from '../recurring'
 import { defineAction, type ServiceContext } from '../types'
-import { codedError, notice } from './common'
+import { codedError, ITEMS_STATE_EMBED, itemsState, notice } from './common'
 import { clip, entries, money, word, type Worded } from './words'
 
 type Named = { name: string; company: string | null } | null
@@ -28,13 +30,13 @@ async function idsWhere(ctx: ServiceContext, table: string, eq: Record<string, s
 async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'project', id: string) {
   if (kind === 'draft') {
     const { data, error } = await ctx.supabase.from('documents')
-      .select('id, type, number, status, currency, tax_treatment, discount_type, discount_value, clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(id)')
+      .select(`id, type, number, status, client_id, currency, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEMS_STATE_EMBED}, payments(id)`)
       .eq('id', id).maybeSingle()
     if (error) throw error
     const doc = data as unknown as {
-      id: string; type: DocumentType; number: string | null; status: string; currency: string | null; tax_treatment: string | null
+      id: string; type: DocumentType; number: string | null; status: string; client_id: string | null; currency: string | null; tax_treatment: string | null
       discount_type: 'percent' | 'fixed' | null; discount_value: number | null; clients: Named
-      document_items: Parameters<typeof calcTotals>[0] | null; payments: { id: string }[] | null
+      document_items: (Parameters<typeof calcTotals>[0][number] & Record<string, unknown>)[] | null; payments: { id: string }[] | null
     } | null
     if (!doc) throw new McpToolError('not_found', { details: { id } })
     if (doc.number) throw codedError('MI015')
@@ -46,6 +48,9 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
       expenses: await idsWhere(ctx, 'project_expenses', { invoiced_document_id: id }),
       deposits: await idsWhere(ctx, 'documents', { final_invoice_id: id }),
     }
+    // A schedule that issues automatically numbers what it copies from this draft: only the owner
+    // deletes it, in Mado.
+    const issueTemplate = (await issueSchedules(ctx.supabase, [id])).map(s => s.id)
     const client = clip(clientDisplayName(doc.clients))
     const gross = calcTotals(doc.document_items ?? [], [], discount, doc.tax_treatment).total
     const notices: Worded[] = [notice('mcp.approve.notices.deleteDraft')]
@@ -57,7 +62,13 @@ async function loadTarget(ctx: ServiceContext, kind: 'draft' | 'client' | 'proje
       summary: notice('mcp.approve.labels.deleteDraft', { type: { docType: doc.type }, client, gross: money(gross, doc.currency) }),
       notices,
       target: { kind, id, type: doc.type, status: doc.status, client, gross, currency: doc.currency ?? 'EUR', app_url: documentUrl(doc.type, id) },
-      state: { number: doc.number, status: doc.status, type: doc.type, cascades },
+      // What the label shows (client and gross) and what it is computed from.
+      state: {
+        number: doc.number, status: doc.status, type: doc.type, client_id: doc.client_id, client, currency: doc.currency ?? 'EUR',
+        tax_treatment: doc.tax_treatment, discount: { type: doc.discount_type, value: cents(doc.discount_value) },
+        items: itemsState(doc.document_items), gross: cents(gross), cascades, issue_template: issueTemplate,
+      },
+      forceApp: issueTemplate.length > 0,
     }
   }
 
@@ -109,7 +120,7 @@ export const deleteAction = defineAction<Args>({
       label: word(ctx.t, 'en', t.summary),
       preview: { summary: t.summary, notices: t.notices, target: t.target },
       warnings: t.notices.map(n => word(ctx.t, 'en', n)),
-      forceApp: false,
+      forceApp: t.forceApp ?? false,
       fingerprint: fingerprintOf({ kind: args.kind, id: args.id, ...t.state }),
     }
   },

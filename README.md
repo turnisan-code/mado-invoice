@@ -34,7 +34,7 @@ All keys are listed in `.env.example`; on Vercel set the same keys in the projec
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (Project Settings → API). Shipped to the browser. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key. Shipped to the browser; data access is enforced by RLS (`is_app_user()`). |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server only. Bypasses RLS for the client portal and the two crons. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only. Bypasses RLS for the client portal, the two crons and the Claude connector (its sign-in at consent, OAuth codes and tokens, connections and request log; Claude's own queries run as the owner under RLS). |
 | `CRON_SECRET` | Bearer token Vercel Cron sends; both cron routes refuse to run without it. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client for Gmail sending and the Drive archive. |
 | `NEXT_PUBLIC_APP_URL` | Public origin, no trailing slash (`http://localhost:3000` locally). Builds the OAuth redirect, links in emails and the Claude connector's URLs. |
@@ -128,12 +128,23 @@ Setup:
 Approvals: by default every irreversible action is approved in Mado. Claude shows a link to
 `/mcp/approve/<id>` with the summary; the page shows exactly what will happen and asks for a
 current authenticator code. Pending approvals are also listed at `/mcp/approve` and under Account
-→ Connected apps, where each action kind can be switched to “Confirm in chat” (then the Claude
-app's prompt is the only gate). Loosening these settings (a kind to chat, or the approval code
-off) asks for a current authenticator code; tightening them does not. An email is always approved
-in Mado when it goes to an address that is not on the client record, to an address Claude put on a
-client (until the owner saves that client in Mado), or to an address the owner has never emailed
-from Mado for that client. A prepared action expires after 15 minutes.
+→ Connected apps, where each action kind can be switched to “Confirm in Claude” (then the Claude
+app's prompt is the only gate). Loosening these settings (a kind to “Confirm in Claude”, or the
+approval code off) asks for a current authenticator code; tightening them does not. Whatever a kind
+is set to, these are always approved in Mado:
+
+- an email or reminder to an address that is not on the client record;
+- one to an address Claude wrote onto a client (`create_client`, `update_client`), until the owner
+  saves that client in Mado; the automatic reminders skip such addresses too (a client whose email
+  Claude wrote gets none, a CC Claude wrote is left out);
+- one to an address on the client record that the owner has never emailed from Mado for that client;
+- on Claude Code connections (and an own OAuth client, which has Claude Code's shorter time limit):
+  a Bookamat sync, and issuing more than 3 documents at once;
+- deleting the template of a recurring schedule that issues invoices automatically. Claude cannot
+  change what such a template bills (active or paused schedule alike); the owner edits it in Mado.
+
+An action prepared while its kind was set to “Confirm in Claude” moves to Mado when the kind is set
+back to “Approve in Mado” before Claude confirms it. A prepared action expires after 15 minutes.
 
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;

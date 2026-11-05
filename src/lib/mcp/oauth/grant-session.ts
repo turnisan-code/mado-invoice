@@ -2,8 +2,9 @@
 // approves with a fresh authenticator code and kept on the server only. Every MCP query uses
 // that session's JWT, so RLS (is_app_user(), mfa_satisfied()) decides as it does for the browser.
 import { createClient, isAuthApiError, type SupabaseClient } from '@supabase/supabase-js'
+import type { McpClientKind } from '@/types'
 import { decryptSecret } from '../crypto'
-import { SESSION_REFRESH_LEASE, SESSION_REFRESH_MARGIN } from '../config'
+import { SESSION_DEADLINE_MARGIN, SESSION_REFRESH_LEASE, SESSION_REFRESH_MARGIN, TOOL_DEADLINE_MS } from '../config'
 import {
   acquireSessionLease, endSupabaseSession, readStoredSession, releaseSessionLease, saveSession,
   type ServiceClient, type SessionTokens, type StoredSession,
@@ -129,23 +130,39 @@ function decryptAccess(grantId: string, stored: StoredSession): string | null {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+// How long a token handed to a request must stay valid: the client kind's tool deadline (a
+// chat-confirmed action runs until then, and a write is not cut off at it) plus a margin.
+export function requiredValidityMs(clientKind: McpClientKind): number {
+  return TOOL_DEADLINE_MS[clientKind] + SESSION_DEADLINE_MARGIN * 1000
+}
+
 // The grant's current Supabase access token, refreshed by one request under the lease when fewer
-// than SESSION_REFRESH_MARGIN seconds remain. A request that finds the lease taken keeps using the
-// old token while it is still valid, else waits for the refreshed one. The cached token is only
-// used while its session exists: mcp_authenticate ends a grant whose session was deleted.
-export async function grantAccessToken(service: ServiceClient, grantId: string, stored: StoredSession, now = Date.now()): Promise<SessionAccess> {
+// than SESSION_REFRESH_MARGIN seconds remain (or less than the request needs, should a deadline
+// ever exceed it). A request that finds the lease taken keeps using the old token only while it
+// outlives this request's deadline, else waits for the refreshed one and, when that does not come
+// in time, answers 'unavailable' (503 with Retry-After). The cached token is only used while its
+// session exists: mcp_authenticate ends a grant whose session was deleted.
+export async function grantAccessToken(
+  service: ServiceClient,
+  grantId: string,
+  stored: StoredSession,
+  clientKind: McpClientKind,
+  now = Date.now(),
+): Promise<SessionAccess> {
+  const needed = requiredValidityMs(clientKind)
+  const refreshBelow = Math.max(SESSION_REFRESH_MARGIN * 1000, needed)
   const current = decryptAccess(grantId, stored)
-  if (current && expiresAtMs(stored) - now > SESSION_REFRESH_MARGIN * 1000) return { ok: true, accessToken: current }
+  if (current && expiresAtMs(stored) - now > refreshBelow) return { ok: true, accessToken: current }
 
   const leased = await acquireSessionLease(service, grantId, now)
   if (!leased) {
-    if (current && expiresAtMs(stored) - now > 10_000) return { ok: true, accessToken: current }
+    if (current && expiresAtMs(stored) - now > needed) return { ok: true, accessToken: current }
     for (let waited = 0; waited < SESSION_REFRESH_LEASE * 1000; waited += 250) {
       await sleep(250)
       const fresh = await readStoredSession(service, grantId)
       if (!fresh) return { ok: false, reason: 'ended' }
       const token = decryptAccess(grantId, fresh)
-      if (token && expiresAtMs(fresh) - Date.now() > 10_000) return { ok: true, accessToken: token }
+      if (token && expiresAtMs(fresh) - Date.now() > needed) return { ok: true, accessToken: token }
     }
     return { ok: false, reason: 'unavailable', retryAfter: RETRY_SOON }
   }
@@ -159,7 +176,7 @@ export async function grantAccessToken(service: ServiceClient, grantId: string, 
   }
   // Another request may have refreshed between our read and the lease.
   const leasedToken = decryptAccess(grantId, leased)
-  if (leasedToken && expiresAtMs(leased) - now > SESSION_REFRESH_MARGIN * 1000) {
+  if (leasedToken && expiresAtMs(leased) - now > refreshBelow) {
     await releaseSessionLease(service, grantId)
     return { ok: true, accessToken: leasedToken }
   }

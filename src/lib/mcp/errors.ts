@@ -16,6 +16,7 @@ import { EInvoiceError } from '@/lib/einvoice/common'
 import { lifecycleErrorMessage } from '@/lib/status'
 import { IssueCheckError, issueProblemMessage } from '@/lib/utils/issue-checks'
 import type { IssueProblem } from '@/types'
+import { appUrl } from './config'
 
 export type McpErrorCode =
   | 'invalid_input' | 'not_found' | 'draft_only' | 'scope' | 'deadline' | 'state_changed' | 'label_mismatch'
@@ -110,6 +111,8 @@ function codedError(e: CodedError, t: TFn): ToolError {
       case 'MI031': return { code, message: t('projects.invoice.nothing') }
       case 'MI032': return { code, message: t('projects.invoice.changed') }
       case 'MI033': return { code, message: t('projects.form.deleteBilled') }
+      // The template of a schedule that issues automatically (the tools name the schedule).
+      case 'MI045': return { code, message: lifecycleErrorMessage({ code, message, details }, t), details: { ...(details ? { schedule_id: details } : {}), recurring_url: appUrl('/recurring') } }
       default: return { code, message: lifecycleErrorMessage({ code, message, details }, t), ...(details ? { details: { detail: details } } : {}) }
     }
   }

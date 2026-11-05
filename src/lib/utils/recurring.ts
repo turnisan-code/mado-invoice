@@ -141,7 +141,9 @@ async function createPeriodInvoice(supabase: SupabaseClient, schedule: Recurring
   throw new Error(`no free date for the invoice of ${period.start} to ${period.end}`)
 }
 
-// 'taken' when another invoice of the schedule already has `date`.
+// 'taken' when another invoice of the schedule already has `date`. What is copied from the template
+// here is what a Claude session may not change on the template of an 'issue' schedule
+// (documents_mcp_template_guard in 20261105_mcp_drafts.sql): keep both lists alike.
 async function insertPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, dueDate: string, period: { start: string; end: string }): Promise<PeriodInvoice | 'taken'> {
   const { data: doc, error } = await supabase.from('documents').insert({
     type: 'invoice',
