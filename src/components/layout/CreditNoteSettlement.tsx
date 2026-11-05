@@ -18,8 +18,8 @@ import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, formatBookings, planBookings, requestBookamatSync, unbookedPlan, type BookingRow,
 } from '@/lib/bookamat-client'
-import { logEvent } from '@/lib/events'
 import { loadMoneyLock } from '@/lib/deposits'
+import { recordRefund, removePayment } from '@/lib/services/payments'
 import { useT } from '@/lib/i18n/client'
 import type { Currency, PaymentMethod } from '@/types'
 
@@ -152,9 +152,8 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     setSaving(true)
     try {
       const row = { date, amount: amt, method, reference: reference.trim() || null, note: note.trim() || null }
-      const { error } = await supabase.from('payments').insert({ document_id: creditNoteId, kind: 'refund', ...row })
+      const { error } = await recordRefund(supabase, creditNoteId, row)
       if (error) { toast.error(dbErrorMessage(t, error)); return }
-      await logEvent(supabase, creditNoteId, 'payment_added', { ...row, kind: 'refund', reference: row.reference ?? undefined })
       toast.success(t('lifecycle.credit.refundRecorded'))
       setAmount(null)
       setReference('')
@@ -170,9 +169,11 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
   async function removeRefund(refund: Refund) {
     setSaving(true)
     try {
-      const { error } = await supabase.rpc('remove_payment', { p_payment_id: refund.id, p_reopen: false })
+      const { error } = await removePayment(supabase, creditNoteId, refund.id, {
+        reopen: false,
+        removed: { amount: refund.amount, date: refund.date, kind: 'refund', method: refund.method },
+      })
       if (error) { toast.error(dbErrorMessage(t, error)); return }
-      await logEvent(supabase, creditNoteId, 'payment_removed', { amount: refund.amount, date: refund.date, kind: 'refund', method: refund.method })
       setPendingRemove(null)
       router.refresh()
     } catch (err) {

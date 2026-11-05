@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { formatMoney, today } from '@/lib/utils/document'
 import { expensePrice } from '@/lib/projects'
+import { expenseProblem, expenseRow, saveExpense, type ExpenseValues } from '@/lib/services/projects'
 import { useT } from '@/lib/i18n/client'
-import type { DictKey } from '@/lib/i18n'
 import type { ProjectExpense, VatRate } from '@/types'
 import { Select } from '@/components/ui/select'
 import { CONTROL_HEIGHT } from '@/components/ui/control'
@@ -18,7 +18,7 @@ import { checkboxClass, inputClass, labelClass } from './ui'
 
 const VAT_RATES: VatRate[] = [20, 13, 10, 0]
 
-type Values = { date: string; description: string; net_amount: number | null; vat_rate: VatRate; billable: boolean; markup_percent: number | null }
+type Values = ExpenseValues
 
 // A cost passed on to the client at its net amount plus an optional markup. Mount only while open.
 export default function ExpenseDialog({ projectId, expense, defaultVatRate, onClose }: {
@@ -42,32 +42,13 @@ export default function ExpenseDialog({ projectId, expense, defaultVatRate, onCl
   const [saving, setSaving] = useState(false)
   const set = (patch: Partial<Values>) => setValues(v => ({ ...v, ...patch }))
 
-  function invalid(): DictKey | null {
-    if (!values.date) return 'projects.time.dateRequired'
-    if (!values.description.trim()) return 'projects.expense.descriptionRequired'
-    if (values.net_amount === null || values.net_amount <= 0) return 'projects.expense.amountRequired'
-    if (values.markup_percent !== null && (values.markup_percent < 0 || values.markup_percent > 1000)) return 'projects.expense.markupInvalid'
-    return null
-  }
-
   async function save() {
-    const problem = invalid()
+    const problem = expenseProblem(values)
     if (problem) { toast.error(t(problem)); return }
     setSaving(true)
-    const row = {
-      project_id: projectId,
-      date: values.date,
-      description: values.description.trim(),
-      net_amount: values.net_amount,
-      vat_rate: values.vat_rate,
-      billable: values.billable,
-      markup_percent: values.markup_percent || null,
-    }
-    const { data, error } = expense
-      ? await supabase.from('project_expenses').update(row).eq('id', expense.id).is('invoiced_document_id', null).select('id')
-      : await supabase.from('project_expenses').insert(row).select('id')
+    const { expense: saved, error } = await saveExpense(supabase, expenseRow(projectId, values), expense?.id)
     setSaving(false)
-    if (error || !data?.length) { toast.error(t('projects.expense.saveFailed')); return }
+    if (error || !saved) { toast.error(t('projects.expense.saveFailed')); return }
     toast.success(t('projects.expense.saved'))
     onClose()
     router.refresh()

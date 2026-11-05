@@ -13,6 +13,7 @@ import { clientDisplayName } from '@/lib/utils/clients'
 import { budgetUse, entryAmount, entryRate, expensePrice, formatDuration, isUnbilled, projectTotals } from '@/lib/projects'
 import { statusLabelKey } from '@/lib/status'
 import { deleteProject as removeProject } from '@/lib/services/lifecycle'
+import { deleteEntry, releaseEntries } from '@/lib/services/projects'
 import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import type { Project, ProjectExpense, TimeEntry, VatRate } from '@/types'
@@ -99,12 +100,12 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   async function confirmRelease() {
     if (!releasing) return
     setBusy(true)
-    const { data, error } = await supabase.rpc('release_project_entries', {
-      p_time_entry_ids: releasing.kind === 'time' ? [releasing.id] : [],
-      p_expense_ids: releasing.kind === 'expense' ? [releasing.id] : [],
+    const { released, error } = await releaseEntries(supabase, {
+      timeEntryIds: releasing.kind === 'time' ? [releasing.id] : [],
+      expenseIds: releasing.kind === 'expense' ? [releasing.id] : [],
     })
     setBusy(false)
-    if (error || !data) { toast.error(t('projects.entries.releaseFailed')); return }
+    if (error || !released) { toast.error(t('projects.entries.releaseFailed')); return }
     toast.success(t('projects.entries.released'))
     setReleasing(null)
     router.refresh()
@@ -113,14 +114,9 @@ export default function ProjectDetail({ project, client, entries, expenses, invo
   async function confirmDelete() {
     if (!deleting) return
     setBusy(true)
-    const { data, error } = await supabase
-      .from(deleting.kind === 'time' ? 'time_entries' : 'project_expenses')
-      .delete()
-      .eq('id', deleting.id)
-      .is('invoiced_document_id', null)
-      .select('id')
+    const { deleted, error } = await deleteEntry(supabase, deleting.kind, deleting.id)
     setBusy(false)
-    if (error || !data?.length) { toast.error(t('projects.entries.deleteFailed')); return }
+    if (error || !deleted) { toast.error(t('projects.entries.deleteFailed')); return }
     toast.success(t('projects.entries.deleted'))
     setDeleting(null)
     router.refresh()

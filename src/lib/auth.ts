@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { ServiceError } from '@/lib/services/errors'
+import { asDbError } from '@/lib/status'
 import type { ApiErrorCode, LifecycleErrorCode } from '@/types'
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>
@@ -25,6 +27,13 @@ export function databaseError(error: { message: string; code?: string | null; de
   }
   console.error('[api] database error:', error.code, error.message)
   return apiError(status, 'database', error.message)
+}
+
+// What a service threw: its own refusal (ServiceError) with its status and code, or a database
+// failure as databaseError answers it (with `status`).
+export function serviceErrorResponse(err: unknown, status = 500): NextResponse {
+  if (err instanceof ServiceError) return apiError(err.status, err.code, err.message, err.details ? { details: err.details } : undefined)
+  return databaseError(asDbError(err), status)
 }
 
 // The settings row could not be read: a failed query, or no row at all (null from .maybeSingle(),

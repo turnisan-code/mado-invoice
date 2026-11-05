@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { createClient } from '@/lib/supabase/server'
 import { apiError, databaseError, requireUser } from '@/lib/auth'
+import { isMcpPaymentRef } from '@/lib/services/payments'
 import { calcTotals, formatDate, today } from '@/lib/utils/document'
 import { toCsv, csvDate, type CsvValue } from '@/lib/utils/csv'
 import { createZipStream, type ZipEntry } from '@/lib/utils/zip'
@@ -129,7 +130,7 @@ async function paymentsCsv(supabase: Supabase, period: Period, t: TFn) {
       p.kind === 'refund' ? -p.amount : p.amount,
       p.reference ?? '',
       p.note ?? '',
-      p.import_ref ?? '',
+      isMcpPaymentRef(p.import_ref) ? '' : p.import_ref ?? '',
     ]
   })
   const header = [

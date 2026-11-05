@@ -4,15 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { addDays, today } from '@/lib/utils/document'
 import { FLUSH_EDITS_EVENT, type FlushEditsDetail } from '@/lib/issued-pdf'
 import { dbErrorMessage } from '@/lib/api-errors'
 import { useT } from '@/lib/i18n/client'
 import type { TFn } from '@/lib/i18n'
 import type { Client, DocumentType } from '@/types'
 import type { PublicSettings } from '@/lib/public-settings'
+import { draftPayload, saveDraft as writeDraft, type DraftSaveMode } from '@/lib/services/drafts'
 import {
-  AUTOSAVE_DELAY, PATHS, adoptLineIds, contentKeyOf, docFields, initialForm, itemsPayload, lineValues, savedKeyOf, storedKeyOf, termDays,
+  AUTOSAVE_DELAY, PATHS, adoptLineIds, contentKeyOf, initialForm, lineValues, savedKeyOf, storedKeyOf,
   type EditorDocument, type FormState, type LineItem,
 } from './model'
 import { BUYER_REFERENCE_EVENT, ISSUE_DATE_EVENT, type BuyerReferenceDetail, type IssueDateDetail } from './events'
@@ -58,7 +58,7 @@ export function errorMessage(e: unknown, t: TFn): string {
   return t('messages.generic')
 }
 
-export type PersistMode = 'auto' | 'save' | 'issue'
+export type PersistMode = DraftSaveMode
 
 interface Options {
   type: DocumentType
@@ -156,54 +156,35 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
     if (mountedRef.current && window.location.pathname === newPath) window.history.replaceState(null, '', `/${PATHS[type]}/${id}`)
   }
 
-  // The one write path: header + items of `f`, inserting the draft once for a new document.
-  // Throws on failure; returns the document id. An autosave never writes an empty document date
-  // over the stored one: the field is empty from clearing it until a new date is complete.
+  // The one write path: header + items of `f` (writeDraft), inserting the draft once for a new
+  // document. Throws on failure; returns the document id.
   async function persist(f: FormState, mode: PersistMode = 'auto'): Promise<string> {
-    const effectiveDate = f.date || today()
     const c = clients.find(x => x.id === f.clientId)
-    const effective: FormState = {
-      ...f,
-      date: effectiveDate,
-      dueDate: f.dueDate || (mode === 'issue' && c ? addDays(effectiveDate, termDays(type, settings, c)) : ''),
-    }
-    const fields = docFields(type, effective)
-    const items = itemsPayload(effective.lines)
+    const { effective, fields, items, keepStoredDate } = draftPayload(type, f, { mode, settings, client: c })
     pendingWritesRef.current++
     try {
-      let id = docIdRef.current
-      if (id) {
-        const keepStoredDate = mode === 'auto' && !f.date
-        const update: Partial<typeof fields> = { ...fields }
-        if (keepStoredDate) delete update.date
-        const { error } = await supabase.from('documents').update(update).eq('id', id)
-        if (error) {
-          // One invoice per period date of a recurring schedule: when another one already has this
-          // date, the form goes back to the stored date and due date (the issue dialog moves both)
-          // instead of holding a date that never saves.
-          if (error.code === '23505' && /recurring_period/.test(`${error.message} ${error.details ?? ''}`)) {
-            console.error('[editor] save failed:', error.code, error.message)
-            const { data: stored } = await supabase.from('documents').select('date, due_date').eq('id', id).maybeSingle()
-            if (stored) applyOverrides({ date: stored.date ?? '', dueDate: stored.due_date ?? '' })
-            else if (storedDateRef.current) applyOverrides({ date: storedDateRef.current })
-            throw new SaveError(t('messages.recurringDateTaken'))
-          }
-          throw dbSaveError(error, t)
-        }
-        if (!keepStoredDate) storedDateRef.current = fields.date
-      } else {
+      if (!docIdRef.current) {
         if (misplacedRef.current) throw new SaveError(t('common.unknownError'))
         if (!fields.client_id) throw new SaveError(t('builder.selectClient'))
-        const { data, error } = await supabase.from('documents')
-          .insert({ type, number: null, status: 'draft', exchange_rate: 1, ...fields })
-          .select('id').single()
-        if (error) throw dbSaveError(error, t)
-        id = data.id as string
-        storedDateRef.current = fields.date
-        adoptId(id)
       }
-      const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
-      if (itemsErr) throw dbSaveError(itemsErr, t)
+      const saved = await writeDraft(supabase, { id: docIdRef.current, type, fields, items, keepStoredDate }, {
+        onHeaderSaved: (newId, inserted) => {
+          if (inserted || !keepStoredDate) storedDateRef.current = fields.date
+          if (inserted) adoptId(newId)
+        },
+      })
+      if (saved.error?.kind === 'recurring_period') {
+        // One invoice per period date of a recurring schedule: when another one already has this
+        // date, the form goes back to the stored date and due date (the issue dialog moves both)
+        // instead of holding a date that never saves.
+        const { error, stored } = saved.error
+        console.error('[editor] save failed:', error.code, error.message)
+        if (stored) applyOverrides({ date: stored.date ?? '', dueDate: stored.due_date ?? '' })
+        else if (storedDateRef.current) applyOverrides({ date: storedDateRef.current })
+        throw new SaveError(t('messages.recurringDateTaken'))
+      }
+      if (saved.error) throw saved.error.kind === 'database' ? dbSaveError(saved.error.error, t) : new SaveError(t('common.unknownError'))
+      const id = saved.id!
 
       // A cleared date counts as saved: the stored one stays until a new date is entered.
       savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, lineValues(effective.lines)])

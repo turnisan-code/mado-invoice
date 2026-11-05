@@ -103,9 +103,10 @@ Setup:
    rotation and reuse detection on, and set no session time-box or inactivity timeout shorter
    than a Claude connection should last. Keep the Email provider enabled: each connection is a
    server-side magic-link session, no email is sent.
-2. Database: run `supabase/migrations/20261105_mcp.sql`, then `supabase/tests/mcp_guards.sql`. The
-   test rolls back on its own; the SQL editor shows the row `all MCP guard checks passed`, or
-   the first failed check as an error (`FAIL …`).
+2. Database: run `supabase/migrations/20261105_mcp.sql` and `20261105_mcp_drafts.sql`, then
+   `supabase/tests/mcp_guards.sql` and `supabase/tests/mcp_drafts_guards.sql`. Each test rolls
+   back on its own; the SQL editor shows the row `all MCP guard checks passed` (`all MCP draft
+   guard checks passed`), or the first failed check as an error (`FAIL …`).
 3. Vercel: add `MCP_SECRET` (Production) and check that `NEXT_PUBLIC_APP_URL` is exactly the
    production origin without a trailing slash; redeploy. Locally, put both in `.env.local`.
 4. Check the deployment: `curl -si -X POST https://<your-app>/api/mcp` answers 401 with
@@ -129,9 +130,10 @@ Approvals: by default every irreversible action is approved in Mado. Claude show
 current authenticator code. Pending approvals are also listed at `/mcp/approve` and under Account
 → Connected apps, where each action kind can be switched to “Confirm in chat” (then the Claude
 app's prompt is the only gate). Loosening these settings (a kind to chat, or the approval code
-off) asks for a current authenticator code; tightening them does not. An email to any address
-that is not on the client record is always approved in Mado. A prepared action expires after 15
-minutes.
+off) asks for a current authenticator code; tightening them does not. An email is always approved
+in Mado when it goes to an address that is not on the client record, to an address Claude put on a
+client (until the owner saves that client in Mado), or to an address the owner has never emailed
+from Mado for that client. A prepared action expires after 15 minutes.
 
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;

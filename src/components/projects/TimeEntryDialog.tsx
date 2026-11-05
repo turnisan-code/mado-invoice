@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { formatMoney, today } from '@/lib/utils/document'
 import { formatDuration, parseDuration } from '@/lib/projects'
+import { saveTimeEntry, timeEntryProblem } from '@/lib/services/projects'
 import { useT } from '@/lib/i18n/client'
-import type { DictKey } from '@/lib/i18n'
 import type { TimeEntry } from '@/types'
 import { Select } from '@/components/ui/select'
 import { CONTROL_HEIGHT } from '@/components/ui/control'
@@ -48,16 +48,8 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
   const project = projects.find(p => p.id === values.project_id)
   const minutes = parseDuration(values.duration)
 
-  function invalid(): DictKey | null {
-    if (!values.project_id) return 'projects.time.projectRequired'
-    if (!values.date) return 'projects.time.dateRequired'
-    if (minutes === null) return 'projects.time.durationInvalid'
-    if (values.rate !== null && values.rate < 0) return 'projects.time.rateInvalid'
-    return null
-  }
-
   async function save() {
-    const problem = invalid()
+    const problem = timeEntryProblem({ project_id: values.project_id, date: values.date, minutes, rate: values.rate })
     if (problem || minutes === null) { toast.error(t(problem ?? 'projects.time.durationInvalid')); return }
     setSaving(true)
     const row = {
@@ -69,11 +61,9 @@ export default function TimeEntryDialog({ projects, projectId, entry, onClose, o
       rate: values.rate,
     }
     // A billed entry is never changed, even from a page that does not know it was billed yet.
-    const { data, error } = entry
-      ? await supabase.from('time_entries').update(row).eq('id', entry.id).is('invoiced_document_id', null).select('id')
-      : await supabase.from('time_entries').insert(row).select('id')
+    const { entry: saved, error } = await saveTimeEntry(supabase, row, entry?.id)
     setSaving(false)
-    if (error || !data?.length) { toast.error(t('projects.time.saveFailed')); return }
+    if (error || !saved) { toast.error(t('projects.time.saveFailed')); return }
     toast.success(entry ? t('projects.time.saved') : t('projects.time.added', { duration: formatDuration(minutes) }))
     onSaved?.()
     onClose()

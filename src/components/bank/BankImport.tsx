@@ -31,7 +31,7 @@ interface ImportResponse {
   paid: string[]
   /** Recorded as dunning fees / interest beyond the open balances. */
   fees?: number
-  errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled'; message: string }[]
+  errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future'; message: string }[]
 }
 
 interface InvoiceLabel { id: string; number: string; client: string }

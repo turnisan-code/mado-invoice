@@ -1860,6 +1860,7 @@ export const en = {
       not_found: 'invoice not found',
       not_issued: 'invoice not issued',
       cancelled: 'invoice cancelled',
+      date_future: 'payment date in the future',
     },
     bookamatHint: 'Sync the paid invoices to Bookamat from the invoice list →',
     another: 'Import another statement',

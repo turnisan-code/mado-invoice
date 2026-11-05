@@ -9,23 +9,15 @@ import { Button } from '@/components/ui/button'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { clientLabel, type NamedClient } from '@/lib/utils/clients'
 import { PROJECT_STATUSES } from '@/lib/projects'
+import { projectProblem, projectRow, saveProject, type ProjectValues } from '@/lib/services/projects'
 import { useT } from '@/lib/i18n/client'
-import type { DictKey } from '@/lib/i18n'
 import type { Project, ProjectStatus } from '@/types'
 import { Select } from '@/components/ui/select'
 import { inputClass, labelClass, textareaClass } from './ui'
 
 export type ClientOption = NamedClient & { id: string }
 
-type Values = {
-  client_id: string
-  name: string
-  status: ProjectStatus
-  hourly_rate: number | null
-  budget_hours: number | null
-  budget_amount: number | null
-  notes: string
-}
+type Values = ProjectValues
 
 function initialValues(project: Project | undefined, defaultClientId: string | undefined): Values {
   return {
@@ -37,13 +29,6 @@ function initialValues(project: Project | undefined, defaultClientId: string | u
     budget_amount: project?.budget_amount ?? null,
     notes: project?.notes ?? '',
   }
-}
-
-function validate(v: Values): DictKey | null {
-  if (!v.client_id) return 'projects.form.clientRequired'
-  if (!v.name.trim()) return 'projects.form.nameRequired'
-  if ([v.hourly_rate, v.budget_hours, v.budget_amount].some(n => n !== null && n < 0)) return 'projects.form.negative'
-  return null
 }
 
 // Creates a project (and opens it) or edits one. Mount it only while open, so it starts from the
@@ -65,21 +50,12 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
   const set = (patch: Partial<Values>) => setValues(v => ({ ...v, ...patch }))
 
   async function save() {
-    const invalid = validate(values)
+    const invalid = projectProblem(values)
     if (invalid) { toast.error(t(invalid)); return }
     setSaving(true)
-    const row = {
-      client_id: values.client_id,
-      name: values.name.trim(),
-      status: values.status,
-      hourly_rate: values.hourly_rate,
-      // A zero budget means none (the columns only take positive budgets).
-      budget_hours: values.budget_hours || null,
-      budget_amount: values.budget_amount || null,
-      notes: values.notes.trim() || null,
-    }
+    const row = projectRow(values)
     if (project) {
-      const { error } = await supabase.from('projects').update(row).eq('id', project.id)
+      const { error } = await saveProject(supabase, row, project.id)
       setSaving(false)
       if (error) { toast.error(t('projects.form.saveFailed')); return }
       toast.success(t('projects.form.saved'))
@@ -87,10 +63,10 @@ export default function ProjectDialog({ project, clients, defaultClientId, lockC
       router.refresh()
       return
     }
-    const { data, error } = await supabase.from('projects').insert(row).select('id').single()
-    if (error || !data) { setSaving(false); toast.error(t('projects.form.saveFailed')); return }
+    const { id: createdId, error } = await saveProject(supabase, row)
+    if (error || !createdId) { setSaving(false); toast.error(t('projects.form.saveFailed')); return }
     toast.success(t('projects.form.created'))
-    router.push(`/projects/${data.id}`)
+    router.push(`/projects/${createdId}`)
   }
 
   const optional = <span className="font-normal text-neutral-500 dark:text-neutral-500">({t('projects.form.optional')})</span>

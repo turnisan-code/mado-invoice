@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { formatDuration, readTimer, timerEntry, timerKey } from '@/lib/projects'
+import { saveTimeEntry } from '@/lib/services/projects'
 import { useT } from '@/lib/i18n/client'
 import type { TimeEntry } from '@/types'
 
@@ -69,18 +70,14 @@ export default function ProjectTimer({ projectId, onStopped }: { projectId: stri
     if (startedAt === null) return
     setSaving(true)
     const { date, minutes, capped } = timerEntry(startedAt, Date.now())
-    const { data, error } = await supabase
-      .from('time_entries')
-      .insert({ project_id: projectId, date, minutes, description: '', billable: true })
-      .select('*')
-      .single()
+    const { entry: data, error } = await saveTimeEntry(supabase, { project_id: projectId, date, minutes, description: '', billable: true })
     setSaving(false)
     if (error || !data) { toast.error(t('projects.timer.failed')); return }
     writeTimer(projectId, null)
     if (capped) toast.warning(t('projects.timer.capped'))
     else toast.success(t('projects.timer.stopped', { duration: formatDuration(minutes) }))
     router.refresh()
-    onStopped(data as TimeEntry)
+    onStopped(data)
   }
 
   if (startedAt === null) {
