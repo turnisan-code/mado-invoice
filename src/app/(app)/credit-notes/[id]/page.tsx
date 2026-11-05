@@ -6,6 +6,7 @@ import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import ShareLinkButton from '@/components/layout/ShareLinkButton'
 import IssuedPdfLink from '@/components/layout/IssuedPdfLink'
+import SettingsMissing from '@/components/layout/SettingsMissing'
 import DocumentHistory from '@/components/layout/DocumentHistory'
 import { toPublicSettings } from '@/lib/public-settings'
 import { formatDate } from '@/lib/utils/document'
@@ -27,6 +28,7 @@ export default async function CreditNoteDetailPage({ params }: { params: Promise
   ])
 
   if (!doc) notFound()
+  if (!settings) return <SettingsMissing />
 
   const publicSettings = toPublicSettings(settings)
   const reference = await fetchReference(supabase, doc)

@@ -11,6 +11,7 @@ import ConvertToCreditNoteButton from '@/components/layout/ConvertToCreditNoteBu
 import MakeRecurringDialog from '@/components/recurring/MakeRecurringDialog'
 import { calcTotals, formatDate, orderItems } from '@/lib/utils/document'
 import { toPublicSettings } from '@/lib/public-settings'
+import SettingsMissing from '@/components/layout/SettingsMissing'
 import Link from 'next/link'
 import { ArrowLeft, Repeat } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
@@ -32,6 +33,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   ])
 
   if (!doc) notFound()
+  if (!settings) return <SettingsMissing />
 
   const schedule = (scheduleRow ?? null) as RecurringSchedule | null
   const publicSettings = toPublicSettings(settings)

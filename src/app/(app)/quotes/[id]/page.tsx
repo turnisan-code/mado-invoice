@@ -9,6 +9,7 @@ import DocumentHistory from '@/components/layout/DocumentHistory'
 import DuplicateDocumentButton from '@/components/layout/DuplicateDocumentButton'
 import DeleteDocumentButton from '@/components/layout/DeleteDocumentButton'
 import { toPublicSettings } from '@/lib/public-settings'
+import SettingsMissing from '@/components/layout/SettingsMissing'
 import { formatDate } from '@/lib/utils/document'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
@@ -27,6 +28,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   ])
 
   if (!doc) notFound()
+  if (!settings) return <SettingsMissing />
 
   const publicSettings = toPublicSettings(settings)
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments: doc.payments ?? [] }
