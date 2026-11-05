@@ -7,6 +7,7 @@ import { canTransition, DOCUMENT_STATUSES } from '@/lib/status'
 import { IssueCheckError } from '@/lib/utils/issue-checks'
 import { clientDisplayName, type NamedClient } from '@/lib/utils/clients'
 import { logEvent } from '@/lib/events'
+import { deleteDrafts } from '@/lib/services/lifecycle'
 import { getT } from '@/lib/i18n/server'
 import type { DocumentStatus } from '@/types'
 
@@ -138,15 +139,9 @@ export async function DELETE(req: Request) {
   if (!isUuidList(body.ids)) return apiError(400, 'invalid_request', 'ids required')
   const ids = body.ids
 
-  const { data: deleted, error } = await auth.supabase
-    .from('documents')
-    .delete()
-    .in('id', ids)
-    .eq('type', 'invoice')
-    .is('number', null)
-    .select('id')
+  const { deleted, error } = await deleteDrafts(auth.supabase, ids, 'invoice')
   if (error) return databaseError(error)
 
-  const count = deleted?.length ?? 0
+  const count = deleted.length
   return NextResponse.json({ deleted: count, skipped: ids.length - count })
 }

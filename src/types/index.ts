@@ -148,6 +148,10 @@ export interface Settings {
   // The studio's own Peppol address; empty = 9914 (Austrian VAT number) with uid_number.
   peppol_scheme?: string | null
   peppol_id?: string | null
+  // Claude connector: where each irreversible action is approved (a missing kind = 'app') and
+  // whether approving in Mado asks for a current authenticator code (missing = true).
+  mcp_confirm_policy?: McpConfirmPolicy
+  mcp_approval_totp?: boolean
 }
 
 export interface Client {
@@ -376,6 +380,8 @@ export interface DocumentEvent {
   created_at: string
   type: DocumentEventType
   detail: Record<string, unknown>
+  // The Claude connection that wrote it (set by the database); null for the browser and the crons.
+  actor?: McpClientKind | null
 }
 
 export type EmailTemplateKind = 'invoice' | 'quote' | 'credit_note' | 'reminder'
@@ -479,3 +485,64 @@ export interface ProjectExpense {
 
 // How "Invoice unbilled" turns time entries into lines: one per entry, per description or per day.
 export type InvoiceGrouping = 'entry' | 'description' | 'day'
+
+// ─── Claude connector (supabase/migrations/20261105_mcp.sql) ────────────────
+// The irreversible actions Claude can prepare; each runs only after the owner approved it.
+// 'issue_and_send' issues one draft and emails it with a single approval.
+export type McpActionKind =
+  | 'issue' | 'issue_and_send' | 'send_email' | 'send_reminder' | 'storno' | 'cancel' | 'delete' | 'bookamat_sync'
+// Where an action is approved: in Mado ('app', the default) or in the Claude app's own prompt ('chat').
+export type McpApproval = 'app' | 'chat'
+export type McpConfirmPolicy = Partial<Record<McpActionKind, McpApproval>>
+// claude.ai (web, desktop, mobile), Claude Code on the owner's computer, or the static client.
+export type McpClientKind = 'claude_ai' | 'claude_code' | 'static'
+// 'expired' is never stored: a pending action past expires_at.
+export type McpActionStatus = 'pending' | 'running' | 'done' | 'failed' | 'rejected'
+
+// A Claude connection as the owner can read it; its session tokens and rate counters are server-only.
+export interface McpGrant {
+  id: string
+  client_name: string
+  client_kind: McpClientKind
+  redirect_uri: string
+  scopes: string[]
+  created_at: string
+  last_used_at: string | null
+  // Moved forward by every token refresh; the connection ends after 30 days without one.
+  idle_expires_at: string
+  expires_at: string
+  revoked_at: string | null
+  revoked_reason: string | null
+}
+
+export interface McpAction {
+  id: string
+  handle_hash: string
+  grant_id: string
+  kind: McpActionKind
+  args: Record<string, unknown>
+  args_hash: string
+  fingerprint: string
+  label: string
+  preview: Record<string, unknown>
+  approval: McpApproval
+  status: McpActionStatus
+  created_at: string
+  expires_at: string
+  claimed_at: string | null
+  claimed_via: McpApproval | null
+  claimed_session: string | null
+  finished_at: string | null
+  result: Record<string, unknown> | null
+  error: Record<string, unknown> | null
+}
+
+export interface McpCall {
+  id: number
+  grant_id: string
+  tool: string
+  ok: boolean
+  error_code: string | null
+  ms: number | null
+  created_at: string
+}

@@ -15,6 +15,7 @@ import { logEvent } from '@/lib/events'
 import { flushPendingEdits } from '@/lib/issued-pdf'
 import { addDays, calcTotals, formatMoney, today } from '@/lib/utils/document'
 import { displayStatus, statusLabelKey, statusMenuTargets } from '@/lib/status'
+import { setDocumentStatus } from '@/lib/services/lifecycle'
 import { useT } from '@/lib/i18n/client'
 import type { DictKey } from '@/lib/i18n'
 import type { DisplayStatus, DocumentStatus, DocumentType, IssueProblem, PaymentKind, PaymentMethod, Settings } from '@/types'
@@ -282,12 +283,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
         if (!res.ok) { toast.error(apiErrorMessage(t, data, t('statusBar.markPaidFailed'))); return }
         if (!data.updated) { toast.error(t('statusBar.cannotMarkPaid')); return }
       } else {
-        const from = status
-        if (newStatus !== from) {
-          const { error } = await supabase.from('documents').update({ status: newStatus }).eq('id', doc.id)
-          if (error) { toast.error(dbErrorMessage(t, error)); return }
-          await logEvent(supabase, doc.id, 'status_changed', { from, to: newStatus })
-        }
+        const { error } = await setDocumentStatus(supabase, doc.id, newStatus as DocumentStatus, { type, status: status as DocumentStatus })
+        if (error) { toast.error(dbErrorMessage(t, error)); return }
       }
       setStatus(newStatus)
       setConfirm(null)
