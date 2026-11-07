@@ -20,6 +20,7 @@ import { ArrowLeft, Info, Repeat } from 'lucide-react'
 import { getT } from '@/lib/i18n/server'
 import type { DictKey } from '@/lib/i18n'
 import type { RecurringSchedule } from '@/types'
+import { coveredPeriods, planNextPeriod } from '@/lib/utils/recurring'
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -48,6 +49,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     : null
 
   const schedule = (scheduleRow ?? null) as RecurringSchedule | null
+  // The date of the invoice the schedule really creates next: past periods its invoices already cover.
+  // None when the next free period starts after the end date: the schedule is shown as ended, as the
+  // schedule list, its editor and list_recurring say (the next run switches it off).
+  const schedulePlan = schedule?.active
+    ? planNextPeriod(schedule, (await coveredPeriods(supabase, [schedule.id])).get(schedule.id) ?? [])
+    : null
+  const scheduleNext = schedulePlan && !schedulePlan.ended ? schedulePlan.date : null
+  const scheduleEnded = !!schedulePlan?.ended || !!(schedule?.end_date && schedule.next_date > schedule.end_date)
   const publicSettings = toPublicSettings(settings)
   const payments = doc.payments ?? []
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments }
@@ -75,9 +84,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             {schedule && (
               <Link href="/recurring" className="inline-flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
                 <Repeat size={12} />
-                {schedule.active
-                  ? t('recurring.templateBanner', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), date: formatDate(schedule.next_date, lang) })
-                  : t('recurring.templateBannerInactive', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), status: t(schedule.end_date && schedule.next_date > schedule.end_date ? 'recurring.statuses.ended' : 'recurring.statuses.paused') })}
+                {scheduleNext
+                  ? t('recurring.templateBanner', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), date: formatDate(scheduleNext, lang) })
+                  : t('recurring.templateBannerInactive', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), status: t(scheduleEnded ? 'recurring.statuses.ended' : 'recurring.statuses.paused') })}
               </Link>
             )}
           </div>

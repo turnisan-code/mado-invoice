@@ -327,10 +327,32 @@ does not. Both need `supabase/migrations/20261107_dunning.sql` (the trigger
 
 | Path | Schedule (UTC) | Does |
 |---|---|---|
-| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
+| `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a period that overlaps one an invoice of the schedule already covers is skipped and logged, so no day is billed twice (see below); a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
 | `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue (and overdue ones whose due date now lies ahead sent again) and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
+
+Recurring schedules: what a schedule has billed is the service periods of the invoices it generated
+(drafts and cancelled ones included), not its dates. Changing its interval, next date (and with it
+the day of the month) or billing in advance changes the periods it creates from then on, so the
+generator (cron and “Generate now” alike) skips every period that shares a day with one of those
+invoices. The schedule editor shows, before saving, the invoice the schedule creates next (date and
+service period), the periods it skips, the days no invoice of the schedule covers (with “Bill
+from”, which starts the next period on the first of them), how many invoices are already due, and
+later periods that will be skipped too; it saves the date of that next invoice, and refuses a save
+from an editor opened before a run moved the schedule on. The schedule list, the template banner
+on the invoice page and Claude's `list_recurring` show the same next invoice and uncovered days.
+A run that finds the schedule changed under it (an edit while it generates) stops and leaves the
+edit in place. The same skip happens when a generated invoice's service period is moved into the
+next period (in the invoice editor or by Claude's `update_document`): the whole next period is
+skipped, so no day is billed twice. The days such a run leaves unbilled are recorded on the
+schedule (`recurring_schedules.unbilled`, `20261107_recurring.sql`): the schedule list
+(“Not billed: …”) and `list_recurring` (`not_covered`) show them until an invoice of the
+schedule covers them or the owner clicks “Dismiss” in the list; bill them with a separate invoice
+if needed. Days the schedule's next invoice, or a later one, will bill (after “Bill from” in the
+editor, for example) are not shown. A run creates at most 12 invoices per schedule; a longer backlog follows with the next
+runs, as the editor says. “Generate now” while another run is creating the same upcoming period
+creates nothing (“this period already exists”) rather than the period after it.
 
 ## Checks
 

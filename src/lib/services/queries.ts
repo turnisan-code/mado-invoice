@@ -7,6 +7,7 @@ import { calcTotals, orderItems, roundCents } from '@/lib/utils/document'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { creditNoteSettled, displayStatus, isOverdue } from '@/lib/status'
 import type { CatalogueItem, Client, DocumentType, InvoiceKind, Payment, Project, ProjectExpense, RecurringSchedule, TimeEntry } from '@/types'
+import { coveredPeriods, type CoveredPeriod } from '@/lib/utils/recurring'
 
 type ListItem = {
   line_type?: string | null
@@ -549,20 +550,27 @@ export async function listProjectRows(supabase: SupabaseClient): Promise<{ data:
 export interface RecurringRow extends RecurringSchedule {
   source: { id: string; number: string | null; client: string } | null
   last: { id: string; number: string | null } | null
+  // The service periods its invoices already cover (planNextPeriod in src/lib/utils/recurring.ts).
+  covered: CoveredPeriod[]
 }
 
 type DocRef = { id: string; number: string | null; clients: { name: string; company: string | null } | null }
 
-// The recurring page: every schedule by next date, with its template and last generated document.
+// The recurring page: every schedule by next date, with its template, last generated document and
+// the periods its invoices cover (what the generator skips, so the page and Claude show the invoice
+// a schedule really creates next).
 export async function listRecurringSchedules(supabase: SupabaseClient): Promise<RecurringRow[]> {
   const { data: schedules } = await supabase.from('recurring_schedules').select('*').order('next_date')
   const list = (schedules ?? []) as RecurringSchedule[]
 
   const ids = Array.from(new Set(list.flatMap(s => [s.source_document_id, s.last_document_id]).filter((id): id is string => !!id)))
   // Without generated DB types supabase-js types the to-one `clients` embed as an array.
-  const docs = ids.length
-    ? (((await supabase.from('documents').select('id, number, clients(name, company)').in('id', ids)).data ?? []) as unknown as DocRef[])
-    : []
+  const [docs, covered] = await Promise.all([
+    ids.length
+      ? supabase.from('documents').select('id, number, clients(name, company)').in('id', ids).then(r => (r.data ?? []) as unknown as DocRef[])
+      : Promise.resolve([] as DocRef[]),
+    coveredPeriods(supabase, list.map(s => s.id)),
+  ])
   const byId = new Map(docs.map(d => [d.id, d]))
 
   return list.map(s => {
@@ -572,6 +580,7 @@ export async function listRecurringSchedules(supabase: SupabaseClient): Promise<
       ...s,
       source: source ? { id: source.id, number: source.number, client: clientDisplayName(source.clients) || '—' } : null,
       last: last ? { id: last.id, number: last.number } : null,
+      covered: covered.get(s.id) ?? [],
     }
   })
 }
