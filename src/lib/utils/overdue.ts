@@ -34,24 +34,34 @@ async function flip(supabase: SupabaseClient, ids: string[], { from, to }: Step,
 // Sent invoices past their due date become 'overdue' — only when something is actually owed: an
 // invoice with a zero total, or settled by payments, Skonto, a write-off or a credit note, never is.
 // An 'overdue' invoice whose due date now lies today or later (an extension, or marked by hand too
-// early) goes back to 'sent', so no reminder counts days from a date not reached yet.
-export async function markOverdueInvoices(supabase: SupabaseClient): Promise<{ marked: number; reopened: number; error: string | null }> {
+// early) goes back to 'sent', so no reminder counts days from a date not reached yet. Paid,
+// cancelled and draft documents are never touched. The daily cron runs it for every invoice; with
+// `only` the same rule runs for those invoices alone, right after a save that can move their due
+// date (src/lib/services/drafts.ts), so the status follows the date at once.
+export async function markOverdueInvoices(
+  supabase: SupabaseClient,
+  { only }: { only?: readonly string[] } = {},
+): Promise<{ marked: number; reopened: number; error: string | null }> {
+  if (only && !only.length) return { marked: 0, reopened: 0, error: null }
   const now = today()
-  const [candidates, extended] = await Promise.all([
-    supabase
-      .from('documents')
-      .select('id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
-      .eq('type', 'invoice')
-      .eq('status', 'sent')
-      .not('due_date', 'is', null)
-      .lt('due_date', now),
-    supabase
-      .from('documents')
-      .select('id')
-      .eq('type', 'invoice')
-      .eq('status', 'overdue')
-      .or(`due_date.is.null,due_date.gte.${now}`),
-  ])
+  let candidatesQuery = supabase
+    .from('documents')
+    .select('id, tax_treatment, discount_type, discount_value, document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)')
+    .eq('type', 'invoice')
+    .eq('status', 'sent')
+    .not('due_date', 'is', null)
+    .lt('due_date', now)
+  let extendedQuery = supabase
+    .from('documents')
+    .select('id')
+    .eq('type', 'invoice')
+    .eq('status', 'overdue')
+    .or(`due_date.is.null,due_date.gte.${now}`)
+  if (only) {
+    candidatesQuery = candidatesQuery.in('id', [...only])
+    extendedQuery = extendedQuery.in('id', [...only])
+  }
+  const [candidates, extended] = await Promise.all([candidatesQuery, extendedQuery])
 
   let reopened = 0
   let error: string | null = null

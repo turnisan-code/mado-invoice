@@ -95,6 +95,9 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
   const savedKeyRef = useRef(initialKeys.saved)
   // The document date the database holds; an autosave never replaces it with an empty field.
   const storedDateRef = useRef<string | null>(doc?.date ?? null)
+  // The due date last written. On an issued invoice a new one can change its status, start its
+  // reminders over and add to its history, so the page reloads its data after such a save.
+  const savedDueRef = useRef<string | null>(doc?.due_date ?? null)
   // False from inserting a new draft until its items are written too.
   const savedOnceRef = useRef(!!doc)
   // Mounted without a document at a document's URL (see the restore effect): never insert one.
@@ -185,6 +188,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       }
       if (saved.error) throw saved.error.kind === 'database' ? dbSaveError(saved.error.error, t) : new SaveError(t('common.unknownError'))
       const id = saved.id!
+      const dueMoved = fields.due_date !== savedDueRef.current
+      savedDueRef.current = fields.due_date
 
       // A cleared date counts as saved: the stored one stays until a new date is entered.
       savedKeyRef.current = JSON.stringify([{ ...fields, date: storedDateRef.current ?? fields.date }, lineValues(effective.lines)])
@@ -203,6 +208,8 @@ export function useDocumentForm({ type, settings, clients, doc, defaultClientId 
       // Edits made while this was being written stay backed up, now against what was saved.
       if (isDirty(formRef.current)) backupNow()
       else removeBackup(backupKey(id))
+      // The status badge, the reminders and the history of an issued invoice follow at once.
+      if (mountedRef.current && (saved.statusChanged || (dueMoved && type === 'invoice' && !!doc?.number))) router.refresh()
       return id
     } finally {
       pendingWritesRef.current--

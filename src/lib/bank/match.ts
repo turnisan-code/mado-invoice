@@ -13,7 +13,7 @@ export interface OpenInvoice {
   balance: number
   skontoPercent: number | null
   skontoDays: number | null
-  /** Highest dunning level sent: a credit above the balance then most likely includes fees and interest. */
+  /** Highest dunning level sent (from reminder_log, which an extended due date does not reset): a credit above the balance then most likely includes fees and interest. */
   reminderLevel: number
 }
 

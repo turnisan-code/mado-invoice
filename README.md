@@ -280,6 +280,32 @@ prepared can then only be rejected. Signing out in the sidebar ends only this de
 password change, on Claude's next request. Limits per connection: an access token lasts 1 hour; the connection ends after 30 days without
 use and after 90 days at most; 120 calls a minute and 3000 a day.
 
+## Reminders
+
+Settings → Reminders sets the grace period, the interval, the highest level, the fee and the
+interest rate. The daily run, or the reminder dialog on the invoice page, escalates an overdue
+invoice level by level:
+
+- level 1, the Zahlungserinnerung, asks for the open balance only: no fee and no interest;
+- level 2, the 1. Mahnung, and every later level add the fee (Mahnspesen) and the late payment
+  interest (Verzugszinsen) on the open balance for the days since the due date.
+
+An invoice is overdue from the day after its due date. The daily run sets the status for every
+invoice; when the due date of an issued invoice is changed in the editor, that invoice gets its
+status (overdue or sent) right after the save, by the same rule. A paid or cancelled invoice is
+never touched. When the due date of an open invoice moves to a later date that is today or later
+(Vienna time), its reminders start over: the next one is a Zahlungserinnerung again, once the new
+due date and the grace period have passed, and the invoice's history says so. A new due date that
+is still in the past keeps the level. The reminders already sent stay listed. The editor saves
+two seconds after a change, so a due date that stood only for a moment (a typo, arrow keys, an
+extension taken back) starts the reminders over too: moving the due date back into the past before
+another reminder went out brings the level reached and the date of the last reminder back, and the
+history says so. That holds while the extended due date has not passed yet. Once it has passed (the
+invoice was marked overdue again), only a due date set back to the one the reminders started over
+from, or an earlier one, brings the level back; a later date that stood only for a moment in between
+does not. Both need `supabase/migrations/20261107_dunning.sql` (the trigger
+`documents_due_date_reminders`).
+
 ## Crons
 
 `vercel.json` schedules two daily runs (the Vercel Hobby plan allows two, once a day each):
@@ -287,7 +313,7 @@ use and after 90 days at most; 120 calls a minute and 3000 a day.
 | Path | Schedule (UTC) | Does |
 |---|---|---|
 | `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
+| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue (and overdue ones whose due date now lies ahead sent again) and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 

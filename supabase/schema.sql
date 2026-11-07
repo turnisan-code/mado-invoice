@@ -323,7 +323,9 @@ create table documents (
   -- Bookings a sync is posting, or posted but could not record: the next sync settles them first.
   bookamat_pending    jsonb,
   reminder_sent_at    timestamptz,
-  -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung).
+  -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung);
+  -- back to 0 when the due date moves to today or later, and back to the level reached when it
+  -- returns to the past before another reminder (documents_due_date_reminders).
   reminder_level      integer not null default 0,
   -- Early-payment discount: skonto_percent off the gross total if paid within skonto_days of the date.
   skonto_percent      numeric,
@@ -446,7 +448,8 @@ create table document_events (
                 'issued','emailed','mailto_opened','reminder_sent','status_changed',
                 'payment_added','payment_removed','storno_created','archived','drive_archived',
                 'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported',
-                'deposit_created','deposit_linked','deposit_released','project_invoiced','project_released')),
+                'deposit_created','deposit_linked','deposit_released','project_invoiced','project_released',
+                'reminders_reset','reminders_restored')),
   detail      jsonb not null default '{}',
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz,
@@ -987,6 +990,94 @@ drop trigger if exists documents_delete_guard on documents;
 create trigger documents_delete_guard
   before delete on documents
   for each row execute function documents_delete_guard();
+
+-- ─── Due date extended: reminders start over ─────────────────────────────────
+-- An open issued invoice (sent or overdue; paid, cancelled and drafts are never touched) whose due
+-- date moves to a later date that is today or later (Vienna) starts its reminders over: level 0,
+-- no reminder sent, and a 'reminders_reset' event with the new and the previous due date, the
+-- level reached and when its last reminder went out. A new due date still in the past keeps the
+-- level. The editor saves an issued invoice's due date with every other field, so only a real move
+-- counts. The status is the app's (markOverdueInvoices, the daily cron's rule), applied right after
+-- the save.
+-- The editor saves 2 s after a change, so a due date that stood only for a moment (a typo, arrow
+-- keys, an extension taken back) starts the reminders over too. Moving the due date back into the
+-- past undoes that while no reminder has gone out since (no 'reminder_sent' event, no reminder_log
+-- row): the level and the date of the last reminder come back from the latest 'reminders_reset'
+-- event, once (they are not 0 and null again until the next reset), and a 'reminders_restored'
+-- event records it. That holds while the extended due date has not passed yet (or there is none),
+-- and later too when the due date goes back to the one the reminders started over from, or
+-- earlier. An extension that ran out and is then moved to another date in the past keeps the
+-- reminders that started over. It ran out once the invoice was marked overdue after the reset (a
+-- 'status_changed' event to 'overdue': the daily run, or the status update right after a save), so
+-- a later date that stands for a moment and is then taken back does not bring the old level back.
+create or replace function documents_due_date_reminders()
+returns trigger language plpgsql as $$
+declare
+  v_today    date := (now() at time zone 'Europe/Vienna')::date;
+  v_reset_at timestamptz;
+  v_detail   jsonb;
+  v_level    integer;
+  v_sent     timestamptz;
+begin
+  if not (new.type = 'invoice' and new.number is not null
+          and old.status in ('sent', 'overdue') and new.status in ('sent', 'overdue')
+          and new.due_date is not null) then
+    return new;
+  end if;
+
+  if new.due_date >= v_today
+     and (old.due_date is null or new.due_date > old.due_date)
+     and (old.reminder_level > 0 or old.reminder_sent_at is not null)
+  then
+    new.reminder_level := 0;
+    new.reminder_sent_at := null;
+    insert into document_events (document_id, type, detail)
+    values (new.id, 'reminders_reset', jsonb_build_object(
+      'due_date', new.due_date, 'previous_due_date', old.due_date, 'level', old.reminder_level,
+      'previous_reminder_sent_at', old.reminder_sent_at));
+    return new;
+  end if;
+
+  if new.due_date >= v_today or old.reminder_level <> 0 or old.reminder_sent_at is not null then
+    return new;
+  end if;
+  select e.created_at, e.detail into v_reset_at, v_detail
+  from document_events e
+  where e.document_id = new.id and e.type = 'reminders_reset'
+  order by e.created_at desc
+  limit 1;
+  if v_reset_at is null
+     or not (old.due_date is null or old.due_date >= v_today
+             or coalesce(new.due_date <= (v_detail ->> 'previous_due_date')::date, false))
+     or (not coalesce(new.due_date <= (v_detail ->> 'previous_due_date')::date, false)
+         and exists (select 1 from document_events e
+                     where e.document_id = new.id and e.type = 'status_changed'
+                       and e.detail ->> 'to' = 'overdue' and e.created_at >= v_reset_at))
+     or exists (select 1 from document_events e
+                where e.document_id = new.id and e.type = 'reminder_sent' and e.created_at >= v_reset_at)
+     or exists (select 1 from reminder_log l
+                where l.document_id = new.id and l.sent_at >= v_reset_at)
+  then
+    return new;
+  end if;
+  v_level := case when jsonb_typeof(v_detail -> 'level') = 'number' then (v_detail ->> 'level')::integer else 0 end;
+  v_sent := (v_detail ->> 'previous_reminder_sent_at')::timestamptz;
+  if v_level > 0 or v_sent is not null then
+    new.reminder_level := v_level;
+    new.reminder_sent_at := v_sent;
+    insert into document_events (document_id, type, detail)
+    values (new.id, 'reminders_restored', jsonb_build_object(
+      'due_date', new.due_date, 'previous_due_date', old.due_date, 'level', v_level,
+      'reminder_sent_at', v_sent));
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_due_date_reminders on documents;
+create trigger documents_due_date_reminders
+  before update of due_date on documents
+  for each row execute function documents_due_date_reminders();
 
 -- ─── Deduction links ─────────────────────────────────────────────────────────
 -- Only an issued, uncancelled advance or partial invoice is deducted, by an uncancelled draft

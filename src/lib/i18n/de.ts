@@ -1543,6 +1543,10 @@ export const de = {
       reminderMailto: '{title} im E-Mail-Programm für {to} geöffnet',
       reminderMailtoPlain: '{title} im E-Mail-Programm geöffnet',
       mailtoPlain: 'Im E-Mail-Programm geöffnet',
+      remindersReset: 'Fälligkeit auf {date} verlängert: Mahnungen beginnen von vorn',
+      remindersResetPrevious: 'Bisher fällig am {date}',
+      remindersResetLevel: 'Zuletzt gesendet: {title}',
+      remindersRestored: 'Fälligkeit auf {date} zurückverlegt: Mahnungen machen weiter, wo sie standen',
       cc: 'CC: {list}',
       bcc: 'BCC: {list}',
       booking: 'Buchung {id}',
@@ -1675,7 +1679,7 @@ export const de = {
       days_overdue: 'Tage überfällig',
       new_deadline: 'Neue Zahlungsfrist',
       fee: 'Mahnspesen dieser Mahnung (ab der 1. Mahnung)',
-      interest: 'Betrag der Verzugszinsen',
+      interest: 'Verzugszinsen dieser Mahnung (ab der 1. Mahnung)',
       total_due: 'Zu zahlen inkl. Spesen und Zinsen (leer ohne beides)',
     },
     sample: {
@@ -1702,7 +1706,7 @@ export const de = {
       },
       reminder1: {
         subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
-        body: 'Guten Tag,\n\nlaut unseren Unterlagen ist Rechnung {{invoice_number}} vom {{date}} noch mit {{amount}} offen. Sie war am {{due_date}} fällig und ist Ihnen vielleicht einfach entgangen.\n\nVerzugszinsen: {{interest}}\nZu zahlen: {{total_due}}\n\nBitte überweisen Sie den Betrag bis {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nDie Zahlungserinnerung und eine Kopie der Rechnung finden Sie im Anhang. Sollte sich Ihre Zahlung mit dieser Nachricht überschnitten haben, betrachten Sie sie bitte als gegenstandslos.\n\nMit freundlichen Grüßen\n{{sender}}',
+        body: 'Guten Tag,\n\nlaut unseren Unterlagen ist Rechnung {{invoice_number}} vom {{date}} noch mit {{amount}} offen. Sie war am {{due_date}} fällig und ist Ihnen vielleicht einfach entgangen.\n\nBitte überweisen Sie den Betrag bis {{new_deadline}} auf folgendes Konto:\nIBAN: {{iban}}\nVerwendungszweck: {{invoice_number}}\n\nDie Zahlungserinnerung und eine Kopie der Rechnung finden Sie im Anhang. Sollte sich Ihre Zahlung mit dieser Nachricht überschnitten haben, betrachten Sie sie bitte als gegenstandslos.\n\nMit freundlichen Grüßen\n{{sender}}',
       },
       reminder2: {
         subject: '{{reminder_title}}: Rechnung {{invoice_number}}',
@@ -2542,7 +2546,7 @@ export const de = {
     },
     reminders: {
       title: 'Mahnungen',
-      description: 'Der tägliche Lauf eskaliert überfällige Rechnungen: Zahlungserinnerung, dann 1. Mahnung, dann 2. Mahnung. Kunden können auf ihrer Seite ausgenommen werden.',
+      description: 'Der tägliche Lauf eskaliert überfällige Rechnungen: Zahlungserinnerung, dann 1. Mahnung, dann 2. Mahnung. Wird die Fälligkeit einer Rechnung auf heute oder später verlängert, beginnen ihre Mahnungen von vorn. Kunden können auf ihrer Seite ausgenommen werden.',
       enabled: 'Mahnungen automatisch senden',
       grace: 'Karenzfrist (Tage)',
       graceHint: 'Nach der Fälligkeit bis zur ersten Mahnung; zugleich die Nachfrist in jeder E-Mail',
@@ -2553,7 +2557,7 @@ export const de = {
       fee: 'Mahnspesen (EUR)',
       feeHint: 'Ab der 1. Mahnung als {token} verrechnet',
       interest: 'Verzugszinsen (% p.a.)',
-      interestHint: 'Auf den offenen Betrag für die überfälligen Tage, als {token}',
+      interestHint: 'Ab der 1. Mahnung als {token} verrechnet: auf den offenen Betrag, für die überfälligen Tage',
       saved: 'Mahneinstellungen gespeichert.',
     },
     footer: {

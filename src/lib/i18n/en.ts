@@ -1543,6 +1543,10 @@ export const en = {
       reminderMailto: '{title} opened in the email app for {to}',
       reminderMailtoPlain: '{title} opened in the email app',
       mailtoPlain: 'Opened in the email app',
+      remindersReset: 'Due date extended to {date}: reminders start over',
+      remindersResetPrevious: 'Previously due {date}',
+      remindersResetLevel: 'Last reminder sent: {title}',
+      remindersRestored: 'Due date moved back to {date}: reminders continue where they left off',
       cc: 'CC: {list}',
       bcc: 'BCC: {list}',
       booking: 'Booking {id}',
@@ -1675,7 +1679,7 @@ export const en = {
       days_overdue: 'Days overdue',
       new_deadline: 'New payment deadline',
       fee: 'Reminder fee of this reminder (from the 1. Mahnung on)',
-      interest: 'Late payment interest amount',
+      interest: 'Late payment interest of this reminder (from the 1. Mahnung on)',
       total_due: 'Amount due incl. fee and interest (empty without either)',
     },
     sample: {
@@ -1702,7 +1706,7 @@ export const en = {
       },
       reminder1: {
         subject: '{{reminder_title}}: invoice {{invoice_number}}',
-        body: 'Dear {{contact}},\n\nAccording to our records, {{amount}} is still outstanding on invoice {{invoice_number}} dated {{date}}. It was due on {{due_date}} and may simply have been overlooked.\n\nLate payment interest: {{interest}}\nAmount due: {{total_due}}\n\nPlease transfer the amount by {{new_deadline}} to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nYou will find this reminder and a copy of the invoice attached. If your payment has crossed with this message, please disregard it.\n\nKind regards,\n{{sender}}',
+        body: 'Dear {{contact}},\n\nAccording to our records, {{amount}} is still outstanding on invoice {{invoice_number}} dated {{date}}. It was due on {{due_date}} and may simply have been overlooked.\n\nPlease transfer the amount by {{new_deadline}} to:\nIBAN: {{iban}}\nReference: {{invoice_number}}\n\nYou will find this reminder and a copy of the invoice attached. If your payment has crossed with this message, please disregard it.\n\nKind regards,\n{{sender}}',
       },
       reminder2: {
         subject: '{{reminder_title}}: invoice {{invoice_number}}',
@@ -2543,7 +2547,7 @@ export const en = {
     },
     reminders: {
       title: 'Reminders',
-      description: 'The daily run escalates overdue invoices: Zahlungserinnerung, then 1. Mahnung, then 2. Mahnung. Clients can be excluded on their page.',
+      description: 'The daily run escalates overdue invoices: Zahlungserinnerung, then 1. Mahnung, then 2. Mahnung. Extending an invoice’s due date to today or later starts its reminders over. Clients can be excluded on their page.',
       enabled: 'Send reminders automatically',
       grace: 'Grace period (days)',
       graceHint: 'After the due date before the first reminder; also the new deadline in each email',
@@ -2554,7 +2558,7 @@ export const en = {
       fee: 'Mahnspesen (EUR)',
       feeHint: 'Charged from the 1. Mahnung on as {token}',
       interest: 'Verzugszinsen (% p.a.)',
-      interestHint: 'On the open balance for the days overdue, as {token}',
+      interestHint: 'Charged from the 1. Mahnung on as {token}: on the open balance, for the days overdue',
       saved: 'Reminder settings saved.',
     },
     footer: {
