@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js'
 import type { RecurringInterval, RecurringSchedule } from '@/types'
 import type { TFn } from '@/lib/i18n'
 
@@ -78,10 +78,180 @@ export function defaultNextDate(today: string): string {
   return m === 12 ? fmt(y + 1, 1, 1) : fmt(y, m + 1, 1)
 }
 
+// ─── Periods already covered ─────────────────────────────────────────────────
+// What the schedule has billed is pinned down by its invoices, not by its dates: each one it
+// generated (drafts and cancelled ones included) covers its service period, service_date to
+// service_date_end. An edit of the interval, the next date (and with it the anchor day) or billing
+// in advance or in arrears changes the periods the schedule generates from then on, but not those
+// invoices. So the generator never creates a period that shares a day with one of them (those days
+// would be billed twice: createPeriodInvoice skips it), and the schedule editor shows the invoice
+// the schedule creates next, the periods it skips and the days no invoice covers (planNextPeriod).
+export type CoveredPeriod = { start: string; end: string }
+
+export type PeriodDefinition = Pick<RecurringSchedule, 'next_date' | 'interval' | 'anchor_day' | 'in_advance' | 'end_date'>
+
+// The service period of the schedule's invoice dated `date`.
+export function periodOn(def: Omit<PeriodDefinition, 'next_date' | 'end_date'>, date: string): CoveredPeriod {
+  return servicePeriod(date, def.interval, def.in_advance, def.anchor_day)
+}
+
+function overlapping(covered: readonly CoveredPeriod[], period: CoveredPeriod): CoveredPeriod[] {
+  return covered.filter(c => c.start <= period.end && c.end >= period.start)
+}
+
+// The days of `period` that none of `covered` covers, as ranges in date order: what stays unbilled
+// when a period overlapping covered ones is skipped.
+export function uncoveredIn(period: CoveredPeriod, covered: readonly CoveredPeriod[]): CoveredPeriod[] {
+  const out: CoveredPeriod[] = []
+  let from = period.start
+  for (const c of [...overlapping(covered, period)].sort((a, b) => a.start.localeCompare(b.start))) {
+    if (c.start > from) out.push({ start: from, end: shiftDays(c.start, -1) })
+    if (c.end >= from) from = shiftDays(c.end, 1)
+  }
+  if (from <= period.end) out.push({ start: from, end: period.end })
+  return out
+}
+
+// Ranges in date order, adjacent and overlapping ones joined.
+function joinRanges(ranges: readonly CoveredPeriod[]): CoveredPeriod[] {
+  const out: CoveredPeriod[] = []
+  for (const r of [...ranges].sort((a, b) => a.start.localeCompare(b.start))) {
+    const last = out[out.length - 1]
+    if (last && r.start <= shiftDays(last.end, 1)) { if (r.end > last.end) last.end = r.end } else out.push({ ...r })
+  }
+  return out
+}
+
+// The service periods the invoices of these schedules cover, by schedule (every invoice generated
+// for a schedule counts, drafts and cancelled ones included). The generator, the schedule list,
+// the template banner and Claude's list_recurring all read them here.
+export async function coveredPeriods(supabase: SupabaseClient, scheduleIds: readonly string[]): Promise<Map<string, CoveredPeriod[]>> {
+  const out = new Map<string, CoveredPeriod[]>(scheduleIds.map(id => [id, []]))
+  if (!scheduleIds.length) return out
+  const { data, error } = await supabase.from('documents').select('recurring_schedule_id, service_date, service_date_end')
+    .in('recurring_schedule_id', [...scheduleIds]).not('service_date', 'is', null).not('service_date_end', 'is', null)
+  if (error) throw new Error(error.message)
+  for (const d of (data ?? []) as { recurring_schedule_id: string; service_date: string; service_date_end: string }[]) {
+    out.get(d.recurring_schedule_id)?.push({ start: d.service_date, end: d.service_date_end })
+  }
+  return out
+}
+
+export interface PeriodPlan {
+  // The invoice the schedule creates next: its date and service period. From next_date on, every
+  // period that overlaps a covered one is skipped; `date` is the first that does not.
+  date: string
+  period: CoveredPeriod
+  // The skipped periods, first to last; empty when next_date's own period is free.
+  skipped: (CoveredPeriod & { date: string })[]
+  // The days between the last covered period before `period` and `period` that no invoice of the
+  // schedule covers; null when `period` follows on directly or nothing came before it.
+  gap: CoveredPeriod | null
+  // `date` is after the end date: the schedule creates no further invoice.
+  ended: boolean
+  // With `asOf`: how many invoices are already due (from `date` up to asOf and the end date), which
+  // the next run creates at once.
+  due: number
+  // Further on (a next date moved back before invoices the schedule already created): the span of
+  // the later periods skipped because invoices cover part of them, and the days they leave
+  // unbilled; null when none is. Periods covered exactly (already generated) are not counted.
+  later: (CoveredPeriod & { uncovered: CoveredPeriod[] }) | null
+}
+
+// Bounds the walk over periods (1000 weeks is about 19 years).
+const MAX_PLAN_STEPS = 1000
+
+export function planNextPeriod(def: PeriodDefinition, covered: readonly CoveredPeriod[], asOf?: string): PeriodPlan {
+  const skipped: PeriodPlan['skipped'] = []
+  let date = def.next_date
+  let period = periodOn(def, date)
+  for (let i = 0; i < MAX_PLAN_STEPS && overlapping(covered, period).length; i++) {
+    skipped.push({ date, ...period })
+    date = advanceDate(date, def.interval, def.anchor_day)
+    period = periodOn(def, date)
+  }
+  let before: string | null = null
+  for (const c of covered) if (c.end < period.start && (!before || c.end > before)) before = c.end
+  const gapStart = before ? shiftDays(before, 1) : null
+  const gap = gapStart && gapStart < period.start ? { start: gapStart, end: shiftDays(period.start, -1) } : null
+  const ended = !!def.end_date && date > def.end_date
+  let due = 0
+  for (let d = date, i = 0; asOf && d <= asOf && (!def.end_date || d <= def.end_date) && i < MAX_PLAN_STEPS; d = advanceDate(d, def.interval, def.anchor_day), i++) {
+    if (!overlapping(covered, periodOn(def, d)).length) due++
+  }
+  let lastEnd: string | null = null
+  for (const c of covered) if (!lastEnd || c.end > lastEnd) lastEnd = c.end
+  const partly: CoveredPeriod[] = []
+  for (let d = advanceDate(date, def.interval, def.anchor_day), i = 0; lastEnd && (!def.end_date || d <= def.end_date) && i < MAX_PLAN_STEPS; d = advanceDate(d, def.interval, def.anchor_day), i++) {
+    const p = periodOn(def, d)
+    if (p.start > lastEnd) break
+    if (overlapping(covered, p).length && !covered.some(c => c.start === p.start && c.end === p.end)) partly.push(p)
+  }
+  const later = partly.length
+    ? { start: partly[0].start, end: partly[partly.length - 1].end, uncovered: joinRanges(partly.flatMap(p => uncoveredIn(p, covered))) }
+    : null
+  return { date, period, skipped, gap, ended, due, later }
+}
+
+// The next date and anchor day that make the schedule's next period start on `start` (the editor's
+// "bill from" for a gap): that date itself in advance, one interval later in arrears.
+export function definitionStartingOn(def: Pick<PeriodDefinition, 'interval' | 'in_advance'>, start: string): Pick<PeriodDefinition, 'next_date' | 'anchor_day'> {
+  const anchor = dayOfMonth(start)
+  return { next_date: def.in_advance ? start : advanceDate(start, def.interval, anchor), anchor_day: anchor }
+}
+
+// The anchor day an edited next date gets: the one the editor set (definitionStartingOn), the
+// schedule's own while the date is unchanged, else the day of the new date.
+export function anchorDayFor(stored: Pick<PeriodDefinition, 'next_date' | 'anchor_day'> | null, nextDate: string, explicit?: number | null): number {
+  if (explicit) return explicit
+  if (stored && stored.next_date === nextDate) return stored.anchor_day
+  return dayOfMonth(nextDate)
+}
+
+export type StoredSchedule = PeriodDefinition & Pick<RecurringSchedule, 'id' | 'active'>
+export type ScheduleEdit = PeriodDefinition & Pick<RecurringSchedule, 'name' | 'mode'>
+
+// Saves the schedule editor's form. The next date saved is the plan's, past the periods the
+// schedule's invoices already cover, so the list shows the date of the invoice that really comes
+// next. A schedule whose next period starts after its end date is saved as ended; an ended one
+// whose end moved out resumes. The update lands only while the schedule is as the editor read it
+// (its dates, interval and active flag): { changed: true } when a run or another tab changed it
+// meanwhile, so a stale form never moves the schedule back onto a period generated since.
+export async function saveScheduleEdit(
+  supabase: SupabaseClient,
+  stored: StoredSchedule,
+  edit: ScheduleEdit,
+  covered: readonly CoveredPeriod[],
+  asOf?: string,
+): Promise<{ ok: true; plan: PeriodPlan } | { ok: false; changed: true } | { ok: false; changed?: false; error: PostgrestError }> {
+  const plan = planNextPeriod(edit, covered, asOf)
+  const wasEnded = !stored.active && !!stored.end_date && stored.next_date > stored.end_date
+  let query = supabase.from('recurring_schedules').update({
+    name: edit.name,
+    mode: edit.mode,
+    interval: edit.interval,
+    in_advance: edit.in_advance,
+    end_date: edit.end_date,
+    next_date: plan.date,
+    anchor_day: edit.anchor_day,
+    active: plan.ended ? false : wasEnded ? true : stored.active,
+  }).eq('id', stored.id).eq('next_date', stored.next_date).eq('interval', stored.interval)
+    .eq('anchor_day', stored.anchor_day).eq('in_advance', stored.in_advance).eq('active', stored.active)
+  query = stored.end_date ? query.eq('end_date', stored.end_date) : query.is('end_date', null)
+  const { data, error } = await query.select('id')
+  if (error) return { ok: false, error }
+  if (!data?.length) return { ok: false, changed: true }
+  return { ok: true, plan }
+}
+
 export interface GenerateResult {
   generated: { scheduleId: string; documentId: string; date: string }[]
-  // Periods that already existed (retry after a crash, overlapping runs), so the cron log shows them.
-  skipped: { scheduleId: string; date: string; skipped: 'already_generated' }[]
+  // Periods that already existed (retry after a crash, overlapping runs), so the cron log shows them,
+  // and periods that overlap one an invoice of the schedule already covers ('overlaps': a schedule
+  // whose interval, next date or billing in advance changed). Those are not generated, so no day is
+  // billed twice; `message` says so (worded as `errors`).
+  // `uncovered`: the days of a skipped period that no invoice covers, which stay unbilled.
+  skipped: { scheduleId: string; date: string; skipped: 'already_generated' | 'overlaps'; message?: string; covered?: CoveredPeriod[]; uncovered?: CoveredPeriod[] }[]
   // `message` is worded (in the UI language when the caller passes t); `detail` is the raw cause,
   // for the log only.
   errors: { scheduleId: string; message: string; code?: 'template_cancelled'; detail?: string }[]
@@ -131,31 +301,41 @@ const MAX_DAYS_BACK = 6
 
 type PeriodInvoice = { id: string; date: string; dueDate: string }
 
-// Copies the template invoice into a new draft for the period dated `date`. Returns null when that
-// period already exists (a retry after a crash, overlapping runs), found by its service period: an
-// issued catch-up period is dated today, see runSchedule. When another invoice of the schedule
-// already holds `date` (documents_recurring_period_key: one invoice per schedule and date, e.g. one
-// moved to today by hand), the draft takes the nearest free day before it, so no period is skipped.
-async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<PeriodInvoice | null> {
-  const period = servicePeriod(date, schedule.interval, schedule.in_advance, schedule.anchor_day)
+type PeriodOutcome =
+  | { created: PeriodInvoice }
+  // The period exists already (a retry after a crash, overlapping runs).
+  | { exists: true }
+  // Invoices of the schedule already cover some of its days (an edited schedule).
+  | { overlaps: CoveredPeriod[] }
+
+// Copies the template invoice into a new draft for the period dated `date`, unless an invoice of
+// the schedule already covers a day of that period (found by service period: an issued catch-up
+// period is dated today, see runSchedule): the very same period exists already, or the schedule was
+// edited and the period overlaps one billed before; either way nothing is created, so no day is
+// billed twice. When another invoice of the schedule already holds `date`
+// (documents_recurring_period_key: one invoice per schedule and date, e.g. one moved to today by
+// hand), the draft takes the nearest free day before it, so no period is skipped.
+async function createPeriodInvoice(supabase: SupabaseClient, schedule: RecurringSchedule, source: SourceDocument, date: string, defaultPaymentDays: number | null): Promise<PeriodOutcome> {
+  const period = periodOn(schedule, date)
   const paymentDays = paymentDaysOf(source, defaultPaymentDays)
 
-  const { data: existing, error: lookupErr } = await supabase.from('documents').select('id')
-    .eq('recurring_schedule_id', schedule.id).eq('service_date', period.start).eq('service_date_end', period.end)
-    .limit(1).maybeSingle()
+  const { data: holders, error: lookupErr } = await supabase.from('documents').select('service_date, service_date_end')
+    .eq('recurring_schedule_id', schedule.id).lte('service_date', period.end).gte('service_date_end', period.start)
   if (lookupErr) throw new Error(lookupErr.message)
-  if (existing) return null
+  const covered = ((holders ?? []) as { service_date: string; service_date_end: string }[]).map(h => ({ start: h.service_date, end: h.service_date_end }))
+  if (covered.some(c => c.start === period.start && c.end === period.end)) return { exists: true }
+  if (covered.length) return { overlaps: covered }
 
   for (let back = 0; back <= MAX_DAYS_BACK; back++) {
     const day = shiftDays(date, -back)
     const created = await insertPeriodInvoice(supabase, schedule, source, day, shiftDays(day, paymentDays), period)
-    if (created !== 'taken') return created
+    if (created !== 'taken') return { created }
     const { data: holder, error: holderErr } = await supabase.from('documents').select('service_date, service_date_end')
       .eq('recurring_schedule_id', schedule.id).eq('date', day).limit(1).maybeSingle()
     if (holderErr) throw new Error(holderErr.message)
     if (!holder) throw new Error(`the invoice dated ${day} could not be read`)
     // An overlapping run has just created this very period.
-    if (holder.service_date === period.start && holder.service_date_end === period.end) return null
+    if (holder.service_date === period.start && holder.service_date_end === period.end) return { exists: true }
   }
   throw new Error(`no free date for the invoice of ${period.start} to ${period.end}`)
 }
@@ -232,6 +412,14 @@ function issueMessages({ t, describeError, describeDriveError, formatDate }: Wor
     clientChanged: (date: string) => t
       ? t('views.recurring.clientChanged', { date: day(date) })
       : `${date}: created as draft, not issued: the client was changed from a Claude connection; check it and save it in Mado, then issue the draft`,
+    overlaps: (date: string, period: CoveredPeriod, uncovered: CoveredPeriod[]) => {
+      const range = (p: CoveredPeriod) => `${day(p.start)} – ${day(p.end)}`
+      if (!t) return `${date}: not created, ${period.start} to ${period.end} overlaps an invoice this schedule already created${uncovered.length ? `; not billed: ${uncovered.map(p => `${p.start} to ${p.end}`).join(', ')}` : ''}`
+      const vars = { date: day(date), start: day(period.start), end: day(period.end) }
+      return uncovered.length
+        ? t('views.recurring.overlapSkippedGap', { ...vars, gap: uncovered.map(range).join(', ') })
+        : t('views.recurring.overlapSkipped', vars)
+    },
     clientChangedIssued: (date: string) => t
       ? t('views.recurring.clientChangedIssued', { date: day(date) })
       : `${date}: issued, but no archive copy was made: the client was changed from a Claude connection while it was issued; check it and save it in Mado, then create the archive copy on the invoice's page`,
@@ -266,18 +454,48 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
   }
 
   let next = schedule.next_date
-  for (let i = 0; i < MAX_PERIODS_PER_RUN; i++) {
-    // The manual button generates the upcoming period regardless of date; after that only catch-up.
-    if (!(force && i === 0) && next > asOf) break
+  // The manual button generates the upcoming period regardless of date: the first one no invoice of
+  // the schedule covers yet, as planNextPeriod shows it. After that only catch-up.
+  let forced = force
+  // A run creates up to MAX_PERIODS_PER_RUN invoices; skipping covered periods (one step for all
+  // of them in a row, landing on a free one) does not count, so it never takes more than twice as
+  // many steps.
+  let periods = 0
+  for (let i = 0; i < 2 * MAX_PERIODS_PER_RUN && periods < MAX_PERIODS_PER_RUN; i++) {
+    if (!forced && next > asOf) break
     if (schedule.end_date && next > schedule.end_date) {
       const { error: endErr } = await supabase.from('recurring_schedules').update({ active: false }).eq('id', schedule.id)
       if (endErr) throw new Error(endErr.message)
       break
     }
 
-    const created = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
+    const outcome = await createPeriodInvoice(supabase, schedule, source as SourceDocument, next, defaultPaymentDays)
+    const created = 'created' in outcome ? outcome.created : null
     const documentId = created?.id ?? null
-    if (created) {
+    let advanced = advanceDate(next, schedule.interval, schedule.anchor_day)
+    if (!created) {
+      // Invoices of the schedule already cover the period at `next`: the very same period
+      // ('already_generated', quietly) or part of it (the schedule was edited: 'overlaps', worded,
+      // with the days left unbilled). This one and every following covered period are skipped in
+      // one step, up to the one planNextPeriod names: the date the editor, the list and
+      // list_recurring show.
+      const covered = (await coveredPeriods(supabase, [schedule.id])).get(schedule.id) ?? []
+      if ('overlaps' in outcome) covered.push(...outcome.overlaps)
+      const plan = planNextPeriod({ ...schedule, next_date: next, end_date: null }, covered)
+      const skipped = plan.skipped.filter((p, k) => k === 0 || !schedule.end_date || p.date <= schedule.end_date)
+      const partly = skipped.some(p => !covered.some(c => c.start === p.start && c.end === p.end))
+      if (partly || ('overlaps' in outcome && !skipped.length)) {
+        const own = periodOn(schedule, next)
+        const span = { start: skipped[0]?.start ?? own.start, end: skipped[skipped.length - 1]?.end ?? own.end }
+        const uncovered = joinRanges(skipped.flatMap(p => uncoveredIn(p, covered)))
+        result.skipped.push({ scheduleId: schedule.id, date: next, skipped: 'overlaps', message: messages.overlaps(next, span, uncovered), covered: overlapping(covered, span), uncovered })
+      } else {
+        for (const p of skipped.length ? skipped : [{ date: next }]) result.skipped.push({ scheduleId: schedule.id, date: p.date, skipped: 'already_generated' })
+      }
+      if (plan.date > next) advanced = plan.date
+    } else {
+      periods++
+      forced = false
       result.generated.push({ scheduleId: schedule.id, documentId: created.id, date: next })
       // Why the invoice stays a draft in 'issue' mode; the log says it in either mode.
       let held = created.date === next ? null : messages.dateHeld(next, created.date)
@@ -329,14 +547,14 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
           }
         }
       }
-    } else {
-      result.skipped.push({ scheduleId: schedule.id, date: next, skipped: 'already_generated' })
     }
 
     // Only what this iteration changed goes into the update: last_* only when a document was
     // created here (an overlapping run must not overwrite them with a stale id) and active only
-    // when the schedule ended, so a Pause clicked mid-run is not undone.
-    const advanced = advanceDate(next, schedule.interval, schedule.anchor_day)
+    // when the schedule ended, so a Pause clicked mid-run is not undone. And only while the
+    // schedule's periods are still the ones this run read: when the owner edited its next date,
+    // interval or billing in advance meanwhile, or an overlapping run moved it on, it stays as it
+    // is now and this run stops (the next run goes on from there).
     const ended = !!schedule.end_date && advanced > schedule.end_date
     const patch: Partial<RecurringSchedule> = { next_date: advanced }
     if (documentId) {
@@ -344,8 +562,12 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       patch.last_generated_at = new Date().toISOString()
     }
     if (ended) patch.active = false
-    const { error: updErr } = await supabase.from('recurring_schedules').update(patch).eq('id', schedule.id)
+    const { data: moved, error: updErr } = await supabase.from('recurring_schedules').update(patch)
+      .eq('id', schedule.id).eq('next_date', next).eq('interval', schedule.interval)
+      .eq('anchor_day', schedule.anchor_day).eq('in_advance', schedule.in_advance)
+      .select('id')
     if (updErr) throw new Error(updErr.message)
+    if (!moved?.length) break
 
     next = advanced
     if (ended) break

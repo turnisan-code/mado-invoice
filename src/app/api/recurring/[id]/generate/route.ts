@@ -12,7 +12,8 @@ export const maxDuration = 60
 
 // "Generate now": creates the schedule's upcoming invoice before its date (plus any missed
 // periods) and answers with the newest document id. A `warning` (worded in the UI language) says
-// what went wrong after an invoice was created.
+// what went wrong after an invoice was created, and which periods were skipped because invoices of
+// the schedule already cover part of them; when nothing was created, `notice` says the latter.
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const auth = await requireUser()
@@ -26,7 +27,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!schedule.active) return apiError(409, 'inactive', 'Schedule is paused or ended')
 
   const { t, lang } = await getT()
-  const { generated, errors } = await generateDueSchedules(supabase, today(), {
+  const { generated, skipped, errors } = await generateDueSchedules(supabase, today(), {
     scheduleId: id, force: true, issue: issueDocument, t, formatDate: date => formatDate(date, lang),
     describeError: err => {
       if (err instanceof IssueCheckError) return err.problems.map(p => issueProblemMessage(p, t)).join(' ')
@@ -35,22 +36,24 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     },
     describeDriveError: driveError => knownApiError(t, driveError) ?? t('messages.api.google_failed'),
   })
+  const notes = skipped.flatMap(s => (s.message ? [s.message] : []))
   if (!generated.length) {
     // The template was cancelled (Storno) in the meantime; the generator has just paused the schedule.
     if (errors.some(e => e.code === 'template_cancelled')) return apiError(409, 'template_cancelled', 'Template invoice is cancelled')
     if (errors.length) {
       console.error('[recurring/generate]', errors)
-      return apiError(500, 'generate_failed', errors.map(e => e.message).join('; '))
+      return apiError(500, 'generate_failed', [...errors.map(e => e.message), ...notes].join('; '))
     }
-    return NextResponse.json({ documentId: null, generated: 0 })
+    return NextResponse.json({ documentId: null, generated: 0, ...(notes.length ? { notice: notes.join('; ') } : {}) })
   }
   // The warning is worded; each error's raw cause (`detail`) is only logged.
   if (errors.length) console.error('[recurring/generate] generated with problems:', errors)
   const newest = generated[generated.length - 1]
+  const warnings = [...errors.map(e => e.message), ...notes]
   return NextResponse.json({
     documentId: newest.documentId,
     date: newest.date,
     generated: generated.length,
-    ...(errors.length ? { warning: errors.map(e => e.message).join('; ') } : {}),
+    ...(warnings.length ? { warning: warnings.join('; ') } : {}),
   })
 }

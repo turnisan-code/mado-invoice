@@ -13,6 +13,7 @@ import { cataloguePrice, rateMap } from '@/lib/utils/catalogue'
 import { clientDisplayName, clientMatches } from '@/lib/utils/clients'
 import { calcTotals, lineAmount, roundCents, today } from '@/lib/utils/document'
 import { issueProblemMessage, issueProblems, type IssueCheckInput } from '@/lib/utils/issue-checks'
+import { planNextPeriod } from '@/lib/utils/recurring'
 import { makePeriod } from '@/app/(app)/reports/period'
 import {
   filterDocuments, getClientDetail, getDocumentDetail, getProjectDetail, invoiceShownStatus, listClients, listDocuments, listProjectRows,
@@ -685,7 +686,7 @@ async function clientsChangedByClaude(supabase: SupabaseClient, templateIds: rea
 const listRecurring = defineTool({
   name: 'list_recurring',
   title: 'Recurring schedules',
-  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. Claude cannot change the template of any schedule (template_locked: true), whatever its mode, active or paused: a schedule in 'issue' mode numbers what it copies from its template without an approval, and one in 'draft' mode can be switched to 'issue' in Mado. Deleting a template is approved in Mado; ask the owner to edit templates there. held_until_client_saved: true when Claude changed the template's client and the owner has not saved it in Mado since; until then the schedule creates drafts instead of issuing.",
+  description: "Recurring invoice schedules by next date: name, interval, next and end date, whether it creates drafts or issues them, active/paused/ended, the template invoice and the last generated one. next_invoice: the date and service period of the invoice the schedule creates next (null once ended), as the schedule list in Mado shows it: a period that overlaps one its invoices already cover is skipped, so no day is billed twice, and next_invoice can be later than next_date until the next run. not_covered: days just before next_invoice that no invoice of the schedule covers (after the owner changed its interval, next date or billing in advance, or deleted one of its invoices); the owner can bill them from the schedule's editor in Mado. Claude cannot change the template of any schedule (template_locked: true), whatever its mode, active or paused: a schedule in 'issue' mode numbers what it copies from its template without an approval, and one in 'draft' mode can be switched to 'issue' in Mado. Deleting a template is approved in Mado; ask the owner to edit templates there. held_until_client_saved: true when Claude changed the template's client and the owner has not saved it in Mado since; until then the schedule creates drafts instead of issuing.",
   scope: 'mado:read',
   inputSchema: z.object({}),
   hints: READ,
@@ -695,15 +696,23 @@ const listRecurring = defineTool({
     return {
       summary: shown(rows.length, rows.length, 'recurring schedules'),
       data: {
-        schedules: rows.map(s => ({
-          id: s.id, name: s.name, interval: s.interval, anchor_day: s.anchor_day, next_date: s.next_date, end_date: s.end_date,
-          mode: s.mode, in_advance: s.in_advance, template_locked: true,
-          ...(s.mode === 'issue' ? { held_until_client_saved: held.has(s.source_document_id) } : {}),
-          state: s.active ? 'active' : s.end_date && s.next_date > s.end_date ? 'ended' : 'paused',
-          last_generated_at: s.last_generated_at,
-          template: s.source && { ...s.source, app_url: documentUrl('invoice', s.source.id) },
-          last_document: s.last && { ...s.last, app_url: documentUrl('invoice', s.last.id) },
-        })),
+        schedules: rows.map(s => {
+          const state = s.active ? 'active' : s.end_date && s.next_date > s.end_date ? 'ended' : 'paused'
+          // What the generator creates next, past the periods its invoices cover (RecurringList shows the same).
+          const plan = planNextPeriod(s, s.covered)
+          const open = state !== 'ended' && !plan.ended
+          return {
+            id: s.id, name: s.name, interval: s.interval, anchor_day: s.anchor_day, next_date: s.next_date, end_date: s.end_date,
+            mode: s.mode, in_advance: s.in_advance, template_locked: true,
+            ...(s.mode === 'issue' ? { held_until_client_saved: held.has(s.source_document_id) } : {}),
+            state,
+            next_invoice: open ? { date: plan.date, service_period: plan.period } : null,
+            ...(open && plan.gap ? { not_covered: plan.gap } : {}),
+            last_generated_at: s.last_generated_at,
+            template: s.source && { ...s.source, app_url: documentUrl('invoice', s.source.id) },
+            last_document: s.last && { ...s.last, app_url: documentUrl('invoice', s.last.id) },
+          }
+        }),
         app_url: appUrl('/recurring'),
       },
     }

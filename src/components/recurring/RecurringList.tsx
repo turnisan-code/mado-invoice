@@ -8,9 +8,9 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
-import { formatDate } from '@/lib/utils/document'
-import { dayOfMonth } from '@/lib/utils/recurring'
-import { ScheduleFormFields, validateSchedule, type ScheduleFormValues } from '@/components/recurring/MakeRecurringDialog'
+import { formatDate, today } from '@/lib/utils/document'
+import { planNextPeriod, saveScheduleEdit, type CoveredPeriod } from '@/lib/utils/recurring'
+import { ScheduleFormFields, formDefinition, validateSchedule, type ScheduleFormValues } from '@/components/recurring/MakeRecurringDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import { ClickableRow } from '@/components/lists/ListParts'
 import { useT } from '@/lib/i18n/client'
@@ -21,6 +21,8 @@ import type { RecurringSchedule } from '@/types'
 export interface ScheduleRow extends RecurringSchedule {
   source: { id: string; number: string | null; client: string } | null
   last: { id: string; number: string | null } | null
+  // The service periods its invoices already cover (listRecurringSchedules).
+  covered: CoveredPeriod[]
 }
 
 type ScheduleStatus = 'active' | 'paused' | 'ended'
@@ -69,7 +71,8 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
       return
     }
     if (!data.documentId) {
-      toast.info(t('recurring.nothingGenerated'))
+      // `notice`: the periods skipped because invoices of the schedule already cover part of them.
+      toast.info(data.notice ?? t('recurring.nothingGenerated'))
       router.refresh()
       return
     }
@@ -95,32 +98,43 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
   }
 
   function openEdit(s: ScheduleRow) {
-    setForm({ name: s.name, interval: s.interval, next_date: s.next_date, end_date: s.end_date ?? '', in_advance: s.in_advance, mode: s.mode })
+    setForm({ name: s.name, interval: s.interval, next_date: s.next_date, anchor_day: null, end_date: s.end_date ?? '', in_advance: s.in_advance, mode: s.mode })
     setEditing(s)
   }
 
+  // Saves the next date the editor shows (past the periods already covered); a moved next date
+  // re-anchors the day of month, and an ended schedule whose end moved out again resumes.
   async function saveEdit() {
     if (!editing || !form) return
     const invalid = validateSchedule(form)
     if (invalid) { toast.error(t(invalid)); return }
     setSaving(true)
-    // A moved next date re-anchors the day of month; an ended schedule whose end moved out again resumes.
-    const endsLater = !form.end_date || form.end_date >= form.next_date
-    const { error } = await supabase.from('recurring_schedules').update({
-      name: form.name.trim(),
-      interval: form.interval,
-      next_date: form.next_date,
-      end_date: form.end_date || null,
-      in_advance: form.in_advance,
-      mode: form.mode,
-      anchor_day: form.next_date === editing.next_date ? editing.anchor_day : dayOfMonth(form.next_date),
-      active: scheduleStatus(editing) === 'ended' && endsLater ? true : editing.active,
-    }).eq('id', editing.id)
+    const result = await saveScheduleEdit(supabase, editing, { name: form.name.trim(), mode: form.mode, ...formDefinition(form, editing) }, editing.covered)
     setSaving(false)
-    if (error) { toast.error(t('recurring.updateFailed')); return }
+    if (!result.ok) {
+      toast.error(result.changed ? t('recurring.changedMeanwhile') : t('recurring.updateFailed'))
+      if (result.changed) { setEditing(null); router.refresh() }
+      return
+    }
     toast.success(t('recurring.saved'))
     setEditing(null)
     router.refresh()
+  }
+
+  // The invoice each schedule creates next (planNextPeriod): its date, service period and the days
+  // before it that no invoice of the schedule covers.
+  const asOf = today()
+  const plans = new Map(schedules.map(s => [s.id, planNextPeriod(s, s.covered, asOf)]))
+  const nextDate = (s: ScheduleRow) => (scheduleStatus(s) === 'ended' ? s.next_date : plans.get(s.id)!.date)
+  function planNote(s: ScheduleRow) {
+    const plan = plans.get(s.id)!
+    if (scheduleStatus(s) === 'ended' || plan.ended) return null
+    return (
+      <>
+        <span className="block">{t('recurring.nextFor', { start: formatDate(plan.period.start, lang), end: formatDate(plan.period.end, lang) })}</span>
+        {plan.gap && <span className="block text-amber-700 dark:text-amber-400">{t('recurring.notCovered', { start: formatDate(plan.gap.start, lang), end: formatDate(plan.gap.end, lang) })}</span>}
+      </>
+    )
   }
 
   async function confirmDelete() {
@@ -176,6 +190,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
           {schedules.length === 0 && emptyState}
           {schedules.map(s => {
             const status = scheduleStatus(s)
+            const note = planNote(s)
             return (
               <div key={s.id} className="px-4 py-3.5 space-y-1.5">
                 <div className="flex items-start justify-between gap-3">
@@ -186,10 +201,11 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   <StatusBadge status={status} label={statusLabel(status)} className="shrink-0" />
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  {intervalLabel(s)} · {t('recurring.next')} {formatDate(s.next_date, lang)}
+                  {intervalLabel(s)} · {t('recurring.next')} {formatDate(nextDate(s), lang)}
                   {s.end_date && <> · {t('recurring.until')} {formatDate(s.end_date, lang)}</>}
                   {' · '}{modeLabel(s)}
                 </p>
+                {note && <p className="text-xs text-neutral-500 dark:text-neutral-400">{note}</p>}
                 <p className="text-xs text-neutral-500 dark:text-neutral-400 flex flex-wrap gap-x-3">
                   {s.source && <Link href={`/invoices/${s.source.id}`} className={linkClass}>{t('recurring.template')}: {docLabel(s.source)}</Link>}
                   <span>
@@ -236,7 +252,10 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   </td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{s.source?.client ?? '—'}</td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{intervalLabel(s)}</td>
-                  <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{formatDate(s.next_date, lang)}</td>
+                  <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
+                    <span className="whitespace-nowrap">{formatDate(nextDate(s), lang)}</span>
+                    <span className="block text-xs">{planNote(s)}</span>
+                  </td>
                   <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{s.end_date ? formatDate(s.end_date, lang) : '—'}</td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{modeLabel(s)}</td>
                   <td className="px-4 py-3">
@@ -262,7 +281,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
       <Dialog open={!!editing && !!form} onClose={() => setEditing(null)} title={t('recurring.editTitle')} busy={saving} panelClassName="max-h-[calc(100dvh-2rem)] overflow-y-auto">
         {form && (
           <form onSubmit={e => { e.preventDefault(); void saveEdit() }} className="space-y-4">
-            <ScheduleFormFields values={form} onChange={patch => setForm(f => (f ? { ...f, ...patch } : f))} disabled={saving} />
+            <ScheduleFormFields values={form} onChange={patch => setForm(f => (f ? { ...f, ...patch } : f))} disabled={saving} stored={editing} covered={editing?.covered ?? []} paused={!!editing && scheduleStatus(editing) === 'paused'} />
             <div className="flex gap-2 justify-end">
               <Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={saving}>{t('common.cancel')}</Button>
               <Button type="submit" disabled={saving}>{saving ? t('common.saving') : t('common.save')}</Button>
