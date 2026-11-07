@@ -1889,6 +1889,7 @@ export default function SettingsForm({ settings }: Props) {
                     className={inp}
                   />
                   {driveError && <p className="text-xs text-red-600 dark:text-red-400">{driveError}</p>}
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('settings.integrations.drive.layout')}</p>
                 </div>
                 <div className="flex items-center gap-3">
                   {driveSaved.id && !driveDirty && (

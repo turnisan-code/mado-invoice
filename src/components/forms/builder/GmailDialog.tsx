@@ -15,7 +15,7 @@ export type GmailPreview = {
   bcc: string
   subject: string
   body: string
-  pdfBase64: string
+  // Shown only: the server attaches the document's frozen PDF under this name.
   filename: string
   documentId: string
   newDocId?: string
@@ -28,6 +28,19 @@ export type GmailPreview = {
   totalChange: { issued: string; current: string } | null
   // Why the last attempt could not build the e-invoice; nothing was sent.
   einvoiceError: string | null
+}
+
+// What /api/gmail/send reads. No PDF goes along: the server attaches the document's frozen copy.
+export function gmailSendBody(preview: GmailPreview) {
+  return {
+    to: preview.to,
+    cc: preview.cc,
+    bcc: preview.bcc,
+    subject: preview.subject,
+    body: preview.body,
+    documentId: preview.documentId,
+    einvoice: preview.attachEInvoice ? preview.einvoiceFormat : null,
+  }
 }
 
 const checkboxCls = 'w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white'

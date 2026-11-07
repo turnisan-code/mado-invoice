@@ -31,7 +31,8 @@ import type { Client, CatalogueItem, DocumentType, IssueProblem, Language, TaxTr
 import type { PublicSettings } from '@/lib/public-settings'
 import { toastApiError } from '@/lib/google/toast'
 import { GOOGLE_REAUTH_CODE } from '@/lib/google/reauth'
-import { fetchIssuedPdf, blobToBase64, archiveErrorMessage } from '@/lib/issued-pdf'
+import { fetchIssuedPdf, archiveErrorMessage } from '@/lib/issued-pdf'
+import { pdfFilename } from '@/lib/pdf/filename'
 import { logEvent } from '@/lib/events'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { useT } from '@/lib/i18n/client'
@@ -42,7 +43,7 @@ import { ClientPicker } from './builder/ClientPicker'
 import { DateInput } from './builder/DateInput'
 import { DeductionTotals } from './builder/DeductionTotals'
 import { DepositPanel } from './builder/DepositPanel'
-import { GmailDialog, type GmailPreview } from './builder/GmailDialog'
+import { GmailDialog, gmailSendBody, type GmailPreview } from './builder/GmailDialog'
 import { IssueDialog } from './builder/IssueDialog'
 import { IssueProblemList } from './builder/IssueProblems'
 import { LineEditor } from './builder/LineEditor'
@@ -524,13 +525,14 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     })
   }
 
+  // The server attaches the frozen PDF when sending (and makes it then if it is missing, saying
+  // why when it cannot), so the browser neither loads nor sends one.
   function sendViaGmail() {
     if (!client) { toast.error(t('builder.selectClientFirst')); return }
     if (!client.email) { toast.error(t('builder.clientNoEmail')); return }
     withIssued(async issued => {
       const content = await emailContent.current(issued)
-      const blob = await issuedPdf(issued)
-      if (!content || !blob) { afterIssue(issued); return }
+      if (!content) { afterIssue(issued); return }
       const driveArchived = issued.driveArchived || !!doc?.drive_file_id
       // Invoices and credit notes in EUR can go out as e-invoices too, to clients who want them.
       const einvoiceFormat = type !== 'quote' && currency === 'EUR' ? client.einvoice_format ?? null : null
@@ -542,7 +544,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
       setGmailPreview({
         to: client.email, cc: parseEmailList(client.cc_emails).emails.join(', '), bcc: '',
         subject: content.subject, body: content.body,
-        pdfBase64: await blobToBase64(blob), filename: `${issued.number}.pdf`,
+        filename: pdfFilename(issued.number),
         documentId: issued.id, newDocId: issued.isNew ? issued.id : undefined,
         uploadToDrive: !!settings.drive_folder_id && !driveArchived, driveArchived,
         einvoiceFormat, attachEInvoice: !!einvoiceFormat && !totalChange, totalChange, einvoiceError: null,
@@ -558,7 +560,7 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     const res = await fetch('/api/gmail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...gmailPreview, einvoice: gmailPreview.attachEInvoice ? gmailPreview.einvoiceFormat : null }),
+      body: JSON.stringify(gmailSendBody(gmailPreview)),
     }).catch((err: unknown) => err)
     setGmailSending(false)
     if (!(res instanceof Response)) {

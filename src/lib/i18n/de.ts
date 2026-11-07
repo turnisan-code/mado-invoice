@@ -2616,7 +2616,8 @@ export const de = {
       },
       drive: {
         title: 'Google Drive',
-        description: 'PDFs beim Senden oder Herunterladen einer Rechnung automatisch in einen Drive-Ordner hochladen.',
+        description: 'Beim Ausstellen wird das PDF eines Belegs in einem gewählten Drive-Ordner gespeichert.',
+        layout: 'Darin kommt jedes PDF in einen Ordner für das Jahr seines Belegdatums und dort in einen für die Belegart, z. B. 2026 › Rechnungen, daneben Gutschriften und Angebote. Fehlende Ordner werden in der Sprache der App angelegt; vorhandene in beiden Sprachen werden verwendet. PDFs, die schon in Drive liegen, werden nicht verschoben.',
         connectFirst: 'Zuerst das Google-Konto verbinden, um Drive zu aktivieren.',
         notConfirmed: 'Der Drive-Zugriff konnte für diese Verbindung nicht bestätigt werden. ',
         reconnectLink: 'Neu verbinden →',

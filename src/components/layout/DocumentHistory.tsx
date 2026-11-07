@@ -128,9 +128,12 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       return { text: t(d.restored ? 'archive.events.archivedRestored' : 'archive.events.archived') }
     case 'drive_archived': {
       const href = str(d.link)
+      // Where it went below the Drive folder (year and type), on uploads since those folders.
+      const name = str(d.name)
+      const folder = str(d.folder)
       return {
         text: t('archive.events.drive_archived'),
-        subs: [str(d.name)],
+        subs: [folder && name ? `${folder}/${name}` : name],
         link: href ? { href, label: t('archive.openInDrive'), external: true } : undefined,
       }
     }

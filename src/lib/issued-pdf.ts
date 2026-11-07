@@ -21,15 +21,6 @@ export async function fetchIssuedPdf(documentId: string, t: TFn): Promise<Blob> 
   return res.blob()
 }
 
-export function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve((reader.result as string).split(',')[1])
-    reader.onerror = () => reject(new Error('Failed to read PDF'))
-    reader.readAsDataURL(blob)
-  })
-}
-
 export const FLUSH_EDITS_EVENT = 'document-builder:flush'
 export type FlushEditsDetail = { documentId: string; waitUntil: (pending: Promise<unknown>) => void }
 
