@@ -2524,12 +2524,17 @@ export const en = {
         noneYet: 'Nothing in this series has been issued yet.',
         noneYetYear: 'Nothing in this series has been issued in {year} yet.',
         below: 'A number is issued only once and the numbers must not go back: enter {next} or higher.',
+        taken: '{number} has already been issued: it would be a duplicate.',
         gapOne: 'Starting at {start} leaves number {from} unused.',
         gapOther: 'Starting at {start} leaves a gap of {count} numbers ({from}–{to}).',
         firstGapOne: 'Starting at {start} leaves number 1 unused, unless it was issued elsewhere (for example in an earlier program).',
         firstGapOther: 'Starting at {start} leaves numbers 1–{to} unused, unless they were issued elsewhere (for example in an earlier program).',
         consecutive: 'Austrian invoices are expected to be numbered consecutively: if the gap stays, document why these numbers are missing.',
       },
+      // Asked on save when a next number is free but below the highest one issued.
+      backTitle: 'Save a next number below one already issued?',
+      backDesc: 'The next documents would get lower numbers than ones already issued. Save only if those numbers belong to another series, for example an earlier number format.',
+      backSave: 'Save anyway',
     },
     defaults: {
       title: 'Defaults',

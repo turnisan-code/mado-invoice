@@ -53,6 +53,8 @@ const NUMBER_ROWS = [
 
 type IssuedNumbers = Record<DocumentType, string[]>
 type NextNumberHint = NonNullable<ReturnType<typeof nextNumberHint>>
+// A next number below the highest issued one that is itself free, as the save asks about it.
+type GoingBack = { numKey: CounterKey; label: string; text: string }
 
 async function loadIssuedNumbers(supabase: ReturnType<typeof createClient>): Promise<IssuedNumbers> {
   const [invoice, quote, credit_note] = await Promise.all(NUMBER_ROWS.map(row => listIssuedNumbers(supabase, row.type)))
@@ -281,6 +283,7 @@ export default function SettingsForm({ settings }: Props) {
   // The numbers already issued, read (under the owner's RLS) once Numbering is opened, so an edited
   // next number can say what it means against them. The save reads them again.
   const [issued, setIssued] = useState<IssuedNumbers | null>(null)
+  const [confirmBack, setConfirmBack] = useState<GoingBack[] | null>(null)
 
   // What the edited next number of a row means against `numbers`, the ones issued for its type.
   function rowCounterHint(row: (typeof NUMBER_ROWS)[number], numbers: readonly string[]): NextNumberHint | null {
@@ -545,9 +548,11 @@ export default function SettingsForm({ settings }: Props) {
     toast.success(t('settings.banking.saved'))
   }
 
-  async function saveDocsSection() {
+  // `confirmed`: the next numbers below the highest issued one the owner chose to save anyway.
+  async function saveDocsSection(confirmed: readonly GoingBack[] = []) {
     if (!settings) return
     const errors: Record<string, string> = {}
+    const back: GoingBack[] = []
     const counters: Partial<Record<CounterKey, number>> = {}
     const rows = NUMBER_ROWS.map(row => ({ ...row, prefix: docs[row.prefixKey].trim(), fmt: docs[row.fmtKey].trim() }))
     for (const row of rows) {
@@ -567,9 +572,11 @@ export default function SettingsForm({ settings }: Props) {
     }
     if (!Object.keys(errors).length && rows.some(row => counters[row.numKey] !== undefined)) {
       setSaving('docs')
-      // A counter set back to, or below, a number of its series already issued is refused: one
-      // taken would only be skipped at issue time, one free (a gap) handed out after higher
-      // numbers. Read again, as something may have been issued since Numbering was opened.
+      // A counter set back onto a number of its series already issued (a duplicate) is refused: it
+      // would only be skipped at issue time. One that is free but below the highest issued one
+      // would be handed out after higher numbers, unless those belong to an earlier format that
+      // reads like this one: it is saved once the owner confirms. Read again, as something may
+      // have been issued since Numbering was opened.
       let fresh: IssuedNumbers
       try {
         fresh = await loadIssuedNumbers(supabase)
@@ -581,7 +588,10 @@ export default function SettingsForm({ settings }: Props) {
       setIssued(fresh)
       for (const row of rows) {
         const hint = rowCounterHint(row, fresh[row.type])
-        if (hint?.hint.kind === 'below') errors[row.numKey] = counterHintText(t, row.type, hint)
+        if (hint?.hint.kind !== 'below') continue
+        const text = counterHintText(t, row.type, hint)
+        if (hint.hint.taken) errors[row.numKey] = text
+        else if (!confirmed.some(c => c.numKey === row.numKey && c.text === text)) back.push({ numKey: row.numKey, label: t(row.labelKey), text })
       }
       // So is one whose number another type already has (a format and prefix they share).
       const taken = await Promise.all(rows.map(async row => {
@@ -596,6 +606,7 @@ export default function SettingsForm({ settings }: Props) {
     }
     setDocsErrors(errors)
     if (Object.keys(errors).length) return
+    if (back.length) { setConfirmBack(back); return }
     const [inv, quote, credit] = rows
     const config = {
       invoice_prefix:                  inv.prefix,
@@ -1268,7 +1279,7 @@ export default function SettingsForm({ settings }: Props) {
             description={t('settings.numbering.description')}
             dirty={!!dirty.docs}
             saving={saving === 'docs'}
-            onSave={saveDocsSection}
+            onSave={() => void saveDocsSection()}
           >
             {/* Token reference */}
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs font-mono text-neutral-500 dark:text-neutral-400 pb-1">
@@ -1291,10 +1302,10 @@ export default function SettingsForm({ settings }: Props) {
               const yearInFormat = hasYearToken(docs[row.fmtKey])
               const cy = counterYear(row)
               const rowErrors = [docsErrors[row.prefixKey], docsErrors[row.fmtKey]].filter(Boolean)
-              // The next number's error (a refused save) or else its hint, in one place the field
-              // points to and a screen reader announces.
+              // The next number's error (a refused save, or a duplicate that would be) or else its
+              // hint, in one place the field points to and a screen reader announces.
               const hint = issued && !docsErrors[row.numKey] ? rowCounterHint(row, issued[row.type]) : null
-              const counterError = docsErrors[row.numKey] ?? (hint?.hint.kind === 'below' ? counterHintText(t, row.type, hint) : null)
+              const counterError = docsErrors[row.numKey] ?? (hint?.hint.kind === 'below' && hint.hint.taken ? counterHintText(t, row.type, hint) : null)
               return (
                 <div key={row.prefixKey} className="space-y-1.5">
                   <div className="grid grid-cols-[1fr_2fr] sm:grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
@@ -2198,6 +2209,17 @@ export default function SettingsForm({ settings }: Props) {
 
       </div>
 
+      <ConfirmDialog
+        open={!!confirmBack}
+        title={t('settings.numbering.backTitle')}
+        description={[
+          ...(confirmBack ?? []).map((item, _, all) => (all.length > 1 ? `${item.label}: ${item.text}` : item.text)),
+          t('settings.numbering.backDesc'),
+        ].join(' ')}
+        confirmLabel={t('settings.numbering.backSave')}
+        onConfirm={() => { const items = confirmBack ?? []; setConfirmBack(null); void saveDocsSection(items) }}
+        onCancel={() => setConfirmBack(null)}
+      />
       <ConfirmDialog
         open={confirmDisconnect}
         title={t('settings.integrations.google.disconnectTitle')}

@@ -94,8 +94,11 @@ export function numberParser(fmt: string, prefix: string): (number: string) => P
 export interface IssuedCounter { counter: number; number: string; year: number | null }
 
 export type CounterHint =
-  // At or below a counter already issued in the series: refused on save.
-  | { kind: 'below'; highest: IssuedCounter; next: number }
+  // At or below the highest counter issued in the series. `taken` is the issued number that has
+  // this counter: a duplicate, refused on save. When it is null the counter itself is free, but
+  // the numbers would go back (or the highest is a number of an earlier format that reads like
+  // this one): saved once the owner confirms.
+  | { kind: 'below'; highest: IssuedCounter; next: number; taken: string | null }
   // Above the counter that follows the highest one: from–to stay unused. `highest` is null when
   // nothing of the series has been issued (in `year`, for a format with a year); `first` when
   // nothing of this format and prefix has been issued at all.
@@ -116,22 +119,27 @@ export function counterHint(issued: readonly string[], opts: { fmt: string; pref
     if (p) parsed.push({ ...p, number })
   }
   const highestOf = (list: IssuedCounter[]) => list.reduce<IssuedCounter | null>((best, p) => (!best || p.counter > best.counter ? p : best), null)
-  const against = (highest: IssuedCounter | null): CounterHint | null => {
+  const against = (series: IssuedCounter[]): CounterHint | null => {
+    const highest = highestOf(series)
     const last = highest?.counter ?? 0
-    if (highest && counter <= last) return { kind: 'below', highest, next: last + 1 }
+    if (highest && counter <= last) {
+      // Matched on the counter, so with {MM} a number of another month counts too.
+      const taken = series.find(p => p.counter === counter)?.number ?? null
+      return { kind: 'below', highest, next: last + 1, taken }
+    }
     if (counter > last + 1) return { kind: 'gap', highest, from: last + 1, to: counter - 1, first: !parsed.length }
     return null
   }
 
-  if (!hasYearToken(opts.fmt)) return against(highestOf(parsed))
-  const inYear = highestOf(parsed.filter(p => p.year === opts.year))
-  if (inYear || counter === 1) return against(inYear)
+  if (!hasYearToken(opts.fmt)) return against(parsed)
+  const inYear = parsed.filter(p => p.year === opts.year)
+  if (inYear.length || counter === 1) return against(inYear)
   // Nothing issued in this year yet: a counter carried on from the latest earlier year is no gap
   // without the yearly restart, and one above it leaves the numbers in between unused.
   const earlierYear = Math.max(...parsed.filter(p => p.year !== null && p.year < opts.year).map(p => p.year!))
-  const carried = opts.resetYearly ? null : highestOf(parsed.filter(p => p.year === earlierYear))
-  if (carried && counter > carried.counter) return against(carried)
-  return against(null)
+  const carried = opts.resetYearly ? [] : parsed.filter(p => p.year === earlierYear)
+  if (carried.length && counter > highestOf(carried)!.counter) return against(carried)
+  return against([])
 }
 
 // The hint for a next number the owner typed in Settings: the series is read with the format and
@@ -154,6 +162,7 @@ export function nextNumberHint(issued: readonly string[], opts: {
 
 // The hint in words: the highest number issued in the series (or none yet), then the warning, and
 // for invoices and credit notes (quotes carry no legal requirement) that the numbers should run on.
+// A duplicate is named first.
 export function counterHintText(t: TFn, type: DocumentType, { hint, year }: { hint: CounterHint; year: number | null }): string {
   const { highest } = hint
   const lead = highest
@@ -161,7 +170,10 @@ export function counterHintText(t: TFn, type: DocumentType, { hint, year }: { hi
       ? t('settings.numbering.hint.highestYear', { year: highest.year, number: highest.number, counter: highest.counter })
       : t('settings.numbering.hint.highest', { number: highest.number, counter: highest.counter })
     : year !== null ? t('settings.numbering.hint.noneYetYear', { year }) : t('settings.numbering.hint.noneYet')
-  if (hint.kind === 'below') return `${lead} ${t('settings.numbering.hint.below', { next: hint.next })}`
+  if (hint.kind === 'below') {
+    const below = `${lead} ${t('settings.numbering.hint.below', { next: hint.next })}`
+    return hint.taken ? `${t('settings.numbering.hint.taken', { number: hint.taken })} ${below}` : below
+  }
   const vars = { start: hint.to + 1, from: hint.from, to: hint.to, count: hint.to - hint.from + 1 }
   const one = hint.from === hint.to
   const gap = hint.first
