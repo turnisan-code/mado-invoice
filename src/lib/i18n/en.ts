@@ -1546,6 +1546,7 @@ export const en = {
       remindersReset: 'Due date extended to {date}: reminders start over',
       remindersResetPrevious: 'Previously due {date}',
       remindersResetLevel: 'Last reminder sent: {title}',
+      remindersRestored: 'Due date moved back to {date}: reminders continue where they left off',
       cc: 'CC: {list}',
       bcc: 'BCC: {list}',
       booking: 'Booking {id}',

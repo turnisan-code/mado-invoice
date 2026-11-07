@@ -75,12 +75,15 @@ function describe(event: DocumentEvent, t: TFn, lang: UiLang, currency: string):
       return { text: d.automatic ? `${text} · ${t('archive.automatic')}` : text }
     }
     // Written by the database (documents_due_date_reminders) when an open invoice's due date moved
-    // to a later date that is today or later.
-    case 'reminders_reset': {
+    // to a later date that is today or later, and when it went back into the past before another
+    // reminder (the level reached before comes back).
+    case 'reminders_reset':
+    case 'reminders_restored': {
       const due = str(d.due_date)
       const previous = str(d.previous_due_date)
+      const key = event.type === 'reminders_reset' ? 'docs.history.remindersReset' : 'docs.history.remindersRestored'
       return {
-        text: t('docs.history.remindersReset', { date: due ? formatDate(due, lang) : '' }),
+        text: t(key, { date: due ? formatDate(due, lang) : '' }),
         subs: [
           level ? t('docs.history.remindersResetLevel', { title: reminderTitle(level, lang) }) : null,
           previous ? t('docs.history.remindersResetPrevious', { date: formatDate(previous, lang) }) : null,

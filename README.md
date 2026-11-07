@@ -296,7 +296,12 @@ status (overdue or sent) right after the save, by the same rule. A paid or cance
 never touched. When the due date of an open invoice moves to a later date that is today or later
 (Vienna time), its reminders start over: the next one is a Zahlungserinnerung again, once the new
 due date and the grace period have passed, and the invoice's history says so. A new due date that
-is still in the past keeps the level. The reminders already sent stay listed. Starting over needs
+is still in the past keeps the level. The reminders already sent stay listed. The editor saves
+two seconds after a change, so a due date that stood only for a moment (a typo, arrow keys, an
+extension taken back) starts the reminders over too: moving the due date back into the past before
+another reminder went out brings the level reached and the date of the last reminder back, and the
+history says so. That holds while the extended due date has not passed yet, and later too when the
+due date goes back to the one the reminders started over from, or earlier. Both need
 `supabase/migrations/20261107_dunning.sql` (the trigger `documents_due_date_reminders`).
 
 ## Crons

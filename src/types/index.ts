@@ -385,7 +385,7 @@ export type DocumentEventType =
   | 'payment_added' | 'payment_removed' | 'storno_created' | 'archived' | 'drive_archived'
   | 'portal_viewed' | 'portal_responded' | 'bookamat_synced' | 'converted' | 'einvoice_exported'
   | 'deposit_created' | 'deposit_linked' | 'deposit_released'
-  | 'project_invoiced' | 'project_released' | 'reminders_reset'
+  | 'project_invoiced' | 'project_released' | 'reminders_reset' | 'reminders_restored'
 
 export interface DocumentEvent {
   id: string

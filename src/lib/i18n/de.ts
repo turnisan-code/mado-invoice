@@ -1546,6 +1546,7 @@ export const de = {
       remindersReset: 'Fälligkeit auf {date} verlängert: Mahnungen beginnen von vorn',
       remindersResetPrevious: 'Bisher fällig am {date}',
       remindersResetLevel: 'Zuletzt gesendet: {title}',
+      remindersRestored: 'Fälligkeit auf {date} zurückverlegt: Mahnungen machen weiter, wo sie standen',
       cc: 'CC: {list}',
       bcc: 'BCC: {list}',
       booking: 'Buchung {id}',
