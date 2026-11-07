@@ -284,6 +284,11 @@ the share link shows it at once and no longer takes the client's own answer, and
 never becomes sent again. Nothing is numbered, sent, booked or asked for by it. Both tools are
 marked destructive, and their descriptions tell Claude to set a status only on the owner's word.
 
+Each document's History marks the entries a Claude connection wrote with “via Claude” or “via
+Claude Code” (“über Claude” in German); the database sets the mark from the session that wrote
+the entry, whatever the writer sends. An action the owner approves in Mado runs as the owner and
+has no mark; one confirmed in Claude's chat has it.
+
 Disconnecting: Account → Connected apps → Revoke takes effect at once; what that connection
 prepared can then only be rejected. Signing out in the sidebar ends only this device's session;
 “Sign out everywhere” and removing the connector in Claude also disconnect Claude; so does a

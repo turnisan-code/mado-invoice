@@ -5,9 +5,19 @@ import type { DictKey, TFn, UiLang } from '@/lib/i18n'
 import { entriesLabel } from '@/lib/projects'
 import { formatDate, formatMoney } from '@/lib/utils/document'
 import { reminderTitle } from '@/lib/utils/reminder-templates'
-import type { DocumentEvent } from '@/types'
+import type { DocumentEvent, McpClientKind } from '@/types'
 
 const DOC_PATHS: Record<string, string> = { invoice: 'invoices', quote: 'quotes', credit_note: 'credit-notes' }
+
+// The Claude app behind a connection of each kind (document_events.actor, set by the database from
+// the session that wrote the entry); an own OAuth client is claude.ai's. Only the kind is stored
+// with an entry, never which connection or its tokens.
+const ACTOR_CLIENT: Record<McpClientKind, string> = { claude_ai: 'Claude', claude_code: 'Claude Code', static: 'Claude' }
+
+function actorClient(actor: string | null | undefined): string | null {
+  if (!actor) return null
+  return ACTOR_CLIENT[actor as McpClientKind] ?? 'Claude'
+}
 
 type Row = {
   text: string
@@ -205,7 +215,7 @@ export default async function DocumentHistory({ documentId, currency }: { docume
     getT(),
     supabase
       .from('document_events')
-      .select('id, document_id, created_at, type, detail')
+      .select('id, document_id, created_at, type, detail, actor')
       .eq('document_id', documentId)
       .order('created_at', { ascending: false })
       .limit(200),
@@ -225,6 +235,9 @@ export default async function DocumentHistory({ documentId, currency }: { docume
       <ol className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
         {events.map(event => {
           const row = describe(event, t, lang, currency)
+          // Written from a Claude connection: said in words, not by colour alone. An action the
+          // owner approved in Mado runs as the owner and carries no mark.
+          const client = actorClient(event.actor)
           return (
             <li key={event.id} className="py-2 flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3">
               <time dateTime={event.created_at} className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 sm:w-36 shrink-0 tabular-nums">
@@ -233,6 +246,15 @@ export default async function DocumentHistory({ documentId, currency }: { docume
               <div className="min-w-0 flex-1">
                 <p className="text-neutral-800 dark:text-neutral-200 break-words">
                   {row.text}
+                  {client && (
+                    <>
+                      {' '}
+                      <span title={t('archive.viaClaudeTitle')}
+                        className="inline-block whitespace-nowrap rounded border border-neutral-300 dark:border-neutral-600 px-1.5 text-xs leading-5 text-neutral-600 dark:text-neutral-300">
+                        {t('archive.viaClaude', { client })}
+                      </span>
+                    </>
+                  )}
                   {row.link && (
                     <>
                       {' · '}
