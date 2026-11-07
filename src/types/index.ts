@@ -447,6 +447,9 @@ export interface RecurringSchedule {
   mode: RecurringMode
   last_generated_at: string | null
   last_document_id: string | null
+  // Days a run skipped that no invoice of the schedule covered (src/lib/utils/recurring.ts
+  // notBilled), until the owner dismisses them; absent before 20261107_recurring.sql is applied.
+  unbilled?: { start: string; end: string }[]
 }
 
 export type ProjectStatus = 'active' | 'done' | 'archived'

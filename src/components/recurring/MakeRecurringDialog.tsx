@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { fieldClass } from '@/components/ui/control'
 import { formatDate, today } from '@/lib/utils/document'
-import { anchorDayFor, defaultNextDate, definitionStartingOn, planNextPeriod, type CoveredPeriod, type PeriodDefinition } from '@/lib/utils/recurring'
+import { MAX_PERIODS_PER_RUN, anchorDayFor, defaultNextDate, definitionStartingOn, planNextPeriod, type CoveredPeriod, type PeriodDefinition } from '@/lib/utils/recurring'
 import { useT } from '@/lib/i18n/client'
 import { n, type DictKey } from '@/lib/i18n'
 import type { RecurringInterval, RecurringMode } from '@/types'
@@ -90,7 +90,13 @@ function SchedulePlan({ values, stored, covered, paused, onChange, disabled }: {
         </p>
       )}
       {!plan.ended && plan.due > 0 && (
-        <p>{paused ? t('recurring.plan.duePaused', { count: plan.due }) : n(plan.due, t('recurring.plan.dueOne'), t('recurring.plan.dueOther', { count: plan.due }))}</p>
+        <p>
+          {paused
+            ? t('recurring.plan.duePaused', { count: plan.due })
+            : plan.due > MAX_PERIODS_PER_RUN
+              ? t('recurring.plan.dueMany', { count: plan.due, max: MAX_PERIODS_PER_RUN })
+              : n(plan.due, t('recurring.plan.dueOne'), t('recurring.plan.dueOther', { count: plan.due }))}
+        </p>
       )}
       {!plan.ended && plan.later && (
         <p className={plan.later.uncovered.length ? 'text-amber-700 dark:text-amber-400' : undefined}>

@@ -499,7 +499,10 @@ create table recurring_schedules (
   in_advance         boolean not null default false,
   mode               text not null default 'draft' check (mode in ('draft','issue')),
   last_generated_at  timestamptz,
-  last_document_id   uuid references documents(id) on delete set null
+  last_document_id   uuid references documents(id) on delete set null,
+  -- Days a run left unbilled (20261107_recurring.sql): [{"start", "end"}, …], shown until an
+  -- invoice of the schedule covers them or the owner dismisses them.
+  unbilled           jsonb not null default '[]'::jsonb
 );
 
 alter table documents

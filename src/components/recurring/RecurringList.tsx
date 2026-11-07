@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { ConfirmDialog, Dialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/button'
 import { formatDate, today } from '@/lib/utils/document'
-import { planNextPeriod, saveScheduleEdit, type CoveredPeriod } from '@/lib/utils/recurring'
+import { dismissUnbilled, notBilled, planNextPeriod, saveScheduleEdit, type CoveredPeriod } from '@/lib/utils/recurring'
 import { ScheduleFormFields, formDefinition, validateSchedule, type ScheduleFormValues } from '@/components/recurring/MakeRecurringDialog'
 import { StatusBadge } from '@/components/lists/StatusBadge'
 import { ClickableRow } from '@/components/lists/ListParts'
@@ -121,18 +121,43 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
     router.refresh()
   }
 
-  // The invoice each schedule creates next (planNextPeriod): its date, service period and the days
-  // before it that no invoice of the schedule covers.
+  // Hides the days a run left unbilled (notBilled); refused when a run moved the schedule on since
+  // the list was loaded, so days recorded meanwhile are not hidden unseen.
+  async function dismiss(s: ScheduleRow) {
+    setBusyId(s.id)
+    const result = await dismissUnbilled(supabase, s)
+    setBusyId(null)
+    if (!result.ok) toast.error(result.changed ? t('recurring.unbilledChanged') : t('recurring.updateFailed'))
+    else toast.success(t('recurring.unbilledDismissed'))
+    router.refresh()
+  }
+
+  // The invoice each schedule creates next (planNextPeriod): its date and service period; and the
+  // days no invoice of the schedule covers: just before it, and those a run skipped (notBilled).
   const asOf = today()
   const plans = new Map(schedules.map(s => [s.id, planNextPeriod(s, s.covered, asOf)]))
   const nextDate = (s: ScheduleRow) => (scheduleStatus(s) === 'ended' ? s.next_date : plans.get(s.id)!.date)
   function planNote(s: ScheduleRow) {
     const plan = plans.get(s.id)!
-    if (scheduleStatus(s) === 'ended' || plan.ended) return null
+    const open = scheduleStatus(s) !== 'ended' && !plan.ended
+    const unbilled = notBilled(s.unbilled, s.covered, open ? plan.gap : null)
+    if (!open && !unbilled.ranges.length) return null
     return (
       <>
-        <span className="block">{t('recurring.nextFor', { start: formatDate(plan.period.start, lang), end: formatDate(plan.period.end, lang) })}</span>
-        {plan.gap && <span className="block text-amber-700 dark:text-amber-400">{t('recurring.notCovered', { start: formatDate(plan.gap.start, lang), end: formatDate(plan.gap.end, lang) })}</span>}
+        {open && <span className="block">{t('recurring.nextFor', { start: formatDate(plan.period.start, lang), end: formatDate(plan.period.end, lang) })}</span>}
+        {unbilled.ranges.length > 0 && (
+          <span className="block text-amber-700 dark:text-amber-400">
+            {t('recurring.notCovered', { ranges: unbilled.ranges.map(r => `${formatDate(r.start, lang)} – ${formatDate(r.end, lang)}`).join(', ') })}
+            {unbilled.dismissable && (
+              <>
+                {' '}
+                <button type="button" onClick={() => dismiss(s)} disabled={busyId === s.id} title={t('recurring.dismissUnbilledHint')} className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200 disabled:opacity-50">
+                  {t('recurring.dismissUnbilled')}
+                </button>
+              </>
+            )}
+          </span>
+        )}
       </>
     )
   }

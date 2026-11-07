@@ -7,7 +7,9 @@ const MONTHS_PER_INTERVAL: Record<Exclude<RecurringInterval, 'weekly'>, number> 
   monthly: 1, quarterly: 3, half_yearly: 6, yearly: 12,
 }
 
-const MAX_PERIODS_PER_RUN = 12
+// How many invoices one run (the cron or "Generate now") creates for a schedule at most; the rest
+// follow on the next runs.
+export const MAX_PERIODS_PER_RUN = 12
 
 function parse(date: string): [number, number, number] {
   const [y, m, d] = date.split('-').map(Number)
@@ -122,17 +124,27 @@ function joinRanges(ranges: readonly CoveredPeriod[]): CoveredPeriod[] {
   return out
 }
 
+// PostgREST returns at most 1000 rows per request (max_rows) and .in() lists travel in the URL, so
+// coveredPeriods reads a page at a time, for 100 schedules at a time.
+const COVERED_PAGE = 1000
+const COVERED_IDS = 100
+
 // The service periods the invoices of these schedules cover, by schedule (every invoice generated
 // for a schedule counts, drafts and cancelled ones included). The generator, the schedule list,
 // the template banner and Claude's list_recurring all read them here.
 export async function coveredPeriods(supabase: SupabaseClient, scheduleIds: readonly string[]): Promise<Map<string, CoveredPeriod[]>> {
   const out = new Map<string, CoveredPeriod[]>(scheduleIds.map(id => [id, []]))
-  if (!scheduleIds.length) return out
-  const { data, error } = await supabase.from('documents').select('recurring_schedule_id, service_date, service_date_end')
-    .in('recurring_schedule_id', [...scheduleIds]).not('service_date', 'is', null).not('service_date_end', 'is', null)
-  if (error) throw new Error(error.message)
-  for (const d of (data ?? []) as { recurring_schedule_id: string; service_date: string; service_date_end: string }[]) {
-    out.get(d.recurring_schedule_id)?.push({ start: d.service_date, end: d.service_date_end })
+  for (let i = 0; i < scheduleIds.length; i += COVERED_IDS) {
+    const ids = scheduleIds.slice(i, i + COVERED_IDS)
+    for (let from = 0; ; from += COVERED_PAGE) {
+      const { data, error } = await supabase.from('documents').select('recurring_schedule_id, service_date, service_date_end')
+        .in('recurring_schedule_id', ids).not('service_date', 'is', null).not('service_date_end', 'is', null)
+        .order('service_date_end').order('id').range(from, from + COVERED_PAGE - 1)
+      if (error) throw new Error(error.message)
+      const rows = (data ?? []) as { recurring_schedule_id: string; service_date: string; service_date_end: string }[]
+      for (const d of rows) out.get(d.recurring_schedule_id)?.push({ start: d.service_date, end: d.service_date_end })
+      if (rows.length < COVERED_PAGE) break
+    }
   }
   return out
 }
@@ -208,6 +220,53 @@ export function anchorDayFor(stored: Pick<PeriodDefinition, 'next_date' | 'ancho
   return dayOfMonth(nextDate)
 }
 
+// ─── Days a run left unbilled ────────────────────────────────────────────────
+// A run that skips a period because invoices of the schedule already cover part of it records the
+// days they leave uncovered on the schedule (recurring_schedules.unbilled, 20261107_recurring.sql).
+// Such a skip happens unattended: a generated invoice whose service period was moved into the next
+// period (in the invoice editor or by Claude's update_document) or a schedule changed outside the
+// editor. The plan's gap names those days only until the schedule's next invoice is created; the
+// record keeps them on the schedule list and in Claude's list_recurring until an invoice of the
+// schedule covers them or the owner dismisses them there (dismissUnbilled). A gap the editor showed
+// before a save is not recorded: the owner saw it and saved.
+export type NotBilled = { ranges: CoveredPeriod[]; dismissable: boolean }
+
+// What the schedule list and list_recurring show as not billed: the recorded days that no invoice of
+// the schedule covers, and `gap` (the plan's gap just before the next invoice; null once the
+// schedule ended), joined. `dismissable`: recorded days lie outside the gap (the gap itself is
+// billed with "Bill from" in the editor).
+export function notBilled(recorded: readonly CoveredPeriod[] | null | undefined, covered: readonly CoveredPeriod[], gap: CoveredPeriod | null): NotBilled {
+  const open = joinRanges((Array.isArray(recorded) ? recorded : []).flatMap(r => uncoveredIn(r, covered)))
+  const outside = gap ? open.flatMap(r => uncoveredIn(r, [gap])) : open
+  return { ranges: joinRanges(gap ? [...open, gap] : open), dismissable: outside.length > 0 }
+}
+
+// The list's "Dismiss": forgets the recorded days. Only while the next date is still the one the list
+// showed: a run records days only together with moving the schedule on, so days recorded after the
+// list was loaded are never dismissed unseen ({ changed: true }).
+export async function dismissUnbilled(
+  supabase: SupabaseClient,
+  schedule: Pick<RecurringSchedule, 'id' | 'next_date'>,
+): Promise<{ ok: true } | { ok: false; changed: true } | { ok: false; changed?: false; error: PostgrestError }> {
+  const { data, error } = await supabase.from('recurring_schedules').update({ unbilled: [] })
+    .eq('id', schedule.id).eq('next_date', schedule.next_date).select('id')
+  if (error) return { ok: false, error }
+  if (!data?.length) return { ok: false, changed: true }
+  return { ok: true }
+}
+
+// The days to record after a run skipped periods leaving `uncovered` unbilled: those recorded so far
+// (read afresh, so a dismissal made while the run went on is kept) that `covered` does not cover yet,
+// and the new ones. null when the schedule has no record (20261107_recurring.sql not applied).
+async function unbilledAfterSkip(supabase: SupabaseClient, schedule: RecurringSchedule, covered: readonly CoveredPeriod[], uncovered: readonly CoveredPeriod[]): Promise<CoveredPeriod[] | null> {
+  if (!('unbilled' in schedule)) return null
+  const { data, error } = await supabase.from('recurring_schedules').select('unbilled').eq('id', schedule.id).maybeSingle()
+  if (error) throw new Error(error.message)
+  const recorded = (data as { unbilled?: unknown } | null)?.unbilled
+  const kept = (Array.isArray(recorded) ? recorded as CoveredPeriod[] : []).flatMap(r => uncoveredIn(r, covered))
+  return joinRanges([...kept, ...uncovered])
+}
+
 export type StoredSchedule = PeriodDefinition & Pick<RecurringSchedule, 'id' | 'active'>
 export type ScheduleEdit = PeriodDefinition & Pick<RecurringSchedule, 'name' | 'mode'>
 
@@ -250,7 +309,8 @@ export interface GenerateResult {
   // and periods that overlap one an invoice of the schedule already covers ('overlaps': a schedule
   // whose interval, next date or billing in advance changed). Those are not generated, so no day is
   // billed twice; `message` says so (worded as `errors`).
-  // `uncovered`: the days of a skipped period that no invoice covers, which stay unbilled.
+  // `uncovered`: the days of a skipped period that no invoice covers, which stay unbilled; they are
+  // recorded on the schedule (notBilled).
   skipped: { scheduleId: string; date: string; skipped: 'already_generated' | 'overlaps'; message?: string; covered?: CoveredPeriod[]; uncovered?: CoveredPeriod[] }[]
   // `message` is worded (in the UI language when the caller passes t); `detail` is the raw cause,
   // for the log only.
@@ -455,7 +515,10 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
 
   let next = schedule.next_date
   // The manual button generates the upcoming period regardless of date: the first one no invoice of
-  // the schedule covers yet, as planNextPeriod shows it. After that only catch-up.
+  // the schedule covers yet, as planNextPeriod shows it. After that only catch-up. A period that
+  // exists already ends it too (another run, the cron or a second tab, has just created it, or a
+  // retry): the button then says so instead of creating the period after it ahead of its date.
+  // Periods skipped as 'overlaps' (an edited schedule) do not: the first free one is created.
   let forced = force
   // A run creates up to MAX_PERIODS_PER_RUN invoices; skipping covered periods (one step for all
   // of them in a row, landing on a free one) does not count, so it never takes more than twice as
@@ -473,12 +536,14 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
     const created = 'created' in outcome ? outcome.created : null
     const documentId = created?.id ?? null
     let advanced = advanceDate(next, schedule.interval, schedule.anchor_day)
+    let unbilled: CoveredPeriod[] | null = null
     if (!created) {
       // Invoices of the schedule already cover the period at `next`: the very same period
       // ('already_generated', quietly) or part of it (the schedule was edited: 'overlaps', worded,
       // with the days left unbilled). This one and every following covered period are skipped in
       // one step, up to the one planNextPeriod names: the date the editor, the list and
       // list_recurring show.
+      if ('exists' in outcome) forced = false
       const covered = (await coveredPeriods(supabase, [schedule.id])).get(schedule.id) ?? []
       if ('overlaps' in outcome) covered.push(...outcome.overlaps)
       const plan = planNextPeriod({ ...schedule, next_date: next, end_date: null }, covered)
@@ -489,6 +554,8 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
         const span = { start: skipped[0]?.start ?? own.start, end: skipped[skipped.length - 1]?.end ?? own.end }
         const uncovered = joinRanges(skipped.flatMap(p => uncoveredIn(p, covered)))
         result.skipped.push({ scheduleId: schedule.id, date: next, skipped: 'overlaps', message: messages.overlaps(next, span, uncovered), covered: overlapping(covered, span), uncovered })
+        // Kept on the schedule until an invoice covers them or the owner dismisses them (notBilled).
+        if (uncovered.length) unbilled = await unbilledAfterSkip(supabase, schedule, covered, uncovered)
       } else {
         for (const p of skipped.length ? skipped : [{ date: next }]) result.skipped.push({ scheduleId: schedule.id, date: p.date, skipped: 'already_generated' })
       }
@@ -550,11 +617,12 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
     }
 
     // Only what this iteration changed goes into the update: last_* only when a document was
-    // created here (an overlapping run must not overwrite them with a stale id) and active only
-    // when the schedule ended, so a Pause clicked mid-run is not undone. And only while the
-    // schedule's periods are still the ones this run read: when the owner edited its next date,
-    // interval or billing in advance meanwhile, or an overlapping run moved it on, it stays as it
-    // is now and this run stops (the next run goes on from there).
+    // created here (an overlapping run must not overwrite them with a stale id), active only
+    // when the schedule ended, so a Pause clicked mid-run is not undone, and unbilled only when
+    // this iteration left days unbilled, always together with the move (dismissUnbilled relies
+    // on that). And only while the schedule's periods are still the ones this run read: when the
+    // owner edited its next date, interval or billing in advance meanwhile, or an overlapping run
+    // moved it on, it stays as it is now and this run stops (the next run goes on from there).
     const ended = !!schedule.end_date && advanced > schedule.end_date
     const patch: Partial<RecurringSchedule> = { next_date: advanced }
     if (documentId) {
@@ -562,6 +630,7 @@ async function runSchedule(supabase: SupabaseClient, schedule: RecurringSchedule
       patch.last_generated_at = new Date().toISOString()
     }
     if (ended) patch.active = false
+    if (unbilled) patch.unbilled = unbilled
     const { data: moved, error: updErr } = await supabase.from('recurring_schedules').update(patch)
       .eq('id', schedule.id).eq('next_date', next).eq('interval', schedule.interval)
       .eq('anchor_day', schedule.anchor_day).eq('in_advance', schedule.in_advance)

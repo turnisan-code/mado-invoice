@@ -343,7 +343,15 @@ later periods that will be skipped too; it saves the date of that next invoice, 
 from an editor opened before a run moved the schedule on. The schedule list, the template banner
 on the invoice page and Claude's `list_recurring` show the same next invoice and uncovered days.
 A run that finds the schedule changed under it (an edit while it generates) stops and leaves the
-edit in place.
+edit in place. The same skip happens when a generated invoice's service period is moved into the
+next period (in the invoice editor or by Claude's `update_document`): the whole next period is
+skipped, so no day is billed twice. The days such a run leaves unbilled are recorded on the
+schedule (`recurring_schedules.unbilled`, `20261107_recurring.sql`): the schedule list
+(“Not billed: …”) and `list_recurring` (`not_covered`) show them until an invoice of the
+schedule covers them or the owner clicks “Dismiss” in the list; bill them with a separate invoice
+if needed. A run creates at most 12 invoices per schedule; a longer backlog follows with the next
+runs, as the editor says. “Generate now” while another run is creating the same upcoming period
+creates nothing (“this period already exists”) rather than the period after it.
 
 ## Checks
 
