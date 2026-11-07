@@ -57,7 +57,8 @@ function parseDays(value: string): number | null {
 }
 
 // ── Variable chip sets ─────────────────────────────────────────────────────────
-// The PDF footer is filled like the document's email, plus {{vat}}; a PDF has no portal link.
+// The PDF footer is filled like the document's email, plus {{vat}}; a PDF has no portal link, and a
+// credit note's amounts print negative there, as in its body.
 function footerVars(t: (key: DictKey) => string, kind: EmailTemplateKind): { name: string; label: string }[] {
   return [
     ...variablesFor(kind).filter(name => name !== 'portal_link').map(name => ({ name, label: t(`dunning.vars.${name}`) })),
@@ -1480,6 +1481,7 @@ export default function SettingsForm({ settings }: Props) {
             <VarChips vars={footerVars(t, footerDocTab).map(v => ({ token: `{{${v.name}}}`, label: v.label }))} onInsert={insertVar} />
             <p className="text-xs text-neutral-500 dark:text-neutral-400 -mt-1">
               {t('settings.footer.insertHint')} {t('docs.footer.emptyLines')}
+              {footerDocTab === 'credit_note' && <> {t('settings.footer.creditNoteSigned')}</>}
             </p>
             <details className="text-xs text-neutral-500 dark:text-neutral-400">
               <summary className="cursor-pointer py-1 w-fit hover:text-neutral-700 dark:hover:text-neutral-200">{t('dunning.settings.variables')}</summary>

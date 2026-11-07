@@ -2563,6 +2563,7 @@ export const de = {
       quote: 'Angebot',
       creditNote: 'Gutschrift',
       insertHint: 'Textfeld anklicken, dann einen Platzhalter wählen, um ihn an der Cursorposition einzufügen.',
+      creditNoteSigned: 'Auf einer Gutschrift stehen Beträge mit Minus, wie im Beleg selbst. Die E-Mail zur Gutschrift nennt sie ohne Minus.',
       saved: 'Fußzeile gespeichert.',
     },
     taxNotes: {

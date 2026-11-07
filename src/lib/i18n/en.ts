@@ -2564,6 +2564,7 @@ export const en = {
       quote: 'Quote',
       creditNote: 'Credit Note',
       insertHint: 'Focus a text field, then click a variable to insert it at the cursor.',
+      creditNoteSigned: 'On a credit note, amounts print with a minus sign, as in the document itself. The credit note email keeps them without one.',
       saved: 'Footer saved.',
     },
     taxNotes: {

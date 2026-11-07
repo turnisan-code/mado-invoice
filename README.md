@@ -103,6 +103,11 @@ e-invoice. The stamp is laid over the stored copy each time the PDF goes out
 ZIP export stay exactly as issued. Should stamping fail, the PDF goes out unstamped and the server
 log says so.
 
+The PDF footer (Settings → PDF Footer) takes the variables of the document's email plus
+`{{vat}}`. On a credit note the amounts (`{{total}}`, `{{subtotal}}`, `{{balance_due}}`,
+`{{vat}}`) print with a minus, as the credit note's own totals do; the credit note email keeps them
+positive.
+
 ## Claude connector
 
 Claude (claude.ai on the web, desktop and mobile, and Claude Code) works with Mado through the MCP

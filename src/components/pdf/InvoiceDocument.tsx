@@ -1,6 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer'
 import { clampPercent, formatDate, lineAmount, orderItems, sectionSummary } from '@/lib/utils/document'
-import { documentVariables, fillTemplate, paymentTermsText, templateMoney } from '@/lib/templates'
+import { documentVariables, fillTemplate, paymentTermsText } from '@/lib/templates'
 import { paymentLineLabel, summarizePayments, type SummaryPayment } from '@/lib/payment-summary'
 import { countryName } from '@/lib/utils/country'
 import {
@@ -187,14 +187,20 @@ export default function InvoiceDocument({ settings, client, document: doc, qrCod
     : doc.type === 'credit_note'
     ? (lang === 'de' ? settings.credit_note_footer_de : settings.credit_note_footer_en)
     : (lang === 'de' ? settings.invoice_footer_de : settings.invoice_footer_en)
-  // The same variables (and formatting) as the document's email, plus {{vat}}.
+  // The same variables as the document's email, plus {{vat}}; the document's own amounts print as
+  // the body prints them, so a credit note's are negative (its email keeps them positive).
   const footerText = rawFooter
-    ? fillTemplate(rawFooter, documentVariables({
-        doc: { ...doc, number, language: lang },
-        client,
-        issuer: settings,
-        totals: doc.totals,
-      }), { vat: templateMoney(doc.totals.total_vat, lang, doc.currency) })
+    ? fillTemplate(rawFooter, {
+        ...documentVariables({
+          doc: { ...doc, number, language: lang },
+          client,
+          issuer: settings,
+          totals: doc.totals,
+        }),
+        subtotal: money(doc.totals.subtotal),
+        total: money(doc.totals.total),
+        balance_due: money(doc.totals.balance_due),
+      }, { vat: money(doc.totals.total_vat) })
     : null
   // The sentence the email's {{payment_terms}} prints.
   const paymentTerms = paymentTermsText({ ...doc, language: lang }, doc.totals.total)
