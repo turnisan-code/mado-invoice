@@ -232,13 +232,37 @@ export function anchorDayFor(stored: Pick<PeriodDefinition, 'next_date' | 'ancho
 export type NotBilled = { ranges: CoveredPeriod[]; dismissable: boolean }
 
 // What the schedule list and list_recurring show as not billed: the recorded days that no invoice of
-// the schedule covers, and `gap` (the plan's gap just before the next invoice; null once the
-// schedule ended), joined. `dismissable`: recorded days lie outside the gap (the gap itself is
-// billed with "Bill from" in the editor).
-export function notBilled(recorded: readonly CoveredPeriod[] | null | undefined, covered: readonly CoveredPeriod[], gap: CoveredPeriod | null): NotBilled {
-  const open = joinRanges((Array.isArray(recorded) ? recorded : []).flatMap(r => uncoveredIn(r, covered)))
+// the schedule covers, nor one it still creates (`ahead`: the schedule and its plan, while it is not
+// ended; e.g. after "Bill from" its next invoice bills the recorded days), and `gap` (the plan's gap
+// just before the next invoice; null once the schedule ended), joined. `dismissable`: recorded days
+// lie outside the gap (the gap itself is billed with "Bill from" in the editor).
+export function notBilled(
+  recorded: readonly CoveredPeriod[] | null | undefined,
+  covered: readonly CoveredPeriod[],
+  gap: CoveredPeriod | null,
+  ahead: { def: PeriodDefinition; plan: PeriodPlan } | null = null,
+): NotBilled {
+  const days = Array.isArray(recorded) ? recorded : []
+  const billed = ahead ? [...covered, ...periodsAhead(ahead.def, covered, ahead.plan, days)] : covered
+  const open = joinRanges(days.flatMap(r => uncoveredIn(r, billed)))
   const outside = gap ? open.flatMap(r => uncoveredIn(r, [gap])) : open
   return { ranges: joinRanges(gap ? [...open, gap] : open), dismissable: outside.length > 0 }
+}
+
+// The periods the schedule still creates from its plan on, as far as the last of `recorded`: the
+// plan's next invoice and every later one that no invoice of the schedule covers in part (the
+// generator skips those), none dated after the end date.
+function periodsAhead(def: PeriodDefinition, covered: readonly CoveredPeriod[], plan: PeriodPlan, recorded: readonly CoveredPeriod[]): CoveredPeriod[] {
+  let until: string | null = null
+  for (const r of recorded) if (!until || r.end > until) until = r.end
+  const out: CoveredPeriod[] = []
+  if (!until || plan.ended) return out
+  for (let d = plan.date, i = 0; (!def.end_date || d <= def.end_date) && i < MAX_PLAN_STEPS; d = advanceDate(d, def.interval, def.anchor_day), i++) {
+    const p = periodOn(def, d)
+    if (p.start > until) break
+    if (!overlapping(covered, p).length) out.push(p)
+  }
+  return out
 }
 
 // The list's "Dismiss": forgets the recorded days. Only while the next date is still the one the list

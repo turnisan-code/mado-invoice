@@ -133,7 +133,8 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
   }
 
   // The invoice each schedule creates next (planNextPeriod): its date and service period; and the
-  // days no invoice of the schedule covers: just before it, and those a run skipped (notBilled).
+  // days no invoice of the schedule covers: just before it, and those a run skipped that neither an
+  // invoice of the schedule nor one it still creates covers (notBilled).
   const asOf = today()
   const plans = new Map(schedules.map(s => [s.id, planNextPeriod(s, s.covered, asOf)]))
   // null: the schedule creates no further invoice, as its editor says ("No further invoice") and
@@ -147,7 +148,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
   function planNote(s: ScheduleRow) {
     const plan = plans.get(s.id)!
     const open = !plan.ended
-    const unbilled = notBilled(s.unbilled, s.covered, open ? plan.gap : null)
+    const unbilled = notBilled(s.unbilled, s.covered, open ? plan.gap : null, open ? { def: s, plan } : null)
     if (!open && !unbilled.ranges.length) return null
     return (
       <>

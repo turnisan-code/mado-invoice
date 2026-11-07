@@ -349,7 +349,8 @@ skipped, so no day is billed twice. The days such a run leaves unbilled are reco
 schedule (`recurring_schedules.unbilled`, `20261107_recurring.sql`): the schedule list
 (“Not billed: …”) and `list_recurring` (`not_covered`) show them until an invoice of the
 schedule covers them or the owner clicks “Dismiss” in the list; bill them with a separate invoice
-if needed. A run creates at most 12 invoices per schedule; a longer backlog follows with the next
+if needed. Days the schedule's next invoice, or a later one, will bill (after “Bill from” in the
+editor, for example) are not shown. A run creates at most 12 invoices per schedule; a longer backlog follows with the next
 runs, as the editor says. “Generate now” while another run is creating the same upcoming period
 creates nothing (“this period already exists”) rather than the period after it.
 
