@@ -548,11 +548,12 @@ export default function SettingsForm({ settings }: Props) {
     toast.success(t('settings.banking.saved'))
   }
 
-  // `confirmed`: the next numbers below the highest issued one the owner chose to save anyway.
+  // `confirmed`: the next numbers below the highest issued one the owner chose to save anyway, with
+  // the hint the dialog showed for each.
   async function saveDocsSection(confirmed: readonly GoingBack[] = []) {
     if (!settings) return
     const errors: Record<string, string> = {}
-    const back: GoingBack[] = []
+    const goingBack: GoingBack[] = []
     const counters: Partial<Record<CounterKey, number>> = {}
     const rows = NUMBER_ROWS.map(row => ({ ...row, prefix: docs[row.prefixKey].trim(), fmt: docs[row.fmtKey].trim() }))
     for (const row of rows) {
@@ -591,7 +592,7 @@ export default function SettingsForm({ settings }: Props) {
         if (hint?.hint.kind !== 'below') continue
         const text = counterHintText(t, row.type, hint)
         if (hint.hint.taken) errors[row.numKey] = text
-        else if (!confirmed.some(c => c.numKey === row.numKey && c.text === text)) back.push({ numKey: row.numKey, label: t(row.labelKey), text })
+        else goingBack.push({ numKey: row.numKey, label: t(row.labelKey), text })
       }
       // So is one whose number another type already has (a format and prefix they share).
       const taken = await Promise.all(rows.map(async row => {
@@ -606,7 +607,9 @@ export default function SettingsForm({ settings }: Props) {
     }
     setDocsErrors(errors)
     if (Object.keys(errors).length) return
-    if (back.length) { setConfirmBack(back); return }
+    // Asked again, with every row going back, when one of them was not confirmed with the hint it
+    // has now: the next confirm then covers them all.
+    if (goingBack.some(g => !confirmed.some(c => c.numKey === g.numKey && c.text === g.text))) { setConfirmBack(goingBack); return }
     const [inv, quote, credit] = rows
     const config = {
       invoice_prefix:                  inv.prefix,
