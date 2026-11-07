@@ -1373,6 +1373,8 @@ export const de = {
     history: 'Verlauf',
     subject: 'Betreff: {subject}',
     automatic: 'automatisch',
+    viaClaude: 'über {client}',
+    viaClaudeTitle: 'Über eine Claude-Verbindung erledigt, nicht in Mado',
     openStorno: 'Storno öffnen',
     openInDrive: 'In Drive öffnen',
     openSource: 'Öffnen',

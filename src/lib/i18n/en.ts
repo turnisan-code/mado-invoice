@@ -1372,6 +1372,9 @@ export const en = {
     history: 'History',
     subject: 'Subject: {subject}',
     automatic: 'automatic',
+    // An entry written from a Claude connection; {client} is Claude or Claude Code.
+    viaClaude: 'via {client}',
+    viaClaudeTitle: 'Done from a Claude connection, not in Mado',
     openStorno: 'Open Storno',
     openInDrive: 'Open in Drive',
     openSource: 'Open',
