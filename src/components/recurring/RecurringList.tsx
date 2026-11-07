@@ -136,10 +136,17 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
   // days no invoice of the schedule covers: just before it, and those a run skipped (notBilled).
   const asOf = today()
   const plans = new Map(schedules.map(s => [s.id, planNextPeriod(s, s.covered, asOf)]))
-  const nextDate = (s: ScheduleRow) => (scheduleStatus(s) === 'ended' ? s.next_date : plans.get(s.id)!.date)
+  // null: the schedule creates no further invoice, as its editor says ("No further invoice") and
+  // list_recurring (next_invoice: null). That is one the generator switched off (its next date is
+  // past the end date) and one whose next free period starts after the end date: the next run
+  // switches it off, e.g. when an invoice's service period was extended over the last period.
+  const nextDate = (s: ScheduleRow) => {
+    const plan = plans.get(s.id)!
+    return plan.ended ? null : plan.date
+  }
   function planNote(s: ScheduleRow) {
     const plan = plans.get(s.id)!
-    const open = scheduleStatus(s) !== 'ended' && !plan.ended
+    const open = !plan.ended
     const unbilled = notBilled(s.unbilled, s.covered, open ? plan.gap : null)
     if (!open && !unbilled.ranges.length) return null
     return (
@@ -216,6 +223,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
           {schedules.map(s => {
             const status = scheduleStatus(s)
             const note = planNote(s)
+            const next = nextDate(s)
             return (
               <div key={s.id} className="px-4 py-3.5 space-y-1.5">
                 <div className="flex items-start justify-between gap-3">
@@ -226,7 +234,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   <StatusBadge status={status} label={statusLabel(status)} className="shrink-0" />
                 </div>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  {intervalLabel(s)} · {t('recurring.next')} {formatDate(nextDate(s), lang)}
+                  {intervalLabel(s)} · {next ? <>{t('recurring.next')} {formatDate(next, lang)}</> : t('recurring.noFurtherInvoice')}
                   {s.end_date && <> · {t('recurring.until')} {formatDate(s.end_date, lang)}</>}
                   {' · '}{modeLabel(s)}
                 </p>
@@ -265,6 +273,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
             )}
             {schedules.map(s => {
               const status = scheduleStatus(s)
+              const next = nextDate(s)
               const cells = (
                 <>
                   <td className="px-4 py-3">
@@ -278,7 +287,7 @@ export default function RecurringList({ schedules }: { schedules: ScheduleRow[] 
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{s.source?.client ?? '—'}</td>
                   <td className="px-4 py-3 text-neutral-600 dark:text-neutral-400">{intervalLabel(s)}</td>
                   <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400">
-                    <span className="whitespace-nowrap">{formatDate(nextDate(s), lang)}</span>
+                    <span className="whitespace-nowrap">{next ? formatDate(next, lang) : t('recurring.noFurtherInvoice')}</span>
                     <span className="block text-xs">{planNote(s)}</span>
                   </td>
                   <td className="px-4 py-3 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">{s.end_date ? formatDate(s.end_date, lang) : '—'}</td>

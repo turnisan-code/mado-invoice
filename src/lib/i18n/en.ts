@@ -646,6 +646,7 @@ export const en = {
     endBeforeNext: 'The end date must not be before the next invoice.',
     client: 'Client',
     next: 'Next',
+    noFurtherInvoice: 'No further invoice',
     until: 'Until',
     status: 'Status',
     lastInvoice: 'Last invoice',

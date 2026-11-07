@@ -50,9 +50,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   const schedule = (scheduleRow ?? null) as RecurringSchedule | null
   // The date of the invoice the schedule really creates next: past periods its invoices already cover.
-  const scheduleNext = schedule?.active
-    ? planNextPeriod(schedule, (await coveredPeriods(supabase, [schedule.id])).get(schedule.id) ?? []).date
+  // None when the next free period starts after the end date: the schedule is shown as ended, as the
+  // schedule list, its editor and list_recurring say (the next run switches it off).
+  const schedulePlan = schedule?.active
+    ? planNextPeriod(schedule, (await coveredPeriods(supabase, [schedule.id])).get(schedule.id) ?? [])
     : null
+  const scheduleNext = schedulePlan && !schedulePlan.ended ? schedulePlan.date : null
+  const scheduleEnded = !!schedulePlan?.ended || !!(schedule?.end_date && schedule.next_date > schedule.end_date)
   const publicSettings = toPublicSettings(settings)
   const payments = doc.payments ?? []
   const docWithItems = { ...doc, items: doc.document_items ?? [], payments }
@@ -82,7 +86,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 <Repeat size={12} />
                 {scheduleNext
                   ? t('recurring.templateBanner', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), date: formatDate(scheduleNext, lang) })
-                  : t('recurring.templateBannerInactive', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), status: t(schedule.end_date && schedule.next_date > schedule.end_date ? 'recurring.statuses.ended' : 'recurring.statuses.paused') })}
+                  : t('recurring.templateBannerInactive', { interval: t(`recurring.intervals.${schedule.interval}` as DictKey), status: t(scheduleEnded ? 'recurring.statuses.ended' : 'recurring.statuses.paused') })}
               </Link>
             )}
           </div>
