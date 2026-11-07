@@ -11,7 +11,9 @@ const noIndex = [{ key: "X-Robots-Tag", value: "noindex, nofollow" }];
 
 const nextConfig: NextConfig = {
   // The PDF renderer reads its fonts from disk (src/lib/pdf/render.ts); files in public/ are
-  // served by the CDN and are not part of a serverless function unless traced in here.
+  // served by the CDN and are not part of a serverless function unless traced in here. The
+  // cancelled stamp (src/lib/pdf/stamp.ts) uses a PDF standard font that pdf-lib carries in its
+  // own code, so it needs no file here.
   outputFileTracingIncludes: {
     "/api/**": ["./public/fonts/*"],
     "/portal/**": ["./public/fonts/*"],

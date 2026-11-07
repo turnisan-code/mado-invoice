@@ -59,7 +59,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_send_email',
     title: 'Prepare: email a document',
-    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. An e-invoice is refused while the client was created or changed from Claude and not saved in Mado since, or while payments Claude recorded, changed or removed on the invoice are not confirmed there: it is built from both as they are when sent; attach_einvoice 'none' sends the frozen PDF alone. Should Claude change either while it runs, nothing is sent. ${APPROVAL}`,
+    description: `Prepare emailing an ISSUED document from the connected Gmail account: sender, recipients, subject, text, attachments (the frozen PDF, with a cancelled stamp over it when the document is cancelled, and optionally the e-invoice) and a warning if the total changed since issuing. For a draft use prepare_issue_and_send. Recipients default to the client record; an address not on it, or never emailed from Mado for this client, is always approved in Mado. An e-invoice is refused while the client was created or changed from Claude and not saved in Mado since, or while payments Claude recorded, changed or removed on the invoice are not confirmed there: it is built from both as they are when sent; attach_einvoice 'none' sends the frozen PDF alone. Should Claude change either while it runs, nothing is sent. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       document_id: z.uuid(),
@@ -94,7 +94,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_storno',
     title: 'Prepare: Storno',
-    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. Refused while the invoice's client was created or changed from Claude and not saved in Mado since: the credit note is archived with it for good; should Claude change the client while it runs, the credit note stays without an archive copy until the owner saves the client (the result says so). ${APPROVAL}`,
+    description: `Prepare cancelling an issued invoice with a Storno credit note: the expected credit-note number, the amount and the consequences (the invoice becomes cancelled and its PDF is shown and sent with a cancelled stamp from then on, its project entries and deducted invoices are freed, the credit is applied, money received has to be paid back). For a partial correction use create_credit_note instead. Refused while the invoice's client was created or changed from Claude and not saved in Mado since: the credit note is archived with it for good; should Claude change the client while it runs, the credit note stays without an archive copy until the owner saves the client (the result says so). ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({
       invoice_id: z.uuid(),
@@ -106,7 +106,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_cancel',
     title: 'Prepare: cancel a document',
-    description: `Prepare cancelling a draft of any type, or an issued quote. Cancelled is final. An issued invoice is cancelled with prepare_storno; an issued credit note can never be cancelled. ${APPROVAL}`,
+    description: `Prepare cancelling a draft of any type, or an issued quote. Cancelled is final; an issued quote's PDF is shown and sent with a cancelled stamp from then on. An issued invoice is cancelled with prepare_storno; an issued credit note can never be cancelled. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({ document_id: z.uuid() }),
     hints: PREPARE,

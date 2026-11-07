@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { apiError, isUuid, requireUser } from '@/lib/auth'
 import { ArchiveError, getIssuedPdf } from '@/lib/pdf/snapshot'
 import { DocumentNotFoundError } from '@/lib/pdf/render'
+import { withCancelStamp } from '@/lib/pdf/stamp'
 
 export const maxDuration = 60
 
 // Every outgoing copy of a numbered document (download, email, reminder, Drive, Bookamat) is this
 // stored PDF. A document issued before archive copies existed gets one on first request. The
-// payments and the open balance a reminder asks for are on the Mahnung, never on this copy.
+// payments and the open balance a reminder asks for are on the Mahnung, never on this copy. A
+// cancelled document is served with the cancelled stamp over it (src/lib/pdf/stamp.ts); the stored
+// copy stays as issued.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const auth = await requireUser()
@@ -16,8 +19,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!isUuid(id)) return apiError(404, 'not_found', 'Not found')
 
   try {
-    const { buffer, filename } = await getIssuedPdf(supabase, id, 'on_demand')
-    return new NextResponse(new Uint8Array(buffer), {
+    const { buffer, filename, doc } = await getIssuedPdf(supabase, id, 'on_demand')
+    const pdf = await withCancelStamp(supabase, doc, buffer)
+    return new NextResponse(new Uint8Array(pdf), {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `inline; filename="${filename}"`,

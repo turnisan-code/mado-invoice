@@ -70,6 +70,8 @@ export const cancelAction = defineAction<Args>({
   async prepare(ctx, args) {
     const { doc, released, gross, client, fingerprint } = await loadCancel(ctx, args.document_id)
     const notices: Worded[] = [notice('mcp.approve.notices.cancelFinal')]
+    // An issued quote: its PDF carries the cancelled stamp from then on (src/lib/pdf/stamp.ts).
+    if (doc.number) notices.push(notice('mcp.approve.notices.cancelStamped', { number: doc.number }))
     if (released.time.length || released.expenses.length) notices.push(notice('mcp.approve.notices.releasesEntries', { entries: entries(released.time.length, released.expenses.length) }))
     if (released.deposits.length) notices.push(notice(released.deposits.length === 1 ? 'mcp.approve.notices.releasesDepositsOne' : 'mcp.approve.notices.releasesDeposits', { count: released.deposits.length }))
     const summary = doc.number

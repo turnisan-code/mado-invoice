@@ -30,6 +30,18 @@ export async function fetchCreditReference(
   return data?.number && data.type === 'invoice' ? { number: data.number, date: data.date, kind: 'correction' } : null
 }
 
+// The Storno that cancelled an issued invoice (create_credit_note with p_cancel): the numbered
+// credit note pointing at it with cancels_document_id. Null when there is none (a quote, or an
+// invoice cancelled before a Storno was required).
+export async function fetchStorno(supabase: SupabaseClient, invoiceId: string): Promise<{ number: string; date: string } | null> {
+  const { data, error } = await supabase.from('documents').select('number, date')
+    .eq('type', 'credit_note').eq('cancels_document_id', invoiceId).not('number', 'is', null)
+    .order('date').order('number').limit(1)
+  if (error) throw new Error(error.message)
+  const row = data?.[0] as { number: string | null; date: string } | undefined
+  return row?.number ? { number: row.number, date: row.date } : null
+}
+
 // The buyer reference a document prints, resolved as its e-invoice resolves it
 // (src/lib/einvoice/export.ts): its own once set ('' = cleared on purpose); while never set, that
 // of the invoice a credit note corrects, else the client's default.

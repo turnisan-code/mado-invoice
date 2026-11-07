@@ -84,7 +84,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
-          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} cancelled={!!doc.number && doc.status === 'cancelled'} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} number={doc.number} kind="invoice" invoiceKind={doc.invoice_kind} language={doc.language} initialToken={doc.share_token ?? null} driveReady={publicSettings.drive_configured} />}
           {doc.number && doc.status !== 'cancelled' && !deductedOn && <ConvertDocumentButton kind="credit_note" sourceId={doc.id} />}

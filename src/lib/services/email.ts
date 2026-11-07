@@ -8,6 +8,7 @@ import { sendGmail, ensurePortalLink, type MailAttachment } from '@/lib/utils/re
 import { logEvent } from '@/lib/events'
 import { getIssuedPdf, type IssuedPdf } from '@/lib/pdf/snapshot'
 import { archiveToDrive, type DriveArchive } from '@/lib/pdf/drive'
+import { withCancelStamp } from '@/lib/pdf/stamp'
 import { exportEInvoice } from '@/lib/einvoice/export'
 import type { EInvoiceFormat, Settings } from '@/types'
 import { fillPortalLink, hasPortalLinkToken } from './email-compose'
@@ -54,8 +55,9 @@ export type EmailFailure =
   | { ok: false; stage: 'pdf' | 'einvoice' | 'portal_link'; error: unknown }
   | { ok: false; stage: 'send'; failure: GoogleFailure }
 
-// The attachment is always the document's frozen copy, never a PDF a caller supplies; the
-// e-invoice is built from the stored document as the download is. A failure before the send
+// The attachment is always the document's frozen copy, never a PDF a caller supplies (with the
+// cancelled stamp over it when the document is cancelled; the Drive copy gets the copy as issued);
+// the e-invoice is built from the stored document as the download is. A failure before the send
 // leaves nothing sent; after it the email is out, and the history and Drive copy are best effort.
 export async function sendDocumentEmail(supabase: SupabaseClient, settings: Settings, mail: DocumentEmail): Promise<SentEmail | EmailFailure> {
   const { documentId } = mail
@@ -64,7 +66,8 @@ export async function sendDocumentEmail(supabase: SupabaseClient, settings: Sett
   if (documentId) {
     try {
       issued = await getIssuedPdf(supabase, documentId, 'on_demand')
-      attachment = { filename: issued.filename, content: issued.buffer }
+      const pdf = await withCancelStamp(supabase, issued.doc, issued.buffer)
+      attachment = { filename: issued.filename, content: Buffer.from(pdf) }
     } catch (error) {
       return { ok: false, stage: 'pdf', error }
     }
