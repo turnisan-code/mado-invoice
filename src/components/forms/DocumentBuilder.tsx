@@ -435,11 +435,25 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     })
   }
 
+  // A cancelled document is previewed with the cancelled stamp its PDF carries wherever it is shown
+  // (src/lib/pdf/stamp.ts, loaded only then); should that fail, the preview shows without it.
+  async function stampedPreview(issued: EditorDocument & { number: string }, blob: Blob): Promise<Blob> {
+    try {
+      const { withCancelStamp } = await import('@/lib/pdf/stamp')
+      const bytes = await withCancelStamp(supabase, { ...issued, language: formRef.current.language }, new Uint8Array(await blob.arrayBuffer()))
+      return new Blob([new Uint8Array(bytes)], { type: 'application/pdf' })
+    } catch (err) {
+      console.error('[editor] preview not stamped:', err)
+      return blob
+    }
+  }
+
   // Preview of the editor's current state; it is never sent anywhere.
   async function downloadPdf() {
     const result = await buildPdfBlob(undefined, !!doc?.number)
     if (!result) return
-    const url = URL.createObjectURL(result.blob)
+    const blob = doc?.number && doc.status === 'cancelled' ? await stampedPreview({ ...doc, number: doc.number }, result.blob) : result.blob
+    const url = URL.createObjectURL(blob)
     // Use a hidden <a> with target="_blank" — not blocked by popup blockers
     // unlike window.open() called after async work.
     const a = document.createElement('a')

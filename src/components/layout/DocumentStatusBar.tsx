@@ -306,6 +306,8 @@ export default function DocumentStatusBar({ document: doc, display }: Props) {
     if (needsNumber(s)) parts.push(t('statusBar.confirmNumber', { number: t(`docTypeNumber.${type}` as DictKey), status: statusLabel(s) }))
     if (recordsPayment(s)) parts.push(t('statusBar.confirmPayment'))
     if (DESTRUCTIVE.has(s)) parts.push(t('statusBar.confirmDestructive'))
+    // An issued document's PDF carries the cancelled stamp from then on (src/lib/pdf/stamp.ts).
+    if (s === 'cancelled' && doc.number) parts.push(t('statusBar.confirmCancelStamp'))
     return parts.join(' ')
   }
 

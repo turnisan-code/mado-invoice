@@ -86,6 +86,23 @@ Create an OAuth client (type “Web application”) in Google Cloud and register
 `gmail.send`, `userinfo.email` and `drive`. Connect the account and choose the Drive folder in
 Settings → Google.
 
+## Issued PDFs
+
+Issuing stores the document's PDF once, in the `documents` bucket (the archive copy). Every later
+copy is that file: the download in Mado, emails and reminders, the client portal, the Drive copy, the Bookamat
+attachment, the PDF inside a Peppol e-invoice and the ZIP of a period's PDFs under Reports.
+
+A cancelled document (an invoice cancelled by its Storno credit note, a cancelled quote) is shown
+and sent with a red stamp across its first page, in the document's language: “STORNIERT” with
+“Storno GS-… vom …” on an invoice, “CANCELLED” with “Cancelled by GS-… on …” in English (a quote
+has no Storno, so only the first line), and a small line at the top of every further page. That
+holds for the PDF opened or downloaded in Mado and the editor's preview, the portal's PDF (the
+portal page also names the Storno under the status), an emailed PDF and the PDF inside a Peppol
+e-invoice. The stamp is laid over the stored copy each time the PDF goes out
+(`src/lib/pdf/stamp.ts`); the stored copy itself, the Drive copy, the Bookamat attachment and the
+ZIP export stay exactly as issued. Should stamping fail, the PDF goes out unstamped and the server
+log says so.
+
 ## Claude connector
 
 Claude (claude.ai on the web, desktop and mobile, and Claude Code) works with Mado through the MCP

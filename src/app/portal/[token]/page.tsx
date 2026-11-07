@@ -8,7 +8,7 @@ import PortalEffects from './PortalEffects'
 import { createServiceClient } from '@/lib/supabase/service'
 import { calcTotals, clampPercent, formatDate, formatMoney, getTaxNote, lineAmount, orderItems, sectionSummary, today } from '@/lib/utils/document'
 import { paymentTermsText } from '@/lib/templates'
-import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
+import { fetchBuyerReference, fetchCreditReference, fetchStorno } from '@/lib/utils/document-reference'
 import { countryName } from '@/lib/utils/country'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import { isShareExpired } from '@/lib/share'
@@ -49,11 +49,15 @@ const loadShared = cache(async (token: string) => {
   // payment details and QR code, so it never asks the client for money by what Claude wrote (a
   // removed payment would ask again for money paid). The PDF route serves a stored copy only.
   const paymentsHeld = !!doc.mcp_payments_at
-  const [reference, buyerReference] = await Promise.all([
+  // A cancelled invoice names its Storno under the status, as the stamp on its PDF does.
+  const [reference, buyerReference, storno] = await Promise.all([
     fetchCreditReference(supabase, doc),
     fetchBuyerReference(supabase, doc, clientHeld ? null : doc.clients),
+    doc.type === 'invoice' && doc.status === 'cancelled'
+      ? fetchStorno(supabase, doc.id).catch(err => { console.error('[portal] Storno not found:', err); return null })
+      : null,
   ])
-  return { doc, client: doc.clients, clientHeld, paymentsHeld, settings: settings as Settings, reference, buyerReference }
+  return { doc, client: doc.clients, clientHeld, paymentsHeld, settings: settings as Settings, reference, buyerReference, storno }
 })
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }): Promise<Metadata> {
@@ -93,7 +97,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const shared = await loadShared(token)
   if (!shared) notFound()
 
-  const { doc, client, clientHeld, paymentsHeld, settings, reference, buyerReference } = shared
+  const { doc, client, clientHeld, paymentsHeld, settings, reference, buyerReference, storno } = shared
   const lang = documentLanguage(doc.language)
   const t = documentT(lang)
   const company = settings.company_name || settings.owner_name
@@ -180,6 +184,9 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
           {expired
             ? <StatusBadge status="expired" label={t('lifecycle.portal.expired')} className="inline-block" />
             : statusShown && <StatusBadge status={doc.status} label={statusLabel(t, doc.status)} className="inline-block" />}
+          {doc.status === 'cancelled' && storno && (
+            <div className="text-xs text-red-700">{t('pdfPortal.cancelStamp.storno', { number: storno.number, date: formatDate(storno.date, lang) })}</div>
+          )}
         </div>
       </header>
 

@@ -51,7 +51,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         </div>
         <div className="flex items-center gap-2 pl-7 sm:pl-0">
           <DocumentStatusBar document={doc} />
-          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} />}
+          {doc.pdf_path && <IssuedPdfLink documentId={doc.id} driveFileId={doc.drive_file_id} cancelled={!!doc.number && doc.status === 'cancelled'} />}
           <div className="flex-1 sm:hidden" />
           {doc.number && <ShareLinkButton documentId={doc.id} number={doc.number} kind="quote" language={doc.language} initialToken={doc.share_token ?? null} driveReady={publicSettings.drive_configured} />}
           {/* Once converted, the quote links to its invoice instead of offering a second conversion. */}
