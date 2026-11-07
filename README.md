@@ -300,9 +300,11 @@ is still in the past keeps the level. The reminders already sent stay listed. Th
 two seconds after a change, so a due date that stood only for a moment (a typo, arrow keys, an
 extension taken back) starts the reminders over too: moving the due date back into the past before
 another reminder went out brings the level reached and the date of the last reminder back, and the
-history says so. That holds while the extended due date has not passed yet, and later too when the
-due date goes back to the one the reminders started over from, or earlier. Both need
-`supabase/migrations/20261107_dunning.sql` (the trigger `documents_due_date_reminders`).
+history says so. That holds while the extended due date has not passed yet. Once it has passed (the
+invoice was marked overdue again), only a due date set back to the one the reminders started over
+from, or an earlier one, brings the level back; a later date that stood only for a moment in between
+does not. Both need `supabase/migrations/20261107_dunning.sql` (the trigger
+`documents_due_date_reminders`).
 
 ## Crons
 

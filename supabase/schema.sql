@@ -1007,7 +1007,9 @@ create trigger documents_delete_guard
 -- event records it. That holds while the extended due date has not passed yet (or there is none),
 -- and later too when the due date goes back to the one the reminders started over from, or
 -- earlier. An extension that ran out and is then moved to another date in the past keeps the
--- reminders that started over.
+-- reminders that started over. It ran out once the invoice was marked overdue after the reset (a
+-- 'status_changed' event to 'overdue': the daily run, or the status update right after a save), so
+-- a later date that stands for a moment and is then taken back does not bring the old level back.
 create or replace function documents_due_date_reminders()
 returns trigger language plpgsql as $$
 declare
@@ -1047,6 +1049,10 @@ begin
   if v_reset_at is null
      or not (old.due_date is null or old.due_date >= v_today
              or coalesce(new.due_date <= (v_detail ->> 'previous_due_date')::date, false))
+     or (not coalesce(new.due_date <= (v_detail ->> 'previous_due_date')::date, false)
+         and exists (select 1 from document_events e
+                     where e.document_id = new.id and e.type = 'status_changed'
+                       and e.detail ->> 'to' = 'overdue' and e.created_at >= v_reset_at))
      or exists (select 1 from document_events e
                 where e.document_id = new.id and e.type = 'reminder_sent' and e.created_at >= v_reset_at)
      or exists (select 1 from reminder_log l
