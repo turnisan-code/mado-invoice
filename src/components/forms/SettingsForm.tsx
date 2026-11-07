@@ -23,8 +23,9 @@ import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import { formatDate, getTaxNote, viennaDate } from '@/lib/utils/document'
-import { NUMBER_TOKENS, formatDocumentNumber, hasYearToken, nextCounter, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
-import type { EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
+import { NUMBER_TOKENS, counterHintText, formatDocumentNumber, hasYearToken, nextCounter, nextNumberHint, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
+import { listIssuedNumbers } from '@/lib/services/queries'
+import type { DocumentType, EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 
 interface Props { settings: PublicSettings | null }
 
@@ -45,10 +46,18 @@ const TAX_TREATMENTS: TaxTreatment[] = ['at_vat', 'eu_reverse_charge', 'non_eu']
 type CounterKey = 'next_invoice_number' | 'next_quote_number' | 'next_credit_note_number'
 
 const NUMBER_ROWS = [
-  { labelKey: 'settings.numbering.invoice',    prefixKey: 'invoice_prefix',     fmtKey: 'invoice_number_format',     numKey: 'next_invoice_number',     resetKey: 'invoice_number_reset_yearly',     yearKey: 'invoice_counter_year' },
-  { labelKey: 'settings.numbering.quote',      prefixKey: 'quote_prefix',       fmtKey: 'quote_number_format',       numKey: 'next_quote_number',       resetKey: 'quote_number_reset_yearly',       yearKey: 'quote_counter_year' },
-  { labelKey: 'settings.numbering.creditNote', prefixKey: 'credit_note_prefix', fmtKey: 'credit_note_number_format', numKey: 'next_credit_note_number', resetKey: 'credit_note_number_reset_yearly', yearKey: 'credit_note_counter_year' },
+  { type: 'invoice',     labelKey: 'settings.numbering.invoice',    prefixKey: 'invoice_prefix',     fmtKey: 'invoice_number_format',     numKey: 'next_invoice_number',     resetKey: 'invoice_number_reset_yearly',     yearKey: 'invoice_counter_year' },
+  { type: 'quote',       labelKey: 'settings.numbering.quote',      prefixKey: 'quote_prefix',       fmtKey: 'quote_number_format',       numKey: 'next_quote_number',       resetKey: 'quote_number_reset_yearly',       yearKey: 'quote_counter_year' },
+  { type: 'credit_note', labelKey: 'settings.numbering.creditNote', prefixKey: 'credit_note_prefix', fmtKey: 'credit_note_number_format', numKey: 'next_credit_note_number', resetKey: 'credit_note_number_reset_yearly', yearKey: 'credit_note_counter_year' },
 ] as const
+
+type IssuedNumbers = Record<DocumentType, string[]>
+type NextNumberHint = NonNullable<ReturnType<typeof nextNumberHint>>
+
+async function loadIssuedNumbers(supabase: ReturnType<typeof createClient>): Promise<IssuedNumbers> {
+  const [invoice, quote, credit_note] = await Promise.all(NUMBER_ROWS.map(row => listIssuedNumbers(supabase, row.type)))
+  return { invoice, quote, credit_note }
+}
 
 // Whole days 0–365, or null when the input is not one.
 function parseDays(value: string): number | null {
@@ -269,6 +278,20 @@ export default function SettingsForm({ settings }: Props) {
     return startsThisYearsSeries(row, docs[row.resetKey] && hasYearToken(docs[row.fmtKey])) ? thisYear : docs[row.yearKey]
   }
 
+  // The numbers already issued, read (under the owner's RLS) once Numbering is opened, so an edited
+  // next number can say what it means against them. The save reads them again.
+  const [issued, setIssued] = useState<IssuedNumbers | null>(null)
+
+  // What the edited next number of a row means against `numbers`, the ones issued for its type.
+  function rowCounterHint(row: (typeof NUMBER_ROWS)[number], numbers: readonly string[]): NextNumberHint | null {
+    const typed = docs[row.numKey]
+    if (typed === null || !editedCounters.has(row.numKey)) return null
+    return nextNumberHint(numbers, {
+      fmt: docs[row.fmtKey], prefix: docs[row.prefixKey], typed,
+      counterYear: counterYear(row), resetYearly: docs[row.resetKey], thisYear,
+    })
+  }
+
   // ── Defaults state ───────────────────────────────────────────────────────────
   const [defaults, setDefaults] = useState({
     default_payment_days:        String(settings?.default_payment_days ?? 14),
@@ -441,6 +464,17 @@ export default function SettingsForm({ settings }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
+  useEffect(() => {
+    if (activeSection !== 'numbering' || issued) return
+    let live = true
+    // Without them there is no hint; the save reads them again and says so if that fails.
+    loadIssuedNumbers(createClient()).then(
+      numbers => { if (live) setIssued(numbers) },
+      error => console.error('[settings] issued numbers:', error),
+    )
+    return () => { live = false }
+  }, [activeSection, issued])
+
   // ── Save functions ───────────────────────────────────────────────────────────
   // The database's own text goes to the console; the toast is worded in the UI language.
   function saveFailed(error: PostgrestError) {
@@ -531,16 +565,34 @@ export default function SettingsForm({ settings }: Props) {
         else errors[row.numKey] = t('settings.numbering.nextError')
       }
     }
-    // A counter set back onto an issued number would only be skipped at issue time; refuse it here.
-    if (!Object.keys(errors).length) {
+    if (!Object.keys(errors).length && rows.some(row => counters[row.numKey] !== undefined)) {
+      setSaving('docs')
+      // A counter set back to, or below, a number of its series already issued is refused: one
+      // taken would only be skipped at issue time, one free (a gap) handed out after higher
+      // numbers. Read again, as something may have been issued since Numbering was opened.
+      let fresh: IssuedNumbers
+      try {
+        fresh = await loadIssuedNumbers(supabase)
+      } catch (error) {
+        setSaving(null)
+        saveFailed(error as PostgrestError)
+        return
+      }
+      setIssued(fresh)
+      for (const row of rows) {
+        const hint = rowCounterHint(row, fresh[row.type])
+        if (hint?.hint.kind === 'below') errors[row.numKey] = counterHintText(t, row.type, hint)
+      }
+      // So is one whose number another type already has (a format and prefix they share).
       const taken = await Promise.all(rows.map(async row => {
         const n = counters[row.numKey]
-        if (n === undefined) return null
+        if (n === undefined || errors[row.numKey]) return null
         const number = formatDocumentNumber(row.fmt, row.prefix, n, todayIso)
         const { data } = await supabase.from('documents').select('id').eq('number', number).limit(1)
         return data?.length ? { key: row.numKey, number } : null
       }))
       for (const hit of taken) if (hit) errors[hit.key] = t('clientData.numbering.numberTaken', { number: hit.number })
+      setSaving(null)
     }
     setDocsErrors(errors)
     if (Object.keys(errors).length) return
@@ -1238,7 +1290,11 @@ export default function SettingsForm({ settings }: Props) {
             {NUMBER_ROWS.map(row => {
               const yearInFormat = hasYearToken(docs[row.fmtKey])
               const cy = counterYear(row)
-              const rowErrors = [docsErrors[row.prefixKey], docsErrors[row.fmtKey], docsErrors[row.numKey]].filter(Boolean)
+              const rowErrors = [docsErrors[row.prefixKey], docsErrors[row.fmtKey]].filter(Boolean)
+              // The next number's error (a refused save) or else its hint, in one place the field
+              // points to and a screen reader announces.
+              const hint = issued && !docsErrors[row.numKey] ? rowCounterHint(row, issued[row.type]) : null
+              const counterError = docsErrors[row.numKey] ?? (hint?.hint.kind === 'below' ? counterHintText(t, row.type, hint) : null)
               return (
                 <div key={row.prefixKey} className="space-y-1.5">
                   <div className="grid grid-cols-[1fr_2fr] sm:grid-cols-[100px_72px_1fr_72px] gap-3 items-center">
@@ -1257,8 +1313,15 @@ export default function SettingsForm({ settings }: Props) {
                     </div>
                     <div className="space-y-1 min-w-0 col-span-2 sm:col-span-1">
                       <label htmlFor={`${uid}-${row.numKey}`} className={`${lbl} sm:sr-only`}>{t('settings.numbering.next')}</label>
-                      <MoneyInput id={`${uid}-${row.numKey}`} integer className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]} aria-invalid={!!docsErrors[row.numKey] || undefined}
-                        onValueChange={n => { setEditedCounters(s => new Set(s).add(row.numKey)); setDocs(d => ({ ...d, [row.numKey]: n })); markDirty('docs') }} />
+                      <MoneyInput id={`${uid}-${row.numKey}`} integer className={`${inp} min-w-0 sm:w-full w-24`} value={docs[row.numKey]}
+                        aria-invalid={!!counterError || undefined}
+                        aria-describedby={`${uid}-${row.numKey}-hint`}
+                        onValueChange={n => {
+                          setEditedCounters(s => new Set(s).add(row.numKey))
+                          setDocs(d => ({ ...d, [row.numKey]: n }))
+                          setDocsErrors(er => ({ ...er, [row.numKey]: undefined }))
+                          markDirty('docs')
+                        }} />
                     </div>
                   </div>
                   <div className="sm:pl-[112px] space-y-1">
@@ -1266,6 +1329,10 @@ export default function SettingsForm({ settings }: Props) {
                       → {previewNumber(row)}
                     </span>
                     {rowErrors.map(e => <p key={e} className={err}>{e}</p>)}
+                    <p id={`${uid}-${row.numKey}-hint`} aria-live="polite"
+                      className={cn(counterError ? err : 'text-xs text-amber-700 dark:text-amber-400', 'empty:mb-0')}>
+                      {counterError ?? (hint && counterHintText(t, row.type, hint))}
+                    </p>
                     <label className={`flex items-start gap-2 text-xs py-1 ${yearInFormat ? 'cursor-pointer text-neutral-700 dark:text-neutral-300' : 'text-neutral-400 dark:text-neutral-500'}`}>
                       <input type="checkbox" className="mt-0.5 accent-neutral-900 dark:accent-white"
                         checked={docs[row.resetKey] && yearInFormat}

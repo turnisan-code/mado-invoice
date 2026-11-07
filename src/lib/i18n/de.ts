@@ -2513,6 +2513,18 @@ export const de = {
       creditNote: 'Gutschrift',
       nextError: 'Die nächste Nummer muss eine ganze Zahl ab 1 sein.',
       saved: 'Nummerierung gespeichert.',
+      hint: {
+        highest: 'Höchste bisher vergebene Nummer: {number} (Nr. {counter}).',
+        highestYear: 'Höchste im Jahr {year} vergebene Nummer: {number} (Nr. {counter}).',
+        noneYet: 'In dieser Reihe wurde noch keine Nummer vergeben.',
+        noneYetYear: 'In dieser Reihe wurde im Jahr {year} noch keine Nummer vergeben.',
+        below: 'Jede Nummer wird nur einmal vergeben und die Nummern dürfen nicht zurückgehen: {next} oder höher eingeben.',
+        gapOne: 'Mit {start} als nächster Nummer bleibt die Nummer {from} frei.',
+        gapOther: 'Mit {start} als nächster Nummer entsteht eine Lücke von {count} Nummern ({from}–{to}).',
+        firstGapOne: 'Mit {start} als nächster Nummer bleibt die Nummer 1 frei, außer sie wurde anderswo vergeben (etwa in einem früheren Programm).',
+        firstGapOther: 'Mit {start} als nächster Nummer bleiben die Nummern 1–{to} frei, außer sie wurden anderswo vergeben (etwa in einem früheren Programm).',
+        consecutive: 'Rechnungen sollen in Österreich fortlaufend nummeriert sein: Bleibt die Lücke, den Grund für die fehlenden Nummern dokumentieren.',
+      },
     },
     defaults: {
       title: 'Vorgaben',

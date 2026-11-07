@@ -271,6 +271,23 @@ export async function getDocumentDetail(supabase: SupabaseClient, id: string): P
   }
 }
 
+// ─── Numbering ───────────────────────────────────────────────────────────────
+
+const NUMBERS_PAGE = 1000
+
+// Every number issued for one document type (Storno and cancelled ones included, as their numbers
+// stay used), read in pages so a long history is not cut at the API's row limit.
+export async function listIssuedNumbers(supabase: SupabaseClient, type: DocumentType): Promise<string[]> {
+  const numbers: string[] = []
+  for (let from = 0; ; from += NUMBERS_PAGE) {
+    const { data, error } = await supabase.from('documents').select('number').eq('type', type).not('number', 'is', null)
+      .order('id').range(from, from + NUMBERS_PAGE - 1)
+    if (error) throw error
+    for (const row of data ?? []) if (typeof row.number === 'string') numbers.push(row.number)
+    if ((data?.length ?? 0) < NUMBERS_PAGE) return numbers
+  }
+}
+
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
 export const CLIENT_LIST_COLUMNS = 'id, client_number, name, company, email, phone, address_line1, address_line2, zip, city, country, uid_number, tax_treatment, language, payment_days, status, tags'

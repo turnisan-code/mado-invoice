@@ -2514,6 +2514,19 @@ export const en = {
       creditNote: 'Credit note',
       nextError: 'Next number must be a whole number of at least 1.',
       saved: 'Numbering saved.',
+      // Shown while a next number is edited: what it means against the numbers already issued.
+      hint: {
+        highest: 'Highest number issued so far: {number} (no. {counter}).',
+        highestYear: 'Highest number issued in {year}: {number} (no. {counter}).',
+        noneYet: 'Nothing in this series has been issued yet.',
+        noneYetYear: 'Nothing in this series has been issued in {year} yet.',
+        below: 'A number is issued only once and the numbers must not go back: enter {next} or higher.',
+        gapOne: 'Starting at {start} leaves number {from} unused.',
+        gapOther: 'Starting at {start} leaves a gap of {count} numbers ({from}–{to}).',
+        firstGapOne: 'Starting at {start} leaves number 1 unused, unless it was issued elsewhere (for example in an earlier program).',
+        firstGapOther: 'Starting at {start} leaves numbers 1–{to} unused, unless they were issued elsewhere (for example in an earlier program).',
+        consecutive: 'Austrian invoices are expected to be numbered consecutively: if the gap stays, document why these numbers are missing.',
+      },
     },
     defaults: {
       title: 'Defaults',
