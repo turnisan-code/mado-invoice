@@ -2617,7 +2617,8 @@ export const en = {
       },
       drive: {
         title: 'Google Drive',
-        description: 'Auto-upload PDFs to a Drive folder when you send or download an invoice.',
+        description: 'When a document is issued, its PDF is saved to a Drive folder of your choice.',
+        layout: 'Inside it, each PDF goes into a folder for the year of its document date and, in there, one for its type, for example 2026 › Invoices, next to Credit notes and Quotes. Missing folders are created in the language of the app; existing ones in either language are used. PDFs already in Drive are not moved.',
         connectFirst: 'Connect your Google account first to enable Drive.',
         notConfirmed: 'Drive access could not be confirmed for this connection. ',
         reconnectLink: 'Re-connect →',

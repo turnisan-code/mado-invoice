@@ -94,6 +94,14 @@ export function isGoogleNotFound(err: unknown): boolean {
   return describe(err).status === 404
 }
 
+// No access to a file or folder: not found for this grant, or not allowed to look into it or add
+// to it. Not an expired grant, a missing scope, a rate limit or a full Drive.
+export function isGoogleNoAccess(err: unknown): boolean {
+  const { status, text } = describe(err)
+  if (status === 404) return true
+  return status === 403 && !isGoogleScopeError(err) && !/rate ?limit|limit exceeded|quota/i.test(text)
+}
+
 export function googleErrorMessage(err: unknown): string {
   return err instanceof Error && err.message ? err.message : 'Google request failed'
 }

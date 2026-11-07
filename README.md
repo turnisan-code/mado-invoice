@@ -86,6 +86,15 @@ Create an OAuth client (type “Web application”) in Google Cloud and register
 `gmail.send`, `userinfo.email` and `drive`. Connect the account and choose the Drive folder in
 Settings → Google.
 
+The PDF of each issued document goes into that folder under `<year>/<type>`: the year of the
+document date, then `Invoices`, `Credit notes` or `Quotes` (`Rechnungen`, `Gutschriften`,
+`Angebote` when the app is in German). A missing folder is created in the app's language, and an
+existing one in either language is used, so switching the language never splits a year; where two
+folders have the same name, the oldest is used. Drive files are never overwritten or moved: PDFs
+uploaded before these folders existed stay in the Drive folder itself and still count as the
+document's copy, so nothing is uploaded twice. When the account may not add folders to the chosen
+folder, the PDF is saved in the chosen folder itself.
+
 ## Issued PDFs
 
 Issuing stores the document's PDF once, in the `documents` bucket (the archive copy). Every later

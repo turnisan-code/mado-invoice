@@ -152,7 +152,7 @@ export async function issueDocument(
   const { settings, doc } = issued
   if (!settings.drive_folder_id || !settings.gmail_refresh_token) return outcome
   try {
-    outcome.drive = await archiveToDrive(supabase, settings, { id: doc.id, number: outcome.number, drive_file_id: doc.drive_file_id }, issued)
+    outcome.drive = await archiveToDrive(supabase, settings, { id: doc.id, number: outcome.number, type: doc.type, date: doc.date, drive_file_id: doc.drive_file_id }, issued)
   } catch (err) {
     if (isGoogleAuthError(err)) {
       await clearGoogleTokens(supabase, settings.id)
