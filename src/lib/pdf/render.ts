@@ -8,6 +8,9 @@ import { calcTotals, getTaxNote, orderItems } from '@/lib/utils/document'
 import { fetchBuyerReference, fetchCreditReference } from '@/lib/utils/document-reference'
 import { epcBeneficiary, generateEpcQr } from '@/lib/utils/epc-qr'
 import type { Client, Document, DocumentItem, Language, Payment, Settings } from '@/types'
+import { pdfFilename } from './filename'
+
+export { pdfFilename }
 
 // Server-only (renderToBuffer needs node): import from route handlers and server utilities,
 // never from a client component.
@@ -41,10 +44,6 @@ export async function loadSettings(supabase: SupabaseClient): Promise<Settings> 
   const { data, error } = await supabase.from('settings').select('*').single()
   if (error || !data) throw new Error(error?.message ?? 'Settings not found')
   return data as Settings
-}
-
-export function pdfFilename(number: string): string {
-  return `${number.replace(/["\\/\r\n]+/g, '_')}.pdf`
 }
 
 // The single assembly of everything the PDF prints: ordered lines, totals after payments and

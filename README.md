@@ -93,7 +93,8 @@ existing one in either language is used, so switching the language never splits 
 folders have the same name, the oldest is used. Drive files are never overwritten or moved: PDFs
 uploaded before these folders existed stay in the Drive folder itself and still count as the
 document's copy, so nothing is uploaded twice. When the account may not add folders to the chosen
-folder, the PDF is saved in the chosen folder itself.
+folder, the PDF is saved in the chosen folder itself. Gmail attaches the same stored PDF; the
+browser never sends one.
 
 ## Issued PDFs
 

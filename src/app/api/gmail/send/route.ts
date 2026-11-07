@@ -47,10 +47,10 @@ export async function POST(req: NextRequest) {
     return apiError(400, 'invalid_request', 'einvoice must be ebinterface or ubl, with a documentId')
   }
 
-  // The attachment is the document's frozen copy, loaded by the service: never a PDF the browser
-  // sends (pdfBase64 is ignored). The editor issues a draft before it can be emailed. The
-  // client's e-invoice goes along; nothing is sent when it cannot be built, and the dialog says
-  // why (einvoice.errors.*).
+  // The attachment is the document's frozen copy, loaded (or made, when it is missing) by the
+  // service: the browser sends no PDF, and any other field in the body is ignored. The editor
+  // issues a draft before it can be emailed. The client's e-invoice goes along; nothing is sent
+  // when it cannot be built, and the dialog says why (einvoice.errors.*).
   const result = await sendDocumentEmail(supabase, settings, {
     documentId: (documentId as string | undefined) ?? null,
     to: [to],
