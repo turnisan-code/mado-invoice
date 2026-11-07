@@ -244,8 +244,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     }))
     if (!payload.length) return
     if (excessTotal > 0.005 && !allowOverpayment) {
-      // A reminded invoice paid with more than its balance is most likely a paid Mahnung.
-      setExcessAs(overpaid.some(id => (invoiceById.get(id)?.reminderLevel ?? 0) > 0) ? 'fee' : 'payment')
+      // An invoice dunned with a Mahnung (level 2 on: fee and interest on top) paid with more than its
+      // balance is most likely a paid Mahnung; a Zahlungserinnerung asks for the balance only.
+      setExcessAs(overpaid.some(id => (invoiceById.get(id)?.reminderLevel ?? 0) >= 2) ? 'fee' : 'payment')
       setConfirmOverpay(true)
       return
     }

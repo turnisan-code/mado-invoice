@@ -1,10 +1,12 @@
-// Writing drafts: the editor's save path (autosave, Save draft, issuing, the flush on leaving),
-// copying a document and changing what a final invoice deducts. Shared by the editor, the
-// duplicate button and the Claude connector. Browser-safe (supabase-js and the editor's pure model).
+// Writing drafts: the editor's save path (autosave, Save draft, issuing, the flush on leaving;
+// also for an issued document, which stays editable), copying a document and changing what a final
+// invoice deducts. Shared by the editor, the duplicate button and the Claude connector.
+// Browser-safe (supabase-js and the editor's pure model).
 import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js'
 import { docFields, itemsPayload, termDays, clientTerms, type FormState } from '@/components/forms/builder/model'
 import { linkDeposit, unlinkDeposit, writeDeductions } from '@/lib/deposits'
 import { addDays, today } from '@/lib/utils/document'
+import { markOverdueInvoices } from '@/lib/utils/overdue'
 import type { Client, DocumentType, Settings } from '@/types'
 
 export type DraftSaveMode = 'auto' | 'save' | 'issue'
@@ -53,24 +55,45 @@ export interface SavedDraft {
   id: string | null
   inserted: boolean
   error: SaveDraftError | null
+  // An issued invoice the save moved between 'sent' and 'overdue' (its due date, or what it bills).
+  statusChanged?: boolean
+}
+
+// An open issued invoice (sent or overdue; never a paid or cancelled one) takes the status its
+// due date gives it at once, by the daily cron's own rule. The database has already started its
+// reminders over when the due date moved to today or later (documents_due_date_reminders). A
+// failure is left to the next daily run and never fails the save.
+async function followDueDate(supabase: SupabaseClient, id: string): Promise<boolean> {
+  try {
+    const { marked, reopened, error } = await markOverdueInvoices(supabase, { only: [id] })
+    if (error) console.error('[drafts] status not updated after the save:', error)
+    return marked + reopened > 0
+  } catch (err) {
+    console.error('[drafts] status not updated after the save:', err)
+    return false
+  }
 }
 
 // Header, then items: a new document is inserted as an unnumbered EUR draft once, an existing one
 // updated; replace_document_items keeps every line under the id it carries, so what is billed on a
 // line stays linked to it. `onHeaderSaved` runs as soon as the header is written, before the items.
 // `draftOnly` refuses a document that has a number or is not a draft any more (the update does not
-// check that on its own; replace_document_items does only for a Claude session).
+// check that on its own; replace_document_items does only for a Claude session). Saving an open
+// issued invoice also moves its status as its due date says (followDueDate).
 export async function saveDraft(
   supabase: SupabaseClient,
   { id, type, fields, items, keepStoredDate = false }: DraftWrite,
   opts: { draftOnly?: boolean; onHeaderSaved?: (id: string, inserted: boolean) => void } = {},
 ): Promise<SavedDraft> {
   const inserted = !id
+  let openInvoice = false
   if (id) {
     const update: Partial<DraftFields> = { ...fields }
     if (keepStoredDate) delete update.date
     const query = supabase.from('documents').update(update).eq('id', id)
-    const { data, error } = opts.draftOnly ? await query.is('number', null).eq('status', 'draft').select('id') : await query
+    const { data, error } = opts.draftOnly
+      ? await query.is('number', null).eq('status', 'draft').select('id')
+      : await query.select('type, number, status')
     if (error) {
       if (error.code === '23505' && /recurring_period/.test(`${error.message} ${error.details ?? ''}`)) {
         const { data: stored } = await supabase.from('documents').select('date, due_date').eq('id', id).maybeSingle()
@@ -79,6 +102,8 @@ export async function saveDraft(
       return { id, inserted: false, error: { kind: 'database', error } }
     }
     if (opts.draftOnly && !(data as unknown[] | null)?.length) return { id, inserted: false, error: { kind: 'draft_only' } }
+    const row = (data as { type?: string; number?: string | null; status?: string }[] | null)?.[0]
+    openInvoice = !opts.draftOnly && row?.type === 'invoice' && !!row.number && (row.status === 'sent' || row.status === 'overdue')
     opts.onHeaderSaved?.(id, false)
   } else {
     const { data, error } = await supabase.from('documents')
@@ -90,7 +115,8 @@ export async function saveDraft(
   }
   const { error: itemsErr } = await supabase.rpc('replace_document_items', { p_document_id: id, p_items: items })
   if (itemsErr?.code === 'MI044') return { id, inserted, error: { kind: 'draft_only' } }
-  return { id, inserted, error: itemsErr ? { kind: 'database', error: itemsErr } : null }
+  if (itemsErr) return { id, inserted, error: { kind: 'database', error: itemsErr } }
+  return { id, inserted, error: null, statusChanged: openInvoice ? await followDueDate(supabase, id) : false }
 }
 
 export type DuplicateResult =

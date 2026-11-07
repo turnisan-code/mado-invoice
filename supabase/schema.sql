@@ -323,7 +323,8 @@ create table documents (
   -- Bookings a sync is posting, or posted but could not record: the next sync settles them first.
   bookamat_pending    jsonb,
   reminder_sent_at    timestamptz,
-  -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung).
+  -- Highest dunning level sent so far (1 = Zahlungserinnerung, 2 = 1. Mahnung, 3 = 2. Mahnung);
+  -- back to 0 when the due date moves to today or later (documents_due_date_reminders).
   reminder_level      integer not null default 0,
   -- Early-payment discount: skonto_percent off the gross total if paid within skonto_days of the date.
   skonto_percent      numeric,
@@ -446,7 +447,8 @@ create table document_events (
                 'issued','emailed','mailto_opened','reminder_sent','status_changed',
                 'payment_added','payment_removed','storno_created','archived','drive_archived',
                 'portal_viewed','portal_responded','bookamat_synced','converted','einvoice_exported',
-                'deposit_created','deposit_linked','deposit_released','project_invoiced','project_released')),
+                'deposit_created','deposit_linked','deposit_released','project_invoiced','project_released',
+                'reminders_reset')),
   detail      jsonb not null default '{}',
   -- Set when the owner opened the document a 'portal_responded' event belongs to (dashboard notice).
   read_at     timestamptz,
@@ -987,6 +989,38 @@ drop trigger if exists documents_delete_guard on documents;
 create trigger documents_delete_guard
   before delete on documents
   for each row execute function documents_delete_guard();
+
+-- ─── Due date extended: reminders start over ─────────────────────────────────
+-- An open issued invoice (sent or overdue; paid, cancelled and drafts are never touched) whose due
+-- date moves to a later date that is today or later (Vienna) starts its reminders over: level 0,
+-- no reminder sent, and a 'reminders_reset' event with the new and the previous due date and the
+-- level reached. A new due date still in the past keeps the level. The editor saves an issued
+-- invoice's due date with every other field, so only a real move counts. The status is the app's
+-- (markOverdueInvoices, the daily cron's rule), applied right after the save.
+create or replace function documents_due_date_reminders()
+returns trigger language plpgsql as $$
+begin
+  if new.type = 'invoice' and new.number is not null
+     and old.status in ('sent', 'overdue') and new.status in ('sent', 'overdue')
+     and new.due_date is not null
+     and new.due_date >= (now() at time zone 'Europe/Vienna')::date
+     and (old.due_date is null or new.due_date > old.due_date)
+     and (old.reminder_level > 0 or old.reminder_sent_at is not null)
+  then
+    new.reminder_level := 0;
+    new.reminder_sent_at := null;
+    insert into document_events (document_id, type, detail)
+    values (new.id, 'reminders_reset', jsonb_build_object(
+      'due_date', new.due_date, 'previous_due_date', old.due_date, 'level', old.reminder_level));
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists documents_due_date_reminders on documents;
+create trigger documents_due_date_reminders
+  before update of due_date on documents
+  for each row execute function documents_due_date_reminders();
 
 -- ─── Deduction links ─────────────────────────────────────────────────────────
 -- Only an issued, uncancelled advance or partial invoice is deducted, by an uncancelled draft

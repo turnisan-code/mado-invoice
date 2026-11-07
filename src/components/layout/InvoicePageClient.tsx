@@ -71,7 +71,10 @@ export default function InvoicePageClient({
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{t('reminders.title')}</h2>
             {showReminder && (
+              // Keyed by the stored level: one that changed elsewhere (an extended due date starts
+              // the reminders over, the daily run sent one) starts the button from it again.
               <ReminderButton
+                key={`${reminderLevel}:${reminderSentAt ?? ''}`}
                 documentId={document.id}
                 reminderSentAt={reminderSentAt}
                 reminderLevel={reminderLevel}

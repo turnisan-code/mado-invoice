@@ -47,8 +47,9 @@ export interface ReminderFigures {
   newDeadline: string
 }
 
-// What a reminder asks for on `issuedOn`: the open balance, Mahnspesen from the 1. Mahnung on,
-// Verzugszinsen on the balance for the days past the due date, and a new deadline after the grace period.
+// What a reminder asks for on `issuedOn`: the open balance and a new deadline after the grace
+// period. The Zahlungserinnerung (level 1) asks for nothing more; from the 1. Mahnung (level 2) on
+// it adds the Mahnspesen and the Verzugszinsen on the balance for the days past the due date.
 export function reminderFigures({ dueDate, balance, issuer, level, lang, issuedOn = viennaToday() }: {
   dueDate: string | null
   balance: number
@@ -58,9 +59,10 @@ export function reminderFigures({ dueDate, balance, issuer, level, lang, issuedO
   issuedOn?: string
 }): ReminderFigures {
   const daysOverdue = dueDate ? Math.max(0, daysBetween(dueDate, issuedOn)) : 0
-  const fee = level >= 2 ? roundCents(Math.max(0, Number(issuer.reminder_fee) || 0)) : 0
+  const charges = level >= 2
+  const fee = charges ? roundCents(Math.max(0, Number(issuer.reminder_fee) || 0)) : 0
   const interestRate = Math.max(0, Number(issuer.reminder_interest_rate) || 0)
-  const interest = roundCents(balance * (interestRate / 100) * daysOverdue / 365)
+  const interest = charges ? roundCents(balance * (interestRate / 100) * daysOverdue / 365) : 0
   return {
     level,
     title: reminderTitle(level, lang),
