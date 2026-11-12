@@ -423,8 +423,15 @@ export default function DocumentBuilder({ type, settings, clients: clientList, c
     const res = await fetch(`/api/documents/${documentId}/drive-pdf`, { method: 'POST' }).catch(() => null)
     if (!res) { toast.error(`${t('builder.driveFailedPrefix')}${t('messages.network')}`); return }
     const data = await res.json().catch(() => ({}))
-    if (res.ok) notifyDriveUpload(t, data.webViewLink, data.existing)
-    else toastApiError(t, { ...data, error: archiveErrorMessage(t, data, t('common.unknownError')) }, t('builder.driveFailedPrefix'))
+    if (res.ok) {
+      notifyDriveUpload(t, data.webViewLink, data.existing)
+      // The page may have been refreshed before the upload finished (after a Gmail send, the dialog
+      // closes and refreshes at once while the copy is still uploading): refresh again, so the
+      // "Not in Google Drive" notice goes and the Drive link shows.
+      router.refresh()
+    } else {
+      toastApiError(t, { ...data, error: archiveErrorMessage(t, data, t('common.unknownError')) }, t('builder.driveFailedPrefix'))
+    }
   }
 
   function saveToDrive() {
