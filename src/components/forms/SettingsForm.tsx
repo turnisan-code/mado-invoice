@@ -21,6 +21,7 @@ import { Select } from '@/components/ui/select'
 import { controlClass, fieldClass } from '@/components/ui/control'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { BookamatReconcile } from '@/components/bookamat/BookamatReconcile'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import { formatDate, getTaxNote, viennaDate } from '@/lib/utils/document'
 import { NUMBER_TOKENS, counterHintText, formatDocumentNumber, hasYearToken, nextCounter, nextNumberHint, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
@@ -2057,6 +2058,7 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
                     {t('books.settings.lastError', { date: bookamatError.at ? formatDate(bookamatError.at, lang) : '—', error: bookamatError.message })}
                   </p>
                 )}
+                {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && <BookamatReconcile />}
                 {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && (
                   <label className="flex items-start gap-2 text-sm cursor-pointer">
                     <input
