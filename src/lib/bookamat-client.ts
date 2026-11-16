@@ -22,7 +22,7 @@ export type BookamatErrorCode =
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
   | 'unknown_outcome' | 'held' | 'preview' | 'external_duplicate' | 'duplicate_check_failed'
   | 'adopt_not_found' | 'adopt_mismatch' | 'adopt_taken' | 'adopt_other_year' | 'adopt_kind' | 'adopt_other_number'
-  | 'adopt_unsettled' | 'adopt_nothing_left' | 'adopt_booked_year'
+  | 'adopt_unsettled' | 'adopt_nothing_left' | 'adopt_booked_year' | 'adopt_payment_booked'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -31,7 +31,7 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'cash_account_missing', 'vat_account_missing', 'account_missing', 'accounts_stale', 'in_progress', 'auth',
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
   'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed', 'adopt_not_found', 'adopt_mismatch',
-  'adopt_taken', 'adopt_other_year', 'adopt_kind', 'adopt_other_number', 'adopt_unsettled', 'adopt_nothing_left', 'adopt_booked_year',
+  'adopt_taken', 'adopt_other_year', 'adopt_kind', 'adopt_other_number', 'adopt_unsettled', 'adopt_nothing_left', 'adopt_booked_year', 'adopt_payment_booked',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are
@@ -51,74 +51,95 @@ export function bookamatErrorMessage(t: TFn, payload: unknown, fallback = t('com
 
 // ─── Plan: what a document books ─────────────────────────────────────────────
 
-export type MoneyRow = { date: string; amount: number; kind: string; method?: string | null }
+// A money row of a document as the plan reads it; `id` names the payment a booking books.
+export type MoneyRow = { id?: string; date: string; amount: number; kind: string; method?: string | null }
 
 export type PlannedBooking = {
   year: number
   kind: BookamatBookingKind
-  // Last money movement of that year: the booking date.
+  // The payment's (or refund's) own date: the booking date.
   date: string
   // Gross booked, always positive here; a refund books it negative.
   amount: number
   cash: number
+  // The money row it books; null only for rows a caller passed without their id.
+  paymentId: string | null
+  // Money of this kind planned before it, in date order: the VAT split goes on from there, so the
+  // bookings of a document add up per VAT rate without a cent of drift.
+  before: number
+  // A part payment's number („Teilzahlung n“); null when one payment books the whole document.
+  part: number | null
 }
 
-// Ist-Besteuerung, money only. An invoice books its 'payment' rows (a Skonto taken, a write-off
-// or an applied credit note moves no money and is not booked), a credit note its 'refund' rows.
-// One booking per calendar year, dated on that year's last movement. What arrives beyond the
-// amount still to be paid (an overpayment) is not turnover and is left out, latest money last.
-// Dunning fees and interest ('fee') are reported back, never booked.
+// A booking as the plan compares it; `payment_id` null: one from before bookings per payment.
+export type BookedLike = { year: number; kind: string; amount: number; payment_id?: string | null }
+
+// Ist-Besteuerung, money only: one booking per payment, on its own date, so a part payment lands
+// in its own UVA period. An invoice books its 'payment' rows (a Skonto taken, a write-off or an
+// applied credit note moves no money and is not booked), a credit note its 'refund' rows. What
+// arrives beyond the amount still to be paid (an overpayment) is not turnover and is left out,
+// latest money last. Dunning fees and interest ('fee') are reported back, never booked.
 export function planBookings(input: { type: 'invoice' | 'credit_note'; total: number; rows: MoneyRow[] }): { bookings: PlannedBooking[]; fees: number } {
   const moneyKind = input.type === 'invoice' ? 'payment' : 'refund'
-  const credited = input.type === 'invoice' ? input.rows.filter(r => r.kind === 'credit').reduce((s, r) => s + r.amount, 0) : 0
-  const fees = roundCents(input.rows.filter(r => r.kind === 'fee').reduce((s, r) => s + r.amount, 0))
-  let remaining = roundCents(Math.max(0, input.total - credited))
+  const kind: BookamatBookingKind = input.type === 'invoice' ? 'income' : 'refund'
+  const sumOf = (kinds: string[]) => roundCents(input.rows.filter(r => kinds.includes(r.kind)).reduce((s, r) => s + r.amount, 0))
+  const credited = input.type === 'invoice' ? sumOf(['credit']) : 0
+  const fees = sumOf(['fee'])
+  const due = roundCents(Math.max(0, input.total - credited))
+  // What money has to cover: a Skonto or a write-off closes the rest without a transfer.
+  const whole = roundCents(Math.max(0, due - (input.type === 'invoice' ? sumOf(['skonto', 'writeoff']) : 0)))
+  let remaining = due
+  let before = 0
 
-  const byYear = new Map<number, MoneyRow[]>()
-  for (const r of input.rows) {
-    if (r.kind !== moneyKind || !(r.amount > 0)) continue
-    const year = Number(r.date.slice(0, 4))
-    byYear.set(year, [...(byYear.get(year) ?? []), r])
-  }
-
+  const money = input.rows
+    .filter(r => r.kind === moneyKind && r.amount > 0)
+    .sort((a, b) => a.date.localeCompare(b.date) || String(a.id ?? '').localeCompare(String(b.id ?? '')))
   const bookings: PlannedBooking[] = []
-  for (const year of [...byYear.keys()].sort((a, b) => a - b)) {
-    const rows = byYear.get(year)!
-    const received = roundCents(rows.reduce((s, r) => s + r.amount, 0))
-    const amount = roundCents(Math.min(received, remaining))
+  for (const r of money) {
+    const amount = roundCents(Math.min(r.amount, remaining))
     if (amount <= 0) continue
     remaining = roundCents(remaining - amount)
-    const cashReceived = rows.filter(r => r.method === 'cash').reduce((s, r) => s + r.amount, 0)
-    bookings.push({
-      year,
-      kind: input.type === 'invoice' ? 'income' : 'refund',
-      date: rows.map(r => r.date).sort().at(-1)!,
-      amount,
-      cash: roundCents(cashReceived * (amount / received)),
-    })
+    bookings.push({ year: Number(r.date.slice(0, 4)), kind, date: r.date, amount, cash: r.method === 'cash' ? amount : 0, paymentId: r.id ?? null, before, part: null })
+    before = roundCents(before + amount)
   }
+  // Part payments are numbered: several bookings, or one that does not cover the document.
+  if (bookings.length > 1 || (bookings.length === 1 && bookings[0].amount < whole - 0.005)) bookings.forEach((b, i) => { b.part = i + 1 })
   return { bookings, fees }
 }
 
-// What is still to book: the planned years without a booking, capped by the planned money the
-// bookings already made do not cover. A booking from before yearly bookings covers all money in
-// one year, and a payment date moved across New Year leaves the old year's booking behind;
-// neither may book the same money a second time.
-export function unbookedPlan(planned: PlannedBooking[], booked: { year: number; kind: string; amount: number }[]): PlannedBooking[] {
+// `p` with only `amount` of it left to book: the part before it counts as booked already.
+function remainderOf(p: PlannedBooking, amount: number): PlannedBooking {
+  return { ...p, amount, cash: roundCents(p.cash * amount / p.amount), before: roundCents(p.before + p.amount - amount) }
+}
+
+// What is still to book: the planned payments without their own booking. A booking from before
+// bookings per payment (no payment_id) covers the money of its year first, in date order, and
+// what it books beyond that (a payment date moved across New Year) covers money of any year;
+// none of that money is booked a second time.
+export function unbookedPlan(planned: PlannedBooking[], booked: BookedLike[]): PlannedBooking[] {
   const out: PlannedBooking[] = []
   for (const kind of new Set(planned.map(p => p.kind))) {
-    const ofKind = planned.filter(p => p.kind === kind).sort((a, b) => a.year - b.year)
-    const done = booked.filter(b => b.kind === kind)
-    let budget = roundCents(ofKind.reduce((s, p) => s + p.amount, 0) - done.reduce((s, b) => s + Math.abs(Number(b.amount)), 0))
-    for (const p of ofKind) {
-      if (done.some(b => b.year === p.year)) continue
-      const amount = roundCents(Math.min(p.amount, budget))
-      if (amount <= 0) break
-      budget = roundCents(budget - amount)
-      out.push(amount === p.amount ? p : { ...p, amount, cash: roundCents(p.cash * amount / p.amount) })
+    const mine = booked.filter(b => b.kind === kind)
+    const byPayment = new Set(mine.filter(b => b.payment_id).map(b => String(b.payment_id)))
+    const cover = new Map<number, number>()
+    for (const b of mine.filter(x => !x.payment_id)) cover.set(b.year, roundCents((cover.get(b.year) ?? 0) + Math.abs(Number(b.amount))))
+    const rest: PlannedBooking[] = []
+    for (const p of planned.filter(x => x.kind === kind && !(x.paymentId && byPayment.has(x.paymentId)))) {
+      const c = cover.get(p.year) ?? 0
+      const used = roundCents(Math.min(c, p.amount))
+      if (used > 0) cover.set(p.year, roundCents(c - used))
+      const left = roundCents(p.amount - used)
+      if (left > 0) rest.push(used > 0 ? remainderOf(p, left) : p)
+    }
+    let spare = roundCents([...cover.values()].reduce((s, v) => s + v, 0))
+    for (const p of rest) {
+      const used = roundCents(Math.min(spare, p.amount))
+      spare = roundCents(spare - used)
+      const left = roundCents(p.amount - used)
+      if (left > 0) out.push(used > 0 ? remainderOf(p, left) : p)
     }
   }
-  return out.sort((a, b) => a.year - b.year)
+  return out.sort((a, b) => a.date.localeCompare(b.date) || a.before - b.before)
 }
 
 // ─── State shown in lists ────────────────────────────────────────────────────
@@ -129,26 +150,40 @@ export type StateInput = {
   status: string
   bookamat_error?: string | null
   bookamat_booking_id?: string | null
-  bookamat_bookings?: unknown[] | null
-  payments?: { kind?: string | null; amount: number }[] | null
+  bookamat_bookings?: BookedLike[] | null
+  payments?: { id?: string; date?: string; kind?: string | null; amount: number }[] | null
 }
 
-// Something to book: money received on a paid invoice, or on a cancelled one (its Storno books
-// the refund); a credit note once money was paid back. An invoice closed without money (a zero
-// total, an applied credit note) books nothing, so it is neither offered nor synced automatically.
+// Something to book: money received on an issued invoice — part payments included, each in its
+// own period —, or on a cancelled one (its Storno books the refund); a credit note once money was
+// paid back. An invoice closed without money (a zero total, an applied credit note) books
+// nothing, so it is neither offered nor synced automatically.
 export function hasMoneyToBook(doc: StateInput): boolean {
   if (!doc.number) return false
   const payments = doc.payments ?? []
   if ((doc.type ?? 'invoice') === 'credit_note') return doc.status === 'sent' && payments.some(p => p.kind === 'refund' && p.amount > 0)
-  return (doc.status === 'paid' || doc.status === 'cancelled') && payments.some(p => (p.kind ?? 'payment') === 'payment' && p.amount > 0)
+  return ['sent', 'overdue', 'paid', 'cancelled'].includes(doc.status) && payments.some(p => (p.kind ?? 'payment') === 'payment' && p.amount > 0)
+}
+
+// Money the document's bookings do not cover yet. Without payment ids and dates (an older caller)
+// any booking counts as covering everything, as before bookings per payment.
+export function hasUnbookedMoney(doc: StateInput): boolean {
+  if (!hasMoneyToBook(doc)) return false
+  const bookings = doc.bookamat_bookings ?? []
+  const rows = doc.payments ?? []
+  if (rows.some(r => !r.id || !r.date)) return bookings.length === 0 && !doc.bookamat_booking_id
+  const type = (doc.type ?? 'invoice') === 'credit_note' ? 'credit_note' : 'invoice'
+  const plan = planBookings({ type, total: Number.MAX_SAFE_INTEGER, rows: rows.map(r => ({ id: r.id, date: r.date!, amount: r.amount, kind: r.kind ?? 'payment' })) })
+  return unbookedPlan(plan.bookings, bookings).length > 0
 }
 
 export function bookamatState(doc: StateInput): BookamatState {
   const synced = (doc.bookamat_bookings?.length ?? 0) > 0 || !!doc.bookamat_booking_id
   // An old failure on a document that has nothing to book (e.g. settled only by a credit note) is moot.
   if (doc.bookamat_error && (synced || hasMoneyToBook(doc))) return 'failed'
+  if (hasUnbookedMoney(doc)) return 'unsynced'
   if (synced) return 'synced'
-  return hasMoneyToBook(doc) ? 'unsynced' : 'none'
+  return 'none'
 }
 
 // "#123 (2025), #456 (2026)"
@@ -158,12 +193,13 @@ export function formatBookings(t: TFn, bookings: { year: number; booking_id?: st
 
 // ─── Sync route ──────────────────────────────────────────────────────────────
 
-export type BookingRow = Pick<BookamatBooking, 'year' | 'booking_id' | 'amount' | 'kind' | 'booked_on' | 'pdf_attached_at'>
-export const BOOKING_COLUMNS = 'year, booking_id, amount, kind, booked_on, pdf_attached_at'
+export type BookingRow = Pick<BookamatBooking, 'year' | 'booking_id' | 'amount' | 'kind' | 'booked_on' | 'pdf_attached_at' | 'payment_id'>
+export const BOOKING_COLUMNS = 'year, booking_id, amount, kind, booked_on, pdf_attached_at, payment_id'
 
 // A booking Bookamat accepted that could not be recorded here: sent back as `adopt`, it is
-// recorded instead of booked a second time.
-export type AdoptBooking = { year: number; kind: BookamatBookingKind; bookingId: string }
+// recorded instead of booked a second time. `paymentId`: the payment it books (absent from a tab
+// opened before bookings per payment).
+export type AdoptBooking = { year: number; kind: BookamatBookingKind; bookingId: string; paymentId?: string | null }
 
 export type SyncSuccess = {
   ok: true
@@ -194,7 +230,7 @@ export function duplicateCandidates(payload: unknown): BookingCandidate[] {
 export type AdoptSuccess = {
   ok: true
   bookings: BookingRow[]
-  adopted: { year: number; bookingId: string; amount: number; date: string }
+  adopted: { year: number; bookingId: string; amount: number; date: string; paymentId: string | null }
 }
 
 type SyncResponse = { ok: true; data: SyncSuccess } | { ok: false; payload: unknown }
@@ -204,7 +240,7 @@ export async function requestBookamatAdopt(documentId: string, ref: BookingRef):
   const res = await fetch('/api/bookamat/adopt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documentId, year: ref.year, bookingId: ref.bookingId }),
+    body: JSON.stringify({ documentId, year: ref.year, bookingId: ref.bookingId, ...(ref.paymentId ? { paymentId: ref.paymentId } : {}) }),
   }).catch(() => null)
   if (!res) return { ok: false, payload: { code: 'network', error: 'Network error' } }
   const payload: unknown = await res.json().catch(() => ({}))

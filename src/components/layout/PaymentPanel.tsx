@@ -297,7 +297,7 @@ export default function PaymentPanel({
   // „Das ist diese Zahlung — übernehmen“: Mado records that booking and books nothing.
   async function adoptBooking(candidate: BookingCandidate) {
     setAdopting(`${candidate.year}:${candidate.bookingId}`)
-    const res = await requestBookamatAdopt(documentId, { year: candidate.year, bookingId: candidate.bookingId })
+    const res = await requestBookamatAdopt(documentId, { year: candidate.year, bookingId: candidate.bookingId, paymentId: candidate.paymentId })
     setAdopting(null)
     if (!res.ok) {
       toast.error(bookamatErrorMessage(t, res.payload))

@@ -11,7 +11,8 @@ const doc = (id: string, number: string, net: number, payments: ReconcileDoc['pa
 })
 const booking = (id: number, date: string, title: string, amount: string, group = '1'): BookingLite =>
   toBookingLite(Number(date.slice(0, 4)), { id, status: '1', title, date, description: '', amounts: [{ group, amount }] })!
-const row = (year: number, id: string, amount: number, bookedOn: string) => ({ year, booking_id: id, amount, kind: 'income' as const, booked_on: bookedOn, pdf_attached_at: null })
+const row = (year: number, id: string, amount: number, bookedOn: string, paymentId: string | null = null) =>
+  ({ year, booking_id: id, amount, kind: 'income' as const, booked_on: bookedOn, pdf_attached_at: null, payment_id: paymentId })
 
 test('recorded bookings: found, missing, different', () => {
   const docs = [
@@ -26,20 +27,42 @@ test('recorded bookings: found, missing, different', () => {
   assert.deepEqual(r.doubles, [])
 })
 
-test('money Mado should book: listed, with what Bookamat may already have', () => {
+test('money Mado should book: listed per payment, with what Bookamat may already have', () => {
   const docs = [
-    doc('d1', 'RN-209906013', 975, [{ date: '2026-07-03', amount: 1170, kind: 'payment' }]),
-    doc('d2', 'RN-209906014', 270, [{ date: '2026-08-04', amount: 258, kind: 'payment' }, { date: '2026-11-11', amount: 12, kind: 'writeoff' }]),
-    // Part-paid: Mado books it once fully paid, so it is not listed yet.
-    doc('d3', 'RN-209907017', 700, [{ date: '2026-08-01', amount: 100, kind: 'payment' }], [], 'sent'),
+    doc('d1', 'RN-209906013', 975, [{ id: 'p1', date: '2026-07-03', amount: 1170, kind: 'payment' }]),
+    doc('d2', 'RN-209906014', 270, [{ id: 'p2', date: '2026-08-04', amount: 258, kind: 'payment' }, { id: 'w2', date: '2026-11-11', amount: 12, kind: 'writeoff' }]),
+    // Part-paid: each payment is booked as it arrives (D2), so it is listed.
+    doc('d3', 'RN-209907017', 700, [{ id: 'p3', date: '2026-08-01', amount: 100, kind: 'payment' }], [], 'sent'),
   ]
   const bookings = [booking(9801, '2026-07-03', 'RN_209906013 - Muster', '1170.00')]
   const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' })
-  assert.deepEqual(r.unbooked.map(u => [u.number, u.amount, u.date, u.candidates.map(c => c.bookingId)]), [
-    ['RN-209906013', 1170, '2026-07-03', ['9801']],
-    ['RN-209906014', 258, '2026-08-04', []],
+  assert.deepEqual(r.unbooked.map(u => [u.number, u.paymentId, u.amount, u.date, u.candidates.map(c => [c.bookingId, c.paymentId])]), [
+    ['RN-209906013', 'p1', 1170, '2026-07-03', [['9801', 'p1']]],
+    ['RN-209906014', 'p2', 258, '2026-08-04', []],
+    ['RN-209907017', 'p3', 100, '2026-08-01', []],
   ])
   assert.deepEqual(r.doubles, [])
+})
+
+test('part payments of one year: each is listed, a booking under the payment it books', () => {
+  const docs = [doc('d1', 'RN-209906301', 500, [
+    { id: 'p1', date: '2026-03-02', amount: 300, kind: 'payment' },
+    { id: 'p2', date: '2026-05-04', amount: 300, kind: 'payment' },
+  ], [], 'paid')]
+  const bookings = [booking(9951, '2026-05-05', 'RN_209906301 Teilzahlung', '300.00')]
+  const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' })
+  assert.deepEqual(r.unbooked.map(u => [u.paymentId, u.candidates.map(c => [c.bookingId, c.fit, c.paymentId])]), [
+    ['p1', []],
+    ['p2', [['9951', 'exact', 'p2']]],
+  ])
+  // Once the first part is booked by Mado, only the second is listed; Mado's own is no double.
+  const booked = reconcile({
+    docs: [{ ...docs[0], bookamat_bookings: [row(2026, '9950', 300, '2026-03-02', 'p1')] }],
+    bookings: [booking(9950, '2026-03-02', 'RN-209906301 (Teilzahlung 1) – Muster', '300.00'), ...bookings],
+    years: [2026], invoicePrefix: 'RN',
+  })
+  assert.deepEqual(booked.unbooked.map(u => [u.paymentId, u.candidates.map(c => c.bookingId)]), [['p2', ['9951']]])
+  assert.deepEqual(booked.doubles, [])
 })
 
 test('a second booking of money Mado already booked is a possible double booking', () => {
@@ -87,29 +110,34 @@ test('the order of the documents changes nothing, and another invoice\'s booking
   }
 })
 
-test('a hand booking of money Mado does not book is no double booking', () => {
+test('a hand booking of money Mado does not book is no double booking; a part payment\'s is its candidate', () => {
   const docs = [
-    { ...doc('d1', 'RN-209906201', 100, [{ date: '2026-06-01', amount: 120, kind: 'payment' }]), currency: 'USD' },
-    doc('d2', 'RN-209906202', 500, [{ date: '2026-06-02', amount: 100, kind: 'payment' }], [], 'sent'),
+    { ...doc('d1', 'RN-209906201', 100, [{ id: 'p1', date: '2026-06-01', amount: 120, kind: 'payment' }]), currency: 'USD' },
+    doc('d2', 'RN-209906202', 500, [{ id: 'p2', date: '2026-06-02', amount: 100, kind: 'payment' }], [], 'sent'),
   ]
   const bookings = [booking(9931, '2026-06-01', 'RN-209906201 USD', '110.00'), booking(9932, '2026-06-02', 'RN 209906202 Teilzahlung', '100.00')]
   const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' })
   assert.deepEqual(r.doubles, [])
-  assert.deepEqual(r.unbooked, [])
+  assert.deepEqual(r.unbooked.map(u => [u.number, u.amount, u.candidates.map(c => [c.bookingId, c.fit, c.paymentId])]), [['RN-209906202', 100, [['9932', 'exact', 'p2']]]])
 })
 
-test('a credit note is listed only once it is settled', () => {
+test('a credit note is listed once money is paid back, for what it did not credit', () => {
   const credit = (payments: ReconcileDoc['payments']): ReconcileDoc => ({ ...doc('c1', 'AN-2099001', 500, payments), type: 'credit_note', status: 'sent' })
-  const partly = credit([{ date: '2026-06-10', amount: 200, kind: 'refund' }])
-  assert.deepEqual(reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN' }).unbooked, [])
-  // 200 refunded and 400 credited to the invoice settle the 600.
+  const partly = credit([{ id: 'r1', date: '2026-06-10', amount: 200, kind: 'refund' }])
+  assert.deepEqual(reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN' }).unbooked.map(u => [u.number, u.paymentId, u.amount]), [['AN-2099001', 'r1', 200]])
+  // 400 of the 600 credited to an invoice: the 200 paid back is the rest.
   const r = reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN', applied: { c1: 400 } })
   assert.deepEqual(r.unbooked.map(u => [u.number, u.amount]), [['AN-2099001', 200]])
+  // Paid back beyond what was not credited: only the rest is a refund of revenue.
+  const over = reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN', applied: { c1: 450 } })
+  assert.deepEqual(over.unbooked.map(u => u.amount), [150])
+  // A cancelled credit note books nothing.
+  assert.deepEqual(reconcile({ docs: [{ ...partly, status: 'cancelled' }], bookings: [], years: [2026], invoicePrefix: 'RN' }).unbooked, [])
 })
 
-test('a booking found by the number is listed under its own year', () => {
-  const docs = [doc('d1', 'RN-209912010', 1000, [{ date: '2025-12-20', amount: 600, kind: 'payment' }, { date: '2026-03-08', amount: 600, kind: 'payment' }])]
+test('a booking found by the number is listed under its own payment', () => {
+  const docs = [doc('d1', 'RN-209912010', 1000, [{ id: 'p1', date: '2025-12-20', amount: 600, kind: 'payment' }, { id: 'p2', date: '2026-03-08', amount: 600, kind: 'payment' }])]
   const bookings = [booking(9941, '2026-03-08', 'RN_209912010 - Muster', '600.00')]
   const r = reconcile({ docs, bookings, years: [2025, 2026], invoicePrefix: 'RN' })
-  assert.deepEqual(r.unbooked.map(u => [u.year, u.candidates.map(c => [c.bookingId, c.fit])]), [[2025, []], [2026, [['9941', 'exact']]]])
+  assert.deepEqual(r.unbooked.map(u => [u.year, u.paymentId, u.candidates.map(c => [c.bookingId, c.fit])]), [[2025, 'p1', []], [2026, 'p2', [['9941', 'exact']]]])
 })

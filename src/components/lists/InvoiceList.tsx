@@ -61,10 +61,10 @@ export interface Invoice {
   pdf_path?: string | null
   bookamat_error?: string | null
   bookamat_booking_id?: string | null
-  bookamat_bookings?: { year: number; booking_id: string }[] | null
+  bookamat_bookings?: { year: number; booking_id: string; amount: number; kind: string; payment_id: string | null }[] | null
   invoice_kind?: InvoiceKind | null
   document_items: DocItem[]
-  payments?: { amount: number; kind?: string }[]
+  payments?: { id?: string; date?: string; amount: number; kind?: string }[]
 }
 
 type BulkSyncRow = { id: string; number: string; ok: boolean; text: string }

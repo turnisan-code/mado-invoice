@@ -2,14 +2,13 @@
 // sync itself with the frozen PDF attached. Server only (Bookamat credentials, the PDF renderer).
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { BookamatError, credentialsOf, findExternalBookings, settingsT, syncBookamatDocument, type BookamatSettings, type ClaudeHold } from '@/lib/bookamat'
+import { BookamatError, bookableTotal, credentialsOf, findExternalBookings, settingsT, syncBookamatDocument, type BookamatSettings, type ClaudeHold } from '@/lib/bookamat'
 import {
-  BOOKING_COLUMNS, hasMoneyToBook, planBookings, unbookedPlan,
+  BOOKING_COLUMNS, planBookings, unbookedPlan,
   type AdoptBooking, type BookingRow, type MoneyRow, type PlannedBooking, type SyncFailure, type SyncSuccess,
 } from '@/lib/bookamat-client'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
-import { creditNoteSettled } from '@/lib/status'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
 import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
@@ -55,7 +54,7 @@ export async function syncBookamatWithAdopt(
 // columns.
 const PREVIEW_COLS = `*,
   document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
-  payments(date, amount, kind, method), clients(*), bookamat_bookings(${BOOKING_COLUMNS})`
+  payments(id, date, amount, kind, method), clients(*), bookamat_bookings(${BOOKING_COLUMNS})`
 
 type PreviewClient = { id: string; name: string; company: string | null; uid_number?: string | null; mcp_written_at?: string | null }
 
@@ -82,7 +81,7 @@ export interface BookamatPreview {
   // The VAT rates of its lines and why a 0 % line is free of VAT: they choose the VAT accounts.
   rates: VatRate[]
   taxTreatment: string | null
-  // What the sync would post, one booking per calendar year; empty when everything is booked.
+  // What the sync would post, one booking per payment; empty when everything is booked.
   bookings: PlannedBooking[]
   // Dunning fees received: reported, never booked.
   fees: number
@@ -126,24 +125,16 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
     doc.tax_treatment,
   )
   if (!totals.vat_groups.length) throw new BookamatError('no_items', 'The document has no lines to book')
-  if (doc.type === 'invoice') {
-    if (!hasMoneyToBook({ ...doc, type: 'invoice' })) throw new BookamatError('not_settled', 'Only fully paid invoices can be synced')
-  } else {
-    const { data: applied, error: appliedErr } = await supabase.from('payments').select('amount').eq('kind', 'credit').eq('credit_note_id', doc.id)
-    if (appliedErr) throw new BookamatError('database', appliedErr.message)
-    const refunded = rows.filter(r => r.kind === 'refund').reduce((s, r) => s + r.amount, 0)
-    const settled = creditNoteSettled(totals.total, (applied ?? []).reduce((s, r) => s + Number(r.amount), 0), refunded)
-    if (doc.status !== 'sent' || !settled) throw new BookamatError('not_settled', 'Only settled credit notes can be synced')
-  }
+  const bookable = await bookableTotal(supabase, { ...doc, type: doc.type }, totals.total)
 
-  const plan = planBookings({ type: doc.type, total: totals.total, rows })
+  const plan = planBookings({ type: doc.type, total: bookable, rows })
   const recorded = doc.bookamat_bookings ?? []
   const unsettled = Array.isArray(doc.bookamat_pending) && doc.bookamat_pending.length > 0
   if (!plan.bookings.length && !recorded.length && !unsettled) throw new BookamatError('nothing_to_book', 'No money received or paid back on this document')
   const todo = unbookedPlan(plan.bookings, recorded)
   const external = search && todo.length
     ? await findExternalBookings(supabase, credentialsOf(settings), {
-      number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
+      number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: bookable,
       bookedYears: recorded.map(b => b.year), t: settingsT(settings),
     })
     : []

@@ -94,7 +94,7 @@ async function documentsCsv(supabase: Supabase, period: Period, t: TFn) {
   return { csv: toCsv(header, rows) }
 }
 
-// "123 (2025); 456 (2026)": one Bookamat booking per year of money received.
+// "123 (2025); 456 (2026)": the document's Bookamat bookings (one per payment received).
 function bookamatIds(bookings: { year: number; booking_id: string }[] | null, legacy: string | null): string {
   if (bookings?.length) return [...bookings].sort((a, b) => a.year - b.year).map(b => `${b.booking_id} (${b.year})`).join('; ')
   return legacy ?? ''

@@ -340,8 +340,8 @@ export type PaymentState = 'nothing_due' | 'unpaid' | 'partially_paid' | 'paid' 
 // A status as shown: the stored status, or a state derived from payments or dates.
 export type DisplayStatus = DocumentStatus | 'partially_paid' | 'written_off' | 'settled' | 'expired'
 
-// One Bookamat booking: money received on an invoice ('income') or paid back on a credit note
-// ('refund', negative), per calendar year.
+// One Bookamat booking: a payment received on an invoice ('income') or a refund paid back on a
+// credit note ('refund', negative).
 export type BookamatBookingKind = 'income' | 'refund'
 
 export interface BookamatBooking {
@@ -353,6 +353,9 @@ export interface BookamatBooking {
   kind: BookamatBookingKind
   booked_on: string | null
   pdf_attached_at: string | null
+  // The payment (or refund) it books; null for a booking from before bookings per payment, which
+  // covers its year's money.
+  payment_id: string | null
   created_at: string
 }
 
@@ -364,6 +367,8 @@ export type BookamatState = 'synced' | 'unsynced' | 'failed' | 'none'
 export interface BookamatPending {
   year: number
   kind: BookamatBookingKind
+  // The payment it books (absent in entries written before bookings per payment).
+  payment_id?: string | null
   booking_id: string | null
   amount: number
   date: string

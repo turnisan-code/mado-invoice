@@ -1934,7 +1934,7 @@ export const en = {
       not_found: 'Document not found.',
       not_issued: 'Only issued invoices and credit notes can be synced.',
       not_eur: 'Bookamat only receives EUR documents; this one is in {currency}.',
-      not_settled: 'Only fully paid invoices and settled credit notes can be synced — record the payment or refund first.',
+      not_settled: 'Nothing to book yet — record the payment or refund first.',
       nothing_to_book: 'No money was received or paid back on this document — nothing to book.',
       no_items: 'The document has no lines to book.',
       cash_account_missing: 'Money was received in cash, but no Bookamat cash account (Kassa) is set — choose one in Settings → Integrations.',
@@ -1963,6 +1963,7 @@ export const en = {
       adopt_unsettled: 'An earlier sync of this document is not settled yet: sync it again on the document first, then take the booking over.',
       adopt_booked_year: 'Mado booked the {year} money of this document already ({bookings}): booking #{id} is possibly a second booking of it. Check it in Bookamat — neither take it over nor book anyway.',
       adopt_nothing_left: 'Everything on {number} is booked already — booking #{id} would be a second booking. Check it in Bookamat.',
+      adopt_payment_booked: 'Mado booked this payment already ({bookings}): booking #{id} is possibly a second booking of it. Check it in Bookamat — neither take it over nor book anyway.',
       adopt_taken: 'Booking #{id} is already recorded on another document in Mado.',
     },
     zero: {
@@ -1972,7 +1973,7 @@ export const en = {
     },
     bookamat: {
       description: 'Invoice {number} | {client}',
-      yearDescription: 'Invoice {number} | {client} | money received {year}',
+      partDescription: 'Invoice {number} | {client} | part payment {part} of {date}',
       refundDescription: 'Refund on credit note {number} | {client}',
     },
     state: {
@@ -3086,6 +3087,7 @@ export const en = {
         reason: 'Reason',
         bookings: 'Bookings',
         bookingDate: 'Booked on',
+        part: 'Part payment {part}',
         amount: 'Amount',
         cash: 'of it cash {amount}',
         fees: 'Dunning fees (not booked)',

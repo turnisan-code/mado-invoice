@@ -7,6 +7,8 @@ import { syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
 import { fakeSupabase, type Op } from './fake-supabase'
 
 const DOC = '00000000-0000-4000-8000-000000000001'
+const P1 = '00000000-0000-4000-8000-0000000000b1'
+const P2 = '00000000-0000-4000-8000-0000000000b2'
 const settings = {
   id: 's1', ui_language: 'de', bookamat_username: 'synthetic', bookamat_api_key: 'not-a-key', bookamat_country: 'at',
   bookamat_bank_account_id: 11, bookamat_cash_account_id: null, bookamat_cost_account_id: 22, bookamat_vat_account_0: 30,
@@ -18,9 +20,9 @@ const doc = {
   id: DOC, type: 'invoice', number: 'RN-209906001', status: 'paid', currency: 'EUR', date: '2026-06-01',
   service_date: null, service_date_end: null, tax_treatment: 'at_vat', discount_type: null, discount_value: null,
   document_items: [{ line_type: 'item', sort_order: 0, quantity: 1, unit_price: 700, vat_rate: 20, discount_type: null, discount_value: null }],
-  payments: [{ date: '2026-06-15', amount: 840, kind: 'payment', method: 'bank' }],
+  payments: [{ id: P1, date: '2026-06-15', amount: 840, kind: 'payment', method: 'bank' }] as { id: string; date: string; amount: number; kind: string; method: string }[],
   clients: { name: 'Muster Client', company: null, uid_number: null },
-  bookamat_pending: null, bookamat_bookings: [],
+  bookamat_pending: null, bookamat_bookings: [] as unknown[],
 }
 
 const income = (id: number, date: string, title: string, amount: string) =>
@@ -33,12 +35,17 @@ type World = {
   // Another sync took the claim over before the journal was written.
   claimLost?: boolean
   payments?: typeof doc.payments
+  status?: string
+  // What the document has recorded already.
+  bookings?: unknown[]
 }
 
 const saved = process.env.VERCEL_ENV
 const realFetch = globalThis.fetch
 let log: string[] = []
-beforeEach(() => { process.env.VERCEL_ENV = 'production'; log = [] })
+// What was posted to Bookamat, in order.
+let bodies: { title: string; date: string; description: string; amounts: { amount: string; tax_percent: string }[] }[] = []
+beforeEach(() => { process.env.VERCEL_ENV = 'production'; log = []; bodies = [] })
 afterEach(() => {
   if (saved === undefined) delete process.env.VERCEL_ENV
   else process.env.VERCEL_ENV = saved
@@ -48,7 +55,9 @@ afterEach(() => {
 function setup(world: World) {
   const db = fakeSupabase((op: Op) => {
     log.push(`db ${op.table} ${op.action}${op.action === 'update' ? ` ${Object.keys(op.values as object).join(',')}` : ''}`)
-    if (op.table === 'documents' && op.action === 'select') return { data: { ...doc, payments: world.payments ?? doc.payments } }
+    if (op.table === 'documents' && op.action === 'select') {
+      return { data: { ...doc, payments: world.payments ?? doc.payments, status: world.status ?? doc.status, bookamat_bookings: world.bookings ?? [] } }
+    }
     if (op.table === 'documents' && op.action === 'update' && op.returning) {
       const journal = 'bookamat_pending' in (op.values as object)
       return { data: journal && world.claimLost ? [] : [{ bookamat_pending: null }] }
@@ -74,7 +83,10 @@ function setup(world: World) {
       if (list === 'missing') return new Response('{"detail":"Nicht gefunden."}', { status: 404 })
       return json({ count: list.length, next: null, results: list })
     }
-    if (method === 'POST' && path === '2026/bookings/') return json({ id: 99001 }, 201)
+    if (method === 'POST' && path === '2026/bookings/') {
+      bodies.push(JSON.parse(String(init?.body)))
+      return json({ id: 99000 + bodies.length }, 201)
+    }
     throw new Error(`unexpected request ${method} ${url}`)
   }) as typeof fetch
   return db
@@ -119,7 +131,7 @@ test('the number at any date of the year counts, and says it is only part of the
 test('a transfer recorded as payment plus dunning fee is found by its sum', async () => {
   const db = setup({
     years: { 2026: [income(71007, '2026-06-15', 'Gutschrift', '850.00')] },
-    payments: [{ date: '2026-06-15', amount: 840, kind: 'payment', method: 'bank' }, { date: '2026-06-15', amount: 10, kind: 'fee', method: 'bank' }],
+    payments: [{ id: P1, date: '2026-06-15', amount: 840, kind: 'payment', method: 'bank' }, { id: P2, date: '2026-06-15', amount: 10, kind: 'fee', method: 'bank' }],
   })
   const res = await syncBookamatDocument(db.client, settings, DOC)
   assert.equal(!res.ok && res.code, 'external_duplicate')
@@ -172,4 +184,65 @@ test('unrelated bookings nearby do not stop the sync', async () => {
   const res = await syncBookamatDocument(db.client, settings, DOC)
   assert.equal(res.ok, true, JSON.stringify(res))
   assert.equal(posts().length, 1)
+})
+
+// ─── One booking per payment (PR 8b) ─────────────────────────────────────────
+
+const parts = [
+  { id: P1, date: '2026-06-15', amount: 420, kind: 'payment', method: 'bank' },
+  { id: P2, date: '2026-07-15', amount: 420, kind: 'payment', method: 'bank' },
+]
+const inserts = (db: ReturnType<typeof setup>) =>
+  db.ops.filter(o => o.table === 'bookamat_bookings' && o.action === 'insert').map(o => o.values as { payment_id: string; booking_id: string; booked_on: string; amount: number })
+const journalEntries = (db: ReturnType<typeof setup>) =>
+  db.ops.filter(o => o.table === 'documents' && o.action === 'update' && Array.isArray((o.values as { bookamat_pending?: unknown }).bookamat_pending))
+    .flatMap(o => (o.values as { bookamat_pending: { payment_id: string }[] }).bookamat_pending)
+
+test('part payments: one booking each, on its own date, named as a part', async () => {
+  const db = setup({ payments: parts, status: 'sent' })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.deepEqual(bodies.map(b => [b.title, b.date]), [
+    ['RN-209906001 (Teilzahlung 1) – Muster Client', '2026-06-15'],
+    ['RN-209906001 (Teilzahlung 2) – Muster Client', '2026-07-15'],
+  ])
+  assert.match(bodies[1].description, /Teilzahlung 2 vom 15\.07\.2026/)
+  assert.deepEqual(bodies.map(b => b.amounts.map(l => [l.tax_percent, l.amount])), [[['20.00', '420.00']], [['20.00', '420.00']]])
+  // Each journal entry and each recorded booking names its payment.
+  assert.deepEqual(inserts(db).map(i => [i.payment_id, i.booking_id, i.booked_on, i.amount]), [[P1, '99001', '2026-06-15', 420], [P2, '99002', '2026-07-15', 420]])
+  assert.deepEqual([...new Set(journalEntries(db).map(e => e.payment_id))], [P1, P2])
+})
+
+test('a booked payment is not booked again; the new part payment is', async () => {
+  const db = setup({
+    payments: parts,
+    status: 'paid',
+    bookings: [{ year: 2026, booking_id: '99001', amount: 420, kind: 'income', booked_on: '2026-06-15', pdf_attached_at: null, payment_id: P1 }],
+    // Bookamat has Mado's own booking of the first part.
+    years: { 2026: [income(99001, '2026-06-15', 'RN-209906001 (Teilzahlung 1) – Muster Client', '420.00')] },
+    recordedElsewhere: [{ year: 2026, booking_id: '99001' }],
+  })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.deepEqual(bodies.map(b => b.title), ['RN-209906001 (Teilzahlung 2) – Muster Client'])
+  assert.deepEqual(inserts(db).map(i => i.payment_id), [P2])
+})
+
+test('a booking from before bookings per payment covers its year: nothing is posted', async () => {
+  const db = setup({
+    payments: parts,
+    status: 'paid',
+    bookings: [{ year: 2026, booking_id: '70001', amount: 840, kind: 'income', booked_on: '2026-07-15', pdf_attached_at: null, payment_id: null }],
+  })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.deepEqual(posts(), [])
+})
+
+test('a hand booking of one part payment stops the sync and names that payment', async () => {
+  const db = setup({ payments: parts, status: 'paid', years: { 2026: [income(71010, '2026-07-16', 'Überweisung Muster', '420.00')] } })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(!res.ok && res.code, 'external_duplicate')
+  assert.deepEqual(!res.ok && res.candidates?.map(c => [c.bookingId, c.fit, c.paymentId]), [['71010', 'exact', P2]])
+  assert.deepEqual(posts(), [])
 })

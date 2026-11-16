@@ -1933,7 +1933,7 @@ export const de = {
       not_found: 'Beleg nicht gefunden.',
       not_issued: 'Nur ausgestellte Rechnungen und Gutschriften können übertragen werden.',
       not_eur: 'Bookamat übernimmt nur Belege in EUR; dieser ist in {currency}.',
-      not_settled: 'Nur vollständig bezahlte Rechnungen und ausgeglichene Gutschriften können übertragen werden — zuerst die Zahlung oder Rückzahlung erfassen.',
+      not_settled: 'Noch nichts zu buchen — zuerst die Zahlung oder Rückzahlung erfassen.',
       nothing_to_book: 'Auf diesem Beleg ist kein Geld eingegangen oder zurückgezahlt worden — nichts zu buchen.',
       no_items: 'Der Beleg hat keine Positionen zum Buchen.',
       cash_account_missing: 'Es wurde bar bezahlt, aber kein Bookamat-Kassakonto ist eingestellt — unter Einstellungen → Integrationen wählen.',
@@ -1962,6 +1962,7 @@ export const de = {
       adopt_unsettled: 'Eine frühere Übertragung dieses Belegs ist noch offen: zuerst auf dem Beleg erneut übertragen, dann die Buchung übernehmen.',
       adopt_booked_year: 'Mado hat das Geld dieses Belegs für {year} schon gebucht ({bookings}): Buchung #{id} ist womöglich eine zweite davon. In Bookamat prüfen — weder übernehmen noch trotzdem buchen.',
       adopt_nothing_left: 'Auf {number} ist schon alles gebucht — Buchung #{id} wäre eine zweite. In Bookamat prüfen.',
+      adopt_payment_booked: 'Mado hat diese Zahlung schon gebucht ({bookings}): Buchung #{id} ist womöglich eine zweite davon. In Bookamat prüfen — weder übernehmen noch trotzdem buchen.',
       adopt_taken: 'Buchung #{id} ist in Mado schon bei einem anderen Beleg vermerkt.',
     },
     zero: {
@@ -1971,7 +1972,7 @@ export const de = {
     },
     bookamat: {
       description: 'Rechnung {number} | {client}',
-      yearDescription: 'Rechnung {number} | {client} | Zahlungseingang {year}',
+      partDescription: 'Rechnung {number} | {client} | Teilzahlung {part} vom {date}',
       refundDescription: 'Rückzahlung Gutschrift {number} | {client}',
     },
     state: {
@@ -3082,6 +3083,7 @@ export const de = {
         reason: 'Grund',
         bookings: 'Buchungen',
         bookingDate: 'Gebucht am',
+        part: 'Teilzahlung {part}',
         amount: 'Betrag',
         cash: 'davon bar {amount}',
         fees: 'Mahnspesen (nicht gebucht)',

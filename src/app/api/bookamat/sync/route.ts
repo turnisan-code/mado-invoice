@@ -38,7 +38,7 @@ function parseAdopt(value: unknown): AdoptBooking[] | null {
 }
 
 // Books an issued invoice's money (or a credit note's refunds) in Bookamat, one booking per
-// calendar year, and attaches the frozen PDF. `adopt` records bookings an earlier attempt created
+// payment, and attaches the frozen PDF. `adopt` records bookings an earlier attempt created
 // but could not store (its `pending`), instead of booking them again.
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
