@@ -18,7 +18,12 @@ import { useT } from '@/lib/i18n/client'
 import { n } from '@/lib/i18n'
 import { paymentDateIssue, paymentState, SMALL_DIFFERENCE } from '@/lib/status'
 import { dbErrorMessage } from '@/lib/api-errors'
-import { BOOKING_COLUMNS, bookamatErrorMessage, formatBookings, hasMoneyToBook, planBookings, requestBookamatSync, unbookedPlan, type BookingRow } from '@/lib/bookamat-client'
+import {
+  BOOKING_COLUMNS, bookamatErrorMessage, duplicateCandidates, formatBookings, hasMoneyToBook, planBookings, requestBookamatAdopt,
+  requestBookamatSync, unbookedPlan, type BookingRow,
+} from '@/lib/bookamat-client'
+import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
+import { BookamatDuplicateDialog } from '@/components/bookamat/BookamatDuplicateDialog'
 import { loadMoneyLock } from '@/lib/deposits'
 import { paymentRows, recordInvoicePayments, removePayment as removePaymentRow, reopensOnRemoval, settledSum, settlementRow, skontoOffered } from '@/lib/services/payments'
 
@@ -94,6 +99,11 @@ export default function PaymentPanel({
   const [confirmReset, setConfirmReset] = useState(false)
   const [showBookamatPrompt, setShowBookamatPrompt] = useState(false)
   const [bookamatBusy, setBookamatBusy] = useState<'sync' | 'attach' | 'reset' | null>(null)
+  // Bookings Bookamat already has that may be this money: the sync booked nothing ('external_duplicate').
+  const [duplicates, setDuplicates] = useState<BookingCandidate[] | null>(null)
+  // Those the owner already said are other money in this dialog; sent again with the next ones.
+  const [acknowledged, setAcknowledged] = useState<BookingRef[]>([])
+  const [adopting, setAdopting] = useState<string | null>(null)
   // null until loaded from the database.
   const [bookamat, setBookamat] = useState<BookamatInfo | null>(null)
   // An advance invoice deducted on an issued final invoice: its payments stay (MI022).
@@ -257,16 +267,23 @@ export default function PaymentPanel({
     router.refresh()
   }
 
-  async function syncToBookamat() {
+  // `acknowledge`: bookings in Bookamat the owner said are other money („trotzdem buchen“).
+  async function syncToBookamat(acknowledge?: BookingRef[]) {
     setShowBookamatPrompt(false)
     setBookamatBusy('sync')
-    const res = await requestBookamatSync(documentId)
+    const res = await requestBookamatSync(documentId, { acknowledge })
     setBookamatBusy(null)
     if (!res.ok) {
-      toast.error(t('books.sync.failed', { error: bookamatErrorMessage(t, res.payload) }))
+      const found = duplicateCandidates(res.payload)
+      if (found.length) setDuplicates(found)
+      else {
+        closeDuplicates()
+        toast.error(t('books.sync.failed', { error: bookamatErrorMessage(t, res.payload) }))
+      }
       void loadBookamat()
       return
     }
+    closeDuplicates()
     const { created, bookings: all, pdf, fees } = res.data
     setBookamat({ bookings: all, error: null, pending: [] })
     const made = formatBookings(t, created)
@@ -275,6 +292,32 @@ export default function PaymentPanel({
     else if (pdf.attached) toast.success(t('books.sync.syncedWithPdf', { bookings: made }))
     else toast.success(t('books.sync.syncedToast', { bookings: made }))
     if (fees > 0) toast.info(t('books.sync.feesNotBooked', { amount: formatMoney(fees, currency) }), { duration: 8000 })
+  }
+
+  // „Das ist diese Zahlung — übernehmen“: Mado records that booking and books nothing.
+  async function adoptBooking(candidate: BookingCandidate) {
+    setAdopting(`${candidate.year}:${candidate.bookingId}`)
+    const res = await requestBookamatAdopt(documentId, { year: candidate.year, bookingId: candidate.bookingId })
+    setAdopting(null)
+    if (!res.ok) {
+      toast.error(bookamatErrorMessage(t, res.payload))
+      return
+    }
+    closeDuplicates()
+    setBookamat({ bookings: res.data.bookings, error: null, pending: [] })
+    toast.success(t('books.duplicates.adopted', { id: candidate.bookingId }))
+    router.refresh()
+  }
+
+  function bookAnyway() {
+    const all = [...acknowledged, ...(duplicates ?? []).map(c => ({ year: c.year, bookingId: c.bookingId }))]
+    setAcknowledged(all)
+    void syncToBookamat(all)
+  }
+
+  function closeDuplicates() {
+    setDuplicates(null)
+    setAcknowledged([])
   }
 
   async function attachAgain() {
@@ -596,6 +639,15 @@ export default function PaymentPanel({
         busy={bookamatBusy === 'sync'}
         onConfirm={() => void syncToBookamat()}
         onCancel={() => setShowBookamatPrompt(false)}
+      />
+
+      <BookamatDuplicateDialog
+        open={!!duplicates}
+        candidates={duplicates ?? []}
+        busy={bookamatBusy === 'sync' ? 'sync' : adopting}
+        onAdopt={c => void adoptBooking(c)}
+        onBookAnyway={bookAnyway}
+        onCancel={closeDuplicates}
       />
     </div>
   )

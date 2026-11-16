@@ -2,7 +2,7 @@
 // sync itself with the frozen PDF attached. Server only (Bookamat credentials, the PDF renderer).
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { BookamatError, syncBookamatDocument, type BookamatSettings, type ClaudeHold } from '@/lib/bookamat'
+import { BookamatError, credentialsOf, findExternalBookings, settingsT, syncBookamatDocument, type BookamatSettings, type ClaudeHold } from '@/lib/bookamat'
 import {
   BOOKING_COLUMNS, hasMoneyToBook, planBookings, unbookedPlan,
   type AdoptBooking, type BookingRow, type MoneyRow, type PlannedBooking, type SyncFailure, type SyncSuccess,
@@ -12,23 +12,26 @@ import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import { creditNoteSettled } from '@/lib/status'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
+import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
 import type { VatRate } from '@/types'
 
 // One sync as the sync route runs it: `adopt` records bookings an earlier attempt created but
 // could not store (its `pending`), instead of booking them again. `claudeHold`: a sync Claude
 // prepared, 'held' when Claude changed the client or the payments since its state was compared
-// (syncBookamatDocument).
+// (syncBookamatDocument). `acknowledge`: bookings in Bookamat the owner said are other money; only
+// the owner's own sync in Mado passes them.
 export async function syncBookamat(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  { adopt = [], deadline, claudeHold }: { adopt?: AdoptBooking[]; deadline?: number; claudeHold?: ClaudeHold } = {},
+  { adopt = [], deadline, claudeHold, acknowledge }: { adopt?: AdoptBooking[]; deadline?: number; claudeHold?: ClaudeHold; acknowledge?: BookingRef[] } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   return syncBookamatDocument(supabase, settings, documentId, {
     adopt,
     loadPdf: async id => getIssuedPdf(supabase, id, 'on_demand'),
     ...(deadline ? { deadline } : {}),
     ...(claudeHold ? { claudeHold } : {}),
+    ...(acknowledge?.length ? { acknowledge } : {}),
   })
 }
 
@@ -85,17 +88,21 @@ export interface BookamatPreview {
   fees: number
   // An earlier attempt left bookings whose outcome the sync settles first.
   unsettled: boolean
+  // With `search`: the bookings Bookamat already has that may be this money (the sync would refuse).
+  external: BookingCandidate[]
 }
 
 // What syncing the document would book, refused as the sync refuses it (BookamatError). Reads
-// only: no claim, no journal, nothing sent to Bookamat.
-export async function bookamatPreview(supabase: SupabaseClient, settings: BookamatSettings, documentId: string): Promise<BookamatPreview> {
+// only: no claim, no journal, nothing sent to Bookamat. `search`: also read Bookamat for bookings
+// that may already be this money, as the sync does before it posts (a failed read throws).
+export async function bookamatPreview(supabase: SupabaseClient, settings: BookamatSettings, documentId: string, { search = false }: { search?: boolean } = {}): Promise<BookamatPreview> {
   if (!isBookamatConfigured(settings)) throw new BookamatError('not_configured', 'Bookamat is not fully configured')
   const { data, error } = await supabase.from('documents').select(PREVIEW_COLS).eq('id', documentId).maybeSingle()
   if (error) throw new BookamatError('database', error.message)
   const doc = data as unknown as (Omit<BookamatPreviewDoc, 'client' | 'clientBooked' | 'total' | 'payments' | 'paymentsAt' | 'recorded' | 'pending'> & {
     type: string
     number: string | null
+    date: string
     currency: string | null
     tax_treatment: string | null
     discount_type: string | null
@@ -133,6 +140,13 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
   const recorded = doc.bookamat_bookings ?? []
   const unsettled = Array.isArray(doc.bookamat_pending) && doc.bookamat_pending.length > 0
   if (!plan.bookings.length && !recorded.length && !unsettled) throw new BookamatError('nothing_to_book', 'No money received or paid back on this document')
+  const todo = unbookedPlan(plan.bookings, recorded)
+  const external = search && todo.length
+    ? await findExternalBookings(supabase, credentialsOf(settings), {
+      number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
+      bookedYears: recorded.map(b => b.year), t: settingsT(settings),
+    })
+    : []
   return {
     document: {
       id: doc.id,
@@ -151,8 +165,9 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
     },
     rates: totals.vat_groups.map(g => g.rate),
     taxTreatment: doc.tax_treatment,
-    bookings: unbookedPlan(plan.bookings, recorded),
+    bookings: todo,
     fees: plan.fees,
     unsettled,
+    external,
   }
 }

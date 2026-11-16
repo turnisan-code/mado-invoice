@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import SettingsForm from '@/components/forms/SettingsForm'
 import { toPublicSettings } from '@/lib/public-settings'
+import { bookamatWritesAllowed } from '@/lib/deployment'
 import { getT } from '@/lib/i18n/server'
 
 export default async function SettingsPage() {
@@ -15,7 +16,7 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold">{t('settings.title')}</h1>
         <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{t('settings.subtitle')}</p>
       </div>
-      <SettingsForm settings={publicSettings} />
+      <SettingsForm settings={publicSettings} bookamatWrites={bookamatWritesAllowed()} />
     </div>
   )
 }

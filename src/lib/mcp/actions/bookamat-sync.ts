@@ -3,6 +3,7 @@
 import { z } from 'zod'
 import { BookamatError, vatAccounts, type BookamatSettings } from '@/lib/bookamat'
 import { bookamatPreview, syncBookamatWithAdopt } from '@/lib/services/bookamat-sync'
+import { describeCandidate } from '@/lib/bookamat-search'
 import { clip, money, word, type Worded } from './words'
 import { documentUrl } from '../config'
 import { McpToolError } from '../errors'
@@ -16,9 +17,11 @@ const ACCOUNT_KEYS = [
   'bookamat_vat_account_13', 'bookamat_vat_account_20', 'bookamat_accounts_year',
 ] as const
 
-async function load(ctx: ServiceContext, documentId: string) {
+// `search`: also look in Bookamat for bookings that may already be this money (prepare only; the
+// sync itself searches again right before it posts).
+async function load(ctx: ServiceContext, documentId: string, { search = false }: { search?: boolean } = {}) {
   const settings = await ctx.settings() as unknown as BookamatSettings
-  const preview = await bookamatPreview(ctx.supabase, settings, documentId)
+  const preview = await bookamatPreview(ctx.supabase, settings, documentId, { search })
   const d = preview.document
   // The bookings carry the client's name and UID, as the automatic sync's hold says.
   refuseClaudeClient(ctx, d.clientBooked, 'mcp.approve.refusals.clientChangedBookamat')
@@ -54,9 +57,13 @@ export const bookamatSyncAction = defineAction<Args, Approved>({
   kind: 'bookamat_sync',
   argsSchema,
   async prepare(ctx, args) {
-    const { settings, preview, fingerprint } = await load(ctx, args.document_id)
+    const { settings, preview, fingerprint } = await load(ctx, args.document_id, { search: true })
     const d = preview.document
     if (!preview.bookings.length && !preview.unsettled) throw refuse(ctx, 'mcp.approve.refusals.alreadyBooked', { number: d.number })
+    // Claude cannot say a booking is other money: the owner decides on the document in Mado.
+    if (preview.external.length) {
+      throw refuse(ctx, 'mcp.approve.refusals.bookamatDuplicate', { number: d.number, bookings: preview.external.map(describeCandidate).join('; ') }, 'invalid_input', { document_id: d.id, app_url: documentUrl(d.type, d.id) })
+    }
     const amount = preview.bookings.reduce((s, b) => s + (b.kind === 'refund' ? -b.amount : b.amount), 0)
     const notices: Worded[] = [notice('mcp.approve.notices.bookamatPdf')]
     if (preview.unsettled) notices.push(notice('mcp.approve.notices.bookamatUnsettled'))

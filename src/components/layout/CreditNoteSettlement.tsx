@@ -16,12 +16,15 @@ import { formatDate, formatMoney, roundCents, today } from '@/lib/utils/document
 import { creditNoteOpen, creditNoteSettled, paymentDateIssue } from '@/lib/status'
 import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import {
-  BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, formatBookings, planBookings, requestBookamatSync, unbookedPlan, type BookingRow,
+  BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, duplicateCandidates, formatBookings, planBookings, requestBookamatAdopt,
+  requestBookamatSync, unbookedPlan, type BookingRow,
 } from '@/lib/bookamat-client'
 import { loadMoneyLock } from '@/lib/deposits'
 import { recordRefund, removePayment } from '@/lib/services/payments'
 import { useT } from '@/lib/i18n/client'
 import type { Currency, PaymentMethod } from '@/types'
+import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
+import { BookamatDuplicateDialog } from '@/components/bookamat/BookamatDuplicateDialog'
 
 type Row = { id: string; date: string; amount: number }
 type Refund = Row & { method: PaymentMethod; note: string | null; reference: string | null }
@@ -83,6 +86,10 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
   // Bookamat books a credit note's refunds once it is settled (the sync route refuses earlier).
   const [bookamat, setBookamat] = useState<{ error: string | null; bookings: BookingRow[] } | null>(null)
   const [syncing, setSyncing] = useState(false)
+  // Bookings Bookamat already has that may be this refund: the sync booked nothing ('external_duplicate').
+  const [duplicates, setDuplicates] = useState<BookingCandidate[] | null>(null)
+  const [acknowledged, setAcknowledged] = useState<BookingRef[]>([])
+  const [adopting, setAdopting] = useState<string | null>(null)
   const syncable = issued && !!number && settled && refunds.length > 0 && bookamatConfigured
   useEffect(() => {
     if (!syncable) return
@@ -118,17 +125,24 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     }
   }
 
-  async function syncToBookamat() {
+  // `acknowledge`: bookings in Bookamat the owner said are other money („trotzdem buchen“).
+  async function syncToBookamat(acknowledge?: BookingRef[]) {
     if (syncing) return
     setSyncing(true)
     try {
-      const res = await requestBookamatSync(creditNoteId)
+      const res = await requestBookamatSync(creditNoteId, { acknowledge })
       if (!res.ok) {
         const error = bookamatErrorMessage(t, res.payload)
-        toast.error(t('books.sync.failed', { error }))
+        const found = duplicateCandidates(res.payload)
+        if (found.length) setDuplicates(found)
+        else {
+          closeDuplicates()
+          toast.error(t('books.sync.failed', { error }))
+        }
         setBookamat(b => (b ? { ...b, error } : b))
         return
       }
+      closeDuplicates()
       const { created, bookings, pdf } = res.data
       setBookamat({ error: null, bookings })
       const made = formatBookings(t, created)
@@ -139,6 +153,32 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     } finally {
       setSyncing(false)
     }
+  }
+
+  // „Das ist diese Zahlung — übernehmen“: Mado records that booking and books nothing.
+  async function adoptBooking(candidate: BookingCandidate) {
+    setAdopting(`${candidate.year}:${candidate.bookingId}`)
+    const res = await requestBookamatAdopt(creditNoteId, { year: candidate.year, bookingId: candidate.bookingId })
+    setAdopting(null)
+    if (!res.ok) {
+      toast.error(bookamatErrorMessage(t, res.payload))
+      return
+    }
+    closeDuplicates()
+    setBookamat({ error: null, bookings: res.data.bookings })
+    toast.success(t('books.duplicates.adopted', { id: candidate.bookingId }))
+    router.refresh()
+  }
+
+  function bookAnyway() {
+    const all = [...acknowledged, ...(duplicates ?? []).map(c => ({ year: c.year, bookingId: c.bookingId }))]
+    setAcknowledged(all)
+    void syncToBookamat(all)
+  }
+
+  function closeDuplicates() {
+    setDuplicates(null)
+    setAcknowledged([])
   }
 
   async function addRefund(allowOver = false) {
@@ -355,6 +395,16 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         busy={saving}
         onConfirm={() => { if (pendingRemove) void removeRefund(pendingRemove) }}
         onCancel={() => setPendingRemove(null)}
+      />
+
+      <BookamatDuplicateDialog
+        open={!!duplicates}
+        candidates={duplicates ?? []}
+        busy={syncing ? 'sync' : adopting}
+        refund
+        onAdopt={c => void adoptBooking(c)}
+        onBookAnyway={bookAnyway}
+        onCancel={closeDuplicates}
       />
     </section>
   )

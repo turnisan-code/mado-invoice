@@ -21,13 +21,15 @@ import { Select } from '@/components/ui/select'
 import { controlClass, fieldClass } from '@/components/ui/control'
 import { cn } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { BookamatReconcile } from '@/components/bookamat/BookamatReconcile'
 import { isValidBic, isValidEmail, isValidIban, isValidVatId, normalizeBic, normalizeIban, normalizeVatId } from '@/lib/utils/validation'
 import { formatDate, getTaxNote, viennaDate } from '@/lib/utils/document'
 import { NUMBER_TOKENS, counterHintText, formatDocumentNumber, hasYearToken, nextCounter, nextNumberHint, numberFormatIssue, numberPrefixIssue } from '@/lib/utils/numbering'
 import { listIssuedNumbers } from '@/lib/services/queries'
 import type { DocumentType, EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 
-interface Props { settings: PublicSettings | null }
+// `bookamatWrites`: false on a preview deployment, which never writes to Bookamat (src/lib/deployment.ts).
+interface Props { settings: PublicSettings | null; bookamatWrites?: boolean }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
 const inp = fieldClass
@@ -182,7 +184,7 @@ function VarChips({ vars, onInsert }: { vars: { token: string; label: string }[]
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function SettingsForm({ settings }: Props) {
+export default function SettingsForm({ settings, bookamatWrites = true }: Props) {
   const supabase = createClient()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -848,6 +850,8 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   async function saveBookamat() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({
@@ -881,6 +885,8 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   async function removeBookamatKey() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({ bookamat_api_key: null }).eq('id', settings.id)
@@ -907,6 +913,8 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   async function disconnectBookamat() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({
@@ -948,6 +956,8 @@ export default function SettingsForm({ settings }: Props) {
   }
 
   async function toggleBookamatAutoSync(on: boolean) {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setBookamatAutoSync(on)
     const { error } = await supabase.from('settings').update({ bookamat_auto_sync: on }).eq('id', settings.id)
@@ -1999,6 +2009,9 @@ export default function SettingsForm({ settings }: Props) {
             title={t('settings.integrations.bookamat.title')}
             description={t('settings.integrations.bookamat.description')}
           >
+            {!bookamatWrites && (
+              <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-400">{t('books.errors.preview')}</p>
+            )}
             {bookamatUsername && !bookamatAccounts && !editingBookamat ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">
@@ -2053,12 +2066,14 @@ export default function SettingsForm({ settings }: Props) {
                     {t('books.settings.lastError', { date: bookamatError.at ? formatDate(bookamatError.at, lang) : '—', error: bookamatError.message })}
                   </p>
                 )}
+                {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && <BookamatReconcile writes={bookamatWrites} />}
                 {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && (
                   <label className="flex items-start gap-2 text-sm cursor-pointer">
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
                       checked={bookamatAutoSync}
+                      disabled={!bookamatWrites}
                       onChange={e => void toggleBookamatAutoSync(e.target.checked)}
                     />
                     <span>

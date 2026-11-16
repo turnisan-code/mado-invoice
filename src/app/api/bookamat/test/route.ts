@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server'
 import { requireUser, settingsUnavailable } from '@/lib/auth'
-import { BOOKAMAT_SETTINGS_COLUMNS, BookamatError, credentialsOf, fetchBookamatAccounts, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
+import { BOOKAMAT_SETTINGS_COLUMNS, BookamatError, credentialsOf, fetchBookamatAccounts, recordBookamatError as storeBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
 import { bookamatErrorMessage } from '@/lib/bookamat-client'
+import { bookamatWritesAllowed } from '@/lib/deployment'
 import { today } from '@/lib/utils/document'
 
 // Settings → Bookamat → Test connection: the stored credentials reach Bookamat and every
 // configured account still exists in the year it was chosen in. Success clears the last error.
+// On a preview the test only reads: the result is shown, never stored.
 export async function POST() {
   const auth = await requireUser()
   if (!auth.ok) return auth.response
   const { supabase } = auth
+  const recordBookamatError: typeof storeBookamatError = async (...args) => {
+    if (bookamatWritesAllowed()) await storeBookamatError(...args)
+  }
 
   const { data, error } = await supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single()
   if (error || !data) return settingsUnavailable(error)
