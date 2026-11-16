@@ -2092,6 +2092,7 @@ export const de = {
       cancelled: 'Rechnung storniert',
       date_future: 'Zahlungsdatum in der Zukunft',
       bank_fees: 'Zahlung erfasst, aber nicht der Rest als Bankspesen: nur bei Rechnungen ohne USt, bis 5 % und 25 €',
+      line_booked: 'Schon als andere Gutschrift in Bookamat gebucht (oder die Buchung läuft) — nicht als Zahlung erfasst',
     },
     bookamatHint: 'Neue Zahlungen in der Rechnungsliste an Bookamat übertragen →',
     another: 'Weiteren Kontoauszug importieren',

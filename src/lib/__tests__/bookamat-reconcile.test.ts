@@ -106,6 +106,14 @@ test('a booking Mado made from a statement line is no document\'s and no unknown
   assert.deepEqual([r.unknown, r.doubles], [[], []])
 })
 
+test('a document\'s money booked from a statement line is shown with the payment it may be', () => {
+  const docs = [doc('d1', 'RN-209905008', 100, [{ date: '2026-05-20', amount: 120, kind: 'payment' }], [])]
+  const bookings = [booking(9606, '2026-05-20', 'Gutschrift RN-209905008 Muster', '120.00')]
+  const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN', lineBookings: [{ year: 2026, booking_id: '9606' }] })
+  assert.deepEqual(r.unbooked.flatMap(u => u.candidates.map(c => c.bookingId)), ['9606'])
+  assert.deepEqual(r.unknown, [])
+})
+
 test('a year outside the check is not reported', () => {
   const docs = [doc('d1', 'RN-209905008', 100, [{ date: '2025-05-20', amount: 120, kind: 'payment' }], [row(2025, '9501', 120, '2025-05-20')])]
   const r = reconcile({ docs, bookings: [], years: [2026], invoicePrefix: 'RN' })

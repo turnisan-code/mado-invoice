@@ -17,7 +17,7 @@ export default async function StatementRoute() {
   const supabase = await createClient()
   const { t } = await getT()
 
-  const [{ data: docs }, { data: closedDocs }, { data: refs }, { data: settings }] = await Promise.all([
+  const [{ data: docs }, { data: closedDocs }, { data: refs }, { data: settings }, { data: lineBooked }] = await Promise.all([
     supabase.from('documents').select(INVOICE_COLS).eq('type', 'invoice').in('status', ['sent', 'overdue']).not('number', 'is', null).order('date', { ascending: true }),
     // Paid invoices: a credit naming one is most likely recorded already (D3: the same statement
     // is imported here and in Bookmatic, and payments were entered by hand until now). A cancelled
@@ -25,6 +25,8 @@ export default async function StatementRoute() {
     supabase.from('documents').select('id, number').eq('type', 'invoice').eq('status', 'paid').not('number', 'is', null).order('date', { ascending: false }).limit(1000),
     supabase.from('payments').select('import_ref').not('import_ref', 'is', null),
     supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id, quote_prefix, credit_note_prefix, owner_name, uid_number, iban, own_ibans').single(),
+    // Credits booked in Bookamat from this page (or being booked): no invoice payment any more
+    supabase.from('bank_lines').select('line_key').gt('amount', 0).or('status.eq.booked,bookamat_pending.not.is.null').limit(5000),
   ])
 
   // Oldest first, so a client's repeated credits settle their invoices in order.
@@ -59,7 +61,10 @@ export default async function StatementRoute() {
     }]
   })
   // The Skonto, fee and bank-charge rows of a transaction carry its id with a suffix; any of them marks it imported.
-  const importedRefs = [...new Set((refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')))]
+  const importedRefs = [...new Set([
+    ...(refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')),
+    ...((lineBooked ?? []) as { line_key: string }[]).map(l => l.line_key),
+  ])]
   const bookamatConfigured = !!settings && isBookamatConfigured(settings)
 
   return (

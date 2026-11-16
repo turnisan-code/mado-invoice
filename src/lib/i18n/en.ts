@@ -2093,6 +2093,7 @@ export const en = {
       cancelled: 'invoice cancelled',
       date_future: 'payment date in the future',
       bank_fees: 'payment recorded, but not the rest as bank charges: only on an invoice without VAT, up to 5 % and 25 €',
+      line_booked: 'Already booked in Bookamat as another credit (or its booking is under way) — not recorded as a payment',
     },
     bookamatHint: 'Sync the new payments to Bookamat from the invoice list →',
     another: 'Import another statement',

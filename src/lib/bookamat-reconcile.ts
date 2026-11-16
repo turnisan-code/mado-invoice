@@ -70,7 +70,7 @@ const longestRun = (number: string) => (number.match(/\d+/g) ?? []).reduce((a, b
 
 // `applied`: per credit note, what was credited to invoices (its refunds book the rest).
 // `lineBookings`: the bookings Mado made from statement lines (an expense, a credit that pays no
-// invoice): never a document's, never an unknown number.
+// invoice): no unknown number; but a document's money booked so is shown (a candidate, a double).
 export function reconcile(input: {
   docs: ReconcileDoc[]
   bookings: BookingLite[]
@@ -81,10 +81,8 @@ export function reconcile(input: {
 }): ReconcileReport {
   const years = new Set(input.years)
   const byKey = new Map(input.bookings.map(b => [bookingKey(b.year, b.id), b]))
-  const recordedKeys = new Set([
-    ...input.docs.flatMap(d => (d.bookamat_bookings ?? []).map(r => bookingKey(r.year, String(r.booking_id)))),
-    ...(input.lineBookings ?? []).map(r => bookingKey(r.year, String(r.booking_id))),
-  ])
+  const recordedKeys = new Set(input.docs.flatMap(d => (d.bookamat_bookings ?? []).map(r => bookingKey(r.year, String(r.booking_id)))))
+  const lineKeys = new Set((input.lineBookings ?? []).map(r => bookingKey(r.year, String(r.booking_id))))
   const report: ReconcileReport = { years: input.years, bookingsRead: input.bookings.length, recorded: [], unbooked: [], doubles: [], unknown: [] }
   // Bookings some document already explains: never an unknown number.
   const named = new Set<string>()
@@ -162,7 +160,7 @@ export function reconcile(input: {
     const re = new RegExp(`(?:^|[^A-Za-z0-9])${escapeRe(prefix)}[\\s:_\\-/]*(\\d{${length}})(?!\\d)`, 'i')
     for (const b of input.bookings) {
       const key = bookingKey(b.year, b.id)
-      if (!b.moneyIn || recordedKeys.has(key) || named.has(key)) continue
+      if (!b.moneyIn || recordedKeys.has(key) || lineKeys.has(key) || named.has(key)) continue
       const m = re.exec(b.title) ?? re.exec(b.description)
       if (m && Number(m[1]) >= first && !known.has(m[1])) report.unknown.push({ number: `${prefix}-${m[1]}`, booking: toCandidate(b, 'number') })
     }

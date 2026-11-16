@@ -29,7 +29,7 @@ interface ImportRow {
 interface ImportError {
   transaction_id: string
   /** Known failure the UI can translate; absent for raw database errors. */
-  code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future' | 'bank_fees'
+  code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future' | 'bank_fees' | 'line_booked'
   message: string
 }
 
@@ -51,6 +51,9 @@ const REFUSALS = {
   cancelled: 'Invoice is cancelled',
   date_future: 'Payment date is in the future',
 } as const
+// A credit booked in Bookamat from the „Kontoauszug“ (another credit, PR 9a), or whose booking
+// there is under way, is that booking's money: recorded on an invoice too, 8b would book it again
+const LINE_BOOKED_REFUSAL = 'This credit is booked in Bookamat from the statement already (or its booking is under way)'
 const BANK_FEES_REFUSAL = 'Bank charges only close the rest of an invoice without VAT (0.5–5 % of what was due, at most 25 €), and not with a Skonto'
 
 function isImportRow(r: unknown): r is ImportRow {
@@ -130,8 +133,23 @@ export async function POST(req: Request) {
     }
   }
 
+  // Credits the „Kontoauszug“ booked in Bookamat itself, or is booking
+  const lineBooked = new Set<string>()
+  const keys = [...new Set(rows.map(r => r.transaction_id))]
+  for (let i = 0; i < keys.length; i += 100) {
+    const { data, error } = await supabase.from('bank_lines').select('line_key, status, bookamat_pending').in('line_key', keys.slice(i, i + 100))
+    if (error) return databaseError(error)
+    for (const l of (data ?? []) as { line_key: string; status: string; bookamat_pending: unknown }[]) {
+      if (l.status === 'booked' || l.bookamat_pending) lineBooked.add(l.line_key)
+    }
+  }
+
   const now = today()
   for (const row of rows) {
+    if (lineBooked.has(row.transaction_id)) {
+      errors.push({ transaction_id: row.transaction_id, code: 'line_booked', message: LINE_BOOKED_REFUSAL })
+      continue
+    }
     const doc = byId.get(row.document_id)
     const refusal = paymentRefusal(doc, row.date, now)
     // isImportRow checked the date's format, so a date refusal is a date in the future.

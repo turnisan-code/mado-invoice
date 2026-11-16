@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { autoSyncBookamat, resetBookamatSync, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
-import { fakeSupabase, type Op } from './fake-supabase'
+import { fakeSupabase, hasFilter, type Op } from './fake-supabase'
 
 const DOC = '00000000-0000-4000-8000-000000000001'
 const P1 = '00000000-0000-4000-8000-0000000000b1'
@@ -31,7 +31,10 @@ const income = (id: number, date: string, title: string, amount: string) =>
 type World = {
   // A year's bookings as Bookamat lists them; 'fail' answers 500, 'missing' 404.
   years?: Record<number, unknown[] | 'fail' | 'missing'>
-  recordedElsewhere?: { year: number; booking_id: string }[]
+  // `on: 'line'`: recorded on a statement line (PR 9a), not on a document
+  recordedElsewhere?: { year: number; booking_id: string; on?: 'line' }[]
+  // What a post answers: 'ok' (default) or a 502 from a gateway
+  postAnswer?: 'ok' | '502'
   // Another sync took the claim over before the journal was written.
   claimLost?: boolean
   payments?: typeof doc.payments
@@ -70,7 +73,8 @@ function setup(world: World) {
     }
     if (op.table === 'bookamat_bookings' && op.action === 'select') {
       if (op.columns === 'booking_id') return { data: (world.taken ?? []).map(booking_id => ({ booking_id })) }
-      return { data: op.columns === 'year, booking_id' ? world.recordedElsewhere ?? [] : [] }
+      const elsewhere = (world.recordedElsewhere ?? []).filter(r => !(hasFilter(op, 'not', 'document_id') && r.on === 'line'))
+      return { data: op.columns === 'year, booking_id' ? elsewhere : [] }
     }
     return { error: null }
   })
@@ -92,6 +96,7 @@ function setup(world: World) {
     }
     if (method === 'GET' && /^2026\/bookings\/\?title=/.test(path)) return json({ count: (world.titled ?? []).length, next: null, results: world.titled ?? [] })
     if (method === 'POST' && path === '2026/bookings/') {
+      if (world.postAnswer === '502') return new Response('{"detail":"Bad gateway"}', { status: 502 })
       bodies.push(JSON.parse(String(init?.body)))
       return json({ id: 99000 + bodies.length }, 201)
     }
@@ -185,6 +190,21 @@ test('Mado\'s own booking of another document is not a duplicate', async () => {
   const res = await syncBookamatDocument(db.client, settings, DOC)
   assert.equal(res.ok, true, JSON.stringify(res))
   assert.deepEqual(posts(), ['http POST 2026/bookings/'])
+})
+
+test('a booking Mado made from a statement line is other money for a document: the sync stops and names it', async () => {
+  const db = setup({ years: { 2026: [income(71005, '2026-06-15', 'Honorar Muster Client', '840.00')] }, recordedElsewhere: [{ year: 2026, booking_id: '71005', on: 'line' }] })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(!res.ok && res.code, 'external_duplicate')
+  assert.deepEqual(posts(), [])
+})
+
+test('a 502 after the post keeps the journal: the booking may exist, the next sync looks it up first', async () => {
+  const db = setup({ postAnswer: '502' })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(!res.ok && res.code, 'unconfirmed')
+  // Written before the post, never taken back
+  assert.equal(journalWrites().length, 1)
 })
 
 test('unrelated bookings nearby do not stop the sync', async () => {
