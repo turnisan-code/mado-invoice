@@ -52,6 +52,8 @@ type World = {
   pending?: BankLinePending | null
   recorded?: { year: number; booking_id: string; bank_line_id: string | null }[]
   live?: 'deleted' | 'missing' | 'live'
+  // Mado's documents by number
+  documents?: { type: 'invoice' | 'credit_note'; number: string }[]
 }
 
 const savedEnv = process.env.VERCEL_ENV
@@ -87,6 +89,7 @@ function setup(world: World) {
       return { data: world.lines }
     }
     if (op.table === 'booking_rules') return { data: RULES }
+    if (op.table === 'documents') return { data: world.documents ?? [] }
     if (op.table === 'payments') return { data: (world.invoicePaid ?? []).map(import_ref => ({ import_ref })) }
     if (op.table === 'bank_lines' && op.action === 'update' && op.returning) {
       const values = op.values as Record<string, unknown>
@@ -213,6 +216,19 @@ test('a credit recorded on an invoice, a refund, a booked or skipped line: not b
   const results = await bookLines(db.client, settings, ['l-in', 'l-ref', 'l-rent', 'l-skip'])
   assert.deepEqual(results.map(r => r.status), ['skipped', 'skipped', 'skipped', 'skipped'])
   assert.ok(results[0].status === 'skipped' && results[0].reason === INVOICE_PAYMENT_TEXT)
+  assert.equal(posted.length, 0)
+})
+
+test('a line naming a Mado invoice or credit note is that document\'s money: never booked here', async () => {
+  const credit = bankLine('l-pay', 'Gutschrift Überweisung|BKAUATWWXXX AT000000000000000003 Agentur Beispiel GmbH|Zahlung RN-2099|06001', 840)
+  const refund = bankLine('l-back', 'Abbuchung Überweisung|BKAUATWWXXX AT000000000000000003 Agentur Beispiel GmbH|GS-209906002', -120)
+  const longer = bankLine('l-other', 'Gutschrift Überweisung|BKAUATWWXXX AT000000000000000003 Agentur Beispiel GmbH|RN-2099060011', 50)
+  const db = setup({ lines: [credit, refund, longer], documents: [{ type: 'invoice', number: 'RN-209906001' }, { type: 'credit_note', number: 'GS-209906002' }] })
+  const [pay, back, other] = await bookLines(db.client, settings, ['l-pay', 'l-back', 'l-other'])
+  assert.ok(pay.status === 'skipped' && pay.reason.startsWith('Nennt RN-209906001 aus Mado — als Zahlung im Tab „Einnahmen“'))
+  assert.ok(back.status === 'skipped' && back.reason.includes('Rückzahlung an der Gutschrift'))
+  // A longer number is another one: this credit is the owner's to book (no Ertragskonto yet)
+  assert.ok(other.status === 'error')
   assert.equal(posted.length, 0)
 })
 

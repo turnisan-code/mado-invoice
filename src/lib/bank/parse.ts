@@ -455,6 +455,7 @@ export function parseEasybank(text: string): ParsedStatement {
       currency: (row[5] ?? '').toUpperCase() || null,
       raw: cells.join(' ; '),
       search: row[1].replace(/\|/g, ''),
+      cells: [...cells],
       ...(fee && fee > 0 && fee < Math.abs(amount) ? { fee: roundCents(fee) } : {}),
     })
   })

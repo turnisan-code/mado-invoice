@@ -26,6 +26,7 @@ import { ruleChoiceReason } from './rule-match'
 import { resolveIncomeDefaults } from './row-defaults'
 import { refundNote } from './refunds'
 import { expenseOwnerOf, setExpenseOwner, type OwnerSettings } from './owner'
+import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import type { BookamatAccounts, BookingPayload, EasybankTransaction, MatchedIncomeTransaction, MatchedTransaction, Vendor } from './types'
 
 export const CLAIM_TTL_MS = 3 * 60_000
@@ -133,6 +134,7 @@ export async function bookLines(
   const { data: payData, error: payErr } = await supabase.from('payments').select('import_ref').in('import_ref', lines.map(l => l.line_key))
   if (payErr) throw new BookamatError('database', payErr.message)
   const invoicePaid = new Set(((payData ?? []) as { import_ref: string }[]).map(p => p.import_ref))
+  const madoNumbers = await readMadoNumbers(supabase)
 
   // Each line is checked against the books of the year it is booked in
   const listsOf = new Map<number, Promise<BookamatAccounts>>()
@@ -177,6 +179,8 @@ export async function bookLines(
     if (kind === 'bank_income' && invoicePaid.has(line.line_key)) return { id: line.id, status: 'skipped', reason: INVOICE_PAYMENT_TEXT }
 
     const tx = lineTransaction(line)
+    const named = namedDocument(tx, madoNumbers)
+    if (named) return { id: line.id, status: 'skipped', reason: madoDocumentText(named, kind === 'bank_income') }
     const engineKind = kind === 'expense' ? 'expense' : 'income'
     const year = Number(bookingDateOf(tx, line.review?.override, engineKind).slice(0, 4))
     const lists = await accounts(year)

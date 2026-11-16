@@ -13,6 +13,7 @@ import { lineKind, lineRow, lineTransaction, readBookingsInWindow, type LineSett
 import { transactionOfCells } from './csv-parser'
 import { bookingDateOf } from './booking-dates'
 import { expenseOwnerOf, setExpenseOwner } from './owner'
+import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import type { BookamatAccounts, MatchedIncomeTransaction, MatchedTransaction } from './types'
 
 export const MAX_LINES = 3000
@@ -73,6 +74,8 @@ export type LineView = {
   year: number
   // A credit recorded on an invoice in the „Einnahmen“ tab
   invoicePayment: boolean
+  // A Mado document the bank text names: never booked here (lib/expenses/mado-numbers.ts)
+  madoDocument: string | null
   row: MatchedTransaction | MatchedIncomeTransaction
   booking: { year: number; booking_id: string; pdf_attached_at: string | null } | null
 }
@@ -111,10 +114,15 @@ export async function analyseStored(
     for (const r of (p.data ?? []) as { import_ref: string }[]) paid.add(r.import_ref)
   }
 
+  const numbers = await readMadoNumbers(supabase)
   const planned = lines.map(line => {
     const tx = lineTransaction(line)
     const kind = lineKind(line)
-    return { line, kind, year: Number(bookingDateOf(tx, line.review?.override, kind === 'expense' ? 'expense' : 'income').slice(0, 4)) }
+    const named = namedDocument(tx, numbers)
+    return {
+      line, kind, year: Number(bookingDateOf(tx, line.review?.override, kind === 'expense' ? 'expense' : 'income').slice(0, 4)),
+      madoDocument: named ? madoDocumentText(named, kind === 'bank_income') : null,
+    }
   })
   const accounts: Record<number, BookamatAccounts> = {}
   const accountsErrors: Record<number, string> = {}
@@ -127,7 +135,7 @@ export async function analyseStored(
     return { ...p, built: lineRow(p.line, vendorsOf(rules, lists), lists) }
   })
   // Bookamat's bookings of the lines still to book: read once
-  const open = built.filter(b => b.line.status === 'open' && !(b.kind === 'bank_income' && paid.has(b.line.line_key)))
+  const open = built.filter(b => b.line.status === 'open' && !b.madoDocument && !(b.kind === 'bank_income' && paid.has(b.line.line_key)))
   const analysed: AnalysedLine[] = open.map(b => (b.built.kind === 'expense'
     ? { kind: 'expense', row: b.built.row, override: b.line.review?.override, ack: b.line.review?.ack_duplicate_ids }
     : { kind: 'income', row: b.built.row, override: b.line.review?.override, ack: b.line.review?.ack_duplicate_ids }))
@@ -147,7 +155,7 @@ export async function analyseStored(
       const { cells: _cells, ...line } = b.line
       void _cells
       return {
-        line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key),
+        line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key), madoDocument: b.madoDocument,
         row: rowOf.get(b.line.id) ?? b.built.row, booking: bookingOf.get(b.line.id) ?? null,
       }
     }),
