@@ -183,6 +183,12 @@ export type SyncFailure = {
   candidates?: BookingCandidate[]
 }
 
+// The bookings a sync refused over ('external_duplicate'), from its error payload; [] otherwise.
+export function duplicateCandidates(payload: unknown): BookingCandidate[] {
+  const p = (payload && typeof payload === 'object' ? payload : {}) as { code?: unknown; candidates?: unknown }
+  return p.code === 'external_duplicate' && Array.isArray(p.candidates) ? p.candidates as BookingCandidate[] : []
+}
+
 // A booking Bookamat already had, taken over for the document's money ('adopt' route).
 export type AdoptSuccess = {
   ok: true

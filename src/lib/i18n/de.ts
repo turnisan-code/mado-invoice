@@ -2012,6 +2012,16 @@ export const de = {
       bulkResultSummary: '{ok} übertragen, {failed} fehlgeschlagen',
       bulkClose: 'Schließen',
     },
+    duplicates: {
+      title: 'Schon in Bookamat?',
+      desc: 'Bookamat hat eine Buchung, die nicht von Mado ist und dieses Geld sein könnte. Nichts wurde gebucht.',
+      byNumber: 'nennt die Nummer',
+      byAmount: 'gleicher Betrag, ±10 Tage',
+      adopt: 'Das ist diese Zahlung — übernehmen',
+      adopting: 'Wird übernommen…',
+      bookAnyway: 'Keine davon — trotzdem buchen',
+      adopted: 'Bookamat-Buchung #{id} übernommen — nichts wurde neu gebucht.',
+    },
     fees: {
       kind: 'Spesen / Zinsen',
       splitTitle: 'Mehr als der offene Betrag',

@@ -2013,6 +2013,16 @@ export const en = {
       bulkResultSummary: '{ok} synced, {failed} failed',
       bulkClose: 'Close',
     },
+    duplicates: {
+      title: 'Already in Bookamat?',
+      desc: 'Bookamat has a booking Mado did not make that may be this money. Nothing was booked.',
+      byNumber: 'names the number',
+      byAmount: 'same amount, within 10 days',
+      adopt: 'This is the payment — take it over',
+      adopting: 'Taking over…',
+      bookAnyway: 'None of these — book anyway',
+      adopted: 'Bookamat booking #{id} taken over — nothing was booked again.',
+    },
     fees: {
       kind: 'Fees / interest',
       splitTitle: 'More than the open balance',
