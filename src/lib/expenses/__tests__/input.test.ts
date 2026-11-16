@@ -3,7 +3,7 @@ import './owner'
 // (never from what the page says it is). Made-up values only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseLineInputs, parseReview, parseRule, receiptPathOk } from '../input'
+import { parseBookEntries, parseLineInputs, parseReview, parseRule, receiptPathOk } from '../input'
 import { lineRecord } from '../statement'
 
 const OWN = 'AT611904300234573201'
@@ -27,16 +27,18 @@ test('the lines a page sends: 1–3000, each a key and 5–12 cells of text', ()
 
 test('a line\'s review: only the editor\'s fields, each in its form', () => {
   assert.deepEqual(parseReview({ override: { cost_account_id: '12', tax_percent: '20', date_invoice: '2026-06-01', vatin: '', title: 'Miete Juni ' } }),
-    { override: { cost_account_id: '12', tax_percent: '20', date_invoice: '2026-06-01', vatin: '', title: 'Miete Juni ' } })
+    { override: { cost_account_id: '12', tax_percent: '20', date_invoice: '2026-06-01', vatin: '', title: 'Miete Juni' } })
   assert.equal(parseReview({ override: { amount: '1' } }), null)
   assert.equal(parseReview({ override: { cost_account_id: 'Miete' } }), null)
   assert.equal(parseReview({ override: { tax_percent: '120' } }), null)
   assert.equal(parseReview({ override: { date: '15.06.2026' } }), null)
   assert.equal(parseReview({ rule_id: 'r1' }), null)
   assert.deepEqual(parseReview({ rule_id: LINE_ID, ack_duplicate_ids: [7001] }), { rule_id: LINE_ID, ack_duplicate_ids: [7001] })
-  assert.deepEqual(parseReview({ lines: [{ label: 'Speisen', amount_gross: 33, vat_percent: 10, deductibility_amount_percent: 50 }] }),
-    { lines: [{ label: 'Speisen', amount_gross: 33, vat_percent: 10, deductibility_amount_percent: 50 }] })
-  assert.equal(parseReview({ lines: [{ label: 'x', amount_gross: 1, vat_percent: 10, cost_account_id: -1 }] }), null)
+  const two = [{ label: 'Speisen', amount_gross: 33, vat_percent: 10, deductibility_amount_percent: 50 }, { label: 'Getränke', amount_gross: 12, vat_percent: 20 }]
+  assert.deepEqual(parseReview({ lines: two }), { lines: two })
+  // One split line would book its own amount instead of the bank's
+  assert.equal(parseReview({ lines: [two[0]] }), null)
+  assert.equal(parseReview({ lines: [two[0], { label: 'x', amount_gross: 1, vat_percent: 10, cost_account_id: -1 }] }), null)
   assert.equal(parseReview({ other: 1 }), null)
   assert.deepEqual(parseReview({}), {})
 })
@@ -62,4 +64,13 @@ test('a Buchungsregel: its name, its texts, its rates and its range', () => {
   assert.equal(parseRule({ ...ok, amount_min: 20, amount_max: 10 }), null)
   assert.equal(parseRule({ ...ok, amount_min: '' })?.amount_min, null)
   assert.equal(parseRule({ ...ok, skip_receipt: 'yes' }), null)
+})
+
+test('the lines a booking takes: 1–25 ids, each with the fingerprint the page showed or none', () => {
+  const id = '0b9c8b1e-6c1f-4b8e-9d2a-1f2e3d4c5b6a'
+  assert.deepEqual(parseBookEntries([{ id, fingerprint: '0a1b2c3d' }, { id }]), [{ id, fingerprint: '0a1b2c3d' }, { id, fingerprint: null }])
+  assert.equal(parseBookEntries([{ id, fingerprint: 'XYZ' }]), null)
+  assert.equal(parseBookEntries([{ id: 'l1' }]), null)
+  assert.equal(parseBookEntries([]), null)
+  assert.equal(parseBookEntries(Array.from({ length: 26 }, () => ({ id }))), null)
 })

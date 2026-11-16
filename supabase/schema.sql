@@ -35,6 +35,9 @@ create table settings (
   -- The owner's other business accounts (20261117_expenses.sql): a transfer to or from one is no
   -- Privatentnahme/Privateinlage. The IBAN above and the statement's own account count anyway.
   own_ibans                   text[] not null default '{}',
+  -- The switch-over (20261117_expenses.sql, decision D2): Mado books statement lines from this
+  -- bank date on; before it, and while it is null, Bookmatic books them.
+  expenses_from               date,
   bank_name                   text,
   -- Name the account is held in (EPC QR beneficiary, PDF payment block); empty = company_name.
   bank_account_holder         text,

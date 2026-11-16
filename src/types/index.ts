@@ -62,6 +62,8 @@ export interface Settings {
   // The owner's other business accounts: a transfer to or from one is no Privatentnahme/Privateinlage
   // (src/lib/expenses/owner.ts). The IBAN above and the statement's own account count anyway.
   own_ibans: string[]
+  // From this bank date on Mado books statement lines (the switch-over from Bookmatic); null: not yet
+  expenses_from: string | null
   bank_name: string | null
   bank_account_holder: string | null
   invoice_prefix: string

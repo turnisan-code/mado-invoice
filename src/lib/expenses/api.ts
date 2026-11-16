@@ -12,7 +12,7 @@ export function expenseError(err: unknown): NextResponse {
       : err.code === 'preview' ? 403
       : err.code === 'timeout' || err.code === 'network' || (err.code === 'bookamat' && err.status >= 500) ? 502
       : 400
-    return NextResponse.json({ error: err.message, code: err.code, detail: err.detail }, { status })
+    return NextResponse.json({ error: err.message, code: err.code, details: err.detail }, { status })
   }
   console.error('[expenses]', err)
   return NextResponse.json({ error: err instanceof Error ? err.message : String(err), code: 'server_error' }, { status: 500 })

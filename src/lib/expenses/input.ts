@@ -8,7 +8,7 @@ import { MAX_LINES, type LineInput } from './statement'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v)
 
-export const LINE_SETTINGS_COLUMNS = `${BOOKAMAT_SETTINGS_COLUMNS}, owner_name, uid_number, iban, own_ibans`
+export const LINE_SETTINGS_COLUMNS = `${BOOKAMAT_SETTINGS_COLUMNS}, owner_name, uid_number, iban, own_ibans, expenses_from`
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
 
@@ -49,7 +49,7 @@ function parseOverride(v: unknown): Record<string, string> | null {
     if (val && DATE_KEYS.has(k) && !DATE.test(val)) return null
     if (val && ID_KEYS.has(k) && !ID.test(val)) return null
     if (val && PERCENT_KEYS.has(k) && (!PERCENT.test(val) || Number(val) > 100)) return null
-    out[k] = k === 'description' || k === 'title' ? raw : val
+    out[k] = k === 'description' ? raw : val
   }
   return out
 }
@@ -58,9 +58,10 @@ const num = (v: unknown, min: number, max: number): v is number => typeof v === 
 const optId = (v: unknown) => v === undefined || (typeof v === 'number' && Number.isInteger(v) && v > 0)
 const optPercent = (v: unknown) => v === undefined || num(v, 0, 100)
 
+// Split lines: none, or two and more (one line would book its own amount instead of the bank's)
 function parseSplits(v: unknown): BankLineSplit[] | null {
   if (v === undefined) return []
-  if (!Array.isArray(v) || v.length > 12) return null
+  if (!Array.isArray(v) || v.length === 1 || v.length > 12) return null
   const out: BankLineSplit[] = []
   for (const s of v) {
     if (!s || typeof s !== 'object') return null
@@ -132,3 +133,20 @@ export function parseRule(value: unknown): RuleInput | null {
   }
 }
 
+
+// The lines a booking takes ({ id, fingerprint }): the fingerprint of the booking the page showed
+// for each (lib/expenses/fingerprint.ts). At most 25 per request: the page sends them in turns.
+export const MAX_BOOK = 25
+
+export function parseBookEntries(value: unknown): { id: string; fingerprint: string | null }[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > MAX_BOOK) return null
+  const out: { id: string; fingerprint: string | null }[] = []
+  for (const v of value) {
+    if (!v || typeof v !== 'object') return null
+    const { id, fingerprint } = v as Record<string, unknown>
+    if (!isUuid(id)) return null
+    if (fingerprint !== undefined && fingerprint !== null && !(typeof fingerprint === 'string' && /^[0-9a-f]{8}$/.test(fingerprint))) return null
+    out.push({ id, fingerprint: typeof fingerprint === 'string' ? fingerprint : null })
+  }
+  return out
+}

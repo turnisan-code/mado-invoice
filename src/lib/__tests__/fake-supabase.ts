@@ -30,7 +30,7 @@ export function fakeSupabase(answer: (op: Op) => Answer | undefined) {
       update(values: unknown) { op.action = 'update'; op.values = values; return builder },
       delete() { op.action = 'delete'; return builder },
       eq: filter('eq'), neq: filter('neq'), in: filter('in'), is: filter('is'), or: filter('or'), not: filter('not'),
-      gte: filter('gte'), lte: filter('lte'), order: filter('order'), limit: filter('limit'), range: filter('range'),
+      gte: filter('gte'), lte: filter('lte'), lt: filter('lt'), gt: filter('gt'), order: filter('order'), limit: filter('limit'), range: filter('range'),
       maybeSingle() { op.single = 'maybe'; return builder },
       single() { op.single = 'single'; return builder },
       then(resolve: (v: Answer) => unknown, reject: (e: unknown) => unknown) {

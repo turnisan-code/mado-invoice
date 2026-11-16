@@ -1,22 +1,26 @@
 // A statement's lines on the server (PR 9a): stored once each (bank_lines, keyed by the
 // parser's line id), and analysed for the „Kontoauszug“ page — the Analyse of every line with
-// what the owner set on it, the year's accounts, and the bookings Bookamat already has.
-// Everything the engine reads is rebuilt from the line's cells: an amount, a date or a name the
-// page sends is never taken.
+// what the owner set on it, the year's accounts, the bookings Bookamat already has (the one
+// check the booking applies too, lib/expenses/lines.ts), and what keeps a line from being
+// booked here. Everything the engine reads is rebuilt from the line's cells: an amount, a date
+// or a name the page sends is never taken.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BankLine, BookingRule } from '@/types'
 import { BookamatError, credentialsOf } from '@/lib/bookamat'
 import { readExpenseAccounts } from './accounts'
 import { vendorsOf } from './rules'
-import { annotateDuplicates, duplicateWindow, type AnalysedLine } from './analyse'
-import { lineKind, lineRow, lineTransaction, readBookingsInWindow, type LineSettings } from './book'
+import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, type LineRow, type StoredLine } from './lines'
+import { LINE_TEXT, type LineSettings } from './book'
 import { transactionOfCells } from './csv-parser'
 import { bookingDateOf } from './booking-dates'
+import { assignDuplicates, bankRows } from './duplicates'
+import { normIban } from './own-transfer'
 import { expenseOwnerOf, setExpenseOwner } from './owner'
 import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import type { BookamatAccounts, MatchedIncomeTransaction, MatchedTransaction } from './types'
 
-export const MAX_LINES = 3000
+// One answer of the page stays well under the platform's response size
+export const MAX_LINES = 1500
 const CHUNK = 200
 
 export type LineInput = { key: string; cells: string[] }
@@ -66,16 +70,21 @@ export async function storeLines(supabase: SupabaseClient, inputs: readonly Line
   return { lines: keys.map(k => found.get(k)).filter((l): l is BankLine => !!l), unreadable: records.length - rows.length }
 }
 
-// A line as the page shows it: the stored line (without its cells' raw text twice), its kind,
-// the year it is booked in, the Analyse (with the bookings Bookamat has), and its booking
+// A line as the page shows it: the stored line (without its cells and its text a second time),
+// its kind, the year it is booked in, the Analyse with the bookings Bookamat has, its booking,
+// and what keeps it from being booked here
 export type LineView = {
-  line: Omit<BankLine, 'cells'>
+  line: Omit<BankLine, 'cells' | 'bank_text'>
   kind: 'expense' | 'bank_income'
   year: number
   // A credit recorded on an invoice in the „Einnahmen“ tab
   invoicePayment: boolean
-  // A Mado document the bank text names: never booked here (lib/expenses/mado-numbers.ts)
+  // A Mado document the line is the money of: its text names one (lib/expenses/mado-numbers.ts),
+  // or Bookamat's booking of it is recorded on one. Never booked here.
   madoDocument: string | null
+  // Why the booking refuses the line whatever the owner sets (the switch-over date, an account
+  // that is no business account, another currency), else null
+  gate: string | null
   row: MatchedTransaction | MatchedIncomeTransaction
   booking: { year: number; booking_id: string; pdf_attached_at: string | null } | null
 }
@@ -86,6 +95,8 @@ export type StatementView = {
   // A year whose accounts Bookamat did not give: its lines are analysed without them
   accountsErrors: Record<number, string>
   unreadable: number
+  // From when Mado books statement lines (Einstellungen → Buchungsregeln); null: not yet
+  switchFrom: string | null
 }
 
 export async function analyseStored(
@@ -115,59 +126,68 @@ export async function analyseStored(
   }
 
   const numbers = await readMadoNumbers(supabase)
-  const planned = lines.map(line => {
-    const tx = lineTransaction(line)
-    const kind = lineKind(line)
-    const named = namedDocument(tx, numbers)
-    return {
-      line, kind, year: Number(bookingDateOf(tx, line.review?.override, kind === 'expense' ? 'expense' : 'income').slice(0, 4)),
-      madoDocument: named ? madoDocumentText(named, kind === 'bank_income') : null,
-    }
+  const planned = lines.flatMap(line => {
+    try {
+      const tx = lineTransaction(line)
+      const kind = lineKind(line)
+      const named = namedDocument(tx, numbers)
+      return [{ line, tx, kind, year: Number(bookingDateOf(tx, line.review?.override, engineKind(kind)).slice(0, 4)), madoDocument: named ? madoDocumentText(named, kind === 'bank_income') : null }]
+    } catch { return [] }
   })
   const accounts: Record<number, BookamatAccounts> = {}
   const accountsErrors: Record<number, string> = {}
   for (const year of [...new Set(planned.map(p => p.year))]) {
     try { accounts[year] = await readExpenseAccounts(creds, year, opts.deadline) } catch (err) { accountsErrors[year] = err instanceof Error ? err.message : String(err) }
   }
+  const listsOf = (year: number) => accounts[year] ?? null
 
-  const built = planned.map(p => {
-    const lists = accounts[p.year] ?? null
-    return { ...p, built: lineRow(p.line, vendorsOf(rules, lists), lists) }
-  })
-  // Bookamat's bookings of the lines still to book: read once
+  const built = planned.map(p => ({ ...p, built: lineRow(p.line, vendorsOf(rules, listsOf(p.year)), listsOf(p.year)) as LineRow }))
+  // Bookamat's bookings of the lines still to book: the booking's own check
   const open = built.filter(b => b.line.status === 'open' && !b.madoDocument && !(b.kind === 'bank_income' && paid.has(b.line.line_key)))
-  const analysed: AnalysedLine[] = open.map(b => (b.built.kind === 'expense'
-    ? { kind: 'expense', row: b.built.row, override: b.line.review?.override, ack: b.line.review?.ack_duplicate_ids }
-    : { kind: 'income', row: b.built.row, override: b.line.review?.override, ack: b.line.review?.ack_duplicate_ids }))
-  const w = duplicateWindow(analysed)
-  let checked: (MatchedTransaction | MatchedIncomeTransaction)[] = analysed.map(a => a.row)
-  if (w) {
-    try {
-      checked = annotateDuplicates(analysed, await readBookingsInWindow(creds, w, opts.deadline))
-    } catch (err) {
-      checked = annotateDuplicates(analysed, null, err instanceof Error ? err.message : String(err))
-    }
+  const dup = await checkDuplicates(supabase, creds, open.map(b => ({ ...(b.line as StoredLine), built: b.built })), rules, listsOf, opts.deadline)
+
+  const ownIbans = [settings.iban ?? '', ...(settings.own_ibans ?? [])].map(normIban)
+  const gateOf = (b: (typeof built)[number]): string | null => {
+    if (!settings.expenses_from) return LINE_TEXT.notSwitched
+    if (String(b.line.booked_on) < settings.expenses_from) return LINE_TEXT.beforeSwitch(settings.expenses_from)
+    const iban = normIban(b.tx.raw?.col0)
+    const business = !!iban && (ownIbans.includes(iban) || (listsOf(b.year)?.bank_accounts ?? []).some(a => normIban(a.iban) === iban))
+    if (!business) return LINE_TEXT.notBusiness(iban)
+    const currency = (b.tx.currency || 'EUR').trim().toUpperCase()
+    if (currency !== 'EUR') return LINE_TEXT.currency(currency)
+    return null
   }
-  const rowOf = new Map(open.map((b, k) => [b.line.id, checked[k]]))
 
   return {
     lines: built.map(b => {
-      const { cells: _cells, ...line } = b.line
-      void _cells
+      const { cells: _cells, bank_text: _text, ...line } = b.line
+      void _cells; void _text
+      const row = dup.rows.get(b.line.id) ?? b.built.row
+      // A booking of this payment that Mado recorded on a document: that document's money,
+      // whatever the owner said about it
+      let madoDocument = b.madoDocument
+      if (!madoDocument && b.line.status === 'open' && dup.documentIndex.length) {
+        const { row: pay } = bankRows(b.tx, { kind: engineKind(b.kind), bookedDate: bookingDateOf(b.tx, b.line.review?.override, engineKind(b.kind)), title: row.title })
+        const m = assignDuplicates([pay], dup.documentIndex)[0]
+        if (m) madoDocument = LINE_TEXT.madoBooking(m.title, m.id)
+      }
       return {
-        line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key), madoDocument: b.madoDocument,
-        row: rowOf.get(b.line.id) ?? b.built.row, booking: bookingOf.get(b.line.id) ?? null,
+        line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key), madoDocument,
+        gate: b.line.status === 'open' ? gateOf(b) : null, row, booking: bookingOf.get(b.line.id) ?? null,
       }
     }),
     accounts,
     accountsErrors,
     unreadable: opts.unreadable ?? 0,
+    switchFrom: settings.expenses_from ?? null,
   }
 }
 
-// The lines still open, oldest first (the page without a file: what is left to do)
+// The debits still open, the newest first (the page without a file: what is left to do). A
+// credit needs the statement to tell an invoice's payment from other money.
 export async function openLines(supabase: SupabaseClient, limit = 500): Promise<BankLine[]> {
-  const { data, error } = await supabase.from('bank_lines').select(LINE_SELECT).eq('status', 'open').order('booked_on').order('id').limit(limit)
+  const { data, error } = await supabase.from('bank_lines').select(LINE_SELECT).eq('status', 'open').lt('amount', 0)
+    .order('booked_on', { ascending: false }).order('id').limit(limit)
   if (error) throw new BookamatError('database', error.message)
-  return (data ?? []) as BankLine[]
+  return ((data ?? []) as BankLine[]).reverse()
 }

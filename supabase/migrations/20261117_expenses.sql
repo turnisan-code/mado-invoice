@@ -4,6 +4,8 @@
 --  - settings.own_ibans: the owner's other business accounts. A transfer to or from one is no
 --    Privatentnahme/Privateinlage (src/lib/expenses/own-transfer.ts); the IBAN on his invoices
 --    (settings.iban) and the statement's own account count anyway.
+--  - settings.expenses_from: the switch-over (decision D2). Mado books statement lines from this
+--    bank date on; before it, and while it is not set, Bookmatic books them.
 --  - bank_lines: one row per line of an imported statement, keyed by the parser's id of the
 --    raw line (the id payments.import_ref carries for an invoice payment). `cells` holds the
 --    bank's cells as written; everything the engine reads is rebuilt from them. `review` is
@@ -26,6 +28,7 @@
 
 -- ─── The owner's business accounts ───────────────────────────────────────────
 alter table settings add column if not exists own_ibans text[] not null default '{}';
+alter table settings add column if not exists expenses_from date;
 
 -- ─── Statement lines ─────────────────────────────────────────────────────────
 create table if not exists bank_lines (

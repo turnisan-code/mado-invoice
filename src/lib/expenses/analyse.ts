@@ -22,7 +22,7 @@ import {
 } from './rule-match'
 import { authorityMentionNoteOf, privateDepositKind, refundNote, refundReason, PRIVATE_DEPOSIT_GUESS_NOTE } from './refunds'
 import { statementBankAccountId } from './bank-account'
-import { assignDuplicates, bankRows, windowFor, type BookingLite, type DuplicateMatch } from './duplicates'
+import { assignDuplicates, bankRows, nearBankDate, windowFor, type BookingLite, type DuplicateMatch } from './duplicates'
 import { bookingDateOf } from './booking-dates'
 import { cleanCounterparty } from './invoice-parsing'
 
@@ -213,11 +213,11 @@ export function duplicateWindow(lines: readonly AnalysedLine[]): { from: string;
 function paymentRows(l: AnalysedLine) {
   const tx = l.row.transaction
   const bookedDate = bookingDateOf(tx, l.override ?? undefined, l.kind)
-  if (l.kind === 'income') return { ...bankRows(tx, { kind: 'income', bookedDate }), titles: [] as string[] }
+  if (l.kind === 'income') return { ...bankRows(tx, { kind: 'income', bookedDate }), titles: [] as string[], bookedDate }
   const row = l.row
   const title = l.override?.title || (row.vendor || row.title === 'Privatentnahme' ? row.title : null)
   const titles = row.vendor ? [] : (row.rule_choices ?? []).map(r => generateTitle(r, tx.date))
-  return { ...bankRows(tx, { kind: 'expense', bookedDate, title, titles }), titles }
+  return { ...bankRows(tx, { kind: 'expense', bookedDate, title, titles }), titles, bookedDate }
 }
 
 const asInfo = (m: DuplicateMatch): DuplicateInfo => ({ id: m.id, title: m.title, date: m.date, total: m.total, certain: m.certain, ...(m.bank ? { bank: m.bank } : {}), ...(m.viaTip ? { viaTip: m.viaTip } : {}) })
@@ -241,6 +241,13 @@ export function annotateDuplicates(
   const built = lines.map(paymentRows)
   const assigned = assignDuplicates(built.map(b => b.row), bookings)
   const taken = new Set(assigned.filter((m): m is DuplicateMatch => !!m).map(m => m.id))
+  // A Buchungsdatum the owner moved to another day near the bank date is checked there too (as
+  // Bookmatic's booking route did), with the bookings no other line took
+  built.forEach((b, k) => {
+    if (assigned[k] || b.bookedDate === b.row.date || b.bookedDate === b.row.payDate || !nearBankDate(b.row.date, b.bookedDate)) return
+    const m = assignDuplicates([{ ...b.row, date: b.bookedDate, payDate: null, invoiceKey: null }], bookings, new Set([...taken, ...(lines[k].ack ?? [])]))[0]
+    if (m) { assigned[k] = m; taken.add(m.id) }
+  })
   return lines.map((l, k) => {
     const acked = new Set(l.ack ?? [])
     let match = assigned[k]

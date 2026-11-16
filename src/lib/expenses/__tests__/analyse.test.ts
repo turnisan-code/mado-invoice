@@ -102,3 +102,18 @@ test('a booking Bookamat has of the payment: certain on its day with the rule\'s
   const [failed] = annotateDuplicates([{ kind: 'expense', row: rent }], null, 'Bookamat antwortet nicht')
   assert.equal(failed.duplicate_check_failed, 'Bookamat antwortet nicht')
 })
+
+test('a Buchungsdatum the owner moved near the bank date is checked there too; rules that tie are checked by their titles', () => {
+  const rent = analyseExpense(rentDebit, RULES, LISTS)
+  const moved: BookingLite = { id: 7101, title: rent.title, date: '2026-06-12', total: 700, income: false, zeroTax: 0 }
+  const [onMoved] = annotateDuplicates([{ kind: 'expense', row: rent, override: { date: '2026-06-12' } }], [moved])
+  assert.equal(onMoved.duplicate_of?.id, 7101)
+  // Not moved: a booking three days before the payment is no certain one of it
+  const [plain] = annotateDuplicates([{ kind: 'expense', row: rent }], [moved])
+  assert.notEqual(plain.duplicate_of?.certain, true)
+  // A debit whose rules tie: a booking under either rule's title on its day is its booking
+  const tel = analyseExpense(line('Abbuchung Lastschrift|MUSTER TELEKOM Rechnung 0626', '-49,90'), RULES, LISTS)
+  const byTitle: BookingLite = { id: 7102, title: 'Telefon Studio 06/2026', date: '2026-06-15', total: 49.9, income: false, zeroTax: 0 }
+  const [tied] = annotateDuplicates([{ kind: 'expense', row: tel }], [byTitle])
+  assert.deepEqual([tied.duplicate_of?.id, tied.duplicate_of?.certain], [7102, true])
+})

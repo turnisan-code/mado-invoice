@@ -41,7 +41,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data, error } = await supabase.from('bank_lines').update(update).eq('id', id).neq('status', 'booked')
     .select('id, status, review, receipt_path, receipt_name, updated_at')
-  if (error) return databaseError(error)
+  // A booked line, or one with a booking attempt open, stays as it is (MI050/MI051): a conflict
+  if (error) return databaseError(error, /^MI05[01]$/.test(error.code ?? '') ? 409 : 500)
   if (!data?.length) {
     const { data: line } = await supabase.from('bank_lines').select('status').eq('id', id).maybeSingle()
     return line ? apiError(409, 'invalid_status', 'This line is booked: forget its booking first') : apiError(404, 'not_found', 'Statement line not found')
