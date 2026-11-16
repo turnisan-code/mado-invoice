@@ -31,7 +31,7 @@ interface ImportResponse {
   paid: string[]
   /** Recorded as dunning fees / interest beyond the open balances. */
   fees?: number
-  errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future'; message: string }[]
+  errors: { transaction_id: string; code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future' | 'bank_fees'; message: string }[]
 }
 
 interface InvoiceLabel { id: string; number: string; client: string }
@@ -48,7 +48,7 @@ const PILL: Record<string, string> = {
   manual: 'text-blue-700 bg-blue-100 dark:bg-blue-950 dark:text-blue-300',
   none: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
 }
-const WARNING_CODES = ['reversal', 'noDate', 'noAmount', 'noHeader', 'noEntries', 'xml', 'unmapped'] as const
+const WARNING_CODES = ['reversal', 'noDate', 'noAmount', 'fewCells', 'noHeader', 'noEntries', 'xml', 'unmapped'] as const
 const MAX_WARNINGS = 8
 
 // Bank exports occasionally print a symbol instead of an ISO code; Intl would throw on it.
@@ -146,7 +146,10 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [selection, setSelection] = useState<Record<string, boolean>>({})
   const [skontoOff, setSkontoOff] = useState<Record<string, boolean>>({})
+  // „Rest als Bankspesen“, ticked by the owner only.
+  const [bankFeesOn, setBankFeesOn] = useState<Record<string, boolean>>({})
   const [skippedOpen, setSkippedOpen] = useState(false)
+  const [warningsOpen, setWarningsOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmOverpay, setConfirmOverpay] = useState(false)
@@ -164,21 +167,29 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   const skipped = rows.filter(r => r.status !== 'match' && r.status !== 'unmatched')
 
   const invoiceFor = (r: MatchRow) => (r.transaction.id in edits ? edits[r.transaction.id] || null : r.invoiceId)
-  const isChecked = (r: MatchRow) => !!invoiceFor(r) && (selection[r.transaction.id] ?? r.status === 'match')
+  // Ticked without the owner's look: only a credit naming the invoice's number whole. One found
+  // by its amount, the client's name or the Skonto keeps its suggestion, unticked (another
+  // client paying the same amount must not land on this invoice).
+  const manual = (r: MatchRow) => r.transaction.id in edits && !!edits[r.transaction.id]
+  const byNumber = (r: MatchRow) => r.status === 'match' && r.exactNumber && invoiceFor(r) === r.invoiceId
+  const isChecked = (r: MatchRow) => !!invoiceFor(r) && (selection[r.transaction.id] ?? byNumber(r))
   const skontoFor = (r: MatchRow) => (r.skontoAmount > 0 && invoiceFor(r) === r.invoiceId && !skontoOff[r.transaction.id] ? r.skontoAmount : 0)
+  const bankFeesFor = (r: MatchRow) => (r.bankFees > 0 && invoiceFor(r) === r.invoiceId && bankFeesOn[r.transaction.id] ? r.bankFees : 0)
 
   const chosen = credits.filter(isChecked)
   const chosenTotal = chosen.reduce((s, r) => s + r.transaction.amount, 0)
   const currency = credits.find(r => r.transaction.currency)?.transaction.currency ?? null
   const assignable = credits.filter(r => !!invoiceFor(r))
-  const allChecked = assignable.length > 0 && assignable.every(isChecked)
+  // „Alle“ ticks the number matches and what the owner assigned by hand, never a guess.
+  const bulk = assignable.filter(r => byNumber(r) || manual(r))
+  const allChecked = bulk.length > 0 && bulk.every(isChecked)
 
   // Selected credits (with their Skonto) per invoice against the balance the page loaded with:
   // a manual re-assignment or two ticks on one invoice can exceed it, like an overpayment in PaymentPanel.
   const assigned = new Map<string, number>()
   for (const r of chosen) {
     const id = invoiceFor(r)!
-    assigned.set(id, roundCents((assigned.get(id) ?? 0) + r.transaction.amount + skontoFor(r)))
+    assigned.set(id, roundCents((assigned.get(id) ?? 0) + r.transaction.amount + skontoFor(r) + bankFeesFor(r)))
   }
   const excessFor = (invoiceId: string | null) => {
     const inv = invoiceId ? invoiceById.get(invoiceId) : undefined
@@ -192,6 +203,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     setEdits({})
     setSelection({})
     setSkontoOff({})
+    setBankFeesOn({})
     setSkippedOpen(false)
   }
 
@@ -228,7 +240,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   }
 
   function toggleAll(checked: boolean) {
-    setSelection(Object.fromEntries(assignable.map(r => [r.transaction.id, checked])))
+    setSelection(Object.fromEntries((checked ? bulk : assignable).map(r => [r.transaction.id, checked])))
   }
 
   async function doImport(allowOverpayment = false) {
@@ -240,6 +252,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
       note: noteFor(r.transaction),
       reference: r.transaction.reference,
       skonto_amount: skontoFor(r),
+      ...(bankFeesFor(r) > 0 ? { bank_fees: bankFeesFor(r), bank_fees_note: t('payments.bankFeesNote') } : {}),
       ...(excessTotal > 0.005 && excessAs === 'fee' ? { excess: 'fee' as const } : {}),
     }))
     if (!payload.length) return
@@ -283,6 +296,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
       <div className="space-y-0.5">
         <span title={reasons || undefined} className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${PILL[kind]}`}>{label}</span>
         {reasons && <p className="text-[11px] text-neutral-500 dark:text-neutral-500 leading-tight">{reasons}</p>}
+        {(kind === 'high' || kind === 'medium') && !r.exactNumber && (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-tight">{t('bankImport.checkHint')}</p>
+        )}
       </div>
     )
   }
@@ -310,6 +326,19 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
       </label>
     )
   }
+
+  function bankFeesLine(r: MatchRow) {
+    if (!(r.bankFees > 0) || invoiceFor(r) !== r.invoiceId) return null
+    const amount = money(r.bankFees, r.transaction.currency)
+    return (
+      <label className="flex items-center gap-1.5 text-xs text-neutral-600 dark:text-neutral-300 cursor-pointer" title={t('bankImport.bankFeesHint', { amount })}>
+        <input type="checkbox" className={CHECKBOX_CLS} checked={!!bankFeesOn[r.transaction.id]} onChange={e => setBankFeesOn(s => ({ ...s, [r.transaction.id]: e.target.checked }))} />
+        {t('bankImport.bankFeesLine', { amount })}
+      </label>
+    )
+  }
+
+  const spesen = (tx: BankTransaction) => (tx.fee ? t('bankImport.spesen', { amount: money(tx.fee, tx.currency) }) : null)
 
   function overpayLine(r: MatchRow) {
     const excess = isChecked(r) ? excessFor(invoiceFor(r)) : 0
@@ -420,7 +449,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium truncate">{fileName}</p>
               <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {parsed.format === 'camt' ? t('bankImport.formatCamt') : t('bankImport.formatCsv')}
+                {parsed.format === 'camt' ? t('bankImport.formatCamt') : parsed.format === 'easybank' ? t('bankImport.formatEasybank') : t('bankImport.formatCsv')}
                 {' · '}
                 {plural(parsed.transactions.length, 'bankImport.transactionsOne', 'bankImport.transactionsOther')}
               </p>
@@ -444,8 +473,13 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
           <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
             <p className="font-medium flex items-center gap-1.5"><AlertTriangle size={13} /> {t('bankImport.warningsTitle')}</p>
             <ul className="mt-1 space-y-0.5 list-disc pl-4">
-              {warnings.slice(0, MAX_WARNINGS).map((w, i) => <li key={i}>{warningText(w, t)}</li>)}
-              {warnings.length > MAX_WARNINGS && <li className="list-none -ml-4">{plural(warnings.length - MAX_WARNINGS, 'bankImport.moreWarningsOne', 'bankImport.moreWarningsOther')}</li>}
+              {(warningsOpen ? warnings : warnings.slice(0, MAX_WARNINGS)).map((w, i) => <li key={i}>{warningText(w, t)}</li>)}
+              {!warningsOpen && warnings.length > MAX_WARNINGS && (
+                <li className="list-none -ml-4">
+                  {plural(warnings.length - MAX_WARNINGS, 'bankImport.moreWarningsOne', 'bankImport.moreWarningsOther')}{' '}
+                  <button type="button" onClick={() => setWarningsOpen(true)} className="underline underline-offset-2">{t('bankImport.showAllWarnings')}</button>
+                </li>
+              )}
             </ul>
           </div>
         )}
@@ -483,7 +517,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                             <p className="text-sm font-semibold shrink-0">{money(r.transaction.amount, r.transaction.currency)}</p>
                           </div>
                           <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate" title={r.transaction.text}>{r.transaction.text || '—'}</p>
-                          <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">{formatDate(r.transaction.date, lang)}</p>
+                          <p className="text-xs text-neutral-500 dark:text-neutral-500 mt-0.5">
+                            {formatDate(r.transaction.date, lang)}{spesen(r.transaction) && ` · ${spesen(r.transaction)}`}
+                          </p>
                         </div>
                       </div>
                       {invoiceSelect(r)}
@@ -491,6 +527,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                         {pill(r)}
                       </div>
                       {skontoLine(r)}
+                      {bankFeesLine(r)}
                       {overpayLine(r)}
                     </div>
                   ))}
@@ -501,7 +538,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                   <thead className="border-y border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400">
                     <tr>
                       <th className="pl-4 py-3 w-8">
-                        <input type="checkbox" className={CHECKBOX_CLS} checked={allChecked} disabled={!assignable.length} aria-label={t('bankImport.selectAll')} onChange={e => toggleAll(e.target.checked)} />
+                        <input type="checkbox" className={CHECKBOX_CLS} checked={allChecked} disabled={!bulk.length} aria-label={t('bankImport.selectAll')} onChange={e => toggleAll(e.target.checked)} />
                       </th>
                       <th className="px-3 py-3 text-left font-medium">{t('bankImport.thDate')}</th>
                       <th className="px-3 py-3 text-left font-medium">{t('bankImport.thCounterparty')}</th>
@@ -517,11 +554,15 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                         <td className="pl-4 py-3 align-top">{rowCheckbox(r)}</td>
                         <td className="px-3 py-3 align-top whitespace-nowrap text-neutral-500 dark:text-neutral-400">{formatDate(r.transaction.date, lang)}</td>
                         <td className="px-3 py-3 align-top max-w-40 truncate" title={r.transaction.counterparty ?? undefined}>{r.transaction.counterparty || '—'}</td>
-                        <td className="px-3 py-3 align-top max-w-56 truncate text-neutral-500 dark:text-neutral-400" title={r.transaction.text}>{r.transaction.text || '—'}</td>
+                        <td className="px-3 py-3 align-top max-w-56 text-neutral-500 dark:text-neutral-400" title={r.transaction.text}>
+                          <span className="block truncate">{r.transaction.text || '—'}</span>
+                          {spesen(r.transaction) && <span className="block text-xs">{spesen(r.transaction)}</span>}
+                        </td>
                         <td className="px-3 py-3 align-top text-right whitespace-nowrap font-medium">{money(r.transaction.amount, r.transaction.currency)}</td>
                         <td className="px-3 py-2.5 align-top space-y-1.5">
                           {invoiceSelect(r)}
                           {skontoLine(r)}
+                          {bankFeesLine(r)}
                           {overpayLine(r)}
                         </td>
                         <td className="px-3 pr-4 py-3 align-top">{pill(r)}</td>

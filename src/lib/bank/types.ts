@@ -12,6 +12,11 @@ export interface BankTransaction {
   /** EndToEndId or structured creditor reference. */
   reference: string | null
   raw: string
+  /** More text for the invoice-number search only: easybank's Buchungstext without its line
+   *  breaks, so a number broken across two lines is found. */
+  search?: string
+  /** What the bank charged on this line („SPESEN“ in an easybank text), shown with it. */
+  fee?: number
 }
 
 /** Column indexes into the CSV header. */
@@ -26,7 +31,7 @@ export interface CsvMapping {
 }
 
 export interface ParsedStatement {
-  format: 'camt' | 'csv'
+  format: 'camt' | 'csv' | 'easybank'
   transactions: BankTransaction[]
   /** Machine-readable `code` or `code:detail`; the UI translates them. */
   warnings: string[]

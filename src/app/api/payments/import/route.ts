@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { apiError, databaseError, invalidJson, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, roundCents, settlesBalance, today } from '@/lib/utils/document'
 import { insertPayments, markPaid, paymentRefusal, splitOverpayment } from '@/lib/services/payments'
+import { bankFeeCap } from '@/lib/bank/match'
 
 const MAX_ROWS = 500
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -16,6 +17,10 @@ interface ImportRow {
   note: string | null
   reference?: string | null
   skonto_amount?: number
+  // What a short payment on an invoice without VAT leaves open, recorded as bank charges the
+  // payer's bank kept (a write-off noted `bank_fees_note`; D5). At most bankFeeCap.
+  bank_fees?: number
+  bank_fees_note?: string
   // What the part beyond the open balance is: dunning fees and interest (a paid Mahnung), or an
   // overpayment recorded as payment like before.
   excess?: 'fee' | 'payment'
@@ -24,7 +29,7 @@ interface ImportRow {
 interface ImportError {
   transaction_id: string
   /** Known failure the UI can translate; absent for raw database errors. */
-  code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future'
+  code?: 'not_found' | 'not_issued' | 'cancelled' | 'date_future' | 'bank_fees'
   message: string
 }
 
@@ -46,6 +51,7 @@ const REFUSALS = {
   cancelled: 'Invoice is cancelled',
   date_future: 'Payment date is in the future',
 } as const
+const BANK_FEES_REFUSAL = 'Bank charges only on an invoice without VAT, up to 5 % and 25 €, and not beyond what is open'
 
 function isImportRow(r: unknown): r is ImportRow {
   if (!r || typeof r !== 'object') return false
@@ -57,6 +63,8 @@ function isImportRow(r: unknown): r is ImportRow {
     && (o.note == null || typeof o.note === 'string')
     && (o.reference == null || typeof o.reference === 'string')
     && (o.skonto_amount === undefined || (typeof o.skonto_amount === 'number' && Number.isFinite(o.skonto_amount) && o.skonto_amount >= 0))
+    && (o.bank_fees === undefined || (typeof o.bank_fees === 'number' && Number.isFinite(o.bank_fees) && o.bank_fees >= 0))
+    && (o.bank_fees_note === undefined || (typeof o.bank_fees_note === 'string' && o.bank_fees_note.length <= 200))
     && (o.excess === undefined || o.excess === 'fee' || o.excess === 'payment')
 }
 
@@ -93,12 +101,12 @@ export async function POST(req: Request) {
   const errors: ImportError[] = []
   const touched = new Set<string>()
 
-  async function insertPayment(row: ImportRow, docId: string, kind: 'payment' | 'skonto' | 'fee', amount: number, importRef: string) {
+  async function insertPayment(row: ImportRow, docId: string, kind: 'payment' | 'skonto' | 'fee' | 'writeoff', amount: number, importRef: string) {
     const { error } = await insertPayments(supabase, [{
       document_id: docId,
       date: row.date,
       amount,
-      note: kind === 'skonto' ? 'Skonto' : row.note?.trim().slice(0, 200) || null,
+      note: kind === 'skonto' ? 'Skonto' : kind === 'writeoff' ? row.bank_fees_note?.trim().slice(0, 200) || 'Bankspesen' : row.note?.trim().slice(0, 200) || null,
       reference: row.reference?.trim().slice(0, 140) || null,
       kind,
       method: 'bank',
@@ -153,6 +161,20 @@ export async function POST(req: Request) {
       const skontoErr = await insertPayment(row, doc.id, 'skonto', skonto, `${row.transaction_id}:skonto`)
       if (!skontoErr) doc.payments.push({ amount: skonto, kind: 'skonto' })
       else if (skontoErr.code !== '23505') errors.push({ transaction_id: row.transaction_id, message: skontoErr.message })
+    }
+
+    // The rest as bank charges: only on an invoice without VAT, within bankFeeCap, and never
+    // beyond what is still open after the payment.
+    const bankFees = roundCents(row.bank_fees ?? 0)
+    if (bankFees > 0.005) {
+      const cap = bankFeeCap(totalOf(doc), doc.tax_treatment)
+      if (bankFees > cap + 0.005 || bankFees > openOf(doc) + 0.005) {
+        errors.push({ transaction_id: row.transaction_id, code: 'bank_fees', message: BANK_FEES_REFUSAL })
+      } else {
+        const feesErr = await insertPayment(row, doc.id, 'writeoff', bankFees, `${row.transaction_id}:bankfees`)
+        if (!feesErr) doc.payments.push({ amount: bankFees, kind: 'writeoff' })
+        else if (feesErr.code !== '23505') errors.push({ transaction_id: row.transaction_id, message: feesErr.message })
+      }
     }
 
     const fee = roundCents(amount - paid)

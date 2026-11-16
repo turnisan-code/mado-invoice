@@ -26,6 +26,7 @@ import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
 import { BookamatDuplicateDialog } from '@/components/bookamat/BookamatDuplicateDialog'
 import { BookamatForgetDialog } from '@/components/bookamat/BookamatForgetDialog'
 import { loadMoneyLock } from '@/lib/deposits'
+import { bankFeeCap } from '@/lib/bank/match'
 import { paymentRows, recordInvoicePayments, removePayment as removePaymentRow, reopensOnRemoval, settledSum, settlementRow, skontoOffered } from '@/lib/services/payments'
 
 interface Payment {
@@ -75,11 +76,6 @@ interface Props {
   // payment's rest can then be closed as bank charges (D5).
   taxTreatment?: string | null
 }
-
-// A foreign transfer short by at most this share of the invoice, and this amount, is offered to
-// be closed as bank charges the payer's bank kept.
-const BANK_FEE_SHARE = 0.05
-const BANK_FEE_MAX = 25
 
 export default function PaymentPanel({
   documentId, number, status, date, total, payments: initial, currency, skontoPercent, skontoDays,
@@ -154,10 +150,10 @@ export default function PaymentPanel({
   const offerWriteoff = canRecord && !fullyPaid && balanceDue < SMALL_DIFFERENCE
   const offerUncollectible = canRecord && !fullyPaid && balanceDue >= SMALL_DIFFERENCE
   // A foreign transfer that arrived a little short on an invoice without VAT (D5): the rest is what
-  // the payer's bank kept. With VAT it stays open (a part payment) unless written off by hand.
-  const offerBankFees = canRecord && !fullyPaid && (taxTreatment === 'non_eu' || taxTreatment === 'eu_reverse_charge')
-    && payments.some(p => p.kind === 'payment') && balanceDue > 0.005
-    && balanceDue <= Math.min(BANK_FEE_MAX, roundCents(total * BANK_FEE_SHARE))
+  // the payer's bank kept (bankFeeCap, the bank import's rule). With VAT it stays open (a part
+  // payment) unless written off by hand.
+  const offerBankFees = canRecord && !fullyPaid && payments.some(p => p.kind === 'payment')
+    && balanceDue > 0.005 && balanceDue <= bankFeeCap(total, taxTreatment)
 
   useEffect(() => {
     if (!bookamatConfigured) return

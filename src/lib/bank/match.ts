@@ -15,10 +15,23 @@ export interface OpenInvoice {
   skontoDays: number | null
   /** Highest dunning level sent (from reminder_log, which an extended due date does not reset): a credit above the balance then most likely includes fees and interest. */
   reminderLevel: number
+  /** Why the invoice charges no VAT, if it does not ('non_eu', 'eu_reverse_charge'): a short
+   *  foreign payment's rest may then be bank charges (bankFeeCap). */
+  taxTreatment?: string | null
 }
 
 export type MatchStatus = 'match' | 'unmatched' | 'debit' | 'imported' | 'nothing_open'
-export type MatchReason = 'number' | 'amount' | 'total' | 'skonto' | 'name'
+export type MatchReason = 'number' | 'amount' | 'total' | 'skonto' | 'name' | 'short'
+
+// A foreign transfer that arrives short on an invoice without VAT lost the difference to the
+// payer's bank (D5): up to 5 % of the invoice and 25 € it is offered as bank charges („Rest als
+// Bankspesen“: a write-off, not booked). On an invoice with VAT the rest stays open.
+const BANK_FEE_SHARE = 0.05
+const BANK_FEE_MAX = 25
+export const isZeroVat = (taxTreatment: string | null | undefined) => taxTreatment === 'non_eu' || taxTreatment === 'eu_reverse_charge'
+// The most a short payment on this invoice may leave as bank charges; 0 when none may.
+export const bankFeeCap = (total: number, taxTreatment: string | null | undefined) =>
+  isZeroVat(taxTreatment) ? Math.min(BANK_FEE_MAX, roundCents(total * BANK_FEE_SHARE)) : 0
 export type MatchConfidence = 'high' | 'medium'
 
 export interface MatchRow {
@@ -31,6 +44,12 @@ export interface MatchRow {
   /** Skonto to record alongside the payment when a Skonto settlement is detected, else 0. */
   skontoAmount: number
   amountToRecord: number
+  /** The invoice's number was found whole in the text (not split by spaces, not a short number):
+   *  only such a match is ticked for import without the owner's look. */
+  exactNumber: boolean
+  /** What a short payment on an invoice without VAT leaves open, offered as bank charges (never
+   *  ticked by default); 0 when it does not apply. */
+  bankFees: number
 }
 
 const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
@@ -188,15 +207,17 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
   const rows: MatchRow[] = []
 
   for (const tx of transactions) {
-    const base: Omit<MatchRow, 'status'> = { transaction: tx, invoiceId: null, confidence: null, score: 0, reasons: [], skontoAmount: 0, amountToRecord: tx.amount }
+    const base: Omit<MatchRow, 'status'> = {
+      transaction: tx, invoiceId: null, confidence: null, score: 0, reasons: [], skontoAmount: 0, amountToRecord: tx.amount, exactNumber: false, bankFees: 0,
+    }
     if (importedRefs.has(tx.id)) { rows.push({ ...base, status: 'imported' }); continue }
     if (tx.amount <= 0) { rows.push({ ...base, status: 'debit' }); continue }
     if (!open.length) { rows.push({ ...base, status: 'nothing_open' }); continue }
 
     // Text and reference are searched separately so a number cannot span the two fields.
-    const haystacks = [tx.text, tx.reference ?? ''].filter(Boolean)
+    const haystacks = [tx.text, tx.reference ?? '', tx.search ?? ''].filter(Boolean)
     const counterparty = nameTokens(tx.counterparty)
-    let best: { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number } | null = null
+    let best: { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number; exact: boolean; fees: number } | null = null
 
     for (const inv of open) {
       const balance = remaining.get(inv.id)!
@@ -208,10 +229,14 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
 
       const matcher = matchers.get(inv.id)
       const find: FindOptions = { ownPrefix: matcher?.prefix ?? '', otherPrefixes }
-      const hit = matcher
-        ? haystacks.map(h => findNumber(h, matcher.full, find) ?? (matcher.digits ? findNumber(h, matcher.digits, find) : null)).find(Boolean)
-        : null
+      // The strongest hit counts: a number easybank broke across two lines is split in its text
+      // and whole in `search`.
+      const hits = matcher
+        ? haystacks.map(h => findNumber(h, matcher.full, find) ?? (matcher.digits ? findNumber(h, matcher.digits, find) : null)).filter(h => !!h)
+        : []
+      const hit = hits.find(h => !h.split) ?? hits[0] ?? null
       if (hit) { score += hit.split || matcher!.short ? 70 : 100; reasons.push('number') }
+      const exact = !!hit && !hit.split && !matcher!.short
 
       if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }
@@ -229,7 +254,13 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       for (const token of counterparty) if (clientTokens.get(inv.id)!.has(token)) overlap++
       if (overlap) { score += Math.min(overlap, 2) * 20; reasons.push('name') }
 
-      if (!best || score > best.score) best = { inv, score, reasons, skonto }
+      // A little short of the balance on an invoice without VAT: the payer's bank kept the rest.
+      // From the client's name that is a suggestion on its own; with the number it is offered too.
+      const short = roundCents(balance - tx.amount)
+      const fees = !skonto && short > 0.005 && short <= bankFeeCap(inv.total, inv.taxTreatment) ? short : 0
+      if (fees && overlap) { score += 30; reasons.push('short') }
+
+      if (!best || score > best.score) best = { inv, score, reasons, skonto, exact, fees: fees && (overlap || hit) ? fees : 0 }
     }
 
     if (best && best.score >= 50) {
@@ -242,6 +273,8 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
         score: best.score,
         reasons: best.reasons,
         skontoAmount: best.skonto,
+        exactNumber: best.exact,
+        bankFees: best.fees,
       })
     } else {
       rows.push({ ...base, status: 'unmatched' })

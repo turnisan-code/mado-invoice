@@ -350,6 +350,105 @@ export function parseCsv(text: string): ParsedStatement {
   return { format: 'csv', transactions, warnings, csv: { header, rows, mapping } }
 }
 
+// ─── easybank ────────────────────────────────────────────────────────────────
+// easybank exports a statement without a header: IBAN; Buchungstext; Buchungsdatum; Valutadatum;
+// Betrag; Währung. „|“ in the Buchungstext is a line break (at 57 characters, or before a new
+// field), and the payer of a credit stands after its BIC and IBAN („Gutschrift|NTSBDEB1XXX
+// DE36… Max Muster|RN-202605010“). Read by the rules of Bookmatic's parser (lib/csv-parser.ts,
+// lib/booking-dates.ts), so both apps date and name a line alike. Every line is a transaction; a
+// header line, should one appear, is skipped, and every other line not read is named.
+
+const EB_IBAN = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/
+const EB_DATE = /^\d{2}\.\d{2}\.\d{4}$/
+const EB_BIC = '[A-Z]{4}[A-Z]{2}[A-Z0-9]{2,5}'
+const EB_BIC_IBAN = new RegExp(`^${EB_BIC}\\s+[A-Z]{2}\\d{10,30}`)
+const EB_BIC_IBAN_NAME = new RegExp(`^${EB_BIC}\\s+[A-Z]{2}\\d{10,30}\\s+(.+)`)
+const EB_BARE_BIC = new RegExp(`^${EB_BIC}$`)
+// A card payment („MC/000000901“): its credit is a merchant's refund, dated by the bank.
+const EB_CARD = /\bMC\/\d{6,}/
+// A Valutadatum this many days before the Buchungsdatum at most is the day the money moved.
+const EB_VALUTA_LAG = 7
+const EB_SPESEN = /SPESEN\s*:?\s*([\d.,]+)/i
+
+const isEasybankHeader = (row: string[]) => (row[0] ?? '').toLowerCase().includes('iban') || (row[2] ?? '').toLowerCase().includes('datum')
+
+const isEasybankRow = (row: string[]) =>
+  row.length >= 5 && EB_IBAN.test(row[0].replace(/\s/g, '')) && EB_DATE.test(row[2]) && EB_DATE.test(row[3]) && parseAmount(row[4]) !== null
+
+// An easybank export: its first line that is not a header is an easybank transaction.
+export function isEasybank(text: string): boolean {
+  const first = splitCsv(text, ';').map(r => r.map(c => c.trim())).find(r => filled(r) > 0 && !isEasybankHeader(r))
+  return !!first && isEasybankRow(first)
+}
+
+// The payer of a credit: the name after its BIC and IBAN, wherever that line stands (a purpose
+// line after it names nobody). Otherwise the last line that names someone: not an IBAN, a BIC,
+// SPESEN, an order reference (OG/, BG/, MC/, VD/, FE/), an invoice reference (RN-…), digits or a
+// web address; the name after a BIC and IBAN when there is no such line.
+function easybankCounterparty(text: string, credit: boolean): string | null {
+  const parts = text.split('|').map(p => p.trim())
+  const payer = parts.map(p => p.match(EB_BIC_IBAN_NAME)?.[1].trim() ?? '').find(Boolean) ?? ''
+  if (payer && credit) return collapse(payer)
+  let found = ''
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]
+    if (/^[A-Z]{2}\d{2}/.test(part) || EB_BIC_IBAN.test(part) || EB_BARE_BIC.test(part)) continue
+    if (/^SPESEN\s*:?/i.test(part) || /^(OG|BG|MC|VD|FE)\/\d+/.test(part) || /^(RN|RE|RG)[_\-/]/i.test(part)) continue
+    if (/^\d+$/.test(part) || /^\d{5,}/.test(part) || part.length < 3) continue
+    found = part
+    break
+  }
+  if (/[a-zA-Z]{3,}\.[a-zA-Z]{3,}\.[a-zA-Z]{2,}/.test(found)) found = ''
+  return found ? collapse(found) : payer ? collapse(payer) : null
+}
+
+// The day a credit's money moved: its Valutadatum when that lies 1–7 days before the Buchungsdatum
+// and in an earlier month (a transfer sent on 31.12. and posted on 02.01. was paid on 31.12.),
+// else the Buchungsdatum. Within a month both give the same UVA period. A card credit keeps the
+// Buchungsdatum.
+function easybankPayDate(posted: string, valutaRaw: string, credit: boolean, text: string): string {
+  const valuta = EB_DATE.test(valutaRaw) ? parseDate(valutaRaw) : null
+  if (!credit || !valuta || EB_CARD.test(text)) return posted
+  const lag = (Date.parse(`${posted}T00:00:00Z`) - Date.parse(`${valuta}T00:00:00Z`)) / 86_400_000
+  return lag >= 1 && lag <= EB_VALUTA_LAG && valuta.slice(0, 7) < posted.slice(0, 7) ? valuta : posted
+}
+
+export function parseEasybank(text: string): ParsedStatement {
+  const transactions: BankTransaction[] = []
+  const warnings: string[] = []
+  splitCsv(text, ';').forEach((cells, i) => {
+    const line = i + 1
+    const row = cells.map(c => c.trim())
+    if (!filled(row) || isEasybankHeader(row)) return
+    if (row.length < 5) { warnings.push(`fewCells:${line}`); return }
+    const posted = EB_DATE.test(row[2]) ? parseDate(row[2]) : null
+    if (!posted) { warnings.push(`noDate:${line}`); return }
+    const amount = parseAmount(row[4])
+    if (amount === null || Math.abs(amount) < 0.005) { warnings.push(`noAmount:${line}`); return }
+    const credit = amount > 0
+    const fields: TransactionFields = {
+      date: easybankPayDate(posted, row[3], credit, row[1]),
+      amount: roundCents(amount),
+      text: collapse(row[1].split('|').map(s => s.trim()).filter(Boolean).join(' ')),
+      counterparty: easybankCounterparty(row[1], credit),
+      reference: null,
+    }
+    const spesen = row[1].match(EB_SPESEN)
+    const fee = spesen ? parseAmount(spesen[1]) : null
+    transactions.push({
+      id: transactionId(fields),
+      ...fields,
+      currency: (row[5] ?? '').toUpperCase() || null,
+      raw: cells.join(' ; '),
+      search: row[1].replace(/\|/g, ''),
+      ...(fee && fee > 0 && fee < Math.abs(amount) ? { fee: roundCents(fee) } : {}),
+    })
+  })
+  dedupeIds(transactions)
+  if (!transactions.length && !warnings.length) warnings.push('noEntries')
+  return { format: 'easybank', transactions, warnings }
+}
+
 // ─── Entry points ────────────────────────────────────────────────────────────
 
 // UTF-8 (BOM stripped by TextDecoder); a replacement character means the export is windows-1252.
@@ -366,5 +465,5 @@ export function isCamt(text: string): boolean {
 
 export function parseStatement(text: string, opts: { xmlParser: (xml: string) => XmlDocument }): ParsedStatement {
   const src = text.replace(/^﻿/, '')
-  return isCamt(src) ? parseCamt(opts.xmlParser(src)) : parseCsv(src)
+  return isCamt(src) ? parseCamt(opts.xmlParser(src)) : isEasybank(src) ? parseEasybank(src) : parseCsv(src)
 }

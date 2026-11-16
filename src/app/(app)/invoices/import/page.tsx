@@ -42,13 +42,14 @@ export default async function BankImportPage() {
       balance: roundCents(totals.balance_due),
       skontoPercent: d.skonto_percent ?? null,
       skontoDays: d.skonto_days ?? null,
+      taxTreatment: d.tax_treatment ?? null,
       // From the reminder history: reminder_level goes back to 0 when the due date is extended
       // (20261107_dunning.sql), the reminders that went out stay in reminder_log.
       reminderLevel: Math.max(d.reminder_level ?? 0, ...(d.reminder_log ?? []).map((r: { level: number | null }) => r.level ?? 0)),
     }]
   })
-  // The Skonto and fee rows of a transaction carry its id with a suffix; any of them marks it imported.
-  const importedRefs = [...new Set((refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee)$/, '')))]
+  // The Skonto, fee and bank-charge rows of a transaction carry its id with a suffix; any of them marks it imported.
+  const importedRefs = [...new Set((refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')))]
   const bookamatConfigured = !!settings && isBookamatConfigured(settings)
 
   return (
