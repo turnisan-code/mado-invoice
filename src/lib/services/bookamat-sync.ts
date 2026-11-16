@@ -12,23 +12,26 @@ import { getIssuedPdf } from '@/lib/pdf/snapshot'
 import { creditNoteSettled } from '@/lib/status'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { calcTotals } from '@/lib/utils/document'
+import type { BookingRef } from '@/lib/bookamat-search'
 import type { VatRate } from '@/types'
 
 // One sync as the sync route runs it: `adopt` records bookings an earlier attempt created but
 // could not store (its `pending`), instead of booking them again. `claudeHold`: a sync Claude
 // prepared, 'held' when Claude changed the client or the payments since its state was compared
-// (syncBookamatDocument).
+// (syncBookamatDocument). `acknowledge`: bookings in Bookamat the owner said are other money; only
+// the owner's own sync in Mado passes them.
 export async function syncBookamat(
   supabase: SupabaseClient,
   settings: BookamatSettings,
   documentId: string,
-  { adopt = [], deadline, claudeHold }: { adopt?: AdoptBooking[]; deadline?: number; claudeHold?: ClaudeHold } = {},
+  { adopt = [], deadline, claudeHold, acknowledge }: { adopt?: AdoptBooking[]; deadline?: number; claudeHold?: ClaudeHold; acknowledge?: BookingRef[] } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   return syncBookamatDocument(supabase, settings, documentId, {
     adopt,
     loadPdf: async id => getIssuedPdf(supabase, id, 'on_demand'),
     ...(deadline ? { deadline } : {}),
     ...(claudeHold ? { claudeHold } : {}),
+    ...(acknowledge?.length ? { acknowledge } : {}),
   })
 }
 

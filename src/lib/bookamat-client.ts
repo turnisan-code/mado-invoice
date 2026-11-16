@@ -4,6 +4,7 @@ import { roundCents } from '@/lib/utils/document'
 import { knownApiError } from '@/lib/api-errors'
 import type { DictKey, TFn } from '@/lib/i18n'
 import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/types'
+import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
@@ -12,11 +13,14 @@ import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/type
 // 'held' only ever comes back to the cron (autoSyncBookamat), which logs it as held back, and to a
 // sync Claude prepared (src/lib/mcp/actions/bookamat-sync.ts), which words it as a refusal.
 // 'preview': this deployment does not write to Bookamat (src/lib/deployment.ts).
+// 'external_duplicate': Bookamat has a booking Mado did not make that may be this money (the
+// failure carries the `candidates`); 'duplicate_check_failed': Bookamat could not be searched for
+// one. Either way nothing was booked.
 export type BookamatErrorCode =
   | 'not_configured' | 'not_found' | 'not_issued' | 'not_eur' | 'not_settled' | 'nothing_to_book' | 'no_items'
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
-  | 'unknown_outcome' | 'held' | 'preview'
+  | 'unknown_outcome' | 'held' | 'preview' | 'external_duplicate' | 'duplicate_check_failed'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -24,7 +28,7 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'not_configured', 'not_found', 'not_issued', 'not_eur', 'not_settled', 'nothing_to_book', 'no_items',
   'cash_account_missing', 'vat_account_missing', 'account_missing', 'accounts_stale', 'in_progress', 'auth',
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
-  'unknown_outcome', 'preview',
+  'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are
@@ -173,6 +177,8 @@ export type SyncFailure = {
   error: string
   detail?: ErrorDetail
   pending?: AdoptBooking[]
+  // 'external_duplicate': the bookings in Bookamat that may be this money.
+  candidates?: BookingCandidate[]
 }
 
 type SyncResponse = { ok: true; data: SyncSuccess } | { ok: false; payload: unknown }
@@ -189,13 +195,15 @@ function pendingOf(res: SyncResponse): AdoptBooking[] {
 
 // Calls the sync route. When Bookamat accepted a booking this database could not record, the
 // second call hands it back as `adopt`, so it is recorded instead of booked twice; if that fails
-// too, the next sync from this tab sends it again.
-export async function requestBookamatSync(documentId: string): Promise<SyncResponse> {
+// too, the next sync from this tab sends it again. `acknowledge`: bookings in Bookamat the owner
+// said are other money („trotzdem buchen“); the sync's search still looks at all others.
+export async function requestBookamatSync(documentId: string, opts: { acknowledge?: BookingRef[] } = {}): Promise<SyncResponse> {
+  const acknowledge = opts.acknowledge?.length ? { acknowledge: opts.acknowledge } : {}
   const post = async (adopt?: AdoptBooking[]): Promise<SyncResponse> => {
     const res = await fetch('/api/bookamat/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documentId, ...(adopt?.length ? { adopt } : {}) }),
+      body: JSON.stringify({ documentId, ...(adopt?.length ? { adopt } : {}), ...acknowledge }),
     }).catch(() => null)
     if (!res) return { ok: false, payload: { code: 'network', error: 'Network error' } }
     const payload: unknown = await res.json().catch(() => ({}))
