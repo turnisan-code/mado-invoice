@@ -48,6 +48,15 @@ export async function GET() {
     if ((data ?? []).length < PAGE) break
   }
 
+  // The bookings Mado made from statement lines: no document's, no unknown number.
+  const lineBookings: { year: number; booking_id: string }[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from('bookamat_bookings').select('year, booking_id').not('bank_line_id', 'is', null).order('id').range(from, from + PAGE - 1)
+    if (error) return databaseError(error)
+    lineBookings.push(...((data ?? []) as { year: number; booking_id: string }[]))
+    if ((data ?? []).length < PAGE) break
+  }
+
   const year = Number(today().slice(0, 4))
   const years = [year - 1, year]
   const creds = credentialsOf(settings)
@@ -63,5 +72,5 @@ export async function GET() {
   }
 
   const docs: ReconcileDoc[] = rows.map(({ clients, ...d }) => ({ ...d, client: clientDisplayName(clients) }))
-  return NextResponse.json(reconcile({ docs, bookings, years, invoicePrefix: settings.invoice_prefix, applied }))
+  return NextResponse.json(reconcile({ docs, bookings, years, invoicePrefix: settings.invoice_prefix, applied, lineBookings }))
 }

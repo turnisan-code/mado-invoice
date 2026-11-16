@@ -92,6 +92,20 @@ test('a number in Mado\'s range that no Mado document has', () => {
   assert.equal(reconcile({ docs, bookings, years: [2026], invoicePrefix: null }).unknown.length, 0)
 })
 
+test('a booking Mado made from a statement line is no document\'s and no unknown number', () => {
+  const docs = [
+    doc('d1', 'RN-209905008', 100, [{ date: '2026-05-20', amount: 120, kind: 'payment' }], [row(2026, '9601', 120, '2026-05-20')]),
+    doc('d2', 'RN-209907017', 700, [], [], 'sent'),
+  ]
+  const bookings = [
+    booking(9601, '2026-05-20', 'RN-209905008 – Muster', '120.00'),
+    booking(9605, '2026-08-02', 'Gutschrift RN_209907016', '50.00'),
+  ]
+  assert.deepEqual(reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' }).unknown.map(u => u.booking.bookingId), ['9605'])
+  const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN', lineBookings: [{ year: 2026, booking_id: '9605' }] })
+  assert.deepEqual([r.unknown, r.doubles], [[], []])
+})
+
 test('a year outside the check is not reported', () => {
   const docs = [doc('d1', 'RN-209905008', 100, [{ date: '2025-05-20', amount: 120, kind: 'payment' }], [row(2025, '9501', 120, '2025-05-20')])]
   const r = reconcile({ docs, bookings: [], years: [2026], invoicePrefix: 'RN' })

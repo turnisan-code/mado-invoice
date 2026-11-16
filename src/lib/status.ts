@@ -138,7 +138,7 @@ export function statusLabelKey(status: DisplayStatus | string): DictKey {
 type DbError = { code?: string | null; message: string; details?: string | null }
 
 // The lifecycle trigger and RPCs raise English messages with MI010–MI018, the deposit guards MI019–MI022, the Claude
-// connector's guards MI040–MI047, the Bookamat lock on booked payments MI048–MI049; numbering (MI001–MI003) and issue_document's MI004 (incomplete, every reason in the
+// connector's guards MI040–MI047, the Bookamat lock on booked payments MI048–MI049 and statement lines MI050–MI051; numbering (MI001–MI003) and issue_document's MI004 (incomplete, every reason in the
 // detail) are worded by numberingErrorMessage, which also covers anything else without the raw text.
 export function lifecycleErrorMessage(error: DbError, t: TFn): string {
   switch (error.code) {
@@ -165,6 +165,8 @@ export function lifecycleErrorMessage(error: DbError, t: TFn): string {
     case 'MI047': return t('mcp.errors.actionBusy')
     case 'MI048': return t('lifecycle.errors.paymentBooked', { booking: error.details ? ` (#${error.details})` : '' })
     case 'MI049': return t('lifecycle.errors.paymentPending')
+    case 'MI050': return t('lifecycle.errors.lineBooked', { booking: error.details ? ` (#${error.details})` : '' })
+    case 'MI051': return t('lifecycle.errors.linePending')
     default: return numberingErrorMessage(error, t)
   }
 }

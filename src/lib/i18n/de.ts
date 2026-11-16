@@ -1255,6 +1255,8 @@ export const de = {
       alreadyCancelled: 'Diese Rechnung ist bereits storniert.',
       paymentBooked: 'Diese Zahlung ist in Bookamat gebucht{booking}. Zuerst die Buchung dort löschen, dann hier „Buchung vergessen“ wählen; danach lässt sich die Zahlung ändern oder entfernen.',
       paymentPending: 'Eine Bookamat-Buchung dieser Zahlung ist noch nicht abgeschlossen. Erneut übertragen oder in Bookamat nachsehen und zuerst „Offene Versuche verwerfen…“ wählen.',
+      lineBooked: 'Diese Kontozeile ist in Bookamat gebucht{booking}. Zuerst die Buchung dort löschen, dann hier „Buchung vergessen“ wählen.',
+      linePending: 'Eine Bookamat-Buchung dieser Kontozeile ist noch nicht abgeschlossen. Erneut buchen oder in Bookamat nachsehen und zuerst den offenen Versuch verwerfen.',
       draftNoStorno: 'Ein Entwurf hat keine Nummer zum Stornieren oder Gutschreiben — stattdessen bearbeiten oder löschen.',
       notOverdue: 'Nur überfällige Rechnungen mit offenem Betrag können gemahnt werden.',
       settingsIncomplete: 'Die Firmendaten in den Einstellungen sind unvollständig (Firmenname, Adresse, UID-Nummer oder IBAN) — bitte zuerst ergänzen.',
@@ -1996,7 +1998,7 @@ export const de = {
       forget_not_found: 'Diese Buchung ist hier nicht mehr erfasst (in einem anderen Fenster vergessen?). Die Seite zeigt jetzt die aktuellen Buchungen.',
       forget_still_booked: 'Bookamat hat die Buchung #{id} ({year}) noch. Zuerst dort löschen, dann hier vergessen — sonst bucht die nächste Übertragung das Geld doppelt.',
       adopt_payment_booked: 'Mado hat diese Zahlung schon gebucht ({bookings}): Buchung #{id} ist womöglich eine zweite davon. In Bookamat prüfen — weder übernehmen noch trotzdem buchen.',
-      adopt_taken: 'Buchung #{id} ist in Mado schon bei einem anderen Beleg vermerkt.',
+      adopt_taken: 'Buchung #{id} ist in Mado schon bei einem anderen Beleg oder einer Kontozeile vermerkt.',
     },
     zero: {
       rc: '0 % EU Reverse Charge (IG Leistungen)',

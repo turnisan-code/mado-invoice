@@ -69,16 +69,22 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const longestRun = (number: string) => (number.match(/\d+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), '')
 
 // `applied`: per credit note, what was credited to invoices (its refunds book the rest).
+// `lineBookings`: the bookings Mado made from statement lines (an expense, a credit that pays no
+// invoice): never a document's, never an unknown number.
 export function reconcile(input: {
   docs: ReconcileDoc[]
   bookings: BookingLite[]
   years: number[]
   invoicePrefix: string | null
   applied?: Record<string, number>
+  lineBookings?: { year: number; booking_id: string | number }[]
 }): ReconcileReport {
   const years = new Set(input.years)
   const byKey = new Map(input.bookings.map(b => [bookingKey(b.year, b.id), b]))
-  const recordedKeys = new Set(input.docs.flatMap(d => (d.bookamat_bookings ?? []).map(r => bookingKey(r.year, String(r.booking_id)))))
+  const recordedKeys = new Set([
+    ...input.docs.flatMap(d => (d.bookamat_bookings ?? []).map(r => bookingKey(r.year, String(r.booking_id)))),
+    ...(input.lineBookings ?? []).map(r => bookingKey(r.year, String(r.booking_id))),
+  ])
   const report: ReconcileReport = { years: input.years, bookingsRead: input.bookings.length, recorded: [], unbooked: [], doubles: [], unknown: [] }
   // Bookings some document already explains: never an unknown number.
   const named = new Set<string>()

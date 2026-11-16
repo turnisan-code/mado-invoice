@@ -1025,7 +1025,7 @@ export async function adoptExternalBooking(
 
     const { data: taken, error: takenErr } = await supabase.from('bookamat_bookings').select('document_id').eq('year', ref.year).eq('booking_id', ref.bookingId)
     if (takenErr) throw new BookamatError('database', takenErr.message)
-    if (taken?.length) throw new BookamatError('adopt_taken', `Booking #${ref.bookingId} is recorded on another document`, 409, { id: ref.bookingId })
+    if (taken?.length) throw new BookamatError('adopt_taken', `Booking #${ref.bookingId} is recorded on another document or statement line`, 409, { id: ref.bookingId })
 
     const sign = kind === 'refund' ? -1 : 1
     const row = { document_id: doc.id, year: ref.year, booking_id: ref.bookingId, amount: sign * booking.total, kind, booked_on: booking.date || target.date, payment_id: target.paymentId }

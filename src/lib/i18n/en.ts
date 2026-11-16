@@ -1255,6 +1255,8 @@ export const en = {
       draftNoStorno: 'A draft has no number to cancel or credit — edit or delete it instead.',
       paymentBooked: 'This payment is booked in Bookamat{booking}. Delete the booking there first, then choose “Forget booking” here; after that the payment can be changed or removed.',
       paymentPending: 'A Bookamat booking of this payment is not settled yet. Sync again, or check Bookamat and choose “Discard open attempts…” first.',
+      lineBooked: 'This statement line is booked in Bookamat{booking}. Delete the booking there first, then choose “Forget booking” here.',
+      linePending: 'A Bookamat booking of this statement line is not settled yet. Book it again, or check Bookamat and discard the open attempt first.',
       notOverdue: 'Only overdue invoices with an open balance can be reminded.',
       settingsIncomplete: 'Your company details in Settings are incomplete (company name, address, UID number or IBAN) — complete them first.',
       incomplete: 'This cannot be issued yet because details are missing — open the document to see what to complete.',
@@ -1997,7 +1999,7 @@ export const en = {
       forget_not_found: 'This booking is no longer recorded here (forgotten in another window?). The page now shows the current bookings.',
       forget_still_booked: 'Bookamat still has booking #{id} ({year}). Delete it there first, then forget it here — otherwise the next sync books the money twice.',
       adopt_payment_booked: 'Mado booked this payment already ({bookings}): booking #{id} is possibly a second booking of it. Check it in Bookamat — neither take it over nor book anyway.',
-      adopt_taken: 'Booking #{id} is already recorded on another document in Mado.',
+      adopt_taken: 'Booking #{id} is already recorded on another document or statement line in Mado.',
     },
     zero: {
       rc: '0 % EU reverse charge (IG Leistungen)',
