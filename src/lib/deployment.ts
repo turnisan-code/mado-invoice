@@ -1,6 +1,7 @@
-// Where this build runs, and whether it may write to Bookamat. Only production books: a Vercel
-// preview uses production's database and the Bookamat key stored there, so a click on a preview
-// would book for real (the owner's rule: a preview never writes). A local server books only with
+// Where this build runs, and whether it may write to Bookamat. Only production books (the owner's
+// rule: a preview never writes). Today Vercel's Preview environment has no database keys, so a
+// preview cannot reach the Bookamat key at all; should it ever get production's, a click there
+// would book for real, and this guard stops it. A local server books only with
 // BOOKAMAT_ALLOW_WRITES=1. Read per call, so tests and the runtime see the current environment.
 
 export type DeploymentEnv = 'production' | 'preview' | 'development' | 'local'
