@@ -19,7 +19,7 @@ type ListItem = {
   discount_value?: number | null
 }
 type Totaled = { document_items: ListItem[]; tax_treatment?: string | null; discount_type?: string | null; discount_value?: number | null }
-type Paid = { payments?: { amount: number; kind?: string }[] | null }
+type Paid = { payments?: { id?: string; date?: string; amount: number; kind?: string }[] | null }
 type Stated = { status: string; due_date: string | null }
 
 const discountOf = (d: Totaled) =>
@@ -66,7 +66,7 @@ export const creditNoteShownStatus = (d: Totaled & Paid & { status: string; appl
 const ITEM_COLUMNS = 'document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value)'
 
 export const DOCUMENT_LIST_COLUMNS: Record<DocumentType, string> = {
-  invoice: `id, number, status, invoice_kind, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, pdf_path, bookamat_error, bookamat_booking_id, clients(name, company), ${ITEM_COLUMNS}, payments(amount, kind), bookamat_bookings(year, booking_id)`,
+  invoice: `id, number, status, invoice_kind, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, pdf_path, bookamat_error, bookamat_booking_id, clients(name, company), ${ITEM_COLUMNS}, payments(id, date, amount, kind), bookamat_bookings(year, booking_id, amount, kind, payment_id)`,
   quote: `id, number, status, date, due_date, currency, client_id, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEM_COLUMNS}`,
   credit_note: `id, number, status, date, currency, client_id, tax_treatment, discount_type, discount_value, clients(name, company), ${ITEM_COLUMNS}, payments(amount, kind)`,
 }
@@ -84,7 +84,7 @@ export interface ListedDocument extends Totaled, Paid {
   pdf_path?: string | null
   bookamat_error?: string | null
   bookamat_booking_id?: string | null
-  bookamat_bookings?: { year: number; booking_id: string }[] | null
+  bookamat_bookings?: { year: number; booking_id: string; amount: number; kind: string; payment_id: string | null }[] | null
   // Credit notes: the sum of the 'credit' rows that apply it to its invoice.
   applied?: number
 }
@@ -247,7 +247,7 @@ export interface DocumentDetail {
   items: NonNullable<DetailDocument['document_items']>
   history: HistoryEvent[]
   reminders: ReminderEntry[]
-  bookings: { year: number; booking_id: string; amount: number; kind: string; booked_on: string | null }[]
+  bookings: { year: number; booking_id: string; amount: number; kind: string; booked_on: string | null; payment_id: string | null }[]
 }
 
 // The document as its page and PDF read it (lines in order, payments, the client), with its
@@ -257,7 +257,7 @@ export async function getDocumentDetail(supabase: SupabaseClient, id: string): P
     supabase.from('documents').select('*, document_items(*), payments(*), clients(*)').eq('id', id).maybeSingle(),
     supabase.from('document_events').select('id, created_at, type, detail, actor').eq('document_id', id).order('created_at', { ascending: false }).limit(200),
     supabase.from('reminder_log').select('level, sent_at, to_email, subject').eq('document_id', id).order('sent_at', { ascending: false }),
-    supabase.from('bookamat_bookings').select('year, booking_id, amount, kind, booked_on').eq('document_id', id).order('year'),
+    supabase.from('bookamat_bookings').select('year, booking_id, amount, kind, booked_on, payment_id').eq('document_id', id).order('year'),
   ])
   const failed = error ?? eventsError ?? remindersError ?? bookingsError
   if (failed) throw failed

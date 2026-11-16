@@ -12,7 +12,7 @@ export const maxDuration = 60
 
 const DOC_COLS = `id, type, number, status, currency, tax_treatment, discount_type, discount_value,
   document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
-  payments(date, amount, kind, method), bookamat_bookings(${BOOKING_COLUMNS}), clients(name, company)`
+  payments(id, date, amount, kind, method), bookamat_bookings(${BOOKING_COLUMNS}), clients(name, company)`
 const PAGE = 1000
 
 // Settings → Bookamat → „Mit Bookamat abgleichen“: this and last year's bookings in Bookamat against

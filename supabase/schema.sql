@@ -474,10 +474,17 @@ create table bookamat_bookings (
   kind            text not null check (kind in ('income','refund')),
   booked_on       date,
   pdf_attached_at timestamptz,
+  -- The payment (or refund) it books; null for a booking from before bookings per payment
+  -- (20261116), which covers its year's money.
+  payment_id      uuid references payments(id),
   created_at      timestamptz not null default now()
 );
 
-create unique index bookamat_bookings_document_year_kind_key on bookamat_bookings(document_id, year, kind);
+-- One booking per payment; the rows without one keep the old one-per-(document, year, kind) rule.
+create unique index bookamat_bookings_legacy_key on bookamat_bookings(document_id, year, kind) where payment_id is null;
+create unique index bookamat_bookings_payment_key on bookamat_bookings(payment_id) where payment_id is not null;
+-- A Bookamat booking is recorded once, on one document.
+create unique index bookamat_bookings_booking_key on bookamat_bookings(year, booking_id);
 
 -- ─── Recurring schedules ─────────────────────────────────────────────────────
 -- A schedule points at a template invoice; every run copies it into a new invoice for the
@@ -1250,6 +1257,63 @@ drop trigger if exists payments_deposit_guard on payments;
 create trigger payments_deposit_guard
   before insert or delete on payments
   for each row execute function payments_deposit_guard();
+
+-- ─── Booked payments stay as they are ────────────────────────────────────────
+-- A payment a Bookamat booking covers (its own, or one from before bookings per payment of its
+-- document, year and kind) cannot be removed, nor its document, date, amount, kind or method
+-- changed (MI048, the booking id in the detail), until the booking is deleted in Bookamat and
+-- forgotten in Mado („Buchung vergessen“ deletes the bookamat_bookings row); nor while a sync's
+-- booking of it is not settled (MI049: documents.bookamat_pending names it).
+create or replace function payments_booking_guard()
+returns trigger language plpgsql as $$
+declare
+  p       payments%rowtype := old;
+  booking text;
+  num     text;
+begin
+  if tg_op = 'UPDATE'
+     and new.document_id is not distinct from old.document_id and new.date is not distinct from old.date
+     and new.amount is not distinct from old.amount and new.kind is not distinct from old.kind
+     and new.method is not distinct from old.method then
+    return new;
+  end if;
+
+  select b.booking_id into booking
+  from bookamat_bookings b
+  where b.payment_id = p.id
+     or (b.payment_id is null
+         and p.kind in ('payment', 'refund')
+         and b.document_id = p.document_id
+         and b.year = extract(year from p.date)::integer
+         and b.kind = case when p.kind = 'refund' then 'refund' else 'income' end)
+  limit 1;
+
+  if booking is not null then
+    select number into num from documents where id = p.document_id;
+    raise exception using errcode = 'MI048', detail = booking,
+      message = format('%s: this payment is booked in Bookamat (#%s). Delete the booking there and use "Buchung vergessen" first.', coalesce(num, 'This document'), booking);
+  end if;
+
+  if exists (
+    select 1 from documents d
+    where d.id = p.document_id
+      and jsonb_typeof(d.bookamat_pending) = 'array'
+      and d.bookamat_pending @> jsonb_build_array(jsonb_build_object('payment_id', p.id::text))
+  ) then
+    select number into num from documents where id = p.document_id;
+    raise exception using errcode = 'MI049',
+      message = format('%s: a Bookamat booking of this payment is not settled yet. Sync again, or check Bookamat and discard the open attempts first.', coalesce(num, 'This document'));
+  end if;
+
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_booking_guard on payments;
+create trigger payments_booking_guard
+  before update or delete on payments
+  for each row execute function payments_booking_guard();
 
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice

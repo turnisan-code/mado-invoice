@@ -590,7 +590,7 @@ function paymentReply(doc: MoneyDoc, all: Payment[], added: Payment[], { becameP
 const removePaymentTool = defineTool({
   name: 'remove_payment',
   title: 'Remove payment',
-  description: `Delete a payment, fee, Skonto, write-off, applied credit or refund row. A paid invoice that is no longer settled is reopened (sent or overdue). Money an issued final invoice deducts stays (refused). ${PAYMENTS_NOTE}`,
+  description: `Delete a payment, fee, Skonto, write-off, applied credit or refund row. A paid invoice that is no longer settled is reopened (sent or overdue). Money an issued final invoice deducts stays (refused). A payment or refund booked in Bookamat, or with a booking attempt not settled yet, is refused until the owner deletes that booking in Bookamat and forgets it in Mado. ${PAYMENTS_NOTE}`,
   scope: 'mado:write',
   inputSchema: z.object({ payment_id: id }),
   hints: { ...WRITE, destructiveHint: true, idempotentHint: true },

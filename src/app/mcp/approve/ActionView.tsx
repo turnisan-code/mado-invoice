@@ -205,8 +205,11 @@ export function ActionPreview({ row, t, lang }: { row: Pick<McpAction, 'kind' | 
             <h3 className="text-sm font-semibold pt-2">{t('mcp.approve.preview.bookings')}</h3>
             <ul className="divide-y divide-neutral-100 dark:divide-neutral-800 text-sm">
               {bookings.map(b => (
-                <li key={`${num(b.year)}-${text(b.kind)}`} className="py-2 flex justify-between gap-3">
-                  <span>{num(b.year)} · {t('mcp.approve.preview.bookingDate')} {formatDate(text(b.date), lang)}</span>
+                <li key={`${num(b.year)}-${text(b.kind)}-${text(b.paymentId)}-${text(b.date)}`} className="py-2 flex justify-between gap-3">
+                  <span>
+                    {num(b.year)} · {t('mcp.approve.preview.bookingDate')} {formatDate(text(b.date), lang)}
+                    {num(b.part) > 0 && <span className={'block ' + labelCls}>{t('mcp.approve.preview.part', { part: num(b.part) })}</span>}
+                  </span>
                   <span className="tabular-nums text-right">
                     {money(b.kind === 'refund' ? -num(b.amount) : b.amount)}
                     {num(b.cash) > 0 && <span className={'block ' + labelCls}>{t('mcp.approve.preview.cash', { amount: money(b.cash) })}</span>}

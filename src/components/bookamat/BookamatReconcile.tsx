@@ -40,15 +40,22 @@ export function BookamatReconcile({ writes = true }: { writes?: boolean }) {
     }
   }
 
-  // Taken over: that money is booked now, so its entry goes; no new check of two years.
-  async function adopt(documentId: string, year: number, c: BookingCandidate) {
+  // Taken over: that payment is booked now, so its entry goes, and the booking leaves every other
+  // entry; no new check of two years.
+  async function adopt(documentId: string, c: BookingCandidate) {
     setAdopting(`${documentId}:${c.year}:${c.bookingId}`)
-    const res = await requestBookamatAdopt(documentId, { year: c.year, bookingId: c.bookingId })
+    const res = await requestBookamatAdopt(documentId, { year: c.year, bookingId: c.bookingId, paymentId: c.paymentId })
     setAdopting(null)
     if (!res.ok) { toast.error(bookamatErrorMessage(t, res.payload)); return }
     toast.success(t('books.duplicates.adopted', { id: c.bookingId }))
-    const booked = res.data.adopted.year
-    setReport(r => r && { ...r, unbooked: r.unbooked.filter(u => !(u.documentId === documentId && (u.year === booked || u.year === year))) })
+    const { paymentId } = res.data.adopted
+    const taken = (x: BookingCandidate) => x.year === c.year && x.bookingId === c.bookingId
+    setReport(r => r && {
+      ...r,
+      unbooked: r.unbooked
+        .filter(u => !(u.documentId === documentId && (paymentId ? u.paymentId === paymentId : u.candidates.some(taken))))
+        .map(u => ({ ...u, candidates: u.candidates.filter(x => !taken(x)) })),
+    })
   }
 
   const years = report?.years.join(', ') ?? ''
@@ -88,7 +95,7 @@ export function BookamatReconcile({ writes = true }: { writes?: boolean }) {
             </p>
           ))}
           {report.unbooked.map(u => (
-            <div key={`${u.documentId}:${u.year}`} className="rounded-lg border border-neutral-200 dark:border-neutral-800 p-2 space-y-1">
+            <div key={`${u.documentId}:${u.paymentId ?? u.year}:${u.date}`} className="rounded-lg border border-neutral-200 dark:border-neutral-800 p-2 space-y-1">
               <p className="break-words">
                 {numberLink(u.type, u.documentId, u.number)}
                 {t('books.reconcile.unbooked', { client: u.client || '—', amount: formatMoney(u.amount, 'EUR'), date: formatDate(u.date, lang) })}
@@ -100,7 +107,7 @@ export function BookamatReconcile({ writes = true }: { writes?: boolean }) {
                   <div key={key} className="flex items-center gap-2 flex-wrap">
                     <span className="text-amber-700 dark:text-amber-400 break-words">{t('books.reconcile.unbookedFound', { booking: describeCandidate(c) })}</span>
                     {c.fit === 'exact' && writes && (
-                      <Button type="button" size="xs" variant="outline" disabled={!!adopting || running} onClick={() => void adopt(u.documentId, u.year, c)}>
+                      <Button type="button" size="xs" variant="outline" disabled={!!adopting || running} onClick={() => void adopt(u.documentId, c)}>
                         {adopting === key ? t('books.duplicates.adopting') : t(u.type === 'credit_note' ? 'books.duplicates.adoptRefund' : 'books.duplicates.adopt')}
                       </Button>
                     )}

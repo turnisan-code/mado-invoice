@@ -1,5 +1,5 @@
-// Booking an issued document's money in Bookamat, one booking per calendar year, with the frozen
-// PDF attached.
+// Booking an issued document's money in Bookamat, one booking per payment (or refund), with the
+// frozen PDF attached.
 import { z } from 'zod'
 import { BookamatError, vatAccounts, type BookamatSettings } from '@/lib/bookamat'
 import { bookamatPreview, syncBookamatWithAdopt } from '@/lib/services/bookamat-sync'
@@ -30,7 +30,9 @@ async function load(ctx: ServiceContext, documentId: string, { search = false }:
     // As the bookings carry it, and Claude's mark (a write after prepare is a change).
     client: d.clientBooked,
     payments: paymentsState(d.payments as unknown as Record<string, unknown>[]),
-    recorded: [...d.recorded].map(r => ({ year: r.year, booking_id: String(r.booking_id), amount: cents(r.amount), kind: r.kind })).sort((a, b) => a.year - b.year || a.kind.localeCompare(b.kind)),
+    recorded: [...d.recorded]
+      .map(r => ({ year: r.year, booking_id: String(r.booking_id), amount: cents(r.amount), kind: r.kind, payment_id: r.payment_id ?? null }))
+      .sort((a, b) => a.year - b.year || a.kind.localeCompare(b.kind) || a.booking_id.localeCompare(b.booking_id)),
     pending: d.pending ?? null,
     accounts: Object.fromEntries(ACCOUNT_KEYS.map(k => [k, settings[k] ?? null])),
   })

@@ -61,10 +61,10 @@ export interface Invoice {
   pdf_path?: string | null
   bookamat_error?: string | null
   bookamat_booking_id?: string | null
-  bookamat_bookings?: { year: number; booking_id: string }[] | null
+  bookamat_bookings?: { year: number; booking_id: string; amount: number; kind: string; payment_id: string | null }[] | null
   invoice_kind?: InvoiceKind | null
   document_items: DocItem[]
-  payments?: { amount: number; kind?: string }[]
+  payments?: { id?: string; date?: string; amount: number; kind?: string }[]
 }
 
 type BulkSyncRow = { id: string; number: string; ok: boolean; text: string }
@@ -155,13 +155,15 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [invoices])
 
+  // As the sync counts it: an overpayment is never money still to book.
+  const stateOf = (d: Invoice) => bookamatState({ ...d, total: docTotal(d) })
   const { sort } = list
   const filtered = useMemo(() => {
     let rows = invoices
     if (status === 'outstanding') rows = rows.filter(isOpen)
     else if (status) rows = rows.filter(d => listStatus(d, todayStr) === status)
     if (client) rows = rows.filter(d => d.client_id === client)
-    if (bookamat && bookamatConfigured) rows = rows.filter(d => bookamatState(d) === bookamat)
+    if (bookamat && bookamatConfigured) rows = rows.filter(d => stateOf(d) === bookamat)
     if (from) rows = rows.filter(d => !!d.date && d.date >= from)
     if (to) rows = rows.filter(d => !!d.date && d.date <= to)
     if (q) {
@@ -192,7 +194,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
 
   const bookamatBadge = (d: Invoice) => {
     if (!bookamatConfigured) return null
-    const state = bookamatState(d)
+    const state = stateOf(d)
     if (state === 'none') return null
     const bookings = d.bookamat_bookings ?? []
     const title = state === 'synced' && bookings.length ? formatBookings(t, bookings) : state === 'failed' ? d.bookamat_error ?? undefined : undefined
@@ -205,7 +207,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
 
   function openBulkSync() {
     const chosen = selection.selectedVisible
-    const eligible = chosen.filter(d => { const s = bookamatState(d); return s === 'unsynced' || (s === 'failed' && hasMoneyToBook(d)) })
+    const eligible = chosen.filter(d => { const s = stateOf(d); return s === 'unsynced' || (s === 'failed' && hasMoneyToBook(d)) })
     setBulkSync({ invoices: eligible, skipped: chosen.length - eligible.length, done: 0, running: false, results: [] })
   }
 

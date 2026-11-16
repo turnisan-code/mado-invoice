@@ -127,7 +127,7 @@ export const IRREVERSIBLE_TOOLS: readonly AnyToolDef[] = [
   defineTool({
     name: 'prepare_bookamat_sync',
     title: 'Prepare: Bookamat sync',
-    description: `Prepare booking an issued document's money in Bookamat (cash basis): a paid invoice's payments or a settled credit note's refunds, one booking per calendar year, with accounts and amounts, the frozen PDF attached. Refused while the document's client was created or changed from Claude and not saved in Mado since: the bookings carry its name and VAT ID. Should Claude change the client or the payments while it runs, it stops before booking. ${APPROVAL}`,
+    description: `Prepare booking an issued document's money in Bookamat (cash basis): each payment received on an issued invoice (part payments too) or each refund of a credit note, one booking per payment on its own date, with accounts and amounts, the frozen PDF attached. Refused while the document's client was created or changed from Claude and not saved in Mado since: the bookings carry its name and VAT ID. Should Claude change the client or the payments while it runs, it stops before booking. ${APPROVAL}`,
     scope: 'mado:irreversible',
     inputSchema: z.object({ document_id: z.uuid() }),
     hints: PREPARE,

@@ -5,7 +5,7 @@ import { adoptExternalBooking, BOOKAMAT_SETTINGS_COLUMNS, type BookamatSettings 
 export const maxDuration = 30
 
 // „Das ist diese Zahlung — übernehmen“: records a booking Bookamat already has (one Mado did not
-// make) as the document's booking of that year, after reading it again from Bookamat. Books
+// make) as the booking of one of the document's payments, after reading it again from Bookamat. Books
 // nothing. Production only.
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
@@ -20,11 +20,13 @@ export async function POST(req: NextRequest) {
   if ((typeof bookingId !== 'string' && typeof bookingId !== 'number') || !/^\d{1,18}$/.test(String(bookingId))) {
     return apiError(400, 'invalid_request', 'bookingId is required')
   }
+  const paymentId = body.paymentId === undefined || body.paymentId === null ? null : body.paymentId
+  if (paymentId !== null && !isUuid(paymentId)) return apiError(400, 'invalid_request', 'Invalid paymentId')
 
   const { data: settings, error: settingsErr } = await supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single()
   if (settingsErr || !settings) return settingsUnavailable(settingsErr)
 
-  const result = await adoptExternalBooking(supabase, settings as unknown as BookamatSettings, body.documentId, { year: year as number, bookingId: String(bookingId) })
+  const result = await adoptExternalBooking(supabase, settings as unknown as BookamatSettings, body.documentId, { year: year as number, bookingId: String(bookingId), paymentId })
   if (!result.ok) {
     const { status, ...payload } = result
     return NextResponse.json(payload, { status })

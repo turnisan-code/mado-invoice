@@ -14,7 +14,7 @@ import { ActionPreview, ActionResult, Notices, StateBadge, wordedList } from '..
 import ApproveForm from './ApproveForm'
 
 // An approved action runs in this page's Server Action: issuing renders and archives PDFs, a
-// Bookamat sync posts per year. No Claude timer applies here.
+// Bookamat sync posts per payment. No Claude timer applies here.
 export const maxDuration = 300
 
 const when = (iso: string, lang: string) => new Date(iso).toLocaleString(lang === 'de' ? 'de-AT' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Vienna' })

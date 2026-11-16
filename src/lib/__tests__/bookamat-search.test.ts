@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  MAX_PAGES, bookingKey, candidateFit, describeCandidate, euro, findCandidates, numberPattern, otherNumberIn, readYear, toBookingLite,
+  MAX_PAGES, bookingKey, candidateFit, describeCandidate, euro, findCandidates, moneyTarget, numberPattern, otherNumberIn, readYear, toBookingLite,
   type BookingLite, type GetPage,
 } from '@/lib/bookamat-search'
 
@@ -105,7 +105,7 @@ test('a refund looks for money going out', () => {
 test('how a found booking fits what Mado still books', () => {
   const ctx = { documentNumber: 'RN-209906001', planned: [{ year: 2026, amount: 600 }] }
   const fit = (raw: unknown, year = 2026) => candidateFit(lite(raw, year), ctx)
-  assert.deepEqual(fit(income(9401, '2026-06-15', 'RN_209906001 - Muster', '600.00')), { fit: 'exact', planned: 600, plannedYears: [2026] })
+  assert.deepEqual(fit(income(9401, '2026-06-15', 'RN_209906001 - Muster', '600.00')), { fit: 'exact', planned: 600, plannedYears: [2026], paymentId: null })
   assert.equal(fit(income(9402, '2026-06-15', 'RN_209906001 - Muster', '300.00')).fit, 'part')
   assert.equal(fit(income(9403, '2026-06-15', 'RN_209906001 - Muster', '640.00')).fit, 'more')
   assert.equal(fit(income(9404, '2025-12-31', 'RN_209906001 - Muster', '600.00'), 2025).fit, 'year')
@@ -117,6 +117,33 @@ test('how a found booking fits what Mado still books', () => {
   assert.equal(fit({ ...income(9408, '2026-06-15', 'RN_209906001 Muster', '600.00'), description: 'Auftraggeberreferenz 104857600' }).fit, 'exact')
   // A year whose money Mado booked already: possibly booked twice there.
   assert.equal(candidateFit(lite(income(9409, '2025-12-20', 'RN_209906001 - Muster', '300.00'), 2025), { ...ctx, bookedYears: [2025] }).fit, 'booked')
+})
+
+test('among part payments, a booking fits the one of its amount nearest its date', () => {
+  const planned = [
+    { year: 2026, amount: 300, paymentId: 'p1', date: '2026-03-02' },
+    { year: 2026, amount: 300, paymentId: 'p2', date: '2026-05-04' },
+    { year: 2026, amount: 240, paymentId: 'p3', date: '2026-06-01' },
+  ]
+  const fit = (date: string, amount: string) => candidateFit(lite(income(9601, date, 'RN_209906001 Teilzahlung', amount)), { documentNumber: 'RN-209906001', planned })
+  assert.deepEqual([fit('2026-05-05', '300.00').fit, fit('2026-05-05', '300.00').paymentId], ['exact', 'p2'])
+  assert.equal(fit('2026-03-03', '300.00').paymentId, 'p1')
+  assert.equal(fit('2026-03-03', '240.00').paymentId, 'p3')
+  // No payment of its amount: measured against the nearest one, and names none.
+  assert.deepEqual([fit('2026-06-02', '100.00').fit, fit('2026-06-02', '100.00').planned, fit('2026-06-02', '100.00').paymentId], ['part', 240, undefined])
+})
+
+test('a payment\'s search amounts: its booked part, itself, with the fees of its day, the whole', () => {
+  const rows = [
+    { id: 'p1', date: '2026-03-02', amount: 300, kind: 'payment' },
+    { id: 'f1', date: '2026-03-02', amount: 10, kind: 'fee' },
+    { id: 'p2', date: '2026-05-04', amount: 500, kind: 'payment' },
+  ]
+  assert.deepEqual(moneyTarget({ kind: 'income', date: '2026-03-02', amount: 300, paymentId: 'p1' }, rows, 800), { date: '2026-03-02', amounts: [300, 300, 310, 800] })
+  // An overpayment cut to what was still open.
+  assert.deepEqual(moneyTarget({ kind: 'income', date: '2026-05-04', amount: 450, paymentId: 'p2' }, rows, 800).amounts, [450, 500, 500, 800])
+  // Rows read without ids: the payment of that day.
+  assert.deepEqual(moneyTarget({ kind: 'income', date: '2026-03-02', amount: 300, paymentId: null }, rows.map(r => ({ date: r.date, amount: r.amount, kind: r.kind })), 800).amounts, [300, 300, 310, 800])
 })
 
 // A stand-in for Bookamat's list endpoint: `pages[year]` are the pages it answers, in order.

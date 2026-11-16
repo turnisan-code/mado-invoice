@@ -2,6 +2,7 @@
 // money that Mado did not make (Bookmatic, bookamat's own bank import, a hand booking), so money
 // is never booked twice (Bookmatic audit P0-2). Browser-safe and free of the HTTP client: the
 // readers take a GET function, and bookamat.ts turns any failure into "nothing booked".
+import type { MoneyRow, PlannedBooking } from '@/lib/bookamat-client'
 
 // A booking as Mado compares it. `total`: the size of the signed sum of its lines (a 100,00 line
 // with a −10,00 line is 90,00). `moneyIn`: income money (lines of group 1, or of no group) with a
@@ -19,10 +20,11 @@ export type BookingLite = {
   lines: 'income' | 'expense' | 'mixed'
 }
 
-// Whether a candidate can be taken over as Mado's booking of that year's money:
-// - 'exact': income, its year's amount still to book (±2 cents) — „übernehmen“;
-// - 'part' / 'more': less or more than that year's amount (a part payment booked on its own, a
-//   reminder fee in the same transfer): the money is in Bookamat, but not in Mado's shape;
+// Whether a candidate can be taken over as Mado's booking of one payment:
+// - 'exact': income, the amount of a payment of its year still to book (±2 cents) — „übernehmen“
+//   (`paymentId`: that payment, the one nearest its date among several of that amount);
+// - 'part' / 'more': less or more than the nearest payment of its year (several payments in one
+//   booking, a reminder fee in the same transfer): the money is in Bookamat, but not in Mado's shape;
 // - 'year': it lies in a year Mado books none of this money in (a payment dated across New Year);
 // - 'booked': it lies in a year whose money Mado booked already: possibly booked twice there;
 // - 'kind': not an income booking (booked as an expense);
@@ -45,10 +47,16 @@ export type BookingCandidate = {
   planned?: number
   plannedYears?: number[]
   other?: string
+  // For an exact fit: the payment it books.
+  paymentId?: string | null
+  // The payment whose search found it (the sync searches per payment).
+  foundFor?: string | null
 }
 
 // A booking the owner said is not this money („trotzdem buchen“), or one to take over.
-export type BookingRef = { year: number; bookingId: string }
+// `paymentId`: the payment it books (a take-over), or the one it was found for (an
+// acknowledgement, which then counts for that payment only).
+export type BookingRef = { year: number; bookingId: string; paymentId?: string | null }
 
 export const WINDOW_DAYS = 10
 const TOLERANCE = 0.02
@@ -65,7 +73,7 @@ export function addDays(iso: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
 }
 
-const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000
+export const daysApart = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000
 
 export function yearsBetween(from: string, until: string): number[] {
   const out: number[] = []
@@ -135,8 +143,23 @@ export function otherNumberIn(text: string, documentNumber: string): string | nu
 }
 
 // Money the sync is about to book: a payment's (or refund's) date and the amounts that would be
-// that money in a booking (the payment with what came with it, the year's booking, the total).
+// that money in a booking (the payment with what came with it, the part Mado books, the total).
 export type MoneyTarget = { date: string; amounts: number[] }
+
+// What one payment still to book may look like in Bookamat: the amount Mado books, the payment
+// itself, the payment with the dunning fees of its day (one transfer recorded as both), and the
+// document's whole amount. The payment is found by its id, or (a row read without its id) as the
+// first of its kind and date.
+export function moneyTarget(
+  p: Pick<PlannedBooking, 'kind' | 'date' | 'amount' | 'paymentId'>,
+  rows: MoneyRow[],
+  total: number,
+): MoneyTarget {
+  const moneyKind = p.kind === 'income' ? 'payment' : 'refund'
+  const row = rows.find(r => r.kind === moneyKind && (p.paymentId ? r.id === p.paymentId : !r.id && r.date === p.date))
+  const fees = row ? rows.filter(f => f.kind === 'fee' && f.date === row.date).reduce((s, f) => s + f.amount, 0) : 0
+  return { date: p.date, amounts: [p.amount, ...(row ? [row.amount, row.amount + fees] : []), total] }
+}
 
 // The bookings among `bookings` that may already book this money: one naming the document's
 // number (any date), or one moving the same amount (±2 cents) the same way within ±10 days of a
@@ -165,22 +188,27 @@ export function findCandidates(input: {
   return [...out.values()].sort((a, b) => a.date.localeCompare(b.date) || Number(a.bookingId) - Number(b.bookingId))
 }
 
-// Whether `booking` can be taken over as the document's booking of its year (see CandidateFit).
-// `planned`: what Mado still books per year; `bookedYears`: the years whose money Mado booked.
+// Whether `booking` can be taken over as the booking of one of the document's payments (see
+// CandidateFit). `planned`: the payments Mado still books (amount, year, date); `bookedYears`: the
+// years whose money Mado booked already. Among several payments of the booking's amount, the one
+// nearest its date is the one it books.
 export function candidateFit(
-  booking: Pick<BookingLite, 'year' | 'title' | 'description' | 'total' | 'lines'>,
-  ctx: { documentNumber: string; planned: { year: number; amount: number }[]; bookedYears?: number[] },
-): Pick<BookingCandidate, 'fit' | 'planned' | 'plannedYears' | 'other'> {
-  const plannedYears = ctx.planned.map(p => p.year)
+  booking: Pick<BookingLite, 'year' | 'date' | 'title' | 'description' | 'total' | 'lines'>,
+  ctx: { documentNumber: string; planned: { year: number; amount: number; paymentId?: string | null; date?: string }[]; bookedYears?: number[] },
+): Pick<BookingCandidate, 'fit' | 'planned' | 'plannedYears' | 'other' | 'paymentId'> {
+  const plannedYears = [...new Set(ctx.planned.map(p => p.year))]
   const text = `${booking.title} ${booking.description}`
   const other = otherNumberIn(text, ctx.documentNumber)
   const ownToo = !!numberPattern(ctx.documentNumber)?.test(text)
   if (other && !ownToo) return { fit: 'other_number', other, plannedYears }
   if (booking.lines !== 'income') return { fit: 'kind', plannedYears }
-  const p = ctx.planned.find(x => x.year === booking.year)
-  if (!p) return { fit: ctx.bookedYears?.includes(booking.year) ? 'booked' : 'year', plannedYears }
-  const fit = Math.abs(booking.total - p.amount) <= TOLERANCE ? 'exact' : booking.total < p.amount ? 'part' : 'more'
-  return { fit, planned: p.amount, plannedYears }
+  const near = (x: { date?: string }) => (x.date && booking.date ? daysApart(x.date, booking.date) : 0)
+  const ofYear = ctx.planned.filter(x => x.year === booking.year).sort((a, b) => near(a) - near(b))
+  if (!ofYear.length) return { fit: ctx.bookedYears?.includes(booking.year) ? 'booked' : 'year', plannedYears }
+  const exact = ofYear.find(x => Math.abs(booking.total - x.amount) <= TOLERANCE)
+  if (exact) return { fit: 'exact', planned: exact.amount, plannedYears, paymentId: exact.paymentId ?? null }
+  const p = ofYear[0]
+  return { fit: booking.total < p.amount ? 'part' : 'more', planned: p.amount, plannedYears }
 }
 
 // ─── Readers ─────────────────────────────────────────────────────────────────
