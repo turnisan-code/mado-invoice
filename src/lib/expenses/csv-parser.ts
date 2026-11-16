@@ -72,7 +72,19 @@ function parseHeaderlessEasybank(csvContent: string): {
   transactions: EasybankTransaction[]
   errors: string[]
 } {
-  const result = { data: rowsOf(csvContent, ';') }
+  return easybankRows(rowsOf(csvContent, ';'))
+}
+
+// Mado: one statement line as stored (bank_lines.cells), read as the file's line is
+export function transactionOfCells(cells: readonly string[]): EasybankTransaction | null {
+  return easybankRows([[...cells]]).transactions[0] ?? null
+}
+
+function easybankRows(rows: string[][]): {
+  transactions: EasybankTransaction[]
+  errors: string[]
+} {
+  const result = { data: rows }
 
   const transactions: EasybankTransaction[] = []
   const errors: string[] = []
