@@ -41,10 +41,11 @@ interface Props {
   settingsId: string
   invoiceIban: string
   ownIbans: string[]
+  expensesFrom: string | null
   year: number
 }
 
-export default function BookingRulesEditor({ rules, settingsId, invoiceIban, ownIbans, year }: Props) {
+export default function BookingRulesEditor({ rules, settingsId, invoiceIban, ownIbans, expensesFrom, year }: Props) {
   const { t } = useT()
   const router = useRouter()
   const [lists, setLists] = useState<BookamatAccounts | null>(null)
@@ -53,6 +54,7 @@ export default function BookingRulesEditor({ rules, settingsId, invoiceIban, own
   const [busy, setBusy] = useState(false)
   const [remove, setRemove] = useState<BookingRule | null>(null)
   const [ibans, setIbans] = useState(ownIbans.join('\n'))
+  const [switchDate, setSwitchDate] = useState(expensesFrom ?? '')
 
   useEffect(() => {
     let active = true
@@ -103,6 +105,17 @@ export default function BookingRulesEditor({ rules, settingsId, invoiceIban, own
     if (error) { toast.error(error.message); return }
     setIbans(list.join('\n'))
     toast.success(t('bookingRules.ibansSaved'))
+    router.refresh()
+  }
+
+  // The switch-over (decision D2): from this bank date on Mado books the statement's lines
+  async function saveSwitch() {
+    if (switchDate && !/^\d{4}-\d{2}-\d{2}$/.test(switchDate)) return
+    setBusy(true)
+    const { error } = await createClient().from('settings').update({ expenses_from: switchDate || null }).eq('id', settingsId)
+    setBusy(false)
+    if (error) { toast.error(error.message); return }
+    toast.success(t('bookingRules.switchSaved'))
     router.refresh()
   }
 
@@ -233,6 +246,16 @@ export default function BookingRulesEditor({ rules, settingsId, invoiceIban, own
             </div>
           )
         })}
+      </section>
+
+      <section className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-3">
+        <h2 className="text-sm font-semibold">{t('bookingRules.switchTitle')}</h2>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('bookingRules.switchHint')}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="date" value={switchDate} onChange={e => setSwitchDate(e.target.value)} className="w-auto" />
+          <Button type="button" variant="outline" disabled={busy || switchDate === (expensesFrom ?? '')} onClick={() => void saveSwitch()}>{t('common.save')}</Button>
+          {!expensesFrom && <span className="text-xs text-neutral-500">{t('bookingRules.switchNone')}</span>}
+        </div>
       </section>
 
       <section className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-3">

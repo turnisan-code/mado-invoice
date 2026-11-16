@@ -372,7 +372,7 @@ test('a dry run posts and claims nothing; a line another attempt holds is not bo
 test('„Buchung vergessen“ only once Bookamat no longer has the booking; a booked line without one is opened again', async () => {
   const recorded = [{ year: 2026, booking_id: '7001', bank_line_id: 'l-rent' }]
   let db = setup({ lines: [], recorded, live: 'live' })
-  await assert.rejects(forgetLineBooking(db.client, SETTINGS, 'l-rent'), /delete it there first/)
+  await assert.rejects(forgetLineBooking(db.client, SETTINGS, 'l-rent'), /zuerst dort löschen/)
   db = setup({ lines: [], recorded, live: 'deleted' })
   assert.deepEqual(await forgetLineBooking(db.client, SETTINGS, 'l-rent'), { forgotten: '7001' })
   assert.ok(db.ops.some(o => o.table === 'bookamat_bookings' && o.action === 'delete'))
@@ -382,7 +382,7 @@ test('„Buchung vergessen“ only once Bookamat no longer has the booking; a bo
   db = setup({ lines: [], recorded: [] })
   assert.deepEqual(await forgetLineBooking(db.client, SETTINGS, 'l-rent'), { forgotten: null })
   db = setup({ lines: [], recorded: [], reopened: false })
-  await assert.rejects(forgetLineBooking(db.client, SETTINGS, 'l-rent'), /no booking to forget/)
+  await assert.rejects(forgetLineBooking(db.client, SETTINGS, 'l-rent'), /keine Buchung zum Vergessen/)
 })
 
 test('an open attempt is discarded under the line\'s claim: never within two minutes, never while Bookamat has it — unless the owner checked', async () => {
@@ -390,17 +390,17 @@ test('an open attempt is discarded under the line\'s claim: never within two min
   let db = setup({ lines: [], pending: pendingOf({ at: new Date().toISOString() }) })
   await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /noch nicht bestätigt/)
   db = setup({ lines: [], pending, titled: [booking(9101, pending.title, '700.00')] })
-  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /book the line again/)
+  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /erneut buchen erfasst sie/)
   db = setup({ lines: [], pending, titled: [] })
   assert.deepEqual(await discardLinePending(db.client, SETTINGS, 'l-rent'), { discarded: true })
   // Two bookings Mado cannot tell apart: only the owner can, after looking in Bookamat
   db = setup({ lines: [], pending, titled: [booking(9101, pending.title, '700.00'), booking(9102, pending.title, '700.00')] })
-  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /could not be searched/)
+  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /nicht eindeutig zu finden/)
   db = setup({ lines: [], pending, titled: [booking(9101, pending.title, '700.00'), booking(9102, pending.title, '700.00')] })
   assert.deepEqual(await discardLinePending(db.client, SETTINGS, 'l-rent', { force: true }), { discarded: true })
   // Accepted by Bookamat: never discarded, booked again it is recorded
   db = setup({ lines: [], pending: pendingOf({ booking_id: '9103' }) })
-  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent', { force: true }), /book the line again/)
+  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent', { force: true }), /erneut buchen erfasst sie/)
   // Another tab holds the line
   db = setup({ lines: [], pending, claimTaken: true })
   await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-rent'), /gerade gebucht/)

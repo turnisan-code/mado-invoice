@@ -27,6 +27,8 @@ export interface LoadedStatement {
 interface Props {
   statement: LoadedStatement | null
   onStatement: (statement: LoadedStatement | null) => void
+  // A generic CSV's columns mapped again: the same file, read anew
+  onRemap?: (statement: LoadedStatement) => void
   invoices: OpenInvoice[]
   importedRefs: string[]
   bookamatConfigured: boolean
@@ -147,7 +149,7 @@ function MappingEditor({ header, rows, mapping, onChange, t }: { header: string[
   )
 }
 
-export default function BankImport({ statement, onStatement, invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices }: Props) {
+export default function BankImport({ statement, onStatement, onRemap, invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices }: Props) {
   const { t, lang } = useT()
   const router = useRouter()
   // The page keys this component by the statement: a new file starts a new review
@@ -227,7 +229,9 @@ export default function BankImport({ statement, onStatement, invoices, importedR
   function remap(mapping: CsvMapping) {
     if (!statement || !parsed?.csv) return
     const { transactions, warnings } = applyMapping(parsed.csv.rows, mapping)
-    onStatement({ ...statement, parsed: { ...parsed, transactions, warnings, csv: { ...parsed.csv, mapping } } })
+    const next = { ...statement, parsed: { ...parsed, transactions, warnings, csv: { ...parsed.csv, mapping } } }
+    if (onRemap) onRemap(next)
+    else onStatement(next)
     resetReview()
   }
 

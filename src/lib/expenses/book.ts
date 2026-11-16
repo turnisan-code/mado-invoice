@@ -113,7 +113,7 @@ export async function findLineBooking(
   const data = await bookamatFetch<ListAnswer>(creds, entry.year, `bookings/?title=${q(entry.title)}&date=${q(entry.date)}&format=json`, { deadline })
   const page = data && typeof data === 'object' && !Array.isArray(data) ? data : null
   const list = Array.isArray(data) ? data : Array.isArray(page?.results) ? page.results : null
-  const unknown = () => new BookamatError('unknown_outcome', `Bookamat ${entry.year} could not be searched for "${entry.title}"`, 0, { year: entry.year, title: entry.title })
+  const unknown = () => new BookamatError('unknown_outcome', `In Bookamat ${entry.year} ist nicht eindeutig zu finden, ob „${entry.title}“ am ${deDay(entry.date)} gebucht wurde — dort nachsehen; danach den Versuch verwerfen (in Bookamat geprüft)`, 0, { year: entry.year, title: entry.title })
   if (!entry.title || !list || page?.next) throw unknown()
   const items = list as (BookingLike & { status?: unknown })[]
   if (items.some(i => !i || i.title !== entry.title || i.date !== entry.date)) throw unknown()
@@ -425,11 +425,11 @@ export async function attachLineReceipt(supabase: SupabaseClient, settings: Book
   const { data: line, error: lineErr } = await supabase.from('bank_lines').select('id, status, receipt_path, receipt_name').eq('id', lineId).maybeSingle()
   if (lineErr) throw new BookamatError('database', lineErr.message)
   const l = line as Pick<BankLine, 'id' | 'status' | 'receipt_path' | 'receipt_name'> | null
-  if (!l || l.status !== 'booked' || !l.receipt_path) throw new BookamatError('not_found', 'This line has no booking with a Beleg to attach', 404)
+  if (!l || l.status !== 'booked' || !l.receipt_path) throw new BookamatError('not_found', 'Diese Zeile hat keine Buchung mit Beleg zum Anhängen', 404)
   const { data: rows, error: rowErr } = await supabase.from('bookamat_bookings').select('year, booking_id, booked_on, pdf_attached_at').eq('bank_line_id', lineId)
   if (rowErr) throw new BookamatError('database', rowErr.message)
   const row = (rows ?? [])[0] as { year: number; booking_id: string; booked_on: string | null; pdf_attached_at: string | null } | undefined
-  if (!row) throw new BookamatError('not_found', 'This line has no booking with a Beleg to attach', 404)
+  if (!row) throw new BookamatError('not_found', 'Diese Zeile hat keine Buchung mit Beleg zum Anhängen', 404)
   if (row.pdf_attached_at) return { attached: true }
   const failed = await attachTo(supabase, credentialsOf(settings), l, row.year, String(row.booking_id), { title: 'Beleg', date: row.booked_on ?? '' }, loadReceipt)
   if (failed) throw new BookamatError('bookamat', failed, 502)
@@ -448,12 +448,12 @@ export async function forgetLineBooking(supabase: SupabaseClient, settings: Book
   if (!row) {
     const { data: reopened, error: reopenErr } = await supabase.from('bank_lines').update({ status: 'open' }).eq('id', lineId).eq('status', 'booked').select('id')
     if (reopenErr) throw new BookamatError('database', reopenErr.message)
-    if (!reopened?.length) throw new BookamatError('forget_not_found', 'This line has no booking to forget', 404)
+    if (!reopened?.length) throw new BookamatError('forget_not_found', 'Diese Zeile hat keine Buchung zum Vergessen', 404)
     return { forgotten: null }
   }
   try {
     const live = await bookamatFetch<{ status?: unknown }>(credentialsOf(settings), row.year, `bookings/${row.booking_id}/?format=json`)
-    if (String(live?.status ?? '1') !== '3') throw new BookamatError('forget_still_booked', `Bookamat still has booking #${row.booking_id}: delete it there first`, 409, { id: row.booking_id })
+    if (String(live?.status ?? '1') !== '3') throw new BookamatError('forget_still_booked', `Bookamat hat Buchung #${row.booking_id} noch — zuerst dort löschen, dann hier vergessen`, 409, { id: row.booking_id, year: row.year })
   } catch (err) {
     // Bookamat answers 404 for a booking it does not have (bookamatFetch calls any 404 year_missing)
     if (!(err instanceof BookamatError && err.code === 'year_missing')) throw err
@@ -484,10 +484,10 @@ export async function discardLinePending(
     const pending = (claimed[0] as { bookamat_pending: BankLinePending | null }).bookamat_pending
     if (!pending) return { discarded: false }
     if (Date.now() - Date.parse(pending.at) < UNCONFIRMED_MS) throw new BookamatError('unconfirmed', LINE_TEXT.unconfirmed, 409)
-    if (pending.booking_id) throw new BookamatError('unknown_outcome', `Bookamat accepted booking #${pending.booking_id} of this line: book the line again to record it`, 409, { id: pending.booking_id })
+    if (pending.booking_id) throw new BookamatError('unknown_outcome', `Bookamat hat Buchung #${pending.booking_id} dieser Zeile angenommen — erneut buchen erfasst sie`, 409, { id: pending.booking_id, year: pending.year, title: pending.title })
     if (!opts.force) {
       const found = await findLineBooking(supabase, credentialsOf(settings), pending)
-      if (found) throw new BookamatError('unknown_outcome', `Bookamat has booking #${found} of this line: book the line again to record it`, 409, { id: found })
+      if (found) throw new BookamatError('unknown_outcome', `Bookamat hat Buchung #${found} dieser Zeile — erneut buchen erfasst sie`, 409, { id: found, year: pending.year, title: pending.title })
     }
     const { data: kept, error: updErr } = await supabase.from('bank_lines').update({ bookamat_pending: null })
       .eq('id', lineId).eq('bookamat_claim', claimedAt).select('id')
