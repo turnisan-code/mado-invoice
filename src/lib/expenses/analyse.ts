@@ -47,8 +47,8 @@ export const OWN_TRANSFER_ACCOUNTS_MISSING_NOTE = '⚠ Überweisung auf dein eig
 export const OWN_TRANSFER_LISTS_MISSING_NOTE = '⚠ Überweisung auf dein eigenes Konto — Konten von bookamat nicht ladbar: Steuerkonto „Privatentnahmen (allgemein)“, „Keine Vorsteuer“, 0 % selbst wählen oder neu analysieren'
 
 // Moved from Bookmatic lib/ai-classifier.ts: a debit to an account of the owner's that the
-// fixed rule did not take (one of his business accounts; a holder that is his name with a
-// title or „e.U.“) is no business expense, and which it is is his call
+// fixed rule did not take (one of the owner's business accounts; a holder that is the owner's
+// name with a title or „e.U.“) is no business expense, and which it is is the owner's call
 export const OWN_BUSINESS_DEBIT_NOTE = '⚠ Überweisung auf dein anderes Geschäftskonto — keine Ausgabe und keine Privatentnahme: hier nicht buchen, in bookamat als Übertrag zwischen den Zahlungsmittelkonten erfassen.'
 export const ownAccountNote = (holder: string): string =>
   `⚠ Empfänger trägt deinen Namen („${holder}“) — eine Umbuchung zwischen deinen Konten oder eine Privatentnahme, keine Betriebsausgabe? Privatentnahme: Steuerkonto „Privatentnahmen (allgemein)“, „Keine Vorsteuer“, 0 %; Umbuchung: hier nicht buchen.`

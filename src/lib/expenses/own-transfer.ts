@@ -14,7 +14,7 @@
 import type { AiSuggestion, BookamatAccounts } from '@/lib/expenses/types'
 
 // Mado: OWNER_NAME and OWN_BUSINESS_IBANS come from Einstellungen (the owner's name, the
-// IBAN on his invoices and his other business accounts), set by lib/expenses/owner.ts
+// IBAN on the owner's invoices and the other business accounts), set by lib/expenses/owner.ts
 // setExpenseOwner before the engine runs — on the server per request and on the page from
 // the settings it was given, so both read the same. Bookmatic kept them as constants here.
 
@@ -81,7 +81,7 @@ const nameText = (s: string): string =>
 const nameTokens = (s: string): string[] => nameText(s).trim().split(' ').filter(Boolean)
 let OWNER_TOKENS: string[] = []
 
-// The owner as Einstellungen name him: his name and his business accounts (lib/expenses/owner.ts)
+// The owner as Einstellungen give it: the name and the business accounts (lib/expenses/owner.ts)
 export function setOwner(owner: { name?: string | null; businessIbans?: readonly (string | null | undefined)[] | null }): void {
   OWNER_NAME = (owner.name ?? '').trim()
   OWNER_TOKENS = nameTokens(OWNER_NAME)

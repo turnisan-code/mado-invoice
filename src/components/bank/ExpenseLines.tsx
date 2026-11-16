@@ -165,8 +165,8 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
   const plural = (count: number, one: DictKey, other: DictKey) => n(count, t(one, { count }), t(other, { count }))
   const money = (amount: number) => formatMoney(amount, 'EUR', lang)
 
-  // The owner as Einstellungen name him: his UID is never a counterparty's (the server does the
-  // same with the same settings)
+  // The owner's details from Einstellungen: the owner's UID is never a counterparty's (the server
+  // does the same with the same settings)
   setExpenseOwner(owner)
 
   const reviewOf = useCallback((v: LineView): BankLineReview => reviews[v.line.id] ?? v.line.review ?? {}, [reviews])

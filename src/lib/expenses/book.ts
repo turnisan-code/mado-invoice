@@ -8,7 +8,7 @@
 //
 // Only the owner books, from the „Kontoauszug“ page: no daily job, and Claude cannot (D9). Mado
 // books statement lines only from the switch-over date the owner set (until then Bookmatic does,
-// decision D2), from his business accounts, in euros.
+// decision D2), from the owner's business accounts, in euros.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BankBookingKind, BankLine, BankLinePending, BookingRule } from '@/types'
 import {
@@ -32,6 +32,7 @@ import { normIban } from './own-transfer'
 import { expenseOwnerOf, setExpenseOwner, type OwnerSettings } from './owner'
 import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import { payloadFingerprint } from './fingerprint'
+import { bookamatWritesAllowed } from '@/lib/deployment'
 import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, LINE_COLUMNS, type LineRow, type StoredLine } from './lines'
 import type { BookamatAccounts, BookingPayload, EasybankTransaction } from './types'
 
@@ -67,7 +68,13 @@ export const LINE_TEXT = {
   invoicePayment: 'Zahlung auf eine Rechnung — im Tab „Einnahmen“ erfasst, hier nicht buchen',
   checkFailed: 'Duplikatprüfung fehlgeschlagen — nicht gebucht',
   recordedElsewhere: (id: string) => `Buchung #${id} ist in Mado schon bei einem Beleg oder einer anderen Kontozeile vermerkt — in Bookamat prüfen`,
+  preview: 'Diese Version bucht nicht in Bookamat — nur die Produktion bucht',
 }
+// Only production writes (lib/deployment.ts): before anything is claimed, journaled or posted
+function refuseOutsideProduction(): void {
+  if (!bookamatWritesAllowed()) throw new BookamatError('preview', LINE_TEXT.preview, 403)
+}
+
 // Kept for the tests and the page
 export const CHECK_FAILED = LINE_TEXT.checkFailed
 export const INVOICE_PAYMENT_TEXT = LINE_TEXT.invoicePayment
@@ -94,7 +101,7 @@ const error = (id: string, text: string, code?: string, problems?: BookingProble
 const refusalText = (err: BookamatError) =>
   err.body && typeof err.body === 'object' ? JSON.stringify(err.body) : String(err.body ?? err.message)
 
-// The business accounts a statement may come from: the IBAN on the owner's invoices, his other
+// The business accounts a statement may come from: the IBAN on the owner's invoices, the other
 // business accounts, and any Zahlungsmittelkonto Bookamat keeps with its IBAN
 function isBusinessAccount(iban: string, settings: OwnerSettings, lists: BookamatAccounts | null): boolean {
   const own = [settings.iban ?? '', ...(settings.own_ibans ?? [])].map(normIban)
@@ -136,6 +143,9 @@ export async function bookLines(
   entries: readonly BookEntry[],
   opts: { dryRun?: boolean; deadline?: number; loadReceipt?: LoadReceipt } = {},
 ): Promise<LineResult[]> {
+  // A preview (or a local server without BOOKAMAT_ALLOW_WRITES) writes nothing — no claim, no
+  // journal, no booking — as 8b's sync; a dry run only reads
+  if (!opts.dryRun) refuseOutsideProduction()
   setExpenseOwner(expenseOwnerOf(settings))
   const creds = credentialsOf(settings)
   // One attempt per line, whatever the page sent twice
@@ -420,6 +430,7 @@ async function attachTo(
 
 // „Beleg anhängen“: a booked line's Beleg that was not attached when it was booked
 export async function attachLineReceipt(supabase: SupabaseClient, settings: BookamatSettings, lineId: string, loadReceipt: LoadReceipt): Promise<{ attached: true }> {
+  refuseOutsideProduction()
   const { data: line, error: lineErr } = await supabase.from('bank_lines').select('id, status, receipt_path, receipt_name').eq('id', lineId).maybeSingle()
   if (lineErr) throw new BookamatError('database', lineErr.message)
   const l = line as Pick<BankLine, 'id' | 'status' | 'receipt_path' | 'receipt_name'> | null
@@ -440,6 +451,7 @@ export async function attachLineReceipt(supabase: SupabaseClient, settings: Book
 // is asked first: while it still has the booking, nothing is forgotten. A booked line without a
 // booking (an earlier forget that did not finish) is opened again.
 export async function forgetLineBooking(supabase: SupabaseClient, settings: BookamatSettings, lineId: string): Promise<{ forgotten: string | null }> {
+  refuseOutsideProduction()
   const { data, error: rowErr } = await supabase.from('bookamat_bookings').select('year, booking_id').eq('bank_line_id', lineId)
   if (rowErr) throw new BookamatError('database', rowErr.message)
   const row = (data ?? [])[0] as { year: number; booking_id: string } | undefined
@@ -465,10 +477,11 @@ export async function forgetLineBooking(supabase: SupabaseClient, settings: Book
 
 // An attempt whose outcome is open, discarded under the line's claim: never within two minutes of
 // its post; not while Bookamat has a booking of it (booking the line again records that one) —
-// unless the owner checked Bookamat himself (`force`) for an attempt Bookamat never confirmed.
+// unless the owner checked Bookamat (`force`) for an attempt Bookamat never confirmed.
 export async function discardLinePending(
   supabase: SupabaseClient, settings: BookamatSettings, lineId: string, opts: { force?: boolean } = {},
 ): Promise<{ discarded: boolean }> {
+  refuseOutsideProduction()
   const claimedAt = new Date().toISOString()
   const cutoff = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
   const { data: claimed, error: claimErr } = await supabase.from('bank_lines')

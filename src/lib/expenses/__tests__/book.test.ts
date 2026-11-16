@@ -406,6 +406,20 @@ test('a line naming a Mado invoice or credit note is that document\'s money: nev
   assert.equal(posted.length, 0)
 })
 
+test('a preview writes nothing: no claim, no journal, no booking, no forget or discard; a dry run still reads', async () => {
+  process.env.VERCEL_ENV = 'preview'
+  const pending = pendingOf()
+  const db = setup({ lines: [RENT, { ...RENT, id: 'l-held', bookamat_pending: pending }], pending })
+  const refused = (err: unknown) => err instanceof Error && (err as { code?: string }).code === 'preview'
+  await assert.rejects(book(db, ['l-rent']), refused)
+  await assert.rejects(forgetLineBooking(db.client, SETTINGS, 'l-rent'), refused)
+  await assert.rejects(discardLinePending(db.client, SETTINGS, 'l-held'), refused)
+  assert.deepEqual(db.ops.filter(o => o.action !== 'select'), [])
+  assert.ok(!log.some(l => l.startsWith('http POST')))
+  assert.equal((await book(db, ['l-rent'], SETTINGS, { dryRun: true }))[0].status, 'dry_run')
+  assert.deepEqual(db.ops.filter(o => o.action !== 'select'), [])
+})
+
 test('a dry run posts and claims nothing; a line another attempt holds is not booked twice', async () => {
   const db = setup({ lines: [RENT] })
   const [dry] = await book(db, ['l-rent'], SETTINGS, { dryRun: true })

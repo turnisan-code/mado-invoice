@@ -6,7 +6,7 @@ import { discardLinePending } from '@/lib/expenses/book'
 
 // „Offenen Versuch verwerfen“: an attempt whose outcome is open, discarded when Bookamat has no
 // booking of it (when it has one, booking the line again records that one). `?force=1`: the owner
-// checked Bookamat himself (an attempt Bookamat never confirmed, two bookings Mado cannot tell
+// checked Bookamat (an attempt Bookamat never confirmed, two bookings Mado cannot tell
 // apart).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser()
