@@ -304,11 +304,11 @@ function asFailure(err: unknown): SyncFailure {
   return fail(500, 'database', err instanceof Error ? err.message : String(err))
 }
 
-const validId = (v: unknown): string | null =>
+export const validId = (v: unknown): string | null =>
   (typeof v === 'number' && Number.isInteger(v) && v > 0) || (typeof v === 'string' && /^\d{1,18}$/.test(v)) ? String(v) : null
 
 // An id Bookamat reports for a booking it already has (a 409), if the body names one.
-function conflictBookingId(body: unknown): string | null {
+export function conflictBookingId(body: unknown): string | null {
   if (!body || typeof body !== 'object') return null
   const o = body as Record<string, unknown>
   for (const key of ['id', 'booking', 'booking_id', 'pk']) {
@@ -343,10 +343,10 @@ function parsePending(value: unknown): BookamatPending[] {
 }
 
 // A booking an earlier attempt may have created although its answer never arrived: the year's
-// live booking with exactly this title and date that no document has recorded (a deleted one, or
-// one Mado recorded, is another booking that happens to share them). When Bookamat's answer is not
+// live booking with exactly this title and date that Mado has not recorded on a document or a
+// statement line (a deleted one, or one Mado recorded, is another booking that happens to share them). When Bookamat's answer is not
 // visibly filtered by them, or two such bookings remain, only the owner can tell, so the sync stops.
-async function findBooking(supabase: SupabaseClient, creds: BookamatCredentials, entry: BookamatPending, deadline?: number): Promise<string | null> {
+export async function findBooking(supabase: SupabaseClient, creds: BookamatCredentials, entry: Pick<BookamatPending, 'year' | 'title' | 'date'>, deadline?: number): Promise<string | null> {
   const q = (v: string) => encodeURIComponent(v).replace(/\./g, '%2E')
   const data: unknown = await bookamatFetch(creds, entry.year, `bookings/?title=${q(entry.title)}&date=${q(entry.date)}&format=json`, { deadline })
   const page = data && typeof data === 'object' && !Array.isArray(data) ? data as { results?: unknown; next?: unknown } : null
