@@ -1,12 +1,12 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileText, Upload, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
-import { applyMapping, decodeStatement, parseStatement } from '@/lib/bank/parse'
+import { applyMapping } from '@/lib/bank/parse'
 import { matchTransactions, preTicked, toggledSelection, type MatchRow, type OpenInvoice } from '@/lib/bank/match'
 import type { BankTransaction, CsvMapping, ParsedStatement } from '@/lib/bank/types'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -17,7 +17,16 @@ import { n, type DictKey, type TFn, type UiLang } from '@/lib/i18n'
 import { apiErrorMessage } from '@/lib/api-errors'
 import { clientDisplayName } from '@/lib/utils/clients'
 
+// A statement as the page read it (lib/bank/parse.ts): the „Kontoauszug“ page holds it, so both
+// tabs work on the one file.
+export interface LoadedStatement {
+  parsed: ParsedStatement
+  fileName: string
+}
+
 interface Props {
+  statement: LoadedStatement | null
+  onStatement: (statement: LoadedStatement | null) => void
   invoices: OpenInvoice[]
   importedRefs: string[]
   bookamatConfigured: boolean
@@ -51,14 +60,14 @@ const PILL: Record<string, string> = {
   none: 'text-neutral-500 bg-neutral-100 dark:bg-neutral-800 dark:text-neutral-400',
 }
 const WARNING_CODES = ['reversal', 'noDate', 'noAmount', 'fewCells', 'noHeader', 'noEntries', 'xml', 'unmapped'] as const
-const MAX_WARNINGS = 8
+export const MAX_WARNINGS = 8
 
 // Bank exports occasionally print a symbol instead of an ISO code; Intl would throw on it.
 const money = (amount: number, currency: string | null) => formatMoney(amount, currency && /^[A-Z]{3}$/.test(currency) ? currency : 'EUR')
 const noteFor = (tx: BankTransaction) => [tx.counterparty, tx.text].filter(Boolean).join(' · ').slice(0, 200) || null
 const percent = (p: number, lang: UiLang) => new Intl.NumberFormat(lang === 'de' ? 'de-AT' : 'en-GB', { maximumFractionDigits: 2 }).format(p)
 
-function warningText(w: string, t: TFn): string {
+export function warningText(w: string, t: TFn): string {
   const i = w.indexOf(':')
   const code = i < 0 ? w : w.slice(0, i)
   const detail = i < 0 ? '' : w.slice(i + 1)
@@ -138,12 +147,11 @@ function MappingEditor({ header, rows, mapping, onChange, t }: { header: string[
   )
 }
 
-export default function BankImport({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices }: Props) {
+export default function BankImport({ statement, onStatement, invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices }: Props) {
   const { t, lang } = useT()
   const router = useRouter()
-  const fileInput = useRef<HTMLInputElement>(null)
-  const [fileName, setFileName] = useState<string | null>(null)
-  const [parsed, setParsed] = useState<ParsedStatement | null>(null)
+  // The page keys this component by the statement: a new file starts a new review
+  const parsed = statement?.parsed ?? null
   // Per transaction: a chosen invoice id ('' = skip), a checkbox override and an opted-out Skonto.
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [selection, setSelection] = useState<Record<string, boolean>>({})
@@ -151,8 +159,6 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   // „Rest als Bankspesen“, ticked by the owner only.
   const [bankFeesOn, setBankFeesOn] = useState<Record<string, boolean>>({})
   const [skippedOpen, setSkippedOpen] = useState(false)
-  const [warningsOpen, setWarningsOpen] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmOverpay, setConfirmOverpay] = useState(false)
   // What the credits beyond an open balance are: dunning fees and interest, or an overpayment.
@@ -213,29 +219,15 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   }
 
   function reset() {
-    setFileName(null)
-    setParsed(null)
     setResult(null)
     resetReview()
-  }
-
-  async function loadFile(file: File) {
-    try {
-      const text = decodeStatement(await file.arrayBuffer())
-      const statement = parseStatement(text, { xmlParser: xml => new DOMParser().parseFromString(xml, 'application/xml') })
-      setFileName(file.name)
-      setParsed(statement)
-      setResult(null)
-      resetReview()
-    } catch {
-      toast.error(t('bankImport.readFailed'))
-    }
+    onStatement(null)
   }
 
   function remap(mapping: CsvMapping) {
-    if (!parsed?.csv) return
+    if (!statement || !parsed?.csv) return
     const { transactions, warnings } = applyMapping(parsed.csv.rows, mapping)
-    setParsed({ ...parsed, transactions, warnings, csv: { ...parsed.csv, mapping } })
+    onStatement({ ...statement, parsed: { ...parsed, transactions, warnings, csv: { ...parsed.csv, mapping } } })
     resetReview()
   }
 
@@ -386,7 +378,6 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     [skipped.filter(r => r.status === 'imported').length, 'bankImport.skippedImportedOne', 'bankImport.skippedImportedOther'],
     [skipped.filter(r => r.status === 'nothing_open').length, 'bankImport.skippedNothingOpenOne', 'bankImport.skippedNothingOpenOther'],
   ] as const
-  const warnings = parsed?.warnings ?? []
 
   if (result) {
     return (
@@ -446,65 +437,12 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
 
   return (
     <div className="space-y-4">
-      {/* Step 1: file */}
-      <section className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6 space-y-3">
-        {!parsed ? (
-          <div
-            onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) void loadFile(f) }}
-            className={`rounded-lg border-2 border-dashed p-6 sm:p-10 text-center transition-colors ${dragOver ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/30' : 'border-neutral-300 dark:border-neutral-700'}`}
-          >
-            <Upload size={28} className="mx-auto mb-3 text-neutral-300 dark:text-neutral-600" />
-            <p className="text-sm font-medium">{t('bankImport.dropzone')}</p>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">{t('bankImport.dropzoneHint')}</p>
-            <Button type="button" onClick={() => fileInput.current?.click()} className="mt-4 px-4">{t('bankImport.chooseFile')}</Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3 min-w-0">
-            <FileText size={16} className="text-neutral-400 dark:text-neutral-500 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">{fileName}</p>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                {parsed.format === 'camt' ? t('bankImport.formatCamt') : parsed.format === 'easybank' ? t('bankImport.formatEasybank') : t('bankImport.formatCsv')}
-                {' · '}
-                {plural(parsed.transactions.length, 'bankImport.transactionsOne', 'bankImport.transactionsOther')}
-              </p>
-            </div>
-            <button type="button" onClick={reset} aria-label={t('bankImport.changeFile')} title={t('bankImport.changeFile')} className="h-11 w-11 -mr-3 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center rounded-md text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
-              <X size={16} />
-            </button>
-          </div>
-        )}
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".xml,.csv,.txt,text/csv,text/xml,application/xml,text/plain"
-          className="sr-only"
-          tabIndex={-1}
-          onChange={e => { const f = e.target.files?.[0]; if (f) void loadFile(f); e.target.value = '' }}
-        />
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('bankImport.privacy')}</p>
-
-        {warnings.length > 0 && (
-          <div className="rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-            <p className="font-medium flex items-center gap-1.5"><AlertTriangle size={13} /> {t('bankImport.warningsTitle')}</p>
-            <ul className="mt-1 space-y-0.5 list-disc pl-4">
-              {(warningsOpen ? warnings : warnings.slice(0, MAX_WARNINGS)).map((w, i) => <li key={i}>{warningText(w, t)}</li>)}
-              {!warningsOpen && warnings.length > MAX_WARNINGS && (
-                <li className="list-none -ml-4">
-                  {plural(warnings.length - MAX_WARNINGS, 'bankImport.moreWarningsOne', 'bankImport.moreWarningsOther')}{' '}
-                  <button type="button" onClick={() => setWarningsOpen(true)} className="underline underline-offset-2">{t('bankImport.showAllWarnings')}</button>
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
-
-        {parsed?.csv && parsed.csv.header.length > 0 && (
+      {/* The file itself: the page's (StatementFile); a generic CSV's columns here */}
+      {parsed?.csv && parsed.csv.header.length > 0 && (
+        <section className="bg-white dark:bg-neutral-900 rounded-xl border border-neutral-200 dark:border-neutral-700 p-4 sm:p-6">
           <MappingEditor header={parsed.csv.header} rows={parsed.csv.rows} mapping={parsed.csv.mapping} onChange={remap} t={t} />
-        )}
-      </section>
+        </section>
+      )}
 
       {/* Step 2: review */}
       {parsed && (

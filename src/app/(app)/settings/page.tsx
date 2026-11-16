@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import SettingsForm from '@/components/forms/SettingsForm'
 import { toPublicSettings } from '@/lib/public-settings'
@@ -15,6 +16,7 @@ export default async function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold">{t('settings.title')}</h1>
         <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{t('settings.subtitle')}</p>
+        <p className="text-sm mt-2"><Link href="/settings/rules" className="underline underline-offset-2">{t('bookingRules.title')}</Link></p>
       </div>
       <SettingsForm settings={publicSettings} bookamatWrites={bookamatWritesAllowed()} />
     </div>
