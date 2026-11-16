@@ -20,6 +20,9 @@ export interface BookamatAccount {
   // Umsatzsteuer/Vorsteuer accounts: the USt rates bookamat takes on this account
   // („20.00“, „4.90“; [""] = any). Read with lib/vat-origin.ts allowedRates.
   tax_values?: (string | number)[] | null
+  // Zahlungsmittelkonten: the account's IBAN as bookamat keeps it (Mado: the statement's
+  // account is found by it, lib/expenses/bank-account.ts statementBankAccountId)
+  iban?: string | null
 }
 
 export interface BookamatAccounts {
