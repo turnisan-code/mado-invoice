@@ -811,10 +811,15 @@ export async function attachPdf(
   return { attached: attachedIds.length, attachedIds, error }
 }
 
-// Forgets the bookings of a document so it can be synced again; only after they were deleted in
-// Bookamat, or the next sync books twice. It takes the claim like a sync, so it never pulls the
-// bookings from under a sync that is running.
-export async function resetBookamatSync(supabase: SupabaseClient, documentId: string): Promise<SyncFailure | null> {
+// What „Buchung vergessen“ forgets: one recorded booking (its payment becomes unbooked and can be
+// changed again, payments_booking_guard), or `unsettled`: the attempts whose outcome a sync could
+// not settle (bookamat_pending) and the single booking id from before bookamat_bookings.
+export type ForgetTarget = { booking: { year: number; bookingId: string } } | { unsettled: true }
+
+// Forgets bookings of a document so its money can be booked again; only after they were deleted
+// in Bookamat, or the next sync books twice. It takes the claim like a sync, so it never pulls a
+// booking from under a sync that is running. The document's last error goes with it.
+export async function resetBookamatSync(supabase: SupabaseClient, documentId: string, target: ForgetTarget): Promise<SyncFailure | null> {
   if (!bookamatWritesAllowed()) return fail(403, 'preview', PREVIEW_REFUSAL)
   const claimedAt = new Date().toISOString()
   const cutoff = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
@@ -828,13 +833,26 @@ export async function resetBookamatSync(supabase: SupabaseClient, documentId: st
     const { data: exists } = await supabase.from('documents').select('id').eq('id', documentId).maybeSingle()
     return exists ? fail(409, 'in_progress', 'A Bookamat sync of this document is running') : fail(404, 'not_found', 'Document not found')
   }
-  const { error } = await supabase.from('bookamat_bookings').delete().eq('document_id', documentId)
+  let error: { message: string } | null = null
+  let missing = false
+  if ('booking' in target) {
+    const { data, error: delErr } = await supabase.from('bookamat_bookings').delete()
+      .eq('document_id', documentId).eq('year', target.booking.year).eq('booking_id', target.booking.bookingId)
+      .select('id')
+    error = delErr
+    missing = !delErr && !data?.length
+  }
+  const forgotten = !error && !missing
   const { error: docErr } = await supabase.from('documents')
-    .update({ ...(error ? {} : { bookamat_booking_id: null, bookamat_error: null, bookamat_pending: null }), bookamat_claimed_at: null })
+    .update({
+      ...(forgotten ? { bookamat_error: null, ...('unsettled' in target ? { bookamat_booking_id: null, bookamat_pending: null } : {}) } : {}),
+      bookamat_claimed_at: null,
+    })
     .eq('id', documentId)
     .eq('bookamat_claimed_at', claimedAt)
   const message = error?.message ?? docErr?.message
-  return message ? fail(500, 'database', message) : null
+  if (message) return fail(500, 'database', message)
+  return missing ? fail(404, 'not_found', 'This booking is not recorded on the document') : null
 }
 
 // Takes over a booking Bookamat already has for a document's money (one Mado did not make, named by

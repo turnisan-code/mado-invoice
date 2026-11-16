@@ -48,8 +48,9 @@ declare
   num     text;
 begin
   if tg_op = 'UPDATE'
-     and new.document_id = old.document_id and new.date = old.date and new.amount = old.amount
-     and new.kind = old.kind and new.method = old.method then
+     and new.document_id is not distinct from old.document_id and new.date is not distinct from old.date
+     and new.amount is not distinct from old.amount and new.kind is not distinct from old.kind
+     and new.method is not distinct from old.method then
     return new;
   end if;
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Lock, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +16,7 @@ import { formatDate, formatMoney, roundCents, today } from '@/lib/utils/document
 import { creditNoteOpen, creditNoteSettled, paymentDateIssue } from '@/lib/status'
 import { apiErrorMessage, dbErrorMessage, requestErrorMessage } from '@/lib/api-errors'
 import {
-  BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, duplicateCandidates, formatBookings, planBookings, requestBookamatAdopt,
+  BOOKING_COLUMNS, bookamatErrorMessage, bookamatState, bookingOfRow, duplicateCandidates, formatBookings, planBookings, requestBookamatAdopt,
   requestBookamatSync, unbookedPlan, type BookingRow,
 } from '@/lib/bookamat-client'
 import { loadMoneyLock } from '@/lib/deposits'
@@ -25,6 +25,7 @@ import { useT } from '@/lib/i18n/client'
 import type { Currency, PaymentMethod } from '@/types'
 import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
 import { BookamatDuplicateDialog } from '@/components/bookamat/BookamatDuplicateDialog'
+import { BookamatForgetDialog } from '@/components/bookamat/BookamatForgetDialog'
 
 type Row = { id: string; date: string; amount: number }
 type Refund = Row & { method: PaymentMethod; note: string | null; reference: string | null }
@@ -46,7 +47,7 @@ interface Props {
 
 // How an issued credit note is settled: applied to the open balance of its invoice (automatic on
 // issue) and/or paid back to the client. Refunds are money and reduce the VAT report's turnover
-// in the period they were paid; once settled, they are booked in Bookamat from here.
+// in the period they were paid; each is booked in Bookamat from here once recorded (D2).
 export default function CreditNoteSettlement({ creditNoteId, issued, number = null, total, currency, invoice, applied, refunds, bookamatConfigured = false }: Props) {
   const [date, setDate] = useState(today())
   const [dateIssue, setDateIssue] = useState<'required' | 'future' | null>(null)
@@ -83,14 +84,17 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
   }, [issued, invoiceId])
   const locked = moneyLock && moneyLock.invoiceId === invoiceId ? moneyLock : null
 
-  // Bookamat books a credit note's refunds once it is settled (the sync route refuses earlier).
+  // Bookamat books each refund once it is paid, on its own date.
   const [bookamat, setBookamat] = useState<{ error: string | null; bookings: BookingRow[] } | null>(null)
+  // „Buchung vergessen“ on one of its bookings (after deleting it in Bookamat).
+  const [forget, setForget] = useState<'booking' | null>(null)
   const [syncing, setSyncing] = useState(false)
   // Bookings Bookamat already has that may be this refund: the sync booked nothing ('external_duplicate').
   const [duplicates, setDuplicates] = useState<BookingCandidate[] | null>(null)
   const [acknowledged, setAcknowledged] = useState<BookingRef[]>([])
   const [adopting, setAdopting] = useState<string | null>(null)
-  const syncable = issued && !!number && settled && refunds.length > 0 && bookamatConfigured
+  const syncable = issued && !!number && refunds.length > 0 && bookamatConfigured
+  const [loads, setLoads] = useState(0)
   useEffect(() => {
     if (!syncable) return
     let current = true
@@ -103,12 +107,17 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         if (current && data) setBookamat({ error: data.bookamat_error ?? null, bookings: (data.bookamat_bookings ?? []) as BookingRow[] })
       })
     return () => { current = false }
-  }, [syncable, creditNoteId, refundedSum])
-  const refundRows = refunds.map(r => ({ date: r.date, amount: r.amount, kind: 'refund', method: r.method }))
+  }, [syncable, creditNoteId, refundedSum, loads])
+  const refundRows = refunds.map(r => ({ id: r.id, date: r.date, amount: r.amount, kind: 'refund', method: r.method }))
   const syncState = bookamat && bookamatState({
     type: 'credit_note', number, status: 'sent', bookamat_error: bookamat.error, bookamat_bookings: bookamat.bookings, payments: refundRows,
   })
-  const unbooked = bookamat ? unbookedPlan(planBookings({ type: 'credit_note', total, rows: refundRows }).bookings, bookamat.bookings) : []
+  // As the sync books them: what the credit note did not credit to its invoice (bookableTotal).
+  const unbooked = bookamat
+    ? unbookedPlan(planBookings({ type: 'credit_note', total: Math.max(0, roundCents(total - appliedSum)), rows: refundRows }).bookings, bookamat.bookings)
+    : []
+  // The booking that locks a refund (D7, MI048); unknown until the bookings are loaded.
+  const heldBy = (r: Refund) => (bookamat ? bookingOfRow({ ...r, kind: 'refund' }, bookamat.bookings) : null)
 
   async function apply() {
     setSaving(true)
@@ -259,7 +268,19 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
               {r.method === 'cash' && <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 shrink-0">{t('payments.cashBadge')}</span>}
               {r.reference && <span className="text-xs text-neutral-500 dark:text-neutral-400 font-mono truncate min-w-0">{t('lifecycle.payments.referenceShort', { reference: r.reference })}</span>}
               {r.note && <span className="text-neutral-500 dark:text-neutral-400 flex-1 truncate min-w-0">{r.note}</span>}
-              {!locked && (
+              {heldBy(r) && (
+                <span className="text-xs px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300 shrink-0">{t('payments.bookedBadge', { id: heldBy(r)!.booking_id })}</span>
+              )}
+              {heldBy(r) ? (
+                <span
+                  role="img"
+                  aria-label={t('payments.bookedRow', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang), booking: t('books.sync.booking', { id: heldBy(r)!.booking_id, year: heldBy(r)!.year }) })}
+                  title={t('payments.bookedLocked')}
+                  className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center text-neutral-400 dark:text-neutral-500"
+                >
+                  <Lock size={13} />
+                </span>
+              ) : !locked && (
                 <button
                   type="button"
                   onClick={() => setPendingRemove(r)}
@@ -285,6 +306,16 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           {syncState === 'synced' && bookamat.bookings.length > 0 && (
             <span className="text-neutral-500 dark:text-neutral-400">{t('books.sync.synced', { bookings: formatBookings(t, bookamat.bookings) })}</span>
+          )}
+          {bookamat.bookings.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setForget('booking')}
+              disabled={syncing}
+              className="px-2 py-2 -my-2 rounded-md text-neutral-500 dark:text-neutral-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+            >
+              {t('payments.forgetBooking')}
+            </button>
           )}
           {syncState === 'failed' && bookamat.error && (
             <span role="alert" className="text-red-600 dark:text-red-400 min-w-0 break-words">{t('books.sync.lastError', { error: bookamat.error })}</span>
@@ -405,6 +436,16 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         onAdopt={c => void adoptBooking(c)}
         onBookAnyway={bookAnyway}
         onCancel={closeDuplicates}
+      />
+
+      <BookamatForgetDialog
+        mode={forget}
+        documentId={creditNoteId}
+        bookings={bookamat?.bookings ?? []}
+        unsettled={[]}
+        currency={currency}
+        onClose={() => setForget(null)}
+        onDone={() => { setForget(null); setLoads(n => n + 1); router.refresh() }}
       />
     </section>
   )

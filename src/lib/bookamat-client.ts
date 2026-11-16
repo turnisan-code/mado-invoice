@@ -235,6 +235,33 @@ export type AdoptSuccess = {
 
 type SyncResponse = { ok: true; data: SyncSuccess } | { ok: false; payload: unknown }
 
+// The booking that holds a money row, as payments_booking_guard (MI048) sees it: its own, or one
+// from before bookings per payment of its year and kind. A held row cannot be removed or changed
+// until that booking is deleted in Bookamat and forgotten here.
+export function bookingOfRow(row: { id: string; date: string; kind: string }, booked: BookingRow[]): BookingRow | null {
+  if (row.kind !== 'payment' && row.kind !== 'refund') return null
+  const kind = row.kind === 'refund' ? 'refund' : 'income'
+  return booked.find(b => b.payment_id === row.id)
+    ?? booked.find(b => !b.payment_id && b.kind === kind && b.year === Number(row.date.slice(0, 4)))
+    ?? null
+}
+
+// „Buchung vergessen“: one booking (after it was deleted in Bookamat), or 'unsettled': the attempts
+// a sync could not settle.
+export async function requestBookamatForget(
+  documentId: string,
+  target: { year: number; bookingId: string } | 'unsettled',
+): Promise<{ ok: true } | { ok: false; payload: unknown }> {
+  const res = await fetch('/api/bookamat/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(target === 'unsettled' ? { documentId, unsettled: true } : { documentId, year: target.year, bookingId: target.bookingId }),
+  }).catch(() => null)
+  if (!res) return { ok: false, payload: { code: 'network', error: 'Network error' } }
+  if (res.ok) return { ok: true }
+  return { ok: false, payload: await res.json().catch(() => ({})) }
+}
+
 // „Das ist diese Zahlung — übernehmen“: records the booking for the document, books nothing.
 export async function requestBookamatAdopt(documentId: string, ref: BookingRef): Promise<{ ok: true; data: AdoptSuccess } | { ok: false; payload: unknown }> {
   const res = await fetch('/api/bookamat/adopt', {
