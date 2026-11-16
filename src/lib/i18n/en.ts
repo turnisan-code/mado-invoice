@@ -1914,6 +1914,7 @@ export const en = {
     bankFeesLine: 'Rest as bank charges ({amount})',
     bankFeesHint: 'The payer’s bank kept {amount}: closes the invoice like a write-off. Mado books the money received.',
     checkHint: 'Not found by its invoice number — please check',
+    recordedHint: 'A payment of {amount} from {date} is recorded on this invoice already — import this only if it is another one',
     spesen: 'SPESEN {amount}',
     showAllWarnings: 'Show all',
     skippedTitle: 'Skipped',

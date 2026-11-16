@@ -1913,6 +1913,7 @@ export const de = {
     bankFeesLine: 'Rest als Bankspesen ({amount})',
     bankFeesHint: 'Die Bank des Zahlers hat {amount} einbehalten: schließt die Rechnung wie eine Abschreibung. Mado bucht das erhaltene Geld.',
     checkHint: 'Nicht über die Rechnungsnummer gefunden — bitte prüfen',
+    recordedHint: 'Auf dieser Rechnung ist schon eine Zahlung über {amount} vom {date} erfasst — nur importieren, wenn es eine weitere ist',
     spesen: 'SPESEN {amount}',
     showAllWarnings: 'Alle zeigen',
     skippedTitle: 'Übersprungen',

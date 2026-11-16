@@ -61,3 +61,12 @@ test('a Skonto settlement is no short payment', () => {
   const [row] = match([credit({ amount: 294, text: 'RN-209906020' })], [inv])
   assert.deepEqual([row.skontoAmount, row.bankFees], [6, 0])
 })
+
+test('a payment already on the invoice (entered by hand) is never ticked again', () => {
+  const inv = invoice({ id: 'i1', number: 'RN-209906001', total: 840, paid: 420, balance: 420, payments: [{ date: '2026-06-18', amount: 420 }] })
+  const [again] = match([credit({ amount: 420, date: '2026-06-20', text: 'Teilzahlung RN-209906001' })], [inv])
+  assert.deepEqual([again.status, again.exactNumber, again.recorded], ['match', true, { date: '2026-06-18', amount: 420 }])
+  // A second part of the same amount weeks later is new money.
+  const [later] = match([credit({ amount: 420, date: '2026-07-20', text: 'Teilzahlung RN-209906001' })], [inv])
+  assert.equal(later.recorded, null)
+})

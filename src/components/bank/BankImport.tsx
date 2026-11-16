@@ -171,7 +171,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   // by its amount, the client's name or the Skonto keeps its suggestion, unticked (another
   // client paying the same amount must not land on this invoice).
   const manual = (r: MatchRow) => r.transaction.id in edits && !!edits[r.transaction.id]
-  const byNumber = (r: MatchRow) => r.status === 'match' && r.exactNumber && invoiceFor(r) === r.invoiceId
+  const byNumber = (r: MatchRow) => r.status === 'match' && r.exactNumber && !r.recorded && invoiceFor(r) === r.invoiceId
   const isChecked = (r: MatchRow) => !!invoiceFor(r) && (selection[r.transaction.id] ?? byNumber(r))
   const skontoFor = (r: MatchRow) => (r.skontoAmount > 0 && invoiceFor(r) === r.invoiceId && !skontoOff[r.transaction.id] ? r.skontoAmount : 0)
   const bankFeesFor = (r: MatchRow) => (r.bankFees > 0 && invoiceFor(r) === r.invoiceId && bankFeesOn[r.transaction.id] ? r.bankFees : 0)
@@ -339,6 +339,16 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   }
 
   const spesen = (tx: BankTransaction) => (tx.fee ? t('bankImport.spesen', { amount: money(tx.fee, tx.currency) }) : null)
+
+  // A payment of this amount is on the invoice already: entered by hand, or imported before.
+  function recordedLine(r: MatchRow) {
+    if (!r.recorded || invoiceFor(r) !== r.invoiceId) return null
+    return (
+      <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+        <AlertTriangle size={12} className="shrink-0" /> {t('bankImport.recordedHint', { amount: money(r.recorded.amount, r.transaction.currency), date: formatDate(r.recorded.date, lang) })}
+      </p>
+    )
+  }
 
   function overpayLine(r: MatchRow) {
     const excess = isChecked(r) ? excessFor(invoiceFor(r)) : 0
@@ -528,6 +538,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                       </div>
                       {skontoLine(r)}
                       {bankFeesLine(r)}
+                      {recordedLine(r)}
                       {overpayLine(r)}
                     </div>
                   ))}
@@ -563,6 +574,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
                           {invoiceSelect(r)}
                           {skontoLine(r)}
                           {bankFeesLine(r)}
+                          {recordedLine(r)}
                           {overpayLine(r)}
                         </td>
                         <td className="px-3 pr-4 py-3 align-top">{pill(r)}</td>

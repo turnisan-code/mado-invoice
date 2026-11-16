@@ -18,6 +18,9 @@ export interface OpenInvoice {
   /** Why the invoice charges no VAT, if it does not ('non_eu', 'eu_reverse_charge'): a short
    *  foreign payment's rest may then be bank charges (bankFeeCap). */
   taxTreatment?: string | null
+  /** The money already recorded on it ('payment' rows): a credit of the same amount within a week
+   *  of one may be that payment again (entered by hand, or imported before from another export). */
+  payments?: { date: string; amount: number }[]
 }
 
 export type MatchStatus = 'match' | 'unmatched' | 'debit' | 'imported' | 'nothing_open'
@@ -50,7 +53,14 @@ export interface MatchRow {
   /** What a short payment on an invoice without VAT leaves open, offered as bank charges (never
    *  ticked by default); 0 when it does not apply. */
   bankFees: number
+  /** A payment of this amount recorded on the suggested invoice within a week of the credit: it
+   *  may be this money already, so the row is never ticked on its own. */
+  recorded: { date: string; amount: number } | null
 }
+
+// A credit this many days from a payment of its amount on the same invoice may be that payment.
+const RECORDED_WINDOW_DAYS = 7
+const daysBetween = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000
 
 const alnum = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
@@ -209,6 +219,7 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
   for (const tx of transactions) {
     const base: Omit<MatchRow, 'status'> = {
       transaction: tx, invoiceId: null, confidence: null, score: 0, reasons: [], skontoAmount: 0, amountToRecord: tx.amount, exactNumber: false, bankFees: 0,
+      recorded: null,
     }
     if (importedRefs.has(tx.id)) { rows.push({ ...base, status: 'imported' }); continue }
     if (tx.amount <= 0) { rows.push({ ...base, status: 'debit' }); continue }
@@ -275,6 +286,7 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
         skontoAmount: best.skonto,
         exactNumber: best.exact,
         bankFees: best.fees,
+        recorded: best.inv.payments?.find(p => Math.abs(p.amount - tx.amount) < 0.005 && daysBetween(p.date, tx.date) <= RECORDED_WINDOW_DAYS) ?? null,
       })
     } else {
       rows.push({ ...base, status: 'unmatched' })

@@ -7,7 +7,7 @@ import { isBookamatConfigured } from '@/lib/public-settings'
 import BankImport from '@/components/bank/BankImport'
 import type { OpenInvoice } from '@/lib/bank/match'
 
-const INVOICE_COLS = 'id, number, date, due_date, tax_treatment, discount_type, discount_value, skonto_percent, skonto_days, reminder_level, reminder_log(level), clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(amount, kind)'
+const INVOICE_COLS = 'id, number, date, due_date, tax_treatment, discount_type, discount_value, skonto_percent, skonto_days, reminder_level, reminder_log(level), clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(date, amount, kind)'
 
 export default async function BankImportPage() {
   const supabase = await createClient()
@@ -43,6 +43,7 @@ export default async function BankImportPage() {
       skontoPercent: d.skonto_percent ?? null,
       skontoDays: d.skonto_days ?? null,
       taxTreatment: d.tax_treatment ?? null,
+      payments: (d.payments ?? []).filter((p: { kind: string }) => p.kind === 'payment').map((p: { date: string; amount: number }) => ({ date: p.date, amount: Number(p.amount) })),
       // From the reminder history: reminder_level goes back to 0 when the due date is extended
       // (20261107_dunning.sql), the reminders that went out stay in reminder_log.
       reminderLevel: Math.max(d.reminder_level ?? 0, ...(d.reminder_log ?? []).map((r: { level: number | null }) => r.level ?? 0)),
