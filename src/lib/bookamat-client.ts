@@ -22,7 +22,7 @@ export type BookamatErrorCode =
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
   | 'unknown_outcome' | 'held' | 'preview' | 'external_duplicate' | 'duplicate_check_failed'
   | 'adopt_not_found' | 'adopt_mismatch' | 'adopt_taken' | 'adopt_other_year' | 'adopt_kind' | 'adopt_other_number'
-  | 'adopt_unsettled' | 'adopt_nothing_left' | 'adopt_booked_year' | 'adopt_payment_booked'
+  | 'adopt_unsettled' | 'adopt_nothing_left' | 'adopt_booked_year' | 'adopt_payment_booked' | 'forget_not_found' | 'forget_still_booked'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -32,6 +32,7 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
   'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed', 'adopt_not_found', 'adopt_mismatch',
   'adopt_taken', 'adopt_other_year', 'adopt_kind', 'adopt_other_number', 'adopt_unsettled', 'adopt_nothing_left', 'adopt_booked_year', 'adopt_payment_booked',
+  'forget_not_found', 'forget_still_booked',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are
@@ -77,67 +78,81 @@ export type BookedLike = { year: number; kind: string; amount: number; payment_i
 // Ist-Besteuerung, money only: one booking per payment, on its own date, so a part payment lands
 // in its own UVA period. An invoice books its 'payment' rows (a Skonto taken, a write-off or an
 // applied credit note moves no money and is not booked), a credit note its 'refund' rows. What
-// arrives beyond the amount still to be paid (an overpayment) is not turnover and is left out,
-// latest money last. Dunning fees and interest ('fee') are reported back, never booked.
-export function planBookings(input: { type: 'invoice' | 'credit_note'; total: number; rows: MoneyRow[] }): { bookings: PlannedBooking[]; fees: number } {
+// arrives beyond the amount still to be paid (an overpayment) is not turnover and is left out.
+// Dunning fees and interest ('fee') are reported back, never booked.
+// - `money`: every money row in date order at its full amount (what unbookedPlan books from);
+// - `due`: the most money of the document books (its total less the credit notes applied to it);
+// - `whole`: what money has to cover to settle it (less a Skonto or a write-off);
+// - `bookings`: the money as one would book it from scratch, in date order, latest money cut first.
+export type Plan = { bookings: PlannedBooking[]; money: PlannedBooking[]; fees: number; due: number; whole: number }
+
+export function planBookings(input: { type: 'invoice' | 'credit_note'; total: number; rows: MoneyRow[] }): Plan {
   const moneyKind = input.type === 'invoice' ? 'payment' : 'refund'
   const kind: BookamatBookingKind = input.type === 'invoice' ? 'income' : 'refund'
   const sumOf = (kinds: string[]) => roundCents(input.rows.filter(r => kinds.includes(r.kind)).reduce((s, r) => s + r.amount, 0))
   const credited = input.type === 'invoice' ? sumOf(['credit']) : 0
   const fees = sumOf(['fee'])
   const due = roundCents(Math.max(0, input.total - credited))
-  // What money has to cover: a Skonto or a write-off closes the rest without a transfer.
   const whole = roundCents(Math.max(0, due - (input.type === 'invoice' ? sumOf(['skonto', 'writeoff']) : 0)))
-  let remaining = due
-  let before = 0
 
-  const money = input.rows
+  const money: PlannedBooking[] = input.rows
     .filter(r => r.kind === moneyKind && r.amount > 0)
     .sort((a, b) => a.date.localeCompare(b.date) || String(a.id ?? '').localeCompare(String(b.id ?? '')))
-  const bookings: PlannedBooking[] = []
-  for (const r of money) {
-    const amount = roundCents(Math.min(r.amount, remaining))
-    if (amount <= 0) continue
-    remaining = roundCents(remaining - amount)
-    bookings.push({ year: Number(r.date.slice(0, 4)), kind, date: r.date, amount, cash: r.method === 'cash' ? amount : 0, paymentId: r.id ?? null, before, part: null })
-    before = roundCents(before + amount)
-  }
-  // Part payments are numbered: several bookings, or one that does not cover the document.
-  if (bookings.length > 1 || (bookings.length === 1 && bookings[0].amount < whole - 0.005)) bookings.forEach((b, i) => { b.part = i + 1 })
-  return { bookings, fees }
+    .map(r => ({
+      year: Number(r.date.slice(0, 4)), kind, date: r.date, amount: roundCents(r.amount), cash: r.method === 'cash' ? roundCents(r.amount) : 0,
+      paymentId: r.id ?? null, before: 0, part: null,
+    }))
+  return { bookings: unbookedPlan({ money, due, whole }, []), money, fees, due, whole }
 }
 
-// `p` with only `amount` of it left to book: the part before it counts as booked already.
-function remainderOf(p: PlannedBooking, amount: number): PlannedBooking {
-  return { ...p, amount, cash: roundCents(p.cash * amount / p.amount), before: roundCents(p.before + p.amount - amount) }
-}
+// `p` with `amount` of it to book, starting from `before` (its cash share scaled alike).
+const partOf = (p: PlannedBooking, amount: number, before: number): PlannedBooking =>
+  ({ ...p, amount, cash: p.amount > 0 ? roundCents(p.cash * amount / p.amount) : 0, before })
 
-// What is still to book: the planned payments without their own booking. A booking from before
-// bookings per payment (no payment_id) covers the money of its year first, in date order, and
-// what it books beyond that (a payment date moved across New Year) covers money of any year;
-// none of that money is booked a second time.
-export function unbookedPlan(planned: PlannedBooking[], booked: BookedLike[]): PlannedBooking[] {
+// What is still to book: the payments without a booking of their own.
+// - A booking from before bookings per payment (no payment_id) covers the money of its year first,
+//   in date order, and what it books beyond that (a payment date moved across New Year) money of
+//   any year; none of that money is booked a second time.
+// - Never more than the document's money: what is booked counts first, so a payment recorded later
+//   but dated before a booked one (a second transfer of the same invoice) is not booked on top; the
+//   rest goes in date order, latest money cut first.
+// - Each booking continues the VAT split where the bookings made stopped (`before`), so the
+//   bookings of a document add up per VAT rate to the cent, and parts are numbered after the
+//   bookings made, so no title is used twice.
+export function unbookedPlan(plan: Pick<Plan, 'money' | 'due' | 'whole'>, booked: BookedLike[]): PlannedBooking[] {
   const out: PlannedBooking[] = []
-  for (const kind of new Set(planned.map(p => p.kind))) {
+  for (const kind of new Set(plan.money.map(p => p.kind))) {
     const mine = booked.filter(b => b.kind === kind)
     const byPayment = new Set(mine.filter(b => b.payment_id).map(b => String(b.payment_id)))
+    const bookedSum = roundCents(mine.reduce((s, b) => s + Math.abs(Number(b.amount)), 0))
     const cover = new Map<number, number>()
     for (const b of mine.filter(x => !x.payment_id)) cover.set(b.year, roundCents((cover.get(b.year) ?? 0) + Math.abs(Number(b.amount))))
-    const rest: PlannedBooking[] = []
-    for (const p of planned.filter(x => x.kind === kind && !(x.paymentId && byPayment.has(x.paymentId)))) {
+
+    const open: { p: PlannedBooking; left: number }[] = []
+    for (const p of plan.money.filter(x => x.kind === kind && !(x.paymentId && byPayment.has(x.paymentId)))) {
       const c = cover.get(p.year) ?? 0
       const used = roundCents(Math.min(c, p.amount))
       if (used > 0) cover.set(p.year, roundCents(c - used))
       const left = roundCents(p.amount - used)
-      if (left > 0) rest.push(used > 0 ? remainderOf(p, left) : p)
+      if (left > 0) open.push({ p, left })
     }
     let spare = roundCents([...cover.values()].reduce((s, v) => s + v, 0))
-    for (const p of rest) {
-      const used = roundCents(Math.min(spare, p.amount))
+    let budget = roundCents(Math.max(0, plan.due - bookedSum))
+    let before = bookedSum
+    const todo: PlannedBooking[] = []
+    for (const o of open) {
+      const used = roundCents(Math.min(spare, o.left))
       spare = roundCents(spare - used)
-      const left = roundCents(p.amount - used)
-      if (left > 0) out.push(used > 0 ? remainderOf(p, left) : p)
+      const amount = roundCents(Math.min(o.left - used, budget))
+      if (amount <= 0) continue
+      budget = roundCents(budget - amount)
+      todo.push(partOf(o.p, amount, before))
+      before = roundCents(before + amount)
     }
+    // Part payments: several bookings of the document's money, or one that does not cover it.
+    const several = mine.length + todo.length > 1
+    todo.forEach((p, i) => { p.part = several || p.amount < plan.whole - 0.005 ? mine.length + i + 1 : null })
+    out.push(...todo)
   }
   return out.sort((a, b) => a.date.localeCompare(b.date) || a.before - b.before)
 }
@@ -152,6 +167,8 @@ export type StateInput = {
   bookamat_booking_id?: string | null
   bookamat_bookings?: BookedLike[] | null
   payments?: { id?: string; date?: string; kind?: string | null; amount: number }[] | null
+  // What the document's money books against (hasUnbookedMoney).
+  total?: number
 }
 
 // Something to book: money received on an issued invoice — part payments included, each in its
@@ -165,16 +182,18 @@ export function hasMoneyToBook(doc: StateInput): boolean {
   return ['sent', 'overdue', 'paid', 'cancelled'].includes(doc.status) && payments.some(p => (p.kind ?? 'payment') === 'payment' && p.amount > 0)
 }
 
-// Money the document's bookings do not cover yet. Without payment ids and dates (an older caller)
-// any booking counts as covering everything, as before bookings per payment.
+// Money the document's bookings do not cover yet, as the sync would book it: `total` is what the
+// document's money books against (an invoice's total; a credit note's total less what it credited
+// to invoices), so an overpayment is never "still to book". Without it every payment counts in
+// full. Without payment ids and dates (an older caller) any booking counts as covering everything.
 export function hasUnbookedMoney(doc: StateInput): boolean {
   if (!hasMoneyToBook(doc)) return false
   const bookings = doc.bookamat_bookings ?? []
   const rows = doc.payments ?? []
   if (rows.some(r => !r.id || !r.date)) return bookings.length === 0 && !doc.bookamat_booking_id
   const type = (doc.type ?? 'invoice') === 'credit_note' ? 'credit_note' : 'invoice'
-  const plan = planBookings({ type, total: Number.MAX_SAFE_INTEGER, rows: rows.map(r => ({ id: r.id, date: r.date!, amount: r.amount, kind: r.kind ?? 'payment' })) })
-  return unbookedPlan(plan.bookings, bookings).length > 0
+  const plan = planBookings({ type, total: doc.total ?? Number.MAX_SAFE_INTEGER, rows: rows.map(r => ({ id: r.id, date: r.date!, amount: r.amount, kind: r.kind ?? 'payment' })) })
+  return unbookedPlan(plan, bookings).length > 0
 }
 
 export function bookamatState(doc: StateInput): BookamatState {

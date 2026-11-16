@@ -16,25 +16,29 @@ export interface OpenInvoice {
   /** Highest dunning level sent (from reminder_log, which an extended due date does not reset): a credit above the balance then most likely includes fees and interest. */
   reminderLevel: number
   /** Why the invoice charges no VAT, if it does not ('non_eu', 'eu_reverse_charge'): a short
-   *  foreign payment's rest may then be bank charges (bankFeeCap). */
+   *  foreign payment's rest may then be bank charges (isBankFee). */
   taxTreatment?: string | null
-  /** The money already recorded on it ('payment' rows): a credit of the same amount within a week
-   *  of one may be that payment again (entered by hand, or imported before from another export). */
-  payments?: { date: string; amount: number }[]
+  /** The money already recorded on it ('payment' rows; `imported`: from a bank statement). A credit
+   *  of the same amount may be that payment again (`recorded`). */
+  payments?: { date: string; amount: number; imported?: boolean }[]
 }
 
 export type MatchStatus = 'match' | 'unmatched' | 'debit' | 'imported' | 'nothing_open'
 export type MatchReason = 'number' | 'amount' | 'total' | 'skonto' | 'name' | 'short'
 
 // A foreign transfer that arrives short on an invoice without VAT lost the difference to the
-// payer's bank (D5): up to 5 % of the invoice and 25 € it is offered as bank charges („Rest als
-// Bankspesen“: a write-off, not booked). On an invoice with VAT the rest stays open.
+// payer's bank (D5): 0,5–5 % of what was due before it, at most 25 €, is offered as bank charges
+// („Rest als Bankspesen“: a write-off, not booked). On an invoice with VAT the rest stays open. A
+// few cents short is rounding, not a bank's charge.
+const BANK_FEE_FLOOR = 0.005
 const BANK_FEE_SHARE = 0.05
 const BANK_FEE_MAX = 25
 export const isZeroVat = (taxTreatment: string | null | undefined) => taxTreatment === 'non_eu' || taxTreatment === 'eu_reverse_charge'
-// The most a short payment on this invoice may leave as bank charges; 0 when none may.
-export const bankFeeCap = (total: number, taxTreatment: string | null | undefined) =>
-  isZeroVat(taxTreatment) ? Math.min(BANK_FEE_MAX, roundCents(total * BANK_FEE_SHARE)) : 0
+// Whether `rest`, left open by a payment on what was `due` before it, may be closed as bank charges.
+export function isBankFee(rest: number, due: number, taxTreatment: string | null | undefined): boolean {
+  if (!isZeroVat(taxTreatment) || !(due > 0) || !(rest > 0.005)) return false
+  return rest >= roundCents(due * BANK_FEE_FLOOR) - 0.005 && rest <= Math.min(BANK_FEE_MAX, roundCents(due * BANK_FEE_SHARE)) + 0.005
+}
 export type MatchConfidence = 'high' | 'medium'
 
 export interface MatchRow {
@@ -47,18 +51,33 @@ export interface MatchRow {
   /** Skonto to record alongside the payment when a Skonto settlement is detected, else 0. */
   skontoAmount: number
   amountToRecord: number
-  /** The invoice's number was found whole in the text (not split by spaces, not a short number):
-   *  only such a match is ticked for import without the owner's look. */
+  /** The invoice's number was found whole in the text: with its prefix (or, the prefix left out,
+   *  with the open amount or the client's name to go with it), not split by spaces, not a short
+   *  number. Only such a match is ticked for import without the owner's look (preTicked). */
   exactNumber: boolean
   /** What a short payment on an invoice without VAT leaves open, offered as bank charges (never
    *  ticked by default); 0 when it does not apply. */
   bankFees: number
-  /** A payment of this amount recorded on the suggested invoice within a week of the credit: it
-   *  may be this money already, so the row is never ticked on its own. */
+  /** A payment of this amount on the suggested invoice, entered by hand (any date) or imported from
+   *  a statement within a week: it may be this money already, so the row is never ticked on its own. */
   recorded: { date: string; amount: number } | null
+  /** An invoice no longer open (paid, cancelled) whose number the credit names: most likely money
+   *  recorded already, so it is suggested for no other invoice. */
+  names: string | null
 }
 
-// A credit this many days from a payment of its amount on the same invoice may be that payment.
+// Ticked for import without the owner's look: a credit naming its open invoice's number whole that
+// is not possibly recorded already.
+export const preTicked = (r: MatchRow) => r.status === 'match' && r.exactNumber && !r.recorded && !r.names
+
+// „Alle“: ticking adds the rows it ticks (`bulk`) to what is ticked; unticking clears every row.
+export function toggledSelection(selection: Record<string, boolean>, bulk: string[], all: string[], checked: boolean): Record<string, boolean> {
+  return checked
+    ? { ...selection, ...Object.fromEntries(bulk.map(id => [id, true])) }
+    : Object.fromEntries(all.map(id => [id, false]))
+}
+
+// An imported payment this many days from a credit of its amount may be that credit (another export).
 const RECORDED_WINDOW_DAYS = 7
 const daysBetween = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000
 
@@ -205,31 +224,48 @@ function addDaysIso(date: string, days: number): string {
 export interface MatchOptions {
   /** Prefixes of the other document types (quote, credit note): their numbers are never an invoice. */
   otherPrefixes?: string[]
+  /** Invoices no longer open (paid, cancelled): a credit naming one is suggested for no other. */
+  closed?: { id: string; number: string }[]
 }
 
+type Hit = { split: boolean; full: boolean }
+type Best = { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number; exact: boolean; fees: number; overlap: number }
+
+// Two passes: credits naming an open invoice's number whole (ticked for import on their own) take
+// its open amount first, in order; every other credit is then suggested against what that leaves,
+// taking nothing from it (a suggestion is not ticked), so a suggestion never shrinks the balance a
+// later credit is matched, its Skonto or its bank charges worked out against.
 export function matchTransactions(transactions: BankTransaction[], invoices: OpenInvoice[], importedRefs: Set<string>, options: MatchOptions = {}): MatchRow[] {
   const otherPrefixes = new Set((options.otherPrefixes ?? []).map(alnum).filter(Boolean))
   const open = invoices.filter(i => i.balance > 0.005)
-  // Running balance: an invoice can absorb several credits only while something is still open.
   const remaining = new Map(open.map(i => [i.id, i.balance]))
   const clientTokens = new Map(open.map(i => [i.id, nameTokens(`${i.clientName} ${i.clientCompany ?? ''}`)]))
   const matchers = new Map(open.map(i => [i.id, numberMatcher(i.number)]))
-  const rows: MatchRow[] = []
+  const closed = (options.closed ?? []).flatMap(c => { const m = numberMatcher(c.number); return m ? [{ ...c, matcher: m }] : [] })
 
-  for (const tx of transactions) {
-    const base: Omit<MatchRow, 'status'> = {
-      transaction: tx, invoiceId: null, confidence: null, score: 0, reasons: [], skontoAmount: 0, amountToRecord: tx.amount, exactNumber: false, bankFees: 0,
-      recorded: null,
+  const findIn = (texts: string[], matcher: NumberMatcher): Hit | null => {
+    const find: FindOptions = { ownPrefix: matcher.prefix, otherPrefixes }
+    for (const h of texts) {
+      const full = findNumber(h, matcher.full, find)
+      if (full) return { ...full, full: true }
+      const digits = matcher.digits ? findNumber(h, matcher.digits, find) : null
+      if (digits) return { ...digits, full: false }
     }
-    if (importedRefs.has(tx.id)) { rows.push({ ...base, status: 'imported' }); continue }
-    if (tx.amount <= 0) { rows.push({ ...base, status: 'debit' }); continue }
-    if (!open.length) { rows.push({ ...base, status: 'nothing_open' }); continue }
+    return null
+  }
+  // The number in the text (and reference). `search` (easybank's text without its line breaks)
+  // only confirms that a number the text has split across a line break is whole; it never finds
+  // one of its own, as it also glues a name to the next line ("Muster|AN-…" reads "MusterAN-…").
+  const hitFor = (tx: BankTransaction, matcher: NumberMatcher): Hit | null => {
+    const hit = findIn([tx.text, tx.reference ?? ''].filter(Boolean), matcher)
+    if (!hit?.split || !tx.search) return hit
+    const whole = findIn([tx.search], matcher)
+    return whole && !whole.split ? { split: false, full: hit.full } : hit
+  }
 
-    // Text and reference are searched separately so a number cannot span the two fields.
-    const haystacks = [tx.text, tx.reference ?? '', tx.search ?? ''].filter(Boolean)
+  const score = (tx: BankTransaction): Best | null => {
     const counterparty = nameTokens(tx.counterparty)
-    let best: { inv: OpenInvoice; score: number; reasons: MatchReason[]; skonto: number; exact: boolean; fees: number } | null = null
-
+    let best: Best | null = null
     for (const inv of open) {
       const balance = remaining.get(inv.id)!
       if (balance <= 0.005) continue
@@ -239,17 +275,11 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       const reasons: MatchReason[] = []
 
       const matcher = matchers.get(inv.id)
-      const find: FindOptions = { ownPrefix: matcher?.prefix ?? '', otherPrefixes }
-      // The strongest hit counts: a number easybank broke across two lines is split in its text
-      // and whole in `search`.
-      const hits = matcher
-        ? haystacks.map(h => findNumber(h, matcher.full, find) ?? (matcher.digits ? findNumber(h, matcher.digits, find) : null)).filter(h => !!h)
-        : []
-      const hit = hits.find(h => !h.split) ?? hits[0] ?? null
+      const hit = matcher ? hitFor(tx, matcher) : null
       if (hit) { score += hit.split || matcher!.short ? 70 : 100; reasons.push('number') }
-      const exact = !!hit && !hit.split && !matcher!.short
 
-      if (Math.abs(tx.amount - balance) < 0.005) { score += 50; reasons.push('amount') }
+      const amountFits = Math.abs(tx.amount - balance) < 0.005
+      if (amountFits) { score += 50; reasons.push('amount') }
       else if (balance < inv.total && Math.abs(tx.amount - inv.total) < 0.005) { score += 20; reasons.push('total') }
 
       if (inv.skontoPercent && inv.skontoPercent > 0 && inv.skontoDays != null && tx.date <= addDaysIso(inv.date, inv.skontoDays)) {
@@ -268,29 +298,62 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       // A little short of the balance on an invoice without VAT: the payer's bank kept the rest.
       // From the client's name that is a suggestion on its own; with the number it is offered too.
       const short = roundCents(balance - tx.amount)
-      const fees = !skonto && short > 0.005 && short <= bankFeeCap(inv.total, inv.taxTreatment) ? short : 0
+      const fees = !skonto && isBankFee(short, balance, inv.taxTreatment) ? short : 0
       if (fees && overlap) { score += 30; reasons.push('short') }
 
-      if (!best || score > best.score) best = { inv, score, reasons, skonto, exact, fees: fees && (overlap || hit) ? fees : 0 }
+      // Whole: with its prefix, or the bare digits backed by the amount or the client's name.
+      const exact = !!hit && !hit.split && !matcher!.short && (hit.full || amountFits || overlap > 0)
+      if (!best || score > best.score) best = { inv, score, reasons, skonto, exact, fees: fees && (overlap || hit) ? fees : 0, overlap }
     }
-
-    if (best && best.score >= 50) {
-      remaining.set(best.inv.id, roundCents(remaining.get(best.inv.id)! - tx.amount - best.skonto))
-      rows.push({
-        ...base,
-        status: 'match',
-        invoiceId: best.inv.id,
-        confidence: best.score >= 100 ? 'high' : 'medium',
-        score: best.score,
-        reasons: best.reasons,
-        skontoAmount: best.skonto,
-        exactNumber: best.exact,
-        bankFees: best.fees,
-        recorded: best.inv.payments?.find(p => Math.abs(p.amount - tx.amount) < 0.005 && daysBetween(p.date, tx.date) <= RECORDED_WINDOW_DAYS) ?? null,
-      })
-    } else {
-      rows.push({ ...base, status: 'unmatched' })
-    }
+    return best && best.score >= 50 ? best : null
   }
-  return rows
+
+  const recordedOn = (inv: OpenInvoice, tx: BankTransaction) => inv.payments?.find(p => Math.abs(p.amount - tx.amount) < 0.005
+    && (!p.imported || daysBetween(p.date, tx.date) <= RECORDED_WINDOW_DAYS)) ?? null
+  const closedNamed = (tx: BankTransaction): string | null => {
+    for (const c of closed) {
+      const hit = hitFor(tx, c.matcher)
+      if (hit && !hit.split) return c.number
+    }
+    return null
+  }
+  const baseOf = (tx: BankTransaction): Omit<MatchRow, 'status'> => ({
+    transaction: tx, invoiceId: null, confidence: null, score: 0, reasons: [], skontoAmount: 0, amountToRecord: tx.amount,
+    exactNumber: false, bankFees: 0, recorded: null, names: null,
+  })
+  const matchRow = (tx: BankTransaction, best: Best, names: string | null): MatchRow => ({
+    ...baseOf(tx),
+    status: 'match',
+    invoiceId: best.inv.id,
+    confidence: best.score >= 100 ? 'high' : 'medium',
+    score: best.score,
+    reasons: best.reasons,
+    skontoAmount: best.skonto,
+    exactNumber: best.exact,
+    bankFees: best.fees,
+    recorded: recordedOn(best.inv, tx),
+    names,
+  })
+
+  const rows: (MatchRow | null)[] = transactions.map(() => null)
+  const later: number[] = []
+  transactions.forEach((tx, i) => {
+    if (importedRefs.has(tx.id)) { rows[i] = { ...baseOf(tx), status: 'imported' }; return }
+    if (tx.amount <= 0) { rows[i] = { ...baseOf(tx), status: 'debit' }; return }
+    if (!open.length) { rows[i] = { ...baseOf(tx), status: 'nothing_open' }; return }
+    const best = score(tx)
+    if (best?.exact && !recordedOn(best.inv, tx)) {
+      remaining.set(best.inv.id, roundCents(remaining.get(best.inv.id)! - tx.amount - best.skonto))
+      rows[i] = matchRow(tx, best, null)
+    } else later.push(i)
+  })
+  for (const i of later) {
+    const tx = transactions[i]
+    const best = score(tx)
+    const names = closedNamed(tx)
+    // A credit naming a paid invoice is suggested for another one only by that one's own number.
+    if (best && (!names || best.reasons.includes('number'))) rows[i] = matchRow(tx, best, names)
+    else rows[i] = { ...baseOf(tx), status: 'unmatched', names }
+  }
+  return rows as MatchRow[]
 }

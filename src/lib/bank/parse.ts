@@ -18,13 +18,16 @@ const collapse = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 // FNV-1a and djb2 (32 bit each) over the normalised fields: stable across imports, no crypto needed.
 export function transactionId(f: TransactionFields): string {
-  const key = [
+  return hashKey([
     f.date,
     f.amount.toFixed(2),
     collapse(f.text).toLowerCase(),
     collapse(f.counterparty ?? '').toLowerCase(),
     collapse(f.reference ?? '').toLowerCase(),
-  ].join('|')
+  ].join('|'))
+}
+
+function hashKey(key: string): string {
   let fnv = 0x811c9dc5
   let djb = 5381
   for (let i = 0; i < key.length; i++) {
@@ -361,24 +364,31 @@ export function parseCsv(text: string): ParsedStatement {
 const EB_IBAN = /^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/
 const EB_DATE = /^\d{2}\.\d{2}\.\d{4}$/
 const EB_BIC = '[A-Z]{4}[A-Z]{2}[A-Z0-9]{2,5}'
-const EB_BIC_IBAN = new RegExp(`^${EB_BIC}\\s+[A-Z]{2}\\d{10,30}`)
-const EB_BIC_IBAN_NAME = new RegExp(`^${EB_BIC}\\s+[A-Z]{2}\\d{10,30}\\s+(.+)`)
+// An IBAN in the text: letters may follow its check digits (GB, NL, IE, …).
+const EB_TEXT_IBAN = '[A-Z]{2}\\d{2}[A-Z0-9]{10,30}'
+const EB_BIC_IBAN = new RegExp(`^${EB_BIC}\\s+${EB_TEXT_IBAN}`)
+const EB_BIC_IBAN_NAME = new RegExp(`^${EB_BIC}\\s+${EB_TEXT_IBAN}\\s+(.+)`)
 const EB_BARE_BIC = new RegExp(`^${EB_BIC}$`)
 // A card payment („MC/000000901“): its credit is a merchant's refund, dated by the bank.
 const EB_CARD = /\bMC\/\d{6,}/
 // A Valutadatum this many days before the Buchungsdatum at most is the day the money moved.
 const EB_VALUTA_LAG = 7
-const EB_SPESEN = /SPESEN\s*:?\s*([\d.,]+)/i
+// An amount in German form („1,50“, „1.234,50“) after SPESEN.
+const EB_SPESEN = /SPESEN\s*:?\s*(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2})(?!\d)/i
+// How many lines decide whether a file is an easybank export.
+const EB_SAMPLE = 5
 
 const isEasybankHeader = (row: string[]) => (row[0] ?? '').toLowerCase().includes('iban') || (row[2] ?? '').toLowerCase().includes('datum')
+const startsWithIban = (row: string[]) => EB_IBAN.test((row[0] ?? '').replace(/\s/g, ''))
+const isEasybankRow = (row: string[]) => row.length >= 5 && startsWithIban(row) && EB_DATE.test(row[2]) && parseAmount(row[4]) !== null
 
-const isEasybankRow = (row: string[]) =>
-  row.length >= 5 && EB_IBAN.test(row[0].replace(/\s/g, '')) && EB_DATE.test(row[2]) && EB_DATE.test(row[3]) && parseAmount(row[4]) !== null
-
-// An easybank export: its first line that is not a header is an easybank transaction.
+// An easybank export: among its first lines (a header aside), every line of five cells or more
+// starts with an IBAN and at least one is a transaction (IBAN, Buchungsdatum, amount), so one broken
+// line does not send the whole file to the generic CSV reader.
 export function isEasybank(text: string): boolean {
-  const first = splitCsv(text, ';').map(r => r.map(c => c.trim())).find(r => filled(r) > 0 && !isEasybankHeader(r))
-  return !!first && isEasybankRow(first)
+  const rows = splitCsv(text, ';').map(r => r.map(c => c.trim())).filter(r => filled(r) > 0 && !(r.length >= 5 && isEasybankHeader(r)))
+  const sample = rows.slice(0, EB_SAMPLE).filter(r => r.length >= 5)
+  return sample.length > 0 && sample.every(startsWithIban) && sample.some(isEasybankRow)
 }
 
 // The payer of a credit: the name after its BIC and IBAN, wherever that line stands (a purpose
@@ -419,8 +429,9 @@ export function parseEasybank(text: string): ParsedStatement {
   splitCsv(text, ';').forEach((cells, i) => {
     const line = i + 1
     const row = cells.map(c => c.trim())
-    if (!filled(row) || isEasybankHeader(row)) return
+    if (!filled(row)) return
     if (row.length < 5) { warnings.push(`fewCells:${line}`); return }
+    if (isEasybankHeader(row)) return
     const posted = EB_DATE.test(row[2]) ? parseDate(row[2]) : null
     if (!posted) { warnings.push(`noDate:${line}`); return }
     const amount = parseAmount(row[4])
@@ -433,10 +444,13 @@ export function parseEasybank(text: string): ParsedStatement {
       counterparty: easybankCounterparty(row[1], credit),
       reference: null,
     }
-    const spesen = row[1].match(EB_SPESEN)
+    // easybank may break a line inside the amount („SPESEN: 1|,50“).
+    const spesen = row[1].replace(/\|/g, '').match(EB_SPESEN)
     const fee = spesen ? parseAmount(spesen[1]) : null
     transactions.push({
-      id: transactionId(fields),
+      // From the line as the bank wrote it (not from what is read out of it), so overlapping
+      // exports give one id, and a later reading rule does not make an imported line new again.
+      id: hashKey(['easybank', ...row.slice(0, 6)].map(c => collapse(c).toLowerCase()).join('|')),
       ...fields,
       currency: (row[5] ?? '').toUpperCase() || null,
       raw: cells.join(' ; '),

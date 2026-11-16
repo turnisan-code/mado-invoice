@@ -111,7 +111,7 @@ test('a booked payment is not booked again; the others still are', () => {
   const planned = planBookings({
     type: 'invoice', total: 300,
     rows: [{ id: 'p1', date: '2026-03-10', amount: 100, kind: 'payment' }, { id: 'p2', date: '2026-05-20', amount: 200, kind: 'payment' }],
-  }).bookings
+  })
   assert.deepEqual(unbookedPlan(planned, [{ year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }]).map(p => p.paymentId), ['p2'])
   assert.deepEqual(unbookedPlan(planned, [
     { year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }, { year: 2026, kind: 'income', amount: 200, payment_id: 'p2' },
@@ -124,12 +124,73 @@ test('a booking from before bookings per payment covers its year first, then lat
   const planned = planBookings({
     type: 'invoice', total: 200,
     rows: [{ id: 'p1', date: '2026-12-30', amount: 100, kind: 'payment' }, { id: 'p2', date: '2027-01-03', amount: 100, kind: 'payment' }],
-  }).bookings
+  })
   assert.deepEqual(unbookedPlan(planned, [{ year: 2026, kind: 'income', amount: 100 }]).map(p => p.paymentId), ['p2'])
   assert.deepEqual(unbookedPlan(planned, [{ year: 2026, kind: 'income', amount: 200 }]), [])
   // Part of a payment covered: the rest is booked, its VAT split going on from there.
   const rest = unbookedPlan(planned, [{ year: 2026, kind: 'income', amount: 150, payment_id: null }])
-  assert.deepEqual(rest.map(p => [p.paymentId, p.amount, p.before]), [['p2', 50, 150]])
+  assert.deepEqual(rest.map(p => [p.paymentId, p.amount, p.before, p.part]), [['p2', 50, 150, 2]])
+})
+
+test('an extra payment dated before a booked one is not booked on top of it', () => {
+  // The client's second transfer of the same 840, recorded after the first was booked, sorting first.
+  const twice = planBookings({
+    type: 'invoice', total: 840,
+    rows: [{ id: 'pb', date: '2026-06-15', amount: 840, kind: 'payment' }, { id: 'pa', date: '2026-06-15', amount: 840, kind: 'payment' }],
+  })
+  assert.deepEqual(unbookedPlan(twice, [{ year: 2026, kind: 'income', amount: 840, payment_id: 'pb' }]), [])
+  const earlier = planBookings({
+    type: 'invoice', total: 840,
+    rows: [{ id: 'p2', date: '2026-06-20', amount: 840, kind: 'payment' }, { id: 'p1', date: '2026-06-01', amount: 840, kind: 'payment' }],
+  })
+  assert.deepEqual(unbookedPlan(earlier, [{ year: 2026, kind: 'income', amount: 840, payment_id: 'p2' }]), [])
+  // A real part payment dated before a booked part: booked after it, as the next part.
+  const parts = planBookings({
+    type: 'invoice', total: 300,
+    rows: [{ id: 'p1', date: '2026-03-10', amount: 100, kind: 'payment' }, { id: 'p0', date: '2026-03-01', amount: 100, kind: 'payment' }],
+  })
+  assert.deepEqual(unbookedPlan(parts, [{ year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }]).map(p => [p.paymentId, p.amount, p.before, p.part]), [['p0', 100, 100, 2]])
+})
+
+test('an overpaid invoice has nothing left to book once its money is booked', () => {
+  const doc = {
+    type: 'invoice', number: 'RN-209901002', status: 'paid', total: 100,
+    payments: [{ id: 'p1', date: '2026-03-10', kind: 'payment', amount: 100 }, { id: 'p2', date: '2026-03-20', kind: 'payment', amount: 30 }],
+    bookamat_bookings: [{ year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }],
+  }
+  assert.equal(hasUnbookedMoney(doc), false)
+  assert.equal(bookamatState(doc), 'synced')
+  // A booking from before bookings per payment that the backfill left without its payment.
+  assert.equal(bookamatState({ ...doc, payments: [{ id: 'p1', date: '2026-03-10', kind: 'payment', amount: 110 }], bookamat_bookings: [{ year: 2026, kind: 'income', amount: 100 }] }), 'synced')
+})
+
+test('booked one after the other, part payments add up per VAT rate to the cent', () => {
+  const groups = [{ rate: 20 as const, base: 100, amount: 20 }, { rate: 10 as const, base: 77.77, amount: 7.78 }, { rate: 0 as const, base: 33.33, amount: 0 }]
+  const accounts = { bank: 1, cash: null, cost: 2, vat: { 20: 3, 10: 4, 0: 5 } }
+  const total = 238.88
+  const once = Object.fromEntries(bookingLines({ year: 2026, kind: 'income', date: '2026-01-01', amount: total, cash: 0, paymentId: 'x', before: 0, part: null }, groups, accounts)
+    .map(l => [l.tax_percent, Number(l.amount)]))
+  let seed = 7
+  const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648 }
+  for (let run = 0; run < 2000; run++) {
+    // 2–4 parts of at least 1 €, in cents, recorded in a random order of dates.
+    const n = 2 + Math.floor(random() * 3)
+    const cuts = Array.from({ length: n - 1 }, () => 100 + Math.floor(random() * (total * 100 - 100 * n))).sort((a, b) => a - b)
+    const cents = [...cuts, total * 100].map((c, i, all) => c - (i ? all[i - 1] : 0))
+    if (cents.some(c => c < 100)) continue
+    const rows = cents.map((c, i) => ({ id: `p${i}`, date: `2026-0${1 + Math.floor(random() * 9)}-1${i}`, amount: c / 100, kind: 'payment' }))
+    const plan = planBookings({ type: 'invoice', total, rows })
+    const booked: { year: number; kind: string; amount: number; payment_id: string }[] = []
+    const sums: Record<string, number> = {}
+    for (let todo = unbookedPlan(plan, booked); todo.length; todo = unbookedPlan(plan, booked)) {
+      const p = todo[0]
+      const lines = bookingLines(p, groups, accounts)
+      assert.equal(Math.round(lines.reduce((s, l) => s + Number(l.amount), 0) * 100), Math.round(p.amount * 100))
+      for (const l of lines) sums[l.tax_percent] = Math.round(((sums[l.tax_percent] ?? 0) + Number(l.amount)) * 100) / 100
+      booked.push({ year: p.year, kind: p.kind, amount: p.amount, payment_id: p.paymentId! })
+    }
+    assert.deepEqual(sums, once, `run ${run}: ${JSON.stringify(cents)}`)
+  }
 })
 
 test('money is offered as soon as it is recorded, part payments too', () => {

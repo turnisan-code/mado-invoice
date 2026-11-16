@@ -246,7 +246,7 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
   const supabase = ctx.supabase
   const payments = doc.payments ?? []
   const bookamat = {
-    state: bookamatState({ type: doc.type, number: doc.number, status: doc.status, payments, bookamat_bookings: detail.bookings, bookamat_booking_id: doc.bookamat_booking_id, bookamat_error: doc.bookamat_error }),
+    state: bookamatState({ type: doc.type, number: doc.number, status: doc.status, payments, bookamat_bookings: detail.bookings, bookamat_booking_id: doc.bookamat_booking_id, bookamat_error: doc.bookamat_error, total }),
     error: doc.bookamat_error ?? null,
     bookings: detail.bookings,
   }

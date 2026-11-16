@@ -7,7 +7,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, FileText, Uploa
 import { toast } from 'sonner'
 import { formatDate, formatMoney, roundCents } from '@/lib/utils/document'
 import { applyMapping, decodeStatement, parseStatement } from '@/lib/bank/parse'
-import { matchTransactions, type MatchRow, type OpenInvoice } from '@/lib/bank/match'
+import { matchTransactions, preTicked, toggledSelection, type MatchRow, type OpenInvoice } from '@/lib/bank/match'
 import type { BankTransaction, CsvMapping, ParsedStatement } from '@/lib/bank/types'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -23,6 +23,8 @@ interface Props {
   bookamatConfigured: boolean
   /** Quote and credit-note prefixes: their numbers in a remittance text are never an invoice. */
   otherPrefixes: string[]
+  /** Invoices no longer open: a credit naming one is most likely recorded already. */
+  closedInvoices: { id: string; number: string }[]
 }
 
 interface ImportResponse {
@@ -136,7 +138,7 @@ function MappingEditor({ header, rows, mapping, onChange, t }: { header: string[
   )
 }
 
-export default function BankImport({ invoices, importedRefs, bookamatConfigured, otherPrefixes }: Props) {
+export default function BankImport({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices }: Props) {
   const { t, lang } = useT()
   const router = useRouter()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -161,7 +163,10 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
 
   const imported = useMemo(() => new Set(importedRefs), [importedRefs])
   const invoiceById = useMemo(() => new Map(invoices.map(i => [i.id, i])), [invoices])
-  const rows = useMemo(() => (parsed ? matchTransactions(parsed.transactions, invoices, imported, { otherPrefixes }) : []), [parsed, invoices, imported, otherPrefixes])
+  const rows = useMemo(
+    () => (parsed ? matchTransactions(parsed.transactions, invoices, imported, { otherPrefixes, closed: closedInvoices }) : []),
+    [parsed, invoices, imported, otherPrefixes, closedInvoices],
+  )
   const txById = useMemo(() => new Map(rows.map(r => [r.transaction.id, r.transaction])), [rows])
   const credits = rows.filter(r => r.status === 'match' || r.status === 'unmatched')
   const skipped = rows.filter(r => r.status !== 'match' && r.status !== 'unmatched')
@@ -171,7 +176,7 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
   // by its amount, the client's name or the Skonto keeps its suggestion, unticked (another
   // client paying the same amount must not land on this invoice).
   const manual = (r: MatchRow) => r.transaction.id in edits && !!edits[r.transaction.id]
-  const byNumber = (r: MatchRow) => r.status === 'match' && r.exactNumber && !r.recorded && invoiceFor(r) === r.invoiceId
+  const byNumber = (r: MatchRow) => preTicked(r) && invoiceFor(r) === r.invoiceId
   const isChecked = (r: MatchRow) => !!invoiceFor(r) && (selection[r.transaction.id] ?? byNumber(r))
   const skontoFor = (r: MatchRow) => (r.skontoAmount > 0 && invoiceFor(r) === r.invoiceId && !skontoOff[r.transaction.id] ? r.skontoAmount : 0)
   const bankFeesFor = (r: MatchRow) => (r.bankFees > 0 && invoiceFor(r) === r.invoiceId && bankFeesOn[r.transaction.id] ? r.bankFees : 0)
@@ -239,8 +244,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
     setSelection(s => ({ ...s, [r.transaction.id]: value !== '' }))
   }
 
+  // Ticking „Alle“ keeps what was ticked by hand; unticking clears every row.
   function toggleAll(checked: boolean) {
-    setSelection(Object.fromEntries((checked ? bulk : assignable).map(r => [r.transaction.id, checked])))
+    setSelection(s => toggledSelection(s, bulk.map(r => r.transaction.id), assignable.map(r => r.transaction.id), checked))
   }
 
   async function doImport(allowOverpayment = false) {
@@ -297,8 +303,9 @@ export default function BankImport({ invoices, importedRefs, bookamatConfigured,
         <span title={reasons || undefined} className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${PILL[kind]}`}>{label}</span>
         {reasons && <p className="text-[11px] text-neutral-500 dark:text-neutral-500 leading-tight">{reasons}</p>}
         {(kind === 'high' || kind === 'medium') && !r.exactNumber && (
-          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-tight">{t('bankImport.checkHint')}</p>
+          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-tight">{t(r.reasons.includes('number') ? 'bankImport.numberPartHint' : 'bankImport.checkHint')}</p>
         )}
+        {r.names && <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-tight">{t('bankImport.namesClosed', { number: r.names })}</p>}
       </div>
     )
   }

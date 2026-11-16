@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { apiError, databaseError, invalidJson, readJsonObject, requireUser } from '@/lib/auth'
 import { calcTotals, roundCents, settlesBalance, today } from '@/lib/utils/document'
 import { insertPayments, markPaid, paymentRefusal, splitOverpayment } from '@/lib/services/payments'
-import { bankFeeCap } from '@/lib/bank/match'
+import { isBankFee } from '@/lib/bank/match'
 
 const MAX_ROWS = 500
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -51,7 +51,7 @@ const REFUSALS = {
   cancelled: 'Invoice is cancelled',
   date_future: 'Payment date is in the future',
 } as const
-const BANK_FEES_REFUSAL = 'Bank charges only on an invoice without VAT, up to 5 % and 25 €, and not beyond what is open'
+const BANK_FEES_REFUSAL = 'Bank charges only close the rest of an invoice without VAT (0.5–5 % of what was due, at most 25 €), and not with a Skonto'
 
 function isImportRow(r: unknown): r is ImportRow {
   if (!r || typeof r !== 'object') return false
@@ -115,13 +115,19 @@ export async function POST(req: Request) {
     return error
   }
 
-  // Transactions an earlier (half-finished) run recorded: their split is kept as it was.
+  // Transactions an earlier (half-finished) run recorded: their split is kept as it was, and bank
+  // charges it recorded are not recorded (nor checked) again.
   const earlier = new Map<string, number>()
-  const txIds = rows.map(r => r.transaction_id)
-  for (let i = 0; i < txIds.length; i += 100) {
-    const { data, error } = await supabase.from('payments').select('import_ref, amount').in('import_ref', txIds.slice(i, i + 100))
+  const earlierFees = new Set<string>()
+  const refs = rows.flatMap(r => [r.transaction_id, `${r.transaction_id}:bankfees`])
+  for (let i = 0; i < refs.length; i += 100) {
+    const { data, error } = await supabase.from('payments').select('import_ref, amount').in('import_ref', refs.slice(i, i + 100))
     if (error) return databaseError(error)
-    for (const r of data ?? []) earlier.set(r.import_ref as string, roundCents(Number(r.amount)))
+    for (const r of data ?? []) {
+      const ref = r.import_ref as string
+      if (ref.endsWith(':bankfees')) earlierFees.add(ref.slice(0, -':bankfees'.length))
+      else earlier.set(ref, roundCents(Number(r.amount)))
+    }
   }
 
   const now = today()
@@ -163,12 +169,14 @@ export async function POST(req: Request) {
       else if (skontoErr.code !== '23505') errors.push({ transaction_id: row.transaction_id, message: skontoErr.message })
     }
 
-    // The rest as bank charges: only on an invoice without VAT, within bankFeeCap, and never
-    // beyond what is still open after the payment.
+    // The rest as bank charges: exactly what this payment left open, on an invoice without VAT,
+    // within isBankFee of what was due before it; never beside a Skonto.
     const bankFees = roundCents(row.bank_fees ?? 0)
-    if (bankFees > 0.005) {
-      const cap = bankFeeCap(totalOf(doc), doc.tax_treatment)
-      if (bankFees > cap + 0.005 || bankFees > openOf(doc) + 0.005) {
+    if (bankFees > 0.005 && earlierFees.has(row.transaction_id)) duplicates++
+    else if (bankFees > 0.005) {
+      const rest = openOf(doc)
+      const due = roundCents(rest + (recorded ?? paid))
+      if (skonto > 0 || Math.abs(bankFees - rest) > 0.005 || !isBankFee(bankFees, due, doc.tax_treatment)) {
         errors.push({ transaction_id: row.transaction_id, code: 'bank_fees', message: BANK_FEES_REFUSAL })
       } else {
         const feesErr = await insertPayment(row, doc.id, 'writeoff', bankFees, `${row.transaction_id}:bankfees`)

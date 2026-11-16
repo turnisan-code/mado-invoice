@@ -7,14 +7,17 @@ import { isBookamatConfigured } from '@/lib/public-settings'
 import BankImport from '@/components/bank/BankImport'
 import type { OpenInvoice } from '@/lib/bank/match'
 
-const INVOICE_COLS = 'id, number, date, due_date, tax_treatment, discount_type, discount_value, skonto_percent, skonto_days, reminder_level, reminder_log(level), clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(date, amount, kind)'
+const INVOICE_COLS = 'id, number, date, due_date, tax_treatment, discount_type, discount_value, skonto_percent, skonto_days, reminder_level, reminder_log(level), clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(date, amount, kind, import_ref)'
 
 export default async function BankImportPage() {
   const supabase = await createClient()
   const { t } = await getT()
 
-  const [{ data: docs }, { data: refs }, { data: settings }] = await Promise.all([
+  const [{ data: docs }, { data: closedDocs }, { data: refs }, { data: settings }] = await Promise.all([
     supabase.from('documents').select(INVOICE_COLS).eq('type', 'invoice').in('status', ['sent', 'overdue']).not('number', 'is', null).order('date', { ascending: true }),
+    // Invoices no longer open: a credit naming one is most likely recorded already (D3: the same
+    // statement is imported here and in Bookmatic, and payments were entered by hand until now).
+    supabase.from('documents').select('id, number').eq('type', 'invoice').in('status', ['paid', 'cancelled']).not('number', 'is', null).order('date', { ascending: false }).limit(1000),
     supabase.from('payments').select('import_ref').not('import_ref', 'is', null),
     supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id, quote_prefix, credit_note_prefix').single(),
   ])
@@ -43,7 +46,8 @@ export default async function BankImportPage() {
       skontoPercent: d.skonto_percent ?? null,
       skontoDays: d.skonto_days ?? null,
       taxTreatment: d.tax_treatment ?? null,
-      payments: (d.payments ?? []).filter((p: { kind: string }) => p.kind === 'payment').map((p: { date: string; amount: number }) => ({ date: p.date, amount: Number(p.amount) })),
+      payments: (d.payments ?? []).filter((p: { kind: string }) => p.kind === 'payment')
+        .map((p: { date: string; amount: number; import_ref: string | null }) => ({ date: p.date, amount: Number(p.amount), imported: !!p.import_ref })),
       // From the reminder history: reminder_level goes back to 0 when the due date is extended
       // (20261107_dunning.sql), the reminders that went out stay in reminder_log.
       reminderLevel: Math.max(d.reminder_level ?? 0, ...(d.reminder_log ?? []).map((r: { level: number | null }) => r.level ?? 0)),
@@ -64,7 +68,17 @@ export default async function BankImportPage() {
           <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1">{t('bankImport.intro')}</p>
         </div>
       </div>
-      <BankImport invoices={invoices} importedRefs={importedRefs} bookamatConfigured={bookamatConfigured} otherPrefixes={[settings?.quote_prefix ?? 'A', settings?.credit_note_prefix ?? 'G']} />
+      <BankImport
+        invoices={invoices}
+        importedRefs={importedRefs}
+        bookamatConfigured={bookamatConfigured}
+        otherPrefixes={[settings?.quote_prefix ?? 'A', settings?.credit_note_prefix ?? 'G']}
+        closedInvoices={[
+          ...((closedDocs ?? []) as { id: string; number: string }[]),
+          // Sent but settled (a credit note applied in full): no longer open either.
+          ...(docs ?? []).filter(d => d.number && !invoices.some(i => i.id === d.id)).map(d => ({ id: d.id, number: d.number as string })),
+        ]}
+      />
     </div>
   )
 }

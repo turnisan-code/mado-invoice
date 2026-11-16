@@ -49,10 +49,13 @@ export type BookingCandidate = {
   other?: string
   // For an exact fit: the payment it books.
   paymentId?: string | null
+  // The payment whose search found it (the sync searches per payment).
+  foundFor?: string | null
 }
 
-// A booking the owner said is not this money („trotzdem buchen“), or one to take over
-// (`paymentId`: the payment it books, as the search matched it).
+// A booking the owner said is not this money („trotzdem buchen“), or one to take over.
+// `paymentId`: the payment it books (a take-over), or the one it was found for (an
+// acknowledgement, which then counts for that payment only).
 export type BookingRef = { year: number; bookingId: string; paymentId?: string | null }
 
 export const WINDOW_DAYS = 10

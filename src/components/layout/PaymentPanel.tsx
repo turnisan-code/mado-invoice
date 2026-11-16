@@ -26,7 +26,7 @@ import type { BookingCandidate, BookingRef } from '@/lib/bookamat-search'
 import { BookamatDuplicateDialog } from '@/components/bookamat/BookamatDuplicateDialog'
 import { BookamatForgetDialog } from '@/components/bookamat/BookamatForgetDialog'
 import { loadMoneyLock } from '@/lib/deposits'
-import { bankFeeCap } from '@/lib/bank/match'
+import { isBankFee } from '@/lib/bank/match'
 import { paymentRows, recordInvoicePayments, removePayment as removePaymentRow, reopensOnRemoval, settledSum, settlementRow, skontoOffered } from '@/lib/services/payments'
 
 interface Payment {
@@ -150,17 +150,22 @@ export default function PaymentPanel({
   const offerWriteoff = canRecord && !fullyPaid && balanceDue < SMALL_DIFFERENCE
   const offerUncollectible = canRecord && !fullyPaid && balanceDue >= SMALL_DIFFERENCE
   // A foreign transfer that arrived a little short on an invoice without VAT (D5): the rest is what
-  // the payer's bank kept (bankFeeCap, the bank import's rule). With VAT it stays open (a part
-  // payment) unless written off by hand.
-  const offerBankFees = canRecord && !fullyPaid && payments.some(p => p.kind === 'payment')
-    && balanceDue > 0.005 && balanceDue <= bankFeeCap(total, taxTreatment)
+  // the payer's bank kept (isBankFee, the bank import's rule, against what was due before the last
+  // payment). With VAT it stays open (a part payment) unless written off by hand.
+  const bankFeesAfter = (rows: Payment[], open: number) => {
+    const last = rows.filter(p => p.kind === 'payment').sort((a, b) => a.date.localeCompare(b.date)).at(-1)
+    return !!last && isBankFee(open, roundCents(open + last.amount), taxTreatment)
+  }
+  const offerBankFees = canRecord && !fullyPaid && bankFeesAfter(payments, balanceDue)
 
+  // Loaded with Bookamat set up or not: a booked payment stays locked (MI048), and „Buchung
+  // vergessen“ must stay at hand, also after the Bookamat settings were removed.
   useEffect(() => {
-    if (!bookamatConfigured) return
+    if (!number) return
     let active = true
     void fetchBookamatInfo(documentId).then(info => { if (active && info) setBookamat(info) })
     return () => { active = false }
-  }, [bookamatConfigured, documentId])
+  }, [documentId, number])
 
   useEffect(() => {
     if (!number) return
@@ -184,7 +189,7 @@ export default function PaymentPanel({
     : t('books.sync.pendingTitle', { title: p.title, year: p.year }))
   const canSync = hasMoneyToBook({ number, status, payments })
   // A payment no booking covers yet (a new part payment, the rest after New Year): the sync books it.
-  const unbookedMoney = !!bookamat && canSync && hasUnbookedMoney({ type: 'invoice', number, status, payments, bookamat_bookings: bookings })
+  const unbookedMoney = !!bookamat && canSync && hasUnbookedMoney({ type: 'invoice', number, status, payments, bookamat_bookings: bookings, total })
   // The booking that locks a payment (D7, MI048); unknown until the bookings are loaded.
   const heldBy = (p: Payment) => (bookamat ? bookingOfRow(p, bookings) : null)
   const anyHeld = !!bookamat && payments.some(p => !!bookingOfRow(p, bookings))
@@ -211,11 +216,14 @@ export default function PaymentPanel({
       } else {
         toast.success(t('payments.recorded', { label }))
       }
-      // Each payment is booked when it arrives (D2), a part payment too; a write-off, a Skonto or
-      // an applied credit note moves no money and has nothing to book.
-      const money = rows.some(r => r.kind === 'payment')
-      if (bookamatConfigured && bookamat && money
-        && hasUnbookedMoney({ type: 'invoice', number, status: settled ? 'paid' : status, payments: next, bookamat_bookings: bookings })) {
+      // Each payment is booked when it arrives (D2), a part payment too. A rest the panel offers to
+      // close (Skonto, bank charges) waits for the owner first, so a payment that settles the
+      // invoice is not booked as a part; after that row the money is offered.
+      const open = roundCents(total - settledSum(next))
+      const restOffered = !settled && open > 0.005
+        && (skontoOffered({ total, date, skontoPercent, skontoDays, payments: next }) || bankFeesAfter(next, open))
+      if (bookamatConfigured && bookamat && !restOffered
+        && hasUnbookedMoney({ type: 'invoice', number, status: settled ? 'paid' : status, payments: next, bookamat_bookings: bookings, total })) {
         setBookamatPrompt(settled ? 'paid' : 'part')
       }
       router.refresh()
@@ -325,7 +333,8 @@ export default function PaymentPanel({
   }
 
   function bookAnyway() {
-    const all = [...acknowledged, ...(duplicates ?? []).map(c => ({ year: c.year, bookingId: c.bookingId }))]
+    // Each for the payment it was found for: another payment's search still sees it.
+    const all = [...acknowledged, ...(duplicates ?? []).map(c => ({ year: c.year, bookingId: c.bookingId, paymentId: c.paymentId ?? c.foundFor ?? null }))]
     setAcknowledged(all)
     void syncToBookamat(all)
   }
@@ -533,39 +542,15 @@ export default function PaymentPanel({
         </div>
       )}
 
-      {bookamatConfigured && (
+      {(bookamatConfigured || synced || unsettled.length > 0) && (
         <div className="space-y-1.5 pt-2 border-t border-neutral-100 dark:border-neutral-800">
-          {synced ? (
-            <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+          <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+            {synced ? (
               <span className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 min-w-0">
                 <CheckCircle2 size={13} className="shrink-0" />
                 <span className="break-words">{bookings.length ? t('books.sync.synced', { bookings: formatBookings(t, bookings) }) : t('payments.synced')}</span>
               </span>
-              <span className="flex items-center gap-1 flex-wrap">
-                {unbookedMoney && (
-                  <button type="button" onClick={() => setBookamatPrompt('new')} disabled={!!bookamatBusy} className={linkBtn}>
-                    {t('books.sync.newMoney')}
-                  </button>
-                )}
-                {bookings.length > 0 && (
-                  <button type="button" onClick={() => void attachAgain()} disabled={!!bookamatBusy} className={linkBtn}>
-                    {bookamatBusy === 'attach' ? t('books.sync.attaching') : t('books.sync.attachAgain')}
-                  </button>
-                )}
-                {bookings.length > 0 && (
-                  <button type="button" onClick={() => setForget('booking')} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
-                    {t('payments.forgetBooking')}
-                  </button>
-                )}
-                {unsettled.length > 0 && (
-                  <button type="button" onClick={() => setForget('unsettled')} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
-                    {t('payments.discardUnsettled')}
-                  </button>
-                )}
-              </span>
-            </div>
-          ) : canSync ? (
-            <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+            ) : bookamatConfigured && canSync ? (
               <button
                 type="button"
                 onClick={() => setBookamatPrompt(fullyPaid ? 'paid' : 'new')}
@@ -574,15 +559,32 @@ export default function PaymentPanel({
               >
                 {bookamatBusy === 'sync' ? t('payments.syncing') : bookamat?.error ? t('books.sync.retry') : t('payments.syncTo')}
               </button>
+            ) : bookamatConfigured ? (
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">{status === 'paid' ? t('books.errors.nothing_to_book') : t('payments.syncAvailableWhenPaid')}</span>
+            ) : <span />}
+            <span className="flex items-center gap-1 flex-wrap">
+              {bookamatConfigured && synced && unbookedMoney && (
+                <button type="button" onClick={() => setBookamatPrompt('new')} disabled={!!bookamatBusy} className={linkBtn}>
+                  {t('books.sync.newMoney')}
+                </button>
+              )}
+              {bookamatConfigured && bookings.length > 0 && (
+                <button type="button" onClick={() => void attachAgain()} disabled={!!bookamatBusy} className={linkBtn}>
+                  {bookamatBusy === 'attach' ? t('books.sync.attaching') : t('books.sync.attachAgain')}
+                </button>
+              )}
+              {bookings.length > 0 && (
+                <button type="button" onClick={() => setForget('booking')} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
+                  {t('payments.forgetBooking')}
+                </button>
+              )}
               {unsettled.length > 0 && (
                 <button type="button" onClick={() => setForget('unsettled')} disabled={!!bookamatBusy} className={`${linkBtn} hover:text-red-500 dark:hover:text-red-400`}>
                   {t('payments.discardUnsettled')}
                 </button>
               )}
-            </div>
-          ) : (
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">{status === 'paid' ? t('books.errors.nothing_to_book') : t('payments.syncAvailableWhenPaid')}</span>
-          )}
+            </span>
+          </div>
           {bookamat?.error && (
             <p role="status" className="text-xs text-red-600 dark:text-red-400 break-words">{t('books.sync.lastError', { error: bookamat.error })}</p>
           )}

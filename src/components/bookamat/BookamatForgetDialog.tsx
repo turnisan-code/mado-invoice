@@ -42,7 +42,13 @@ export function BookamatForgetDialog({ mode, documentId, bookings, unsettled, cu
     setBusy(true)
     const res = await requestBookamatForget(documentId, mode === 'unsettled' ? 'unsettled' : { year: booking!.year, bookingId: booking!.booking_id })
     setBusy(false)
-    if (!res.ok) { toast.error(bookamatErrorMessage(t, res.payload)); return }
+    if (!res.ok) {
+      toast.error(bookamatErrorMessage(t, res.payload))
+      // Forgotten meanwhile (another window): the page shows the bookings as they are now.
+      const code = res.payload && typeof res.payload === 'object' ? (res.payload as { code?: unknown }).code : null
+      if (code === 'forget_not_found') { setChosen(null); onDone() }
+      return
+    }
     toast.success(mode === 'unsettled' ? t('payments.discarded') : t('payments.forgotten', { booking: label(booking!) }))
     setChosen(null)
     onDone()

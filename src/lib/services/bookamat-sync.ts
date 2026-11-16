@@ -131,7 +131,7 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
   const recorded = doc.bookamat_bookings ?? []
   const unsettled = Array.isArray(doc.bookamat_pending) && doc.bookamat_pending.length > 0
   if (!plan.bookings.length && !recorded.length && !unsettled) throw new BookamatError('nothing_to_book', 'No money received or paid back on this document')
-  const todo = unbookedPlan(plan.bookings, recorded)
+  const todo = unbookedPlan(plan, recorded)
   const external = search && todo.length
     ? await findExternalBookings(supabase, credentialsOf(settings), {
       number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: bookable,

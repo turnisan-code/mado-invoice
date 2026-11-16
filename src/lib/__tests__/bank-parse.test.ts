@@ -96,3 +96,38 @@ test('a windows-1252 export keeps its umlauts', () => {
   assert.equal(tx.counterparty, 'Jürgen Müller')
   assert.equal(tx.amount, 1234.56)
 })
+
+test('one broken first line does not turn the file into a generic CSV; it is named', () => {
+  const text = [`${IBAN};Gutschrift|TESTATWWXXX AT991234567890123456 Max Muster;15.06.2026;;kaputt;EUR`, credit, debit].join('\n')
+  assert.equal(isEasybank(text), true)
+  const parsed = parseStatement(text, noXml)
+  assert.equal(parsed.format, 'easybank')
+  assert.deepEqual(parsed.warnings, ['noAmount:1'])
+  assert.equal(parsed.transactions.length, 2)
+  // Another bank's export with a date first is not easybank.
+  assert.equal(isEasybank('15.06.2026;Gutschrift Max Muster;15.06.2026;15.06.2026;840,00;EUR\n16.06.2026;Abbuchung;16.06.2026;16.06.2026;-10,00;EUR'), false)
+})
+
+test('a payer whose IBAN has letters (GB, NL, IE) is read too', () => {
+  const uk = line('Gutschrift Auslandsüberweisung|TESTGB2LXXX GB29TEST60161331926819 Sample Studio Ltd|INVOICE PAYMENT', '04.08.2026', '04.08.2026', '258,00')
+  assert.equal(parseEasybank(uk).transactions[0].counterparty, 'Sample Studio Ltd')
+})
+
+test('SPESEN are read as an amount, whatever follows them or breaks the line', () => {
+  const fee = (text: string) => parseEasybank(line(text, '15.06.2026', '15.06.2026', '-101,50')).transactions[0].fee
+  assert.equal(fee('Karte MC/000000901|SPESEN: 1,50.|Musterladen'), 1.5)
+  assert.equal(fee('Karte MC/000000901|SPESEN: 1,50, Kurs 1,08|Musterladen'), 1.5)
+  assert.equal(fee('Karte MC/000000901|SPESEN: 1|,50|Musterladen'), 1.5)
+})
+
+test('ids come from the line as the bank wrote it', () => {
+  // The same credit text posted on two days (one with a Valutadatum of the first): two transactions.
+  const a = line('Gutschrift|TESTATWWXXX AT991234567890123456 Max Muster|RN-209906005', '30.06.2026', '30.06.2026', '100,00')
+  const b = line('Gutschrift|TESTATWWXXX AT991234567890123456 Max Muster|RN-209906005', '02.07.2026', '30.06.2026', '100,00')
+  const [first] = parseEasybank(a).transactions
+  const [second] = parseEasybank(b).transactions
+  assert.equal(first.date, second.date)
+  assert.notEqual(first.id, second.id)
+  // Overlapping exports: a line in both has one id.
+  assert.equal(parseEasybank([a, credit].join('\n')).transactions[0].id, parseEasybank([debit, a].join('\n')).transactions[1].id)
+})

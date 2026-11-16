@@ -38,6 +38,12 @@ type World = {
   status?: string
   // What the document has recorded already.
   bookings?: unknown[]
+  // The journal an earlier attempt left (documents.bookamat_pending).
+  pending?: unknown[]
+  // What Bookamat answers a search by title and date with.
+  titled?: unknown[]
+  // Booking ids some document has recorded (the lost-answer lookup skips them).
+  taken?: string[]
 }
 
 const saved = process.env.VERCEL_ENV
@@ -56,13 +62,14 @@ function setup(world: World) {
   const db = fakeSupabase((op: Op) => {
     log.push(`db ${op.table} ${op.action}${op.action === 'update' ? ` ${Object.keys(op.values as object).join(',')}` : ''}`)
     if (op.table === 'documents' && op.action === 'select') {
-      return { data: { ...doc, payments: world.payments ?? doc.payments, status: world.status ?? doc.status, bookamat_bookings: world.bookings ?? [] } }
+      return { data: { ...doc, payments: world.payments ?? doc.payments, status: world.status ?? doc.status, bookamat_bookings: world.bookings ?? [], bookamat_pending: world.pending ?? null } }
     }
     if (op.table === 'documents' && op.action === 'update' && op.returning) {
       const journal = 'bookamat_pending' in (op.values as object)
-      return { data: journal && world.claimLost ? [] : [{ bookamat_pending: null }] }
+      return { data: journal && world.claimLost ? [] : [{ bookamat_pending: journal ? null : world.pending ?? null }] }
     }
     if (op.table === 'bookamat_bookings' && op.action === 'select') {
+      if (op.columns === 'booking_id') return { data: (world.taken ?? []).map(booking_id => ({ booking_id })) }
       return { data: op.columns === 'year, booking_id' ? world.recordedElsewhere ?? [] : [] }
     }
     return { error: null }
@@ -83,6 +90,7 @@ function setup(world: World) {
       if (list === 'missing') return new Response('{"detail":"Nicht gefunden."}', { status: 404 })
       return json({ count: list.length, next: null, results: list })
     }
+    if (method === 'GET' && /^2026\/bookings\/\?title=/.test(path)) return json({ count: (world.titled ?? []).length, next: null, results: world.titled ?? [] })
     if (method === 'POST' && path === '2026/bookings/') {
       bodies.push(JSON.parse(String(init?.body)))
       return json({ id: 99000 + bodies.length }, 201)
@@ -244,5 +252,79 @@ test('a hand booking of one part payment stops the sync and names that payment',
   const res = await syncBookamatDocument(db.client, settings, DOC)
   assert.equal(!res.ok && res.code, 'external_duplicate')
   assert.deepEqual(!res.ok && res.candidates?.map(c => [c.bookingId, c.fit, c.paymentId]), [['71010', 'exact', P2]])
+  assert.deepEqual(posts(), [])
+})
+
+// ─── What an earlier attempt left behind ─────────────────────────────────────
+
+const longAgo = '2026-06-15T08:00:00Z'
+
+test('a journal entry from before bookings per payment, its booking recorded meanwhile, is not recorded again', async () => {
+  const db = setup({
+    status: 'paid',
+    bookings: [{ year: 2026, booking_id: '95074', amount: 840, kind: 'income', booked_on: '2026-06-15', pdf_attached_at: null, payment_id: P1 }],
+    pending: [{ year: 2026, kind: 'income', booking_id: '95074', amount: 840, date: '2026-06-15', title: 'RN-209906001 – Muster Client', at: longAgo }],
+  })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.deepEqual(inserts(db), [])
+  assert.deepEqual(posts(), [])
+})
+
+test('a lost answer is found among bookings no document has recorded, deleted ones aside', async () => {
+  const title = 'RN-209906001 (Teilzahlung 2) – Muster Client'
+  const db = setup({
+    payments: parts,
+    status: 'paid',
+    bookings: [{ year: 2026, booking_id: '99001', amount: 420, kind: 'income', booked_on: '2026-06-15', pdf_attached_at: null, payment_id: P1 }],
+    pending: [{ year: 2026, kind: 'income', payment_id: P2, booking_id: null, amount: 420, date: '2026-07-15', title, at: longAgo }],
+    titled: [
+      { id: 99001, status: '1', title, date: '2026-07-15' },
+      { id: 99007, status: '3', title, date: '2026-07-15' },
+      { id: 99009, status: '1', title, date: '2026-07-15' },
+    ],
+    taken: ['99001'],
+    years: { 2026: [income(99001, '2026-06-15', title, '420.00'), income(99009, '2026-07-15', title, '420.00')] },
+    recordedElsewhere: [{ year: 2026, booking_id: '99001' }],
+  })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.deepEqual(inserts(db).map(i => [i.booking_id, i.payment_id]), [['99009', P2]])
+  assert.deepEqual(posts(), [])
+})
+
+test('two bookings that may be the lost answer: only the owner can tell, nothing is booked', async () => {
+  const title = 'RN-209906001 – Muster Client'
+  const db = setup({
+    pending: [{ year: 2026, kind: 'income', payment_id: P1, booking_id: null, amount: 840, date: '2026-06-15', title, at: longAgo }],
+    titled: [{ id: 99003, status: '1', title, date: '2026-06-15' }, { id: 99004, status: '1', title, date: '2026-06-15' }],
+  })
+  const res = await syncBookamatDocument(db.client, settings, DOC)
+  assert.equal(!res.ok && res.code, 'unknown_outcome')
+  assert.deepEqual(inserts(db), [])
+  assert.deepEqual(posts(), [])
+})
+
+test('a booking handed back is recorded for the payment it names, and never guessed', async () => {
+  const named = setup({ payments: parts, status: 'paid', years: { 2026: [income(99010, '2026-07-15', 'RN-209906001 (Teilzahlung 1) – Muster Client', '420.00')] }, recordedElsewhere: [{ year: 2026, booking_id: '99010' }] })
+  await syncBookamatDocument(named.client, settings, DOC, { adopt: [{ year: 2026, kind: 'income', bookingId: '99010', paymentId: P2 }] })
+  assert.deepEqual(inserts(named)[0] && [inserts(named)[0].booking_id, inserts(named)[0].payment_id], ['99010', P2])
+  // From an older tab, without its payment, with two payments unbooked: not recorded on either.
+  log = []; bodies = []
+  const guess = setup({ payments: parts, status: 'paid', years: { 2026: [income(99011, '2026-07-15', 'RN-209906001 (Teilzahlung 2) – Muster Client', '420.00')] } })
+  const res = await syncBookamatDocument(guess.client, settings, DOC, { adopt: [{ year: 2026, kind: 'income', bookingId: '99011' }] })
+  assert.equal(inserts(guess).some(i => i.booking_id === '99011'), false)
+  // And the booking stops the sync as a possible duplicate instead of being booked again.
+  assert.equal(!res.ok && res.code, 'external_duplicate')
+  assert.deepEqual(posts(), [])
+})
+
+test('„trotzdem buchen“ counts for the payment it was said for', async () => {
+  const both = { years: { 2026: [income(71020, '2026-06-16', 'Überweisung Muster', '420.00')] }, payments: parts, status: 'paid' }
+  // Said for the second part: the first part's search still sees it.
+  const db = setup(both)
+  const res = await syncBookamatDocument(db.client, settings, DOC, { acknowledge: [{ year: 2026, bookingId: '71020', paymentId: P2 }] })
+  assert.equal(!res.ok && res.code, 'external_duplicate')
+  assert.deepEqual(!res.ok && res.candidates?.map(c => [c.bookingId, c.foundFor]), [['71020', P1]])
   assert.deepEqual(posts(), [])
 })

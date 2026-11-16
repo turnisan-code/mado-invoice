@@ -108,7 +108,7 @@ export function reconcile(input: {
     // What the sync would book now: money received on an issued invoice, part payments too, or
     // paid back on an issued credit note, in EUR.
     const offered = (d.currency ?? 'EUR') === 'EUR' && hasMoneyToBook({ type: d.type, number: d.number, status: d.status, payments: rows })
-    const todo = offered ? unbookedPlan(planBookings({ type: d.type, total, rows }).bookings, recorded) : []
+    const todo = offered ? unbookedPlan(planBookings({ type: d.type, total, rows }), recorded) : []
     const planned = todo.map(p => ({ year: p.year, amount: p.amount, paymentId: p.paymentId, date: p.date }))
     const bookedYears = recorded.map(r => r.year)
     const shown = todo.filter(x => years.has(x.year))

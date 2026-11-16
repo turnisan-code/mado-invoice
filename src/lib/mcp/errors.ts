@@ -113,6 +113,9 @@ function codedError(e: CodedError, t: TFn): ToolError {
       case 'MI033': return { code, message: t('projects.form.deleteBilled') }
       // The template of a recurring schedule (the tools name the schedule).
       case 'MI045': return { code, message: lifecycleErrorMessage({ code, message, details }, t), details: { ...(details ? { schedule_id: details } : {}), recurring_url: appUrl('/recurring') } }
+      // A booked payment: only the owner can delete the booking in Bookamat and forget it in Mado.
+      case 'MI048': return { code, message: t('mcp.errors.paymentBooked', { booking: details ? `#${details}` : '' }), ...(details ? { details: { booking_id: details } } : {}) }
+      case 'MI049': return { code, message: t('mcp.errors.paymentPending') }
       default: return { code, message: lifecycleErrorMessage({ code, message, details }, t), ...(details ? { details: { detail: details } } : {}) }
     }
   }

@@ -4,13 +4,16 @@
 --    migration keep payment_id null where no single payment can be named; such a row still covers
 --    the money of its year (src/lib/bookamat-client.ts, unbookedPlan).
 --  - One booking per payment; the old one-per-(document, year, kind) rule stays for the rows
---    without a payment.
+--    without a payment. A Bookamat booking is recorded once, on one document.
 --  - Backfill: a row gets its payment when the document has exactly one money row of that year
---    and kind, of the booked amount.
---  - payments_booking_guard (MI048): a payment a booking covers cannot be removed, nor its
---    document, date, amount, kind or method changed, until the booking is deleted in Bookamat and
---    forgotten in Mado („Buchung vergessen“ deletes the bookamat_bookings row).
--- Idempotent — safe to re-run.
+--    and kind, and the row books at most that payment (the old sync booked a year's money capped
+--    at what was due).
+--  - payments_booking_guard: a payment a booking covers cannot be removed, nor its document, date,
+--    amount, kind or method changed (MI048, the booking id in the detail), until the booking is
+--    deleted in Bookamat and forgotten in Mado („Buchung vergessen“ deletes the bookamat_bookings
+--    row); nor while a sync's booking of it is not settled (MI049: documents.bookamat_pending
+--    names it).
+-- Idempotent — safe to re-run (after the merge too: it links rows the old code wrote meanwhile).
 
 -- ─── Bookings per payment ────────────────────────────────────────────────────
 alter table bookamat_bookings add column if not exists payment_id uuid references payments(id);
@@ -20,6 +23,8 @@ create unique index if not exists bookamat_bookings_legacy_key
   on bookamat_bookings(document_id, year, kind) where payment_id is null;
 create unique index if not exists bookamat_bookings_payment_key
   on bookamat_bookings(payment_id) where payment_id is not null;
+create unique index if not exists bookamat_bookings_booking_key
+  on bookamat_bookings(year, booking_id);
 
 update bookamat_bookings b
 set payment_id = m.payment_id
@@ -36,7 +41,7 @@ from (
 ) m
 where b.id = m.row_id
   and m.n = 1
-  and abs(m.amount - abs(b.amount)) < 0.005
+  and abs(b.amount) <= m.amount + 0.005
   and not exists (select 1 from bookamat_bookings o where o.payment_id = m.payment_id);
 
 -- ─── Booked payments stay as they are ────────────────────────────────────────
@@ -66,8 +71,19 @@ begin
 
   if booking is not null then
     select number into num from documents where id = p.document_id;
-    raise exception using errcode = 'MI048',
+    raise exception using errcode = 'MI048', detail = booking,
       message = format('%s: this payment is booked in Bookamat (#%s). Delete the booking there and use "Buchung vergessen" first.', coalesce(num, 'This document'), booking);
+  end if;
+
+  if exists (
+    select 1 from documents d
+    where d.id = p.document_id
+      and jsonb_typeof(d.bookamat_pending) = 'array'
+      and d.bookamat_pending @> jsonb_build_array(jsonb_build_object('payment_id', p.id::text))
+  ) then
+    select number into num from documents where id = p.document_id;
+    raise exception using errcode = 'MI049',
+      message = format('%s: a Bookamat booking of this payment is not settled yet. Sync again, or check Bookamat and discard the open attempts first.', coalesce(num, 'This document'));
   end if;
 
   if tg_op = 'DELETE' then return old; end if;
