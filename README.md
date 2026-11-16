@@ -223,8 +223,8 @@ confirmed and the page reloads with them; payments already confirmed in another 
 device are said to be so. Meanwhile the automatic reminders skip the invoice and the automatic
 Bookamat sync skips the document, each with the reason
 in the cron log: removing a payment reopens a paid invoice or raises what is open, so the Mahnung
-would ask the client, unattended, for money it paid, and a booking takes its date, its amount per
-year and its account (bank or Kassa) from those rows, so Claude's payments would become Bookamat
+would ask the client, unattended, for money it paid, and a booking takes its date, its amount and
+its account (bank or Kassa) from those rows (one booking per payment), so Claude's payments would become Bookamat
 bookings no one approved (a write-off or Skonto alone makes an invoice paid, so bookable). No
 archive copy is made of such a document either (downloads, emails and the portal's PDF of one that
 has none yet fail with a notice), as the copy keeps the payments up to its issue date for good, and
@@ -234,7 +234,7 @@ overdue status and the payment details. Nor can Claude email such an invoice wit
 link to the invoice), as the e-invoice states the payments up to its issue date as already paid. A
 credit note Claude applied to its invoice (`apply_credit_note`) is held the same way as the
 invoice: the credit settles the credit note, and
-the Bookamat sync books a settled credit note's refunds. Where an earlier version of
+the Bookamat sync books a credit note's refunds (what it did not credit). Where an earlier version of
 `20261105_mcp_drafts.sql` was applied (no mark yet, or invoices only), the migration marks every
 invoice and credit note with a payment or refund recorded or removed from a Claude connection
 once; where any earlier version was applied, also every credit note applied from a Claude
@@ -328,7 +328,7 @@ does not. Both need `supabase/migrations/20261107_dunning.sql` (the trigger
 | Path | Schedule (UTC) | Does |
 |---|---|---|
 | `/api/cron/recurring` | `0 6 * * *` | Creates (and optionally issues) the invoices of due recurring schedules; a period that overlaps one an invoice of the schedule already covers is skipped and logged, so no day is billed twice (see below); a client changed from a Claude connection and not saved in Mado since gets drafts (checked again just before numbering, and no archive copy is made from it). |
-| `/api/cron/reminders` | `0 8 * * *` | Syncs paid invoices and refunds to Bookamat when automatic sync is on, marks past-due invoices overdue (and overdue ones whose due date now lies ahead sent again) and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
+| `/api/cron/reminders` | `0 8 * * *` | Books payments (part payments too, one booking each) and refunds in Bookamat when automatic sync is on — money from 1 January of last year on; a document with older money still to book is logged as held for the owner — marks past-due invoices overdue (and overdue ones whose due date now lies ahead sent again) and sends the reminders that are due; a client changed from a Claude connection and not saved in Mado since gets neither a booking nor a reminder, nor does an address Claude wrote get a reminder, nor an invoice or credit note whose payments or refunds Claude changed a booking or a reminder until the owner confirms them. |
 
 Vercel sends `Authorization: Bearer $CRON_SECRET`; a call without it gets 401.
 
@@ -357,9 +357,14 @@ creates nothing (“this period already exists”) rather than the period after 
 ## Checks
 
 ```bash
+npm test
 npx tsc --noEmit
 npm run lint
 ```
+
+`npm test` runs the tests in `src/**/__tests__/` with Node's own test runner (no extra dependency;
+`scripts/test-hooks.mjs` resolves `@/`). They use synthetic data only and a stand-in for the
+database and for Bookamat, so they never reach either.
 
 ## Deploy
 
