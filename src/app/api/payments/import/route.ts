@@ -172,8 +172,8 @@ export async function POST(req: Request) {
     // The rest as bank charges: exactly what this payment left open, on an invoice without VAT,
     // within isBankFee of what was due before it; never beside a Skonto.
     const bankFees = roundCents(row.bank_fees ?? 0)
-    if (bankFees > 0.005 && earlierFees.has(row.transaction_id)) duplicates++
-    else if (bankFees > 0.005) {
+    // Bank charges an earlier run recorded are left as they are (counted with their payment).
+    if (bankFees > 0.005 && !earlierFees.has(row.transaction_id)) {
       const rest = openOf(doc)
       const due = roundCents(rest + (recorded ?? paid))
       if (skonto > 0 || Math.abs(bankFees - rest) > 0.005 || !isBankFee(bankFees, due, doc.tax_treatment)) {

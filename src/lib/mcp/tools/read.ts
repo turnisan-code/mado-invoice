@@ -245,11 +245,6 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
   const { doc, items } = detail
   const supabase = ctx.supabase
   const payments = doc.payments ?? []
-  const bookamat = {
-    state: bookamatState({ type: doc.type, number: doc.number, status: doc.status, payments, bookamat_bookings: detail.bookings, bookamat_booking_id: doc.bookamat_booking_id, bookamat_error: doc.bookamat_error, total }),
-    error: doc.bookamat_error ?? null,
-    bookings: detail.bookings,
-  }
 
   let draft: { issue_problems: { code: string; message: string }[]; expected_number: string | null } | undefined
   if (!doc.number && doc.status === 'draft') {
@@ -308,6 +303,14 @@ async function documentExtras(ctx: ToolContext, detail: NonNullable<Awaited<Retu
       open: Math.max(0, roundCents(total - s.applied.reduce((a, r) => a + r.amount, 0) - s.refunds.reduce((a, r) => a + r.amount, 0))),
       settled: s.settled,
     }
+  }
+
+  // As the sync counts it: a credit note's refunds book what it did not credit to invoices.
+  const bookable = creditSettlement ? Math.max(0, roundCents(total - (creditSettlement.applied as { amount: number }[]).reduce((a, r) => a + r.amount, 0))) : total
+  const bookamat = {
+    state: bookamatState({ type: doc.type, number: doc.number, status: doc.status, payments, bookamat_bookings: detail.bookings, bookamat_booking_id: doc.bookamat_booking_id, bookamat_error: doc.bookamat_error, total: bookable }),
+    error: doc.bookamat_error ?? null,
+    bookings: detail.bookings,
   }
 
   return {

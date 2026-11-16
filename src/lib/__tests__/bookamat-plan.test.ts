@@ -144,12 +144,22 @@ test('an extra payment dated before a booked one is not booked on top of it', ()
     rows: [{ id: 'p2', date: '2026-06-20', amount: 840, kind: 'payment' }, { id: 'p1', date: '2026-06-01', amount: 840, kind: 'payment' }],
   })
   assert.deepEqual(unbookedPlan(earlier, [{ year: 2026, kind: 'income', amount: 840, payment_id: 'p2' }]), [])
-  // A real part payment dated before a booked part: booked after it, as the next part.
+  // A real part payment dated before a booked part: booked after it, numbered above it.
   const parts = planBookings({
     type: 'invoice', total: 300,
     rows: [{ id: 'p1', date: '2026-03-10', amount: 100, kind: 'payment' }, { id: 'p0', date: '2026-03-01', amount: 100, kind: 'payment' }],
   })
-  assert.deepEqual(unbookedPlan(parts, [{ year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }]).map(p => [p.paymentId, p.amount, p.before, p.part]), [['p0', 100, 100, 2]])
+  assert.deepEqual(unbookedPlan(parts, [{ year: 2026, kind: 'income', amount: 100, payment_id: 'p1' }]).map(p => [p.paymentId, p.amount, p.before, p.part]), [['p0', 100, 100, 3]])
+})
+
+test('a part booked again after „Buchung vergessen“ takes no number another booking carries', () => {
+  const plan = planBookings({
+    type: 'invoice', total: 1000,
+    rows: [{ id: 'p1', date: '2026-03-01', amount: 400, kind: 'payment' }, { id: 'p2', date: '2026-03-01', amount: 600, kind: 'payment' }],
+  })
+  assert.deepEqual(unbookedPlan(plan, []).map(p => p.part), [1, 2])
+  // Teilzahlung 1 forgotten, Teilzahlung 2 still booked.
+  assert.deepEqual(unbookedPlan(plan, [{ year: 2026, kind: 'income', amount: 600, payment_id: 'p2' }]).map(p => [p.paymentId, p.part]), [['p1', 3]])
 })
 
 test('an overpaid invoice has nothing left to book once its money is booked', () => {

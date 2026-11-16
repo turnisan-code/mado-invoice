@@ -132,6 +132,8 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
     : []
   // The booking that locks a refund (D7, MI048); unknown until the bookings are loaded.
   const heldBy = (r: Refund) => (bookamat ? bookingOfRow({ ...r, kind: 'refund' }, bookamat.bookings) : null)
+  // A refund whose booking a sync has not settled yet is locked as well (MI049).
+  const pendingOf = (r: Refund) => (bookamat?.pending ?? []).some(e => e.payment_id === r.id)
 
   async function apply() {
     setSaving(true)
@@ -195,8 +197,12 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
   }
 
   function bookAnyway() {
-    // Each for the payment it was found for: another payment's search still sees it.
-    const all = [...acknowledged, ...(duplicates ?? []).map(c => ({ year: c.year, bookingId: c.bookingId, paymentId: c.paymentId ?? c.foundFor ?? null }))]
+    // For the payment whose search found it and the one it fits, so neither asks again; another
+    // payment's search still sees it.
+    const all: BookingRef[] = [...acknowledged, ...(duplicates ?? []).flatMap((c): BookingRef[] => {
+      const payments = [...new Set([c.foundFor, c.paymentId].filter((p): p is string => !!p))]
+      return payments.length ? payments.map(paymentId => ({ year: c.year, bookingId: c.bookingId, paymentId })) : [{ year: c.year, bookingId: c.bookingId, paymentId: null }]
+    })]
     setAcknowledged(all)
     void syncToBookamat(all)
   }
@@ -292,6 +298,15 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
                   role="img"
                   aria-label={t('payments.bookedRow', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang), booking: t('books.sync.booking', { id: heldBy(r)!.booking_id, year: heldBy(r)!.year }) })}
                   title={t('payments.bookedLocked')}
+                  className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center text-neutral-400 dark:text-neutral-500"
+                >
+                  <Lock size={13} />
+                </span>
+              ) : pendingOf(r) ? (
+                <span
+                  role="img"
+                  aria-label={t('payments.pendingRow', { amount: formatMoney(r.amount, currency), date: formatDate(r.date, lang) })}
+                  title={t('lifecycle.errors.paymentPending')}
                   className="ml-auto h-11 w-11 -mr-2 sm:h-8 sm:w-8 sm:-mr-1 shrink-0 flex items-center justify-center text-neutral-400 dark:text-neutral-500"
                 >
                   <Lock size={13} />

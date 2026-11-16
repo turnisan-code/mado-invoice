@@ -3,7 +3,7 @@
 // A stand-in database and a stand-in Bookamat log every call in one sequence. Synthetic data only.
 import { afterEach, beforeEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
+import { autoSyncBookamat, resetBookamatSync, syncBookamatDocument, type BookamatSettings } from '@/lib/bookamat'
 import { fakeSupabase, type Op } from './fake-supabase'
 
 const DOC = '00000000-0000-4000-8000-000000000001'
@@ -327,4 +327,64 @@ test('„trotzdem buchen“ counts for the payment it was said for', async () =>
   assert.equal(!res.ok && res.code, 'external_duplicate')
   assert.deepEqual(!res.ok && res.candidates?.map(c => [c.bookingId, c.foundFor]), [['71020', P1]])
   assert.deepEqual(posts(), [])
+})
+
+// ─── The daily job, „Buchung vergessen“ ──────────────────────────────────────
+
+test('the daily job books money from 1 January of last year on; older money is left to the owner', async () => {
+  const OLD = '00000000-0000-4000-8000-000000000003'
+  const thisYear = Number(new Date().toISOString().slice(0, 4))
+  const old = { ...doc, id: OLD, number: 'RN-209901001', date: `${thisYear - 3}-03-01`, mcp_payments_at: null, payments: [{ id: P2, date: `${thisYear - 3}-03-20`, amount: 840, kind: 'payment', method: 'bank' }], bookamat_bookings: [] }
+  const recent = { ...doc, mcp_payments_at: null, payments: [{ id: P1, date: `${thisYear}-01-15`, amount: 840, kind: 'payment', method: 'bank' }], bookamat_bookings: [] }
+  const db = fakeSupabase((op: Op) => {
+    log.push(`db ${op.table} ${op.action}`)
+    if (op.table === 'documents' && op.action === 'select') return { data: op.single ? (op.filters.some(f => f[2] === OLD) ? old : recent) : [old, recent] }
+    if (op.table === 'documents' && op.action === 'update' && op.returning) return { data: [{ bookamat_pending: null }] }
+    if (op.table === 'bookamat_bookings' && op.action === 'select') return { data: [] }
+    return { error: null }
+  })
+  setup({})
+  const yearRead = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const path = String(input).replace('https://www.bookamat.com/api/v1/at/', '')
+    if ((init?.method ?? 'GET') === 'GET' && /^\d{4}\/bookings\/\?format=json&limit=100$/.test(path)) return new Response(JSON.stringify({ count: 0, next: null, results: [] }), { status: 200 })
+    if ((init?.method ?? 'GET') === 'POST' && /^\d{4}\/bookings\/$/.test(path)) { log.push(`http POST ${path}`); return new Response(JSON.stringify({ id: 99100 }), { status: 201 }) }
+    return yearRead(input, init)
+  }) as typeof fetch
+  const results = await autoSyncBookamat(db.client, { ...settings, bookamat_accounts_year: thisYear } as BookamatSettings, async () => { throw new Error('no PDF here') })
+  const byNumber = Object.fromEntries(results.map(r => [r.number, r]))
+  assert.match(String(byNumber['RN-209901001']?.held), /money from before/)
+  assert.equal(byNumber['RN-209906001']?.ok, true, JSON.stringify(results))
+  assert.deepEqual(log.filter(l => l.startsWith('http POST')), [`http POST ${thisYear}/bookings/`])
+})
+
+test('„Buchung vergessen“ forgets only what is recorded here and gone from Bookamat', async () => {
+  const creds = { username: 'synthetic', apiKey: 'not-a-key', country: 'at' }
+  const world = (row: unknown, answer: () => Response) => {
+    const db = fakeSupabase((op: Op) => {
+      log.push(`db ${op.table} ${op.action}`)
+      if (op.table === 'bookamat_bookings' && op.action === 'select') return { data: row }
+      if (op.table === 'bookamat_bookings' && op.action === 'delete') return { data: [{ id: 'r1' }] }
+      if (op.table === 'documents' && op.action === 'update' && op.returning) return { data: [{ id: DOC }] }
+      return { error: null }
+    })
+    globalThis.fetch = (async () => { log.push('http GET booking'); return answer() }) as typeof fetch
+    return db
+  }
+  const target = { booking: { year: 2026, bookingId: '99001' } }
+  // Not recorded here (forgotten in another window): said so, Bookamat not asked.
+  log = []
+  assert.equal((await resetBookamatSync(world(null, () => new Response('{}')).client, DOC, target, creds))?.code, 'forget_not_found')
+  assert.equal(log.includes('http GET booking'), false)
+  // Bookamat still has it: refused, nothing deleted.
+  log = []
+  const live = world({ id: 'r1' }, () => new Response(JSON.stringify({ id: 99001, status: '1' }), { status: 200 }))
+  assert.equal((await resetBookamatSync(live.client, DOC, target, creds))?.code, 'forget_still_booked')
+  assert.equal(live.ops.some(o => o.action === 'delete'), false)
+  // Deleted there (404, or status 3): forgotten.
+  for (const answer of [() => new Response('{"detail":"Nicht gefunden."}', { status: 404 }), () => new Response(JSON.stringify({ id: 99001, status: '3' }), { status: 200 })]) {
+    const gone = world({ id: 'r1' }, answer)
+    assert.equal(await resetBookamatSync(gone.client, DOC, target, creds), null)
+    assert.equal(gone.ops.some(o => o.table === 'bookamat_bookings' && o.action === 'delete'), true)
+  }
 })

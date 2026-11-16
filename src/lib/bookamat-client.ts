@@ -117,8 +117,11 @@ const partOf = (p: PlannedBooking, amount: number, before: number): PlannedBooki
 //   but dated before a booked one (a second transfer of the same invoice) is not booked on top; the
 //   rest goes in date order, latest money cut first.
 // - Each booking continues the VAT split where the bookings made stopped (`before`), so the
-//   bookings of a document add up per VAT rate to the cent, and parts are numbered after the
-//   bookings made, so no title is used twice.
+//   bookings of a document add up per VAT rate to the cent.
+// - A part's number is its payment's place among the document's money in date order, but always
+//   above the places of the payments booked already (and the count of bookings from before
+//   bookings per payment), so a payment booked later — backdated, or again after „Buchung
+//   vergessen“ — does not take a number an earlier booking of the document carries.
 export function unbookedPlan(plan: Pick<Plan, 'money' | 'due' | 'whole'>, booked: BookedLike[]): PlannedBooking[] {
   const out: PlannedBooking[] = []
   for (const kind of new Set(plan.money.map(p => p.kind))) {
@@ -151,7 +154,13 @@ export function unbookedPlan(plan: Pick<Plan, 'money' | 'due' | 'whole'>, booked
     }
     // Part payments: several bookings of the document's money, or one that does not cover it.
     const several = mine.length + todo.length > 1
-    todo.forEach((p, i) => { p.part = several || p.amount < plan.whole - 0.005 ? mine.length + i + 1 : null })
+    const place = new Map(plan.money.filter(x => x.kind === kind).map((x, i) => [x.paymentId, i + 1]))
+    let last = Math.max(mine.filter(b => !b.payment_id).length, ...mine.filter(b => b.payment_id).map(b => place.get(String(b.payment_id)) ?? 0))
+    for (const p of todo) {
+      if (!several && p.amount >= plan.whole - 0.005) { p.part = null; continue }
+      p.part = Math.max(place.get(p.paymentId) ?? 0, last + 1)
+      last = p.part
+    }
     out.push(...todo)
   }
   return out.sort((a, b) => a.date.localeCompare(b.date) || a.before - b.before)

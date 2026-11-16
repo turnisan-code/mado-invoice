@@ -52,8 +52,8 @@ export interface MatchRow {
   skontoAmount: number
   amountToRecord: number
   /** The invoice's number was found whole in the text: with its prefix (or, the prefix left out,
-   *  with the open amount or the client's name to go with it), not split by spaces, not a short
-   *  number. Only such a match is ticked for import without the owner's look (preTicked). */
+   *  from a payer with the client's name), not split by spaces, not a short number. Only such a
+   *  match is ticked for import without the owner's look (preTicked), and it takes the open amount. */
   exactNumber: boolean
   /** What a short payment on an invoice without VAT leaves open, offered as bank charges (never
    *  ticked by default); 0 when it does not apply. */
@@ -301,8 +301,9 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
       const fees = !skonto && isBankFee(short, balance, inv.taxTreatment) ? short : 0
       if (fees && overlap) { score += 30; reasons.push('short') }
 
-      // Whole: with its prefix, or the bare digits backed by the amount or the client's name.
-      const exact = !!hit && !hit.split && !matcher!.short && (hit.full || amountFits || overlap > 0)
+      // Whole: with its prefix, or the bare digits from the client (a quote's or the payer's own
+      // reference can share the digits, and the open amount says nothing about who pays).
+      const exact = !!hit && !hit.split && !matcher!.short && (hit.full || overlap > 0)
       if (!best || score > best.score) best = { inv, score, reasons, skonto, exact, fees: fees && (overlap || hit) ? fees : 0, overlap }
     }
     return best && best.score >= 50 ? best : null
@@ -352,8 +353,13 @@ export function matchTransactions(transactions: BankTransaction[], invoices: Ope
     const best = score(tx)
     const names = closedNamed(tx)
     // A credit naming a paid invoice is suggested for another one only by that one's own number.
-    if (best && (!names || best.reasons.includes('number'))) rows[i] = matchRow(tx, best, names)
-    else rows[i] = { ...baseOf(tx), status: 'unmatched', names }
+    if (best && (!names || best.reasons.includes('number'))) {
+      const row = matchRow(tx, best, names)
+      // One that is ticked after all (its invoice was not the best in the first pass) takes its
+      // open amount like any ticked one.
+      if (preTicked(row)) remaining.set(best.inv.id, roundCents(remaining.get(best.inv.id)! - tx.amount - best.skonto))
+      rows[i] = row
+    } else rows[i] = { ...baseOf(tx), status: 'unmatched', names }
   }
   return rows as MatchRow[]
 }

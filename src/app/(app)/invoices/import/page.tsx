@@ -15,9 +15,10 @@ export default async function BankImportPage() {
 
   const [{ data: docs }, { data: closedDocs }, { data: refs }, { data: settings }] = await Promise.all([
     supabase.from('documents').select(INVOICE_COLS).eq('type', 'invoice').in('status', ['sent', 'overdue']).not('number', 'is', null).order('date', { ascending: true }),
-    // Invoices no longer open: a credit naming one is most likely recorded already (D3: the same
-    // statement is imported here and in Bookmatic, and payments were entered by hand until now).
-    supabase.from('documents').select('id, number').eq('type', 'invoice').in('status', ['paid', 'cancelled']).not('number', 'is', null).order('date', { ascending: false }).limit(1000),
+    // Paid invoices: a credit naming one is most likely recorded already (D3: the same statement
+    // is imported here and in Bookmatic, and payments were entered by hand until now). A cancelled
+    // one is not among them: its client may pay it under the reissued invoice's amount.
+    supabase.from('documents').select('id, number').eq('type', 'invoice').eq('status', 'paid').not('number', 'is', null).order('date', { ascending: false }).limit(1000),
     supabase.from('payments').select('import_ref').not('import_ref', 'is', null),
     supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id, quote_prefix, credit_note_prefix').single(),
   ])

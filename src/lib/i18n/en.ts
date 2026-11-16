@@ -1820,6 +1820,7 @@ export const en = {
     syncNewDesc: 'Book the payments that are not in Bookamat yet? Each is booked on its own date.',
     bookedBadge: 'Bookamat #{id}',
     bookedRow: '{amount} from {date} is booked in Bookamat ({booking}) and cannot be removed',
+    pendingRow: '{amount} from {date} has a Bookamat booking that is not settled yet and cannot be removed',
     bookedLocked: 'Booked payments are locked: to change or remove one, delete its booking in Bookamat first, then choose “Forget booking” here.',
     forgetBooking: 'Forget booking…',
     forgetTitle: 'Forget a Bookamat booking?',

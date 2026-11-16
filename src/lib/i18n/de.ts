@@ -1819,6 +1819,7 @@ export const de = {
     syncNewDesc: 'Die Zahlungen buchen, die noch nicht in Bookamat sind? Jede wird an ihrem eigenen Tag gebucht.',
     bookedBadge: 'Bookamat #{id}',
     bookedRow: '{amount} vom {date} ist in Bookamat gebucht ({booking}) und kann nicht entfernt werden',
+    pendingRow: '{amount} vom {date} hat eine noch nicht abgeschlossene Bookamat-Buchung und kann nicht entfernt werden',
     bookedLocked: 'Gebuchte Zahlungen sind gesperrt: Um eine zu ändern oder zu entfernen, zuerst ihre Buchung in Bookamat löschen, dann hier „Buchung vergessen“ wählen.',
     forgetBooking: 'Buchung vergessen…',
     forgetTitle: 'Bookamat-Buchung vergessen?',

@@ -28,13 +28,13 @@ test('only a credit naming the number whole is ticked without a look', () => {
   assert.deepEqual([split.status, preTicked(split)], ['match', false])
 })
 
-test('the bare digits count as the number only with the open amount or the client\'s name', () => {
+test('the bare digits count as the number only from the client', () => {
   const inv = invoice({ id: 'i1', number: 'RN-209906003', total: 500, clientName: 'Erika Beispiel' })
-  // Someone else's 300 € quoting the same digits (their quote's number, say): suggested, not ticked.
-  const [other] = match([credit({ amount: 300, text: 'Anzahlung 209906003', counterparty: 'Max Muster' })], [inv])
-  assert.equal(preTicked(other), false)
-  // The open amount, or the client's own transfer, with the digits: ticked.
-  assert.equal(preTicked(match([credit({ amount: 500, text: 'Rechnung 209906003' })], [inv])[0]), true)
+  // Someone else quoting the same digits (their quote's number, say): suggested, not ticked —
+  // also when it is exactly the open amount.
+  assert.equal(preTicked(match([credit({ amount: 300, text: 'Anzahlung 209906003', counterparty: 'Max Muster' })], [inv])[0]), false)
+  assert.equal(preTicked(match([credit({ amount: 500, text: 'Anzahlung 209906003', counterparty: 'Max Muster' })], [inv])[0]), false)
+  // The client's own transfer with the digits: ticked.
   assert.equal(preTicked(match([credit({ amount: 250, text: '209906003 erste Hälfte', counterparty: 'Erika Beispiel' })], [inv])[0]), true)
 })
 

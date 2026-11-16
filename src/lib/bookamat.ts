@@ -866,6 +866,13 @@ export async function resetBookamatSync(
   creds?: BookamatCredentials | null,
 ): Promise<SyncFailure | null> {
   if (!bookamatWritesAllowed()) return fail(403, 'preview', PREVIEW_REFUSAL)
+  if ('booking' in target) {
+    const { year, bookingId } = target.booking
+    const { data: row, error: rowErr } = await supabase.from('bookamat_bookings').select('id')
+      .eq('document_id', documentId).eq('year', year).eq('booking_id', bookingId).maybeSingle()
+    if (rowErr) return fail(500, 'database', rowErr.message)
+    if (!row) return fail(404, 'forget_not_found', 'This booking is not recorded on the document')
+  }
   if ('booking' in target && creds) {
     const { year, bookingId } = target.booking
     try {
@@ -1070,7 +1077,8 @@ const heldSince = (row: ClaudeMarks | null, { paymentsAt }: ClaudeHold): string 
 
 // The daily cron step: invoices and credit notes with money no booking covers yet (a part payment
 // too, D2, whenever the document was issued), that failed before or have pending bookings, oldest
-// first, documents that failed before last; those with something from a Claude connection the owner has not confirmed
+// first, documents that failed before last. Unattended it books money from 1 January of last year
+// on only: a document with older money still to book is listed as held, for the owner to sync; those with something from a Claude connection the owner has not confirmed
 // (heldBack) are listed as held. It ends by `deadline`, so the cron keeps its time for the
 // reminders.
 export async function autoSyncBookamat(
@@ -1096,22 +1104,42 @@ export async function autoSyncBookamat(
 
   const t = settingsT(settings)
   type Candidate = StateInput & ClaudeMarks & Pick<SyncDoc, 'document_items' | 'discount_type' | 'discount_value' | 'tax_treatment'> & { id: string; number: string; bookamat_pending: unknown }
-  // What the money books against, as the sync counts it (a credit note's credits to invoices
-  // aside: an over-refund then only takes a place in the run, the sync books nothing more).
-  const withTotal = (d: Candidate) => ({ ...d, total: calcTotals(d.document_items ?? [], [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total })
-  const candidates = ((data ?? []) as unknown as Candidate[])
+  const docs = (data ?? []) as unknown as Candidate[]
+  // What the money books against, as the sync counts it (bookableTotal): a credit note's refunds
+  // book what it did not credit to invoices.
+  const creditNotes = docs.filter(d => d.type === 'credit_note').map(d => d.id)
+  const applied = new Map<string, number>()
+  if (creditNotes.length) {
+    const { data: credits, error: creditsErr } = await supabase.from('payments').select('credit_note_id, amount').eq('kind', 'credit').in('credit_note_id', creditNotes)
+    if (creditsErr) throw new Error(creditsErr.message)
+    for (const c of (credits ?? []) as { credit_note_id: string; amount: number }[]) applied.set(c.credit_note_id, roundCents((applied.get(c.credit_note_id) ?? 0) + Number(c.amount)))
+  }
+  const withTotal = (d: Candidate) => {
+    const gross = calcTotals(d.document_items ?? [], [], d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null, d.tax_treatment).total
+    return { ...d, total: roundCents(Math.max(0, gross - (applied.get(d.id) ?? 0))) }
+  }
+  // Money the cron leaves to the owner: still to book and dated before 1 January of last year.
+  const since = `${Number(today().slice(0, 4)) - 1}-01-01`
+  const oldMoney = (d: Candidate) => {
+    const doc = withTotal(d)
+    const rows = (doc.payments ?? []).filter(r => !!r.id && !!r.date).map(r => ({ id: r.id, date: r.date!, amount: r.amount, kind: r.kind ?? 'payment' }))
+    return unbookedPlan(planBookings({ type: doc.type === 'credit_note' ? 'credit_note' : 'invoice', total: doc.total, rows }), doc.bookamat_bookings ?? [])
+      .some(p => p.date < since)
+  }
+  const heldOld = (d: Candidate) => (oldMoney(d) ? `money from before ${since} still to book: sync it on the document in Mado` : null)
+  const candidates = docs
     .filter(d => parsePending(d.bookamat_pending).length > 0 || (!!d.bookamat_error && hasMoneyToBook(d)) || hasUnbookedMoney(withTotal(d)))
     .sort((a, b) => Number(!!a.bookamat_error) - Number(!!b.bookamat_error))
 
   // Held ones take no place in this run's limit; a pending booking of theirs waits as well.
   const results: AutoSyncResult[] = candidates.flatMap(d => {
-    const held = heldBack(d)
+    const held = heldBack(d) ?? heldOld(d)
     return held ? [{ number: d.number, ok: false, held }] : []
   })
   const resolver = new AccountResolver(credentialsOf(settings), settings.bookamat_accounts_year, deadline)
   // Each year of Bookamat is read once per run for the duplicate search.
   const bookingsCache: BookingsCache = new Map()
-  for (const doc of candidates.filter(d => !heldBack(d)).slice(0, limit)) {
+  for (const doc of candidates.filter(d => !heldBack(d) && !heldOld(d)).slice(0, limit)) {
     if (deadline - Date.now() < MIN_POST_MS) break
     // `unattended`: the marks are read again with the rows the bookings are made of, as Claude may
     // have changed the client or the payments since the list was read; the hand-back as well, as it
