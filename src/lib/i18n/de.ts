@@ -1951,6 +1951,7 @@ export const de = {
       unconfirmed: 'Bookamat hat die Buchung für {year} noch nicht bestätigt. In ein paar Minuten nochmal übertragen: Die Übertragung prüft zuerst Bookamat und bucht nie doppelt.',
       unknown_outcome: 'Unklar, ob die Buchung für {year} in Bookamat angekommen ist. In Bookamat {year} nach „{title}“ suchen und, falls vorhanden, löschen; danach die Übertragung zurücksetzen und neu übertragen.',
       not_synced: 'Dieser Beleg hat noch keine Bookamat-Buchung — zuerst übertragen.',
+      preview: 'Vorschau-Deployment: Hier wird nichts an Bookamat übertragen. Dafür die Live-App verwenden.',
     },
     zero: {
       rc: '0 % EU Reverse Charge (IG Leistungen)',

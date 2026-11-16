@@ -9,6 +9,7 @@ import { logEvent } from '@/lib/events'
 import { isUiLang, makeT, type TFn } from '@/lib/i18n'
 import { clientDisplayName } from '@/lib/utils/clients'
 import { archiveErrorMessage } from '@/lib/issued-pdf'
+import { bookamatWritesAllowed } from '@/lib/deployment'
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, hasMoneyToBook, planBookings, unbookedPlan,
   type AdoptBooking, type BookamatErrorCode, type BookingRow, type ErrorDetail, type MoneyRow, type PlannedBooking,
@@ -60,6 +61,7 @@ export type BookamatCredentials = { username: string; apiKey: string; country: s
 
 const BASE = 'https://www.bookamat.com/api/v1/'
 const TIMEOUT_MS = 20_000
+export const PREVIEW_REFUSAL = 'This deployment does not write to Bookamat: only production books'
 
 export function credentialsOf(settings: Pick<Settings, 'bookamat_username' | 'bookamat_api_key' | 'bookamat_country'>): BookamatCredentials {
   return { username: settings.bookamat_username ?? '', apiKey: settings.bookamat_api_key ?? '', country: settings.bookamat_country || 'at' }
@@ -82,6 +84,8 @@ export async function bookamatFetch<T = unknown>(
   init: { method?: 'GET' | 'POST'; body?: unknown; timeoutMs?: number; deadline?: number } = {},
 ): Promise<T> {
   if (!creds.username || !creds.apiKey) throw new BookamatError('not_configured', 'Bookamat is not configured', 400)
+  // Reads go anywhere; a write (a booking, an attachment) only from production.
+  if ((init.method ?? 'GET') !== 'GET' && !bookamatWritesAllowed()) throw new BookamatError('preview', PREVIEW_REFUSAL, 403)
   const base = yearBase(creds, year)
   const url = path.startsWith(base) ? path : `${base}${path}`
   if (!url.startsWith(base) || /[\s#]|\.\./.test(url.slice(base.length))) throw new BookamatError('bookamat', 'Invalid Bookamat path', 400)
@@ -276,6 +280,7 @@ const fail = (status: number, code: BookamatErrorCode, error: string, extra: Par
 function asFailure(err: unknown): SyncFailure {
   if (err instanceof BookamatError) {
     const status = err.code === 'db_write' || err.code === 'database' ? 500
+      : err.code === 'preview' ? 403
       : err.code === 'unconfirmed' || err.code === 'unknown_outcome' ? 409
       : err.code === 'timeout' || err.code === 'network' || (err.code === 'bookamat' && err.status >= 500) ? 502
       : 400
@@ -393,6 +398,8 @@ export async function syncBookamatDocument(
   } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   if (!isBookamatConfigured(settings)) return fail(400, 'not_configured', 'Bookamat is not fully configured')
+  // Before anything is read or written: a preview writes neither the claim nor the journal.
+  if (!bookamatWritesAllowed()) return fail(403, 'preview', PREVIEW_REFUSAL)
   const t = settingsT(settings)
   const adopt = opts.adopt ?? []
 
@@ -674,6 +681,7 @@ export async function attachPdf(
 // Bookamat, or the next sync books twice. It takes the claim like a sync, so it never pulls the
 // bookings from under a sync that is running.
 export async function resetBookamatSync(supabase: SupabaseClient, documentId: string): Promise<SyncFailure | null> {
+  if (!bookamatWritesAllowed()) return fail(403, 'preview', PREVIEW_REFUSAL)
   const claimedAt = new Date().toISOString()
   const cutoff = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
   const { data: claimed, error: claimErr } = await supabase.from('documents')
@@ -736,6 +744,11 @@ export async function autoSyncBookamat(
   loadPdf: LoadPdf,
   { limit = 10, deadline = Date.now() + 35_000 }: { limit?: number; deadline?: number } = {},
 ): Promise<AutoSyncResult[]> {
+  // Vercel runs crons on production only; a local or preview call books nothing.
+  if (!bookamatWritesAllowed()) {
+    console.warn('[cron/bookamat] skipped: this deployment does not write to Bookamat')
+    return []
+  }
   const year = Number(today().slice(0, 4))
   const since = `${year - 1}-01-01`
   const { data, error } = await supabase

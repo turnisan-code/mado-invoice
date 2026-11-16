@@ -11,11 +11,12 @@ import type { BookamatBooking, BookamatBookingKind, BookamatState } from '@/type
 // carries Bookamat's own message: why it refused a booking is the most useful thing to show.
 // 'held' only ever comes back to the cron (autoSyncBookamat), which logs it as held back, and to a
 // sync Claude prepared (src/lib/mcp/actions/bookamat-sync.ts), which words it as a refusal.
+// 'preview': this deployment does not write to Bookamat (src/lib/deployment.ts).
 export type BookamatErrorCode =
   | 'not_configured' | 'not_found' | 'not_issued' | 'not_eur' | 'not_settled' | 'nothing_to_book' | 'no_items'
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
-  | 'unknown_outcome' | 'held'
+  | 'unknown_outcome' | 'held' | 'preview'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -23,7 +24,7 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'not_configured', 'not_found', 'not_issued', 'not_eur', 'not_settled', 'nothing_to_book', 'no_items',
   'cash_account_missing', 'vat_account_missing', 'account_missing', 'accounts_stale', 'in_progress', 'auth',
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
-  'unknown_outcome',
+  'unknown_outcome', 'preview',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are

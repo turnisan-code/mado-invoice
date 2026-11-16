@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { apiError, databaseError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
-import { attachPdf, BOOKAMAT_SETTINGS_COLUMNS, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
+import { attachPdf, BOOKAMAT_SETTINGS_COLUMNS, PREVIEW_REFUSAL, recordBookamatError, settingsT, type BookamatSettings } from '@/lib/bookamat'
+import { bookamatWritesAllowed } from '@/lib/deployment'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import { getIssuedPdf } from '@/lib/pdf/snapshot'
 
@@ -18,6 +19,8 @@ export async function POST(req: NextRequest) {
   if (!body) return invalidJson()
   if (!isUuid(body.documentId)) return apiError(400, 'invalid_request', 'documentId is required')
   const documentId = body.documentId
+  // A preview neither uploads to Bookamat nor stores an error here.
+  if (!bookamatWritesAllowed()) return NextResponse.json({ error: PREVIEW_REFUSAL, code: 'preview' }, { status: 403 })
 
   const [{ data: settingsRow, error: settingsErr }, { data: bookings, error: bookingsErr }] = await Promise.all([
     supabase.from('settings').select(BOOKAMAT_SETTINGS_COLUMNS).single(),

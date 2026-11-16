@@ -27,7 +27,8 @@ import { NUMBER_TOKENS, counterHintText, formatDocumentNumber, hasYearToken, nex
 import { listIssuedNumbers } from '@/lib/services/queries'
 import type { DocumentType, EmailTemplateKind, TaxTreatment, Unit, VatRate } from '@/types'
 
-interface Props { settings: PublicSettings | null }
+// `bookamatWrites`: false on a preview deployment, which never writes to Bookamat (src/lib/deployment.ts).
+interface Props { settings: PublicSettings | null; bookamatWrites?: boolean }
 
 // ── Shared style tokens ────────────────────────────────────────────────────────
 const inp = fieldClass
@@ -182,7 +183,7 @@ function VarChips({ vars, onInsert }: { vars: { token: string; label: string }[]
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-export default function SettingsForm({ settings }: Props) {
+export default function SettingsForm({ settings, bookamatWrites = true }: Props) {
   const supabase = createClient()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -1999,6 +2000,9 @@ export default function SettingsForm({ settings }: Props) {
             title={t('settings.integrations.bookamat.title')}
             description={t('settings.integrations.bookamat.description')}
           >
+            {!bookamatWrites && (
+              <p role="status" className="mb-3 text-xs text-amber-700 dark:text-amber-400">{t('books.errors.preview')}</p>
+            )}
             {bookamatUsername && !bookamatAccounts && !editingBookamat ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap px-3 py-2.5 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30">

@@ -1952,6 +1952,7 @@ export const en = {
       unconfirmed: 'Bookamat has not confirmed the booking for {year} yet. Sync again in a few minutes: the sync checks Bookamat first and never books twice.',
       unknown_outcome: 'Unclear whether the booking for {year} reached Bookamat. Look for “{title}” in Bookamat {year}: if it is there, delete it; then reset the sync and sync again.',
       not_synced: 'This document has no Bookamat booking yet — sync it first.',
+      preview: 'This is a preview deployment: nothing is sent to Bookamat here. Use the live app.',
     },
     zero: {
       rc: '0 % EU reverse charge (IG Leistungen)',
