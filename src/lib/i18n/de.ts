@@ -1954,6 +1954,9 @@ export const de = {
       preview: 'Vorschau-Deployment: Hier wird nichts an Bookamat übertragen. Dafür die Live-App verwenden.',
       external_duplicate: 'Möglicherweise schon gebucht — Bookamat hat {bookings}. Nichts wurde gebucht. Auf dem Beleg: diese Buchung übernehmen oder trotzdem buchen.',
       duplicate_check_failed: 'Bookamat konnte nicht nach einer früheren Buchung dieses Geldes durchsucht werden, darum wurde nichts gebucht ({reason}). Bitte nochmal versuchen.',
+      adopt_not_found: 'Bookamat {year} hat keine Buchung #{id} (mehr).',
+      adopt_mismatch: 'Buchung #{id} bucht {booked}, für dieses Jahr sind aber noch {planned} zu buchen — sie ist nicht dieses Geld. In Bookamat prüfen.',
+      adopt_taken: 'Buchung #{id} ist in Mado schon bei einem anderen Beleg vermerkt.',
     },
     zero: {
       rc: '0 % EU Reverse Charge (IG Leistungen)',

@@ -21,6 +21,7 @@ export type BookamatErrorCode =
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
   | 'unknown_outcome' | 'held' | 'preview' | 'external_duplicate' | 'duplicate_check_failed'
+  | 'adopt_not_found' | 'adopt_mismatch' | 'adopt_taken'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -28,7 +29,8 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'not_configured', 'not_found', 'not_issued', 'not_eur', 'not_settled', 'nothing_to_book', 'no_items',
   'cash_account_missing', 'vat_account_missing', 'account_missing', 'accounts_stale', 'in_progress', 'auth',
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
-  'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed',
+  'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed', 'adopt_not_found', 'adopt_mismatch',
+  'adopt_taken',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are
@@ -181,7 +183,26 @@ export type SyncFailure = {
   candidates?: BookingCandidate[]
 }
 
+// A booking Bookamat already had, taken over for the document's money ('adopt' route).
+export type AdoptSuccess = {
+  ok: true
+  bookings: BookingRow[]
+  adopted: { year: number; bookingId: string; amount: number; date: string }
+}
+
 type SyncResponse = { ok: true; data: SyncSuccess } | { ok: false; payload: unknown }
+
+// „Das ist diese Zahlung — übernehmen“: records the booking for the document, books nothing.
+export async function requestBookamatAdopt(documentId: string, ref: BookingRef): Promise<{ ok: true; data: AdoptSuccess } | { ok: false; payload: unknown }> {
+  const res = await fetch('/api/bookamat/adopt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documentId, year: ref.year, bookingId: ref.bookingId }),
+  }).catch(() => null)
+  if (!res) return { ok: false, payload: { code: 'network', error: 'Network error' } }
+  const payload: unknown = await res.json().catch(() => ({}))
+  return res.ok ? { ok: true, data: payload as AdoptSuccess } : { ok: false, payload }
+}
 
 // Bookings this tab learned of but the database could not record, per document; the server keeps
 // them as well when it can write at all.

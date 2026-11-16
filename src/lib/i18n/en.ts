@@ -1955,6 +1955,9 @@ export const en = {
       preview: 'This is a preview deployment: nothing is sent to Bookamat here. Use the live app.',
       external_duplicate: 'Possibly booked already — Bookamat has {bookings}. Nothing was booked. On the document: take that booking over, or book anyway.',
       duplicate_check_failed: 'Bookamat could not be searched for an earlier booking of this money, so nothing was booked ({reason}). Try again.',
+      adopt_not_found: 'Bookamat {year} has no booking #{id} (any more).',
+      adopt_mismatch: 'Booking #{id} books {booked}, but {planned} is still to be booked for this year — it is not this money. Check it in Bookamat.',
+      adopt_taken: 'Booking #{id} is already recorded on another document in Mado.',
     },
     zero: {
       rc: '0 % EU reverse charge (IG Leistungen)',
