@@ -58,7 +58,9 @@ type World = {
   claimTaken?: boolean
   pending?: BankLinePending | null
   // The ledger: bookings Mado recorded, on documents or lines
-  recorded?: { year: number; booking_id: string; bank_line_id: string | null; document_id?: string | null }[]
+  recorded?: { year: number; booking_id: string; bank_line_id: string | null; document_id?: string | null; payment_id?: string | null }[]
+  // Invoice payments by id, with the statement line the import recorded them from
+  payments?: { id: string; import_ref: string | null }[]
   live?: 'deleted' | 'missing' | 'live'
   documents?: { type: 'invoice' | 'credit_note'; number: string }[]
   reopened?: boolean
@@ -101,6 +103,10 @@ function setup(world: World) {
     }
     if (op.table === 'booking_rules') return { data: RULES }
     if (op.table === 'documents') return { data: world.documents ?? [] }
+    if (op.table === 'payments' && hasFilter(op, 'in', 'id')) {
+      const ids = op.filters.find(f => f[0] === 'in' && f[1] === 'id')![2] as string[]
+      return { data: (world.payments ?? []).filter(p => ids.includes(p.id)) }
+    }
     if (op.table === 'payments') return { data: (world.invoicePaid ?? []).map(import_ref => ({ import_ref })) }
     if (op.table === 'bank_lines' && op.action === 'update' && op.returning) {
       const values = op.values as Record<string, unknown>
@@ -114,7 +120,11 @@ function setup(world: World) {
         const id = op.filters.find(f => f[0] === 'eq' && f[1] === 'bank_line_id')![2]
         return { data: recorded.filter(r => r.bank_line_id === id).map(r => ({ year: r.year, booking_id: r.booking_id, booked_on: '2026-06-15', amount: -700 })) }
       }
-      if (hasFilter(op, 'in', 'year')) return { data: recorded }
+      if (hasFilter(op, 'in', 'year')) {
+        // Page by page, as Supabase answers a range
+        const range = op.filters.find(f => f[0] === 'range') as [string, number, number] | undefined
+        return { data: range ? recorded.slice(range[1], range[2] + 1) : recorded }
+      }
       if (op.columns === 'booking_id') return { data: recorded.map(r => ({ booking_id: r.booking_id })) }
       return { data: recorded }
     }
@@ -235,6 +245,42 @@ test('money Mado booked for a document is that document\'s, whatever the owner s
   assert.equal(posted.length, 0)
 })
 
+test('the ledger is read page by page: a booking recorded on a line after the first thousand is still that line\'s', async () => {
+  const twin = (id: string) => bankLine(id, RENT_TEXT, -700)
+  const many = Array.from({ length: 1000 }, (_, i) => ({ year: 2026, booking_id: String(50000 + i), bank_line_id: null, document_id: `d${i}` }))
+  const db = setup({
+    lines: [{ ...twin('l-a'), status: 'booked' }, twin('l-b')], window: [booking(7001, 'Studio Miete 06/2026', '700.00')],
+    recorded: [...many, { year: 2026, booking_id: '7001', bank_line_id: 'l-a' }],
+  })
+  assert.equal((await book(db, ['l-b']))[0].status, 'booked')
+  assert.ok(db.ops.filter(o => o.table === 'bookamat_bookings' && hasFilter(o, 'in', 'year')).length >= 2)
+})
+
+test('a booking of a payment the statement import recorded is that line\'s money, never another line\'s', async () => {
+  const text = 'Gutschrift Überweisung|BKAUATWWXXX AT000000000000000003 Agentur Beispiel GmbH|Honorar'
+  const other = bankLine('l-b', text, 840, { review: { override: { revenue_account_id: '32', vat_account_id: '25', vat_percent: '20' } } })
+  // The twin the import recorded as an invoice's payment (its line sorts after the other)
+  const paid = bankLine('l-z', text, 840)
+  const world = (importRef: string | null): World => ({
+    lines: [other, paid], window: [booking(8001, 'RN-209906001 – Agentur Beispiel GmbH', '840.00', '1')], invoicePaid: ['key-l-z'],
+    recorded: [{ year: 2026, booking_id: '8001', bank_line_id: null, document_id: 'd1', payment_id: 'p1' }],
+    payments: [{ id: 'p1', import_ref: importRef }],
+  })
+  assert.equal((await book(setup(world('key-l-z')), ['l-b']))[0].status, 'booked')
+  // A payment recorded by hand: its booking may be this line's money, so the line is held
+  posted = []
+  assert.ok(isError((await book(setup(world(null)), ['l-b']))[0], 'mado_booking'))
+  assert.equal(posted.length, 0)
+})
+
+test('the journal keeps the amount posted: a split a cent or two off the bank\'s amount is looked up by its own total', async () => {
+  const split = { ...RENT, review: { lines: [{ label: 'Studio', amount_gross: 400.02, vat_percent: 20 }, { label: 'Lager', amount_gross: 300, vat_percent: 20 }] } }
+  const db = setup({ lines: [split] })
+  const [r] = await book(db, ['l-rent'])
+  assert.equal(r.status, 'booked')
+  assert.equal((journalWrites(db)[0] as BankLinePending).amount, -700.02)
+})
+
 test('what the engine refuses is not posted: an open rule choice, a line without accounts, one split line', async () => {
   const tel = bankLine('l-tel', 'Abbuchung Lastschrift|MUSTER TELEKOM Rechnung 0626', -49.9)
   const unknown = bankLine('l-shop', 'Bezahlung Karte MC/000000902|Musterladen Wien', -12.4)
@@ -296,6 +342,8 @@ test('a lost answer keeps the journal — a 502 too; the next attempt records wh
     const db = setup({ lines: [RENT], posts: [post] })
     const [lost] = await book(db, ['l-rent'])
     assert.ok(isError(lost, 'unconfirmed'), post)
+    // What Bookamat said is kept for the owner
+    if (post === '502') assert.ok(lost.status === 'error' && lost.error.includes('Bookamat 502') && lost.error.includes('Bad gateway'), lost.status === 'error' ? lost.error : '')
     assert.ok(!db.ops.some(o => o.table === 'bookamat_bookings' && o.action === 'insert'))
     assert.notEqual(journalWrites(db).at(-1), null, post)
   }

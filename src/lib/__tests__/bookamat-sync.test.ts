@@ -203,6 +203,7 @@ test('a 502 after the post keeps the journal: the booking may exist, the next sy
   const db = setup({ postAnswer: '502' })
   const res = await syncBookamatDocument(db.client, settings, DOC)
   assert.equal(!res.ok && res.code, 'unconfirmed')
+  assert.ok(!res.ok && res.error.includes('Bookamat 502: Bad gateway'), !res.ok ? res.error : '')
   // Written before the post, never taken back
   assert.equal(journalWrites().length, 1)
 })

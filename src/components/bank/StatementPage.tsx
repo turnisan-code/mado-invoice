@@ -17,6 +17,7 @@ import { apiErrorMessage } from '@/lib/api-errors'
 import { formatDate } from '@/lib/utils/document'
 import type { StatementView } from '@/lib/expenses/statement'
 import type { ExpenseOwner } from '@/lib/expenses/owner'
+import { MAX_LINES } from '@/lib/expenses/limits'
 
 interface Props {
   invoices: OpenInvoice[]
@@ -25,11 +26,13 @@ interface Props {
   otherPrefixes: string[]
   closedInvoices: { id: string; number: string }[]
   owner: ExpenseOwner
+  // Credits booked in Bookamat from this page, or being booked: no invoice payment any more
+  lineBookedRefs: string[]
 }
 
 type Tab = 'income' | 'expenses'
 
-export default function StatementPage({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices, owner }: Props) {
+export default function StatementPage({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices, owner, lineBookedRefs }: Props) {
   const { t, lang } = useT()
   const [statement, setStatement] = useState<LoadedStatement | null>(null)
   // A new file or none: a new epoch, never one an earlier answer had (a column mapping keeps it)
@@ -63,6 +66,8 @@ export default function StatementPage({ invoices, importedRefs, bookamatConfigur
       : null
     const request: Promise<{ view: StatementView | null } | { error: string }> = statement && !lines?.length
       ? Promise.resolve({ view: null })
+      : lines && lines.length > MAX_LINES
+      ? Promise.resolve({ error: t('statement.tooLarge', { count: lines.length, max: MAX_LINES }) })
       : fetch('/api/bank-lines', lines
         ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lines }) }
         : { method: 'GET' })
@@ -107,8 +112,13 @@ export default function StatementPage({ invoices, importedRefs, bookamatConfigur
     return { other, hints }
   }, [statement, invoices, importedRefs, otherPrefixes, closedInvoices, t])
 
+  // The „Einnahmen“ tab never offers a credit booked here as an invoice's payment
+  const allImported = useMemo(() => [...importedRefs, ...lineBookedRefs], [importedRefs, lineBookedRefs])
+
   const debits = (view?.lines ?? []).filter(v => v.kind === 'expense')
-  const otherCredits = (view?.lines ?? []).filter(v => v.kind === 'bank_income' && !v.invoicePayment && (credits?.other.has(v.line.line_key) ?? false))
+  // A credit booked here, or whose booking is open, stays here whatever the matcher says now
+  const otherCredits = (view?.lines ?? []).filter(v => v.kind === 'bank_income' && !v.invoicePayment
+    && ((credits?.other.has(v.line.line_key) ?? false) || v.line.status === 'booked' || !!v.line.bookamat_pending))
   const openDebits = debits.filter(v => v.line.status === 'open').length
   const easybank = !statement || statement.parsed.format === 'easybank'
 
@@ -160,7 +170,7 @@ export default function StatementPage({ invoices, importedRefs, bookamatConfigur
           onStatement={onStatement}
           onRemap={onRemap}
           invoices={invoices}
-          importedRefs={importedRefs}
+          importedRefs={allImported}
           bookamatConfigured={bookamatConfigured}
           otherPrefixes={otherPrefixes}
           closedInvoices={closedInvoices}

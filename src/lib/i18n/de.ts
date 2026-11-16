@@ -1852,6 +1852,7 @@ export const de = {
     invalidAmount: 'Gültigen Betrag eingeben.',
   },
   statement: {
+    tooLarge: 'Der Kontoauszug hat {count} Zeilen — höchstens {max} auf einmal. Bitte einen kürzeren Zeitraum exportieren.',
     switchMissing: 'Mado bucht Kontozeilen erst ab dem Umstellungsdatum — bis dahin bucht Bookmatic sie. Das Datum unter Buchungsregeln setzen:',
     switchFrom: 'Mado bucht Kontozeilen ab {date}; ältere bucht Bookmatic.',
     suggestedHint: 'Im Tab „Einnahmen“ als Zahlung auf {number} vorgeschlagen — dort zuordnen oder hier buchen, nicht beides',
@@ -1869,6 +1870,8 @@ export const de = {
     unreadable: '{count} Zeile(n) des Auszugs nicht lesbar — nicht übernommen',
   },
   expenses: {
+    invalid: 'Eine Eingabe ist so nicht speicherbar (Text zu lang, zu viele Zeilen oder ein ungültiger Wert) — korrigieren, sonst wird die Zeile nicht gebucht',
+    unsavedLines: 'Änderungen an {lines} nicht gespeichert — nichts gebucht. Bitte korrigieren oder nochmals versuchen.',
     unsaved: 'Nicht alle Änderungen sind gespeichert — nichts gebucht. Bitte nochmals versuchen.',
     chosen: 'gewählt',
     choiceOther: 'Andere passende Buchungsregel anwenden:',

@@ -61,10 +61,8 @@ export default async function StatementRoute() {
     }]
   })
   // The Skonto, fee and bank-charge rows of a transaction carry its id with a suffix; any of them marks it imported.
-  const importedRefs = [...new Set([
-    ...(refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')),
-    ...((lineBooked ?? []) as { line_key: string }[]).map(l => l.line_key),
-  ])]
+  const importedRefs = [...new Set((refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')))]
+  const lineBookedRefs = ((lineBooked ?? []) as { line_key: string }[]).map(l => l.line_key)
   const bookamatConfigured = !!settings && isBookamatConfigured(settings)
 
   return (
@@ -83,6 +81,7 @@ export default async function StatementRoute() {
         importedRefs={importedRefs}
         bookamatConfigured={bookamatConfigured}
         owner={expenseOwnerOf(settings ?? {})}
+        lineBookedRefs={lineBookedRefs}
         otherPrefixes={[settings?.quote_prefix ?? 'A', settings?.credit_note_prefix ?? 'G']}
         closedInvoices={[
           ...((closedDocs ?? []) as { id: string; number: string }[]),

@@ -3,6 +3,7 @@ import { apiError, invalidJson, readJsonObject, requireUser, settingsUnavailable
 import { expenseError } from '@/lib/expenses/api'
 import { LINE_SETTINGS_COLUMNS, parseLineInputs } from '@/lib/expenses/input'
 import { analyseStored, openLines, storeLines } from '@/lib/expenses/statement'
+import { MAX_LINES } from '@/lib/expenses/limits'
 import type { LineSettings } from '@/lib/expenses/book'
 
 export const maxDuration = 60
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
   const body = await readJsonObject(req)
   if (!body) return invalidJson()
   const inputs = parseLineInputs(body.lines)
-  if (!inputs) return apiError(400, 'invalid_request', 'lines must be 1–3000 statement lines, each { key, cells }')
+  if (!inputs) return apiError(400, 'invalid_request', `lines must be 1–${MAX_LINES} statement lines, each { key, cells }`)
   const { data: settings, error } = await supabase.from('settings').select(LINE_SETTINGS_COLUMNS).single()
   if (error || !settings) return settingsUnavailable(error)
   try {

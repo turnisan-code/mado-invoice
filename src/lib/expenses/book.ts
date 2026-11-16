@@ -20,7 +20,7 @@ import { vendorsOf } from './rules'
 import { lineBankAccountId } from './analyse'
 import { buildExpenseBookingPayload, buildIncomeBookingPayload, payloadContext } from './booking-payload'
 import { blockingProblems, problemText, validatePayload, type BookingProblem } from './booking-validation'
-import { assignDuplicates, bankRows, toBookingLite, type BookingLike, type BookingLite, type DuplicateMatch } from './duplicates'
+import { toBookingLite, type BookingLike, type DuplicateMatch } from './duplicates'
 import { bookingDateOf, payDay } from './booking-dates'
 import { adaptBookingPayload, safeAttachmentName } from './adapt-payload'
 import { attachmentName } from './attachment'
@@ -182,7 +182,7 @@ export async function bookLines(
   const results: LineResult[] = []
   for (const entry of wanted) {
     const line = byId.get(entry.id)
-    if (!line) { results.push(error(entry.id, 'Statement line not found', 'not_found')); continue }
+    if (!line) { results.push(error(entry.id, 'Kontozeile nicht gefunden', 'not_found')); continue }
     try {
       results.push(await bookLine(line, entry))
     } catch (err) {
@@ -235,19 +235,12 @@ export async function bookLines(
       return { result: error(line.id, `${LINE_TEXT.checkFailed} (${dup.failed ?? checked?.duplicate_check_failed ?? '—'})`, 'duplicate_check_failed') }
     }
     // A booking Mado recorded on a document is that document's money, whatever the owner said
-    const docBooking = documentMatch(tx, ek, payload)
+    const docBooking = dup.documentMatches.get(line.id)
     if (docBooking) return { result: error(line.id, LINE_TEXT.madoBooking(docBooking.title, docBooking.id), 'mado_booking') }
     const match = checked.duplicate_of ?? null
     if (match) return { result: { id: line.id, status: 'duplicate', existing: { id: match.id, title: match.title, date: match.date, total: match.total, certain: match.certain } } }
     if (blockingProblems(problems).length) return { result: error(line.id, notBooked(problems), 'problems', problems) }
     return { payload, problems, year, kind }
-  }
-
-  function documentMatch(tx: EasybankTransaction, ek: 'expense' | 'income', payload: BookingPayload): BookingLite | null {
-    if (!dup.documentIndex.length) return null
-    const { row } = bankRows(tx, { kind: ek, bookedDate: payload.date, title: payload.title })
-    const m = assignDuplicates([row], dup.documentIndex)[0]
-    return m ? dup.documentIndex.find(b => b.id === m.id) ?? null : null
   }
 
   async function bookLine(line: StoredLine, entry: BookEntry): Promise<LineResult> {
@@ -287,13 +280,13 @@ export async function bookLines(
     }
     const markBooked = async (bookingId: string) => {
       const { error: lineUpd } = await supabase.from('bank_lines').update({ status: 'booked', bookamat_pending: null, bookamat_claim: null }).eq('id', line.id)
-      if (lineUpd) throw new BookamatError('db_write', `Booked in Bookamat (#${bookingId}) and recorded, but the line is not marked: ${lineUpd.message}`)
+      if (lineUpd) throw new BookamatError('db_write', `In Bookamat gebucht (#${bookingId}) und vermerkt, die Zeile aber nicht als gebucht markiert (${lineUpd.message}) — erneut buchen markiert sie`)
     }
     const record = async (pending: BankLinePending, bookingId: string): Promise<void> => {
       const { error: insertErr } = await supabase.from('bookamat_bookings').insert({
         bank_line_id: line.id, year: pending.year, booking_id: bookingId, amount: pending.amount, kind: pending.kind, booked_on: pending.date,
       })
-      if (insertErr && insertErr.code !== '23505') throw new BookamatError('db_write', `Booked in Bookamat (#${bookingId}) but not recorded in Mado: ${insertErr.message}`)
+      if (insertErr && insertErr.code !== '23505') throw new BookamatError('db_write', `In Bookamat gebucht (#${bookingId}), in Mado aber nicht vermerkt (${insertErr.message}) — erneut buchen vermerkt sie`)
       if (insertErr) {
         // Recorded already: on this line it is done, on anything else it is not this line's booking
         const { data: same, error: sameErr } = await supabase.from('bookamat_bookings').select('bank_line_id').eq('year', pending.year).eq('booking_id', bookingId)
@@ -327,7 +320,7 @@ export async function bookLines(
           return booked(found, pending, { recovered: true })
         }
         if (Date.now() - Date.parse(pending.at) < UNCONFIRMED_MS) return error(line.id, LINE_TEXT.unconfirmed, 'unconfirmed')
-        if (!await saveJournal(null)) throw new BookamatError('in_progress', 'Another booking of this line took over meanwhile', 409)
+        if (!await saveJournal(null)) throw new BookamatError('in_progress', LINE_TEXT.inProgress, 409)
       }
 
       // 3. The checks
@@ -341,11 +334,14 @@ export async function bookLines(
       // Only a real alias (UK → GB), not upper-casing, is worth a line (as Bookmatic)
       if (country !== (payload.country || '').trim().toUpperCase()) corrections.push(`Land „${payload.country}“ → „${country}“`)
       payload = { ...payload, country }
+      // The journal keeps what is posted (a split may be a cent or two off the bank's amount):
+      // a lost answer is looked up by that
+      const total = Math.round(payload.amounts.reduce((s, a) => s + (Number(a.amount) || 0), 0) * 100) / 100
       const journal: BankLinePending = {
-        year: prep.year, kind: prep.kind, booking_id: null, amount: Number(line.amount), date: payload.date, title: payload.title, at: new Date().toISOString(),
+        year: prep.year, kind: prep.kind, booking_id: null, amount: prep.kind === 'expense' ? -total : total, date: payload.date, title: payload.title, at: new Date().toISOString(),
       }
       if (opts.deadline && opts.deadline - Date.now() < MIN_POST_MS) return error(line.id, LINE_TEXT.noTime, 'timeout')
-      if (!await saveJournal(journal)) throw new BookamatError('in_progress', 'Another booking of this line took over meanwhile; nothing was sent to Bookamat', 409)
+      if (!await saveJournal(journal)) throw new BookamatError('in_progress', `${LINE_TEXT.inProgress} — nichts gesendet`, 409)
 
       let bookingId: string | null = null
       for (let attempt = 1; !bookingId; attempt++) {
@@ -357,7 +353,7 @@ export async function bookLines(
         try {
           const answer = await bookamatFetch<{ id?: unknown }>(creds, prep.year, 'bookings/', { method: 'POST', body: payload, deadline: opts.deadline })
           bookingId = validId(answer?.id)
-          if (!bookingId) throw new BookamatError('unconfirmed', 'Bookamat accepted the booking but returned no id', 0)
+          if (!bookingId) throw new BookamatError('unconfirmed', 'Bookamat hat die Buchung angenommen, aber keine Nummer genannt', 0)
         } catch (err) {
           if (err instanceof BookamatError && err.status === 409) {
             bookingId = conflictBookingId(err.body)
@@ -366,7 +362,9 @@ export async function bookLines(
           // No answer, Bookamat failing, or an answer without the booking: it may exist. The
           // journal stays; the next attempt looks it up first.
           if (err instanceof BookamatError && (err.code === 'timeout' || err.code === 'network' || err.code === 'unconfirmed' || err.status === 409 || err.status >= 500)) {
-            throw new BookamatError('unconfirmed', LINE_TEXT.unconfirmed, 0)
+            // Bookamat's own words go with it: a failure that lasts is seen as what it is
+            const said = err.status ? ` (Bookamat ${err.status}: ${err.message.slice(0, 200)})` : ''
+            throw new BookamatError('unconfirmed', `${LINE_TEXT.unconfirmed}${said}`, 0)
           }
           // Refused (a 4xx books nothing): healed where Bookamat names the cause, every correction
           // said; else the journal goes and the refusal is the answer

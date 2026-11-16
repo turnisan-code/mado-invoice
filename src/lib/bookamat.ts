@@ -764,7 +764,8 @@ export async function syncBookamatDocument(
             // No answer, Bookamat failing (a 5xx may come after the booking was made), or a conflict
             // that names no booking: it may exist; the next sync looks it up first
             if (err instanceof BookamatError && (err.code === 'timeout' || err.code === 'network' || err.status === 409 || err.status >= 500)) {
-              throw new BookamatError('unconfirmed', `Bookamat did not confirm the ${p.year} booking; the next sync checks Bookamat before booking again`, 0, { year: p.year })
+              const said = err.status ? ` (Bookamat ${err.status}: ${err.message.slice(0, 200)})` : ''
+              throw new BookamatError('unconfirmed', `Bookamat did not confirm the ${p.year} booking${said}; the next sync checks Bookamat before booking again`, 0, { year: p.year })
             }
             // Refused: nothing was booked.
             journal.pop()

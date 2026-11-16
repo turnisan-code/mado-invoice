@@ -1853,6 +1853,7 @@ export const en = {
     invalidAmount: 'Enter a valid amount.',
   },
   statement: {
+    tooLarge: 'The statement has {count} lines — at most {max} at once. Please export a shorter period.',
     switchMissing: 'Mado books statement lines only from the switch-over date — until then Bookmatic books them. Set the date under booking rules:',
     switchFrom: 'Mado books statement lines from {date}; Bookmatic books older ones.',
     suggestedHint: 'Suggested in “Income” as a payment of {number} — assign it there or book it here, not both',
@@ -1870,6 +1871,8 @@ export const en = {
     unreadable: '{count} line(s) of the statement could not be read — not taken over',
   },
   expenses: {
+    invalid: 'An entry cannot be saved like this (text too long, too many lines or an invalid value) — correct it, or the line is not booked',
+    unsavedLines: 'Changes to {lines} not saved — nothing booked. Please correct them or try again.',
     unsaved: 'Not every change is saved — nothing was booked. Please try again.',
     chosen: 'chosen',
     choiceOther: 'Apply another fitting booking rule:',

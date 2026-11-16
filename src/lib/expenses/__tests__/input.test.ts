@@ -4,6 +4,7 @@ import './owner'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseBookEntries, parseLineInputs, parseReview, parseRule, receiptPathOk } from '../input'
+import { MAX_LINES } from '../limits'
 import { lineRecord } from '../statement'
 
 const OWN = 'AT611904300234573201'
@@ -17,8 +18,11 @@ test('a stored line comes from its cells: the signed amount, the Buchungsdatum, 
   assert.equal(lineRecord({ key: 'k3', cells: [OWN, 'kaputt', '31.06.2026', '', '10,00', 'EUR'] }), null)
 })
 
-test('the lines a page sends: 1–3000, each a key and 5–12 cells of text', () => {
-  assert.deepEqual(parseLineInputs([{ key: 'k1', cells: [OWN, 'x', '15.06.2026', '15.06.2026', '-1,00', 'EUR'] }])?.length, 1)
+test('the lines a page sends: 1–1500, each a key and 5–12 cells of text', () => {
+  const line = (i: number) => ({ key: `k${i}`, cells: [OWN, 'x', '15.06.2026', '15.06.2026', '-1,00', 'EUR'] })
+  assert.deepEqual(parseLineInputs([line(1)])?.length, 1)
+  assert.equal(parseLineInputs(Array.from({ length: MAX_LINES }, (_, i) => line(i)))?.length, MAX_LINES)
+  assert.equal(parseLineInputs(Array.from({ length: MAX_LINES + 1 }, (_, i) => line(i))), null)
   assert.equal(parseLineInputs([]), null)
   assert.equal(parseLineInputs([{ key: '', cells: [OWN, 'x', '15.06.2026', '15.06.2026', '-1,00'] }]), null)
   assert.equal(parseLineInputs([{ key: 'k', cells: [OWN, 1, '15.06.2026', '15.06.2026', '-1,00'] }]), null)
@@ -66,11 +70,13 @@ test('a Buchungsregel: its name, its texts, its rates and its range', () => {
   assert.equal(parseRule({ ...ok, skip_receipt: 'yes' }), null)
 })
 
-test('the lines a booking takes: 1–25 ids, each with the fingerprint the page showed or none', () => {
+test('the lines a booking takes: 1–25 ids, each with the fingerprint of the booking the page showed', () => {
   const id = '0b9c8b1e-6c1f-4b8e-9d2a-1f2e3d4c5b6a'
-  assert.deepEqual(parseBookEntries([{ id, fingerprint: '0a1b2c3d' }, { id }]), [{ id, fingerprint: '0a1b2c3d' }, { id, fingerprint: null }])
+  assert.deepEqual(parseBookEntries([{ id, fingerprint: '0a1b2c3d' }]), [{ id, fingerprint: '0a1b2c3d' }])
+  assert.equal(parseBookEntries([{ id }]), null)
   assert.equal(parseBookEntries([{ id, fingerprint: 'XYZ' }]), null)
-  assert.equal(parseBookEntries([{ id: 'l1' }]), null)
+  assert.equal(parseBookEntries([{ id, fingerprint: '0A1B2C3D' }]), null)
+  assert.equal(parseBookEntries([{ id: 'l1', fingerprint: '0a1b2c3d' }]), null)
   assert.equal(parseBookEntries([]), null)
-  assert.equal(parseBookEntries(Array.from({ length: 26 }, () => ({ id }))), null)
+  assert.equal(parseBookEntries(Array.from({ length: 26 }, () => ({ id, fingerprint: '0a1b2c3d' }))), null)
 })

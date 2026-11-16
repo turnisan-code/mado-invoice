@@ -13,14 +13,12 @@ import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, type L
 import { LINE_TEXT, type LineSettings } from './book'
 import { transactionOfCells } from './csv-parser'
 import { bookingDateOf } from './booking-dates'
-import { assignDuplicates, bankRows } from './duplicates'
 import { normIban } from './own-transfer'
 import { expenseOwnerOf, setExpenseOwner } from './owner'
 import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import type { BookamatAccounts, MatchedIncomeTransaction, MatchedTransaction } from './types'
 
-// One answer of the page stays well under the platform's response size
-export const MAX_LINES = 1500
+export { MAX_LINES } from './limits'
 const CHUNK = 200
 
 export type LineInput = { key: string; cells: string[] }
@@ -165,12 +163,8 @@ export async function analyseStored(
       const row = dup.rows.get(b.line.id) ?? b.built.row
       // A booking of this payment that Mado recorded on a document: that document's money,
       // whatever the owner said about it
-      let madoDocument = b.madoDocument
-      if (!madoDocument && b.line.status === 'open' && dup.documentIndex.length) {
-        const { row: pay } = bankRows(b.tx, { kind: engineKind(b.kind), bookedDate: bookingDateOf(b.tx, b.line.review?.override, engineKind(b.kind)), title: row.title })
-        const m = assignDuplicates([pay], dup.documentIndex)[0]
-        if (m) madoDocument = LINE_TEXT.madoBooking(m.title, m.id)
-      }
+      const docBooking = b.line.status === 'open' ? dup.documentMatches.get(b.line.id) : undefined
+      const madoDocument = b.madoDocument ?? (docBooking ? LINE_TEXT.madoBooking(docBooking.title, docBooking.id) : null)
       return {
         line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key), madoDocument,
         gate: b.line.status === 'open' ? gateOf(b) : null, row, booking: bookingOf.get(b.line.id) ?? null,

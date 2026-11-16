@@ -33,6 +33,7 @@ import { isOpenRuleChoice, ownerSetRuleFields, pickRule } from '@/lib/expenses/r
 import { statementBankAccountId } from '@/lib/expenses/bank-account'
 import { payloadFingerprint } from '@/lib/expenses/fingerprint'
 import { setExpenseOwner, type ExpenseOwner } from '@/lib/expenses/owner'
+import { parseReview } from '@/lib/expenses/review'
 
 interface Props {
   kind: 'expense' | 'bank_income'
@@ -122,14 +123,16 @@ function useAutosave(save: (id: string, review: BankLineReview) => Promise<boole
     timers.current[id] = setTimeout(() => { delete timers.current[id]; void run(id) }, SAVE_DELAY_MS)
   }, [run])
 
-  const flush = useCallback(async (): Promise<boolean> => {
-    for (const [id, timer] of Object.entries(timers.current)) {
-      clearTimeout(timer)
+  // The given lines' changes saved now: the ids whose latest change could not be saved
+  const flush = useCallback(async (ids: readonly string[]): Promise<string[]> => {
+    for (const id of ids) {
+      if (!timers.current[id]) continue
+      clearTimeout(timers.current[id])
       delete timers.current[id]
     }
-    const dirty = Object.keys(version.current).filter(id => (saved.current[id] ?? 0) < (version.current[id] ?? 0))
+    const dirty = ids.filter(id => (saved.current[id] ?? 0) < (version.current[id] ?? 0))
     await Promise.all(dirty.map(run))
-    return Object.keys(version.current).every(id => (saved.current[id] ?? 0) >= (version.current[id] ?? 0))
+    return ids.filter(id => (saved.current[id] ?? 0) < (version.current[id] ?? 0))
   }, [run])
 
   useEffect(() => {
@@ -170,7 +173,12 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
 
   // Each line's booking as it would be posted, and what stops it
   const prepared = useMemo(() => lines.map(v => {
-    const review = reviewOf(v)
+    const typed = reviewOf(v)
+    // What the server will store of it: the preview (and its fingerprint) is built from that; an
+    // edit it would refuse is said on the line and keeps the line from being booked
+    const stored = parseReview(typed)
+    const invalid = !stored
+    const review = stored ?? typed
     const row = withReview(v, review)
     const tx = row.transaction
     const engineKind = v.kind === 'expense' ? 'expense' : 'income'
@@ -204,10 +212,11 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     else if (status === 'needs_review') pill = 'review'
     else pill = 'unknown'
     const blocking = blockingProblems(problems).length > 0
-    // A line with an open attempt can be booked again: the server settles the attempt first
-    const bookable = v.line.status === 'open' && !v.madoDocument && !refund && !v.gate
-      && (pendingLine || (!row.duplicate_check_failed && !dup && !choice && !blocking))
-    return { v, review, row, year, lists, payload, problems, dup, refund, choice, pill, bookable, pendingLine, ticked: pill === 'ready' && bookable }
+    // A line with an open attempt can be booked again whatever it shows now: the server settles
+    // the attempt before anything else
+    const bookable = v.line.status === 'open'
+      && (pendingLine || (!v.madoDocument && !refund && !v.gate && !invalid && !row.duplicate_check_failed && !dup && !choice && !blocking))
+    return { v, typed, review, row, year, lists, payload, problems, dup, refund, choice, pill, bookable, pendingLine, invalid, ticked: pill === 'ready' && bookable }
   }), [lines, reviewOf, accounts, accountsErrors, t])
 
   type Prepared = (typeof prepared)[number]
@@ -233,17 +242,19 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
 
   const setReview = (id: string, review: BankLineReview) => {
     setReviews(r => ({ ...r, [id]: review }))
-    autosave.queue(id, review)
+    const stored = parseReview(review)
+    if (stored) autosave.queue(id, stored)
   }
 
   const setOverride = (p: Prepared, key: string, value: string | null) => {
-    const override = { ...(p.review.override ?? {}) }
+    const override = { ...(p.typed.override ?? {}) }
     if (value === null) delete override[key]
     else override[key] = value
-    setReview(p.v.line.id, { ...p.review, override })
-    // A Buchungsdatum in another year: that year's accounts are read with the lines again
-    if (key === 'date' && value && Number(value.slice(0, 4)) !== p.year && !accounts[Number(value.slice(0, 4))]) {
-      void autosave.flush().then(ok => (ok ? onChanged() : undefined))
+    setReview(p.v.line.id, { ...p.typed, override })
+    // A Buchungsdatum in another year: the line is analysed again with that year's rules and
+    // accounts
+    if (key === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(value ?? '') && Number(value!.slice(0, 4)) !== p.year) {
+      void autosave.flush([p.v.line.id]).then(left => (left.length ? undefined : onChanged()))
     }
   }
 
@@ -261,16 +272,23 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     return false
   }
 
-  // Every change saved first; a change that cannot be saved stops what was asked
-  async function saved(): Promise<boolean> {
-    if (await autosave.flush()) return true
-    toast.error(t('expenses.unsaved'))
+  // The lines acted on saved first; a change that cannot be saved stops what was asked, and the
+  // line is named
+  async function saved(ids: readonly string[]): Promise<boolean> {
+    const invalid = prepared.filter(p => ids.includes(p.v.line.id) && p.invalid)
+    const left = await autosave.flush(ids.filter(id => !invalid.some(p => p.v.line.id === id)))
+    const names = [...invalid.map(p => p.v.line.id), ...left].map(id => {
+      const p = prepared.find(x => x.v.line.id === id)
+      return p ? `„${p.payload.title || p.row.transaction.counterparty || '—'}“` : id
+    })
+    if (!names.length) return true
+    toast.error(t('expenses.unsavedLines', { lines: names.join(', ') }))
     return false
   }
 
   async function pickRuleFor(p: Prepared, ruleId: string) {
     setBusy(true)
-    if (await saved()) {
+    if (await saved([p.v.line.id])) {
       const review = { ...p.review, rule_id: ruleId }
       setReviews(r => ({ ...r, [p.v.line.id]: review }))
       if (await patch(p.v.line.id, { review })) await onChanged()
@@ -280,7 +298,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
 
   async function setStatus(p: Prepared, status: 'open' | 'skipped') {
     setBusy(true)
-    if (await saved() && await patch(p.v.line.id, { status })) await onChanged()
+    if (await saved([p.v.line.id]) && await patch(p.v.line.id, { status })) await onChanged()
     setBusy(false)
   }
 
@@ -298,14 +316,14 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     const path = `${p.v.line.id}/${safeName(file.name)}`
     const { error } = await createClient().storage.from('receipts').upload(path, file, { upsert: true, contentType: file.type || undefined })
     if (error) toast.error(t('expenses.receiptFailed', { error: error.message }))
-    else if (await saved() && await patch(p.v.line.id, { receipt: { path, name: file.name } })) await onChanged()
+    else if (await saved([p.v.line.id]) && await patch(p.v.line.id, { receipt: { path, name: file.name } })) await onChanged()
     setBusy(false)
   }
 
   async function removeReceipt(p: Prepared) {
     if (!p.v.line.receipt_path) return
     setBusy(true)
-    if (await saved() && await patch(p.v.line.id, { receipt: null })) {
+    if (await saved([p.v.line.id]) && await patch(p.v.line.id, { receipt: null })) {
       await createClient().storage.from('receipts').remove([p.v.line.receipt_path])
       await onChanged()
     }
@@ -319,7 +337,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     const labels = Object.fromEntries(now.map(p => [p.v.line.id, `${formatDate(p.v.line.booked_on, lang)} · ${money(Number(p.v.line.amount))} · ${p.payload.title || p.row.transaction.counterparty || '—'}`]))
     setBusy(true)
     setResults(null)
-    if (!await saved()) { setBusy(false); return }
+    if (!await saved(now.map(p => p.v.line.id))) { setBusy(false); return }
     const entries = now.map(p => ({ id: p.v.line.id, fingerprint: payloadFingerprint(p.payload) }))
     const items: LineResult[] = []
     for (let i = 0; i < entries.length; i += BOOK_CHUNK) {
@@ -419,7 +437,8 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
   }
 
   function editor(p: Prepared) {
-    const { v, review, row, lists, payload } = p
+    const { v, row, lists, payload } = p
+    const review = p.typed
     const ov = (review.override ?? {}) as Record<string, string>
     const set = (key: string) => (value: string) => setOverride(p, key, value)
     const locked = v.line.status !== 'open' || p.pendingLine || busy
@@ -551,6 +570,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     if (row.duplicate_check_failed) out.push({ text: t('expenses.checkFailed', { error: row.duplicate_check_failed }), tone: 'error' })
     if (dup) out.push({ text: t(dup.certain ? 'expenses.duplicateCertain' : 'expenses.duplicatePossible', { title: dup.title, date: formatDate(dup.date, lang), id: dup.id }), tone: dup.certain ? 'error' : 'warn' })
     if (p.pendingLine) out.push({ text: t('expenses.pendingHint'), tone: 'warn' })
+    if (p.invalid && v.line.status === 'open') out.push({ text: t('expenses.invalid'), tone: 'error' })
     if (v.line.status === 'open' && !v.gate && !v.madoDocument) for (const pr of problems) out.push({ text: pr.message, tone: pr.blocking ? 'error' : 'warn' })
     return out
   }
