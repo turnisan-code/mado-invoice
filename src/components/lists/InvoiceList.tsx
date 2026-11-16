@@ -378,6 +378,11 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
             {BOOKAMAT_FILTERS.map(f => <option key={f} value={f}>{t(`books.state.${f}`)}</option>)}
           </Select>
         )}
+        {bookamatConfigured && bookamat && (
+          <Link href="/settings?section=integrations" className="text-xs text-neutral-500 dark:text-neutral-400 underline underline-offset-2 hover:text-neutral-700 dark:hover:text-neutral-200">
+            {t('books.reconcile.run')} →
+          </Link>
+        )}
         <div className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
           <input type="date" value={from} max={to || undefined} onChange={e => setFilters({ from: e.target.value })} aria-label={t('lists.fromDate')} className={inputClass} />
           <span>–</span>

@@ -1,12 +1,13 @@
 // Module resolution for `npm test` (node --test, no dependencies): '@/…' is src/…, and an
-// import without an extension finds its .ts/.tsx file or index, as Next's bundler does.
-// 'server-only' is a no-op here: tests run on the server side anyway.
+// import without an extension finds its .ts file or index.ts, as Next's bundler does.
+// 'server-only' is a no-op here: tests run on the server side anyway. Node strips TypeScript but
+// does not compile JSX, so tests import .ts modules only (no .tsx, no JSON).
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const SRC = path.resolve(fileURLToPath(new URL('..', import.meta.url)), 'src')
-const SUFFIXES = ['.ts', '.tsx', '.mts', '.js', '/index.ts', '/index.tsx']
+const SUFFIXES = ['.ts', '.mts', '.js', '/index.ts']
 
 function findFile(base) {
   if (existsSync(base) && statSync(base).isFile()) return base

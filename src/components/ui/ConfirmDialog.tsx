@@ -78,7 +78,7 @@ export function Dialog({ open, onClose, title, description, busy = false, align 
         tabIndex={-1}
         className={cn(
           'bg-popover text-popover-foreground border border-border shadow-xl outline-none',
-          align === 'bottom' ? 'w-full rounded-t-2xl' : 'w-full max-w-sm rounded-xl p-6 space-y-4',
+          align === 'bottom' ? 'w-full rounded-t-2xl' : 'w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl p-6 space-y-4',
           panelClassName,
         )}
       >
@@ -124,7 +124,7 @@ export function ConfirmDialog({ open, title, description, confirmLabel, cancelLa
   return (
     <Dialog open={open} onClose={onCancel} title={title} description={description} busy={busy} initialFocus={cancelRef} portal={portal}>
       {children}
-      <div className="flex gap-2 justify-end">
+      <div className="flex flex-wrap gap-2 justify-end">
         <Button ref={cancelRef} type="button" variant="outline" onClick={onCancel} disabled={busy}>{cancelLabel ?? t('dialogs.cancel')}</Button>
         <Button
           type="button"

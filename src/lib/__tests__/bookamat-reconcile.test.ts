@@ -74,3 +74,35 @@ test('a year outside the check is not reported', () => {
   const r = reconcile({ docs, bookings: [], years: [2026], invoicePrefix: 'RN' })
   assert.deepEqual(r.recorded, [])
 })
+
+test('the order of the documents changes nothing, and another invoice\'s booking is never offered', () => {
+  const a = doc('dA', 'RN-209906101', 700, [{ date: '2026-06-15', amount: 840, kind: 'payment' }])
+  const b = doc('dB', 'RN-209906102', 700, [{ date: '2026-06-10', amount: 840, kind: 'payment' }], [row(2026, '9921', 840, '2026-06-10')])
+  const bookings = [booking(9921, '2026-06-10', 'RN-209906102 – Muster', '840.00'), booking(9922, '2026-06-10', 'RN_209906102 - Muster', '840.00')]
+  for (const docs of [[a, b], [b, a]]) {
+    const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' })
+    assert.deepEqual(r.doubles.map(d => [d.number, d.booking.bookingId]), [['RN-209906102', '9922']])
+    const offered = r.unbooked.find(u => u.number === 'RN-209906101')!
+    assert.deepEqual(offered.candidates.map(c => [c.bookingId, c.fit]), [['9922', 'other_number']])
+  }
+})
+
+test('a hand booking of money Mado does not book is no double booking', () => {
+  const docs = [
+    { ...doc('d1', 'RN-209906201', 100, [{ date: '2026-06-01', amount: 120, kind: 'payment' }]), currency: 'USD' },
+    doc('d2', 'RN-209906202', 500, [{ date: '2026-06-02', amount: 100, kind: 'payment' }], [], 'sent'),
+  ]
+  const bookings = [booking(9931, '2026-06-01', 'RN-209906201 USD', '110.00'), booking(9932, '2026-06-02', 'RN 209906202 Teilzahlung', '100.00')]
+  const r = reconcile({ docs, bookings, years: [2026], invoicePrefix: 'RN' })
+  assert.deepEqual(r.doubles, [])
+  assert.deepEqual(r.unbooked, [])
+})
+
+test('a credit note is listed only once it is settled', () => {
+  const credit = (payments: ReconcileDoc['payments']): ReconcileDoc => ({ ...doc('c1', 'AN-2099001', 500, payments), type: 'credit_note', status: 'sent' })
+  const partly = credit([{ date: '2026-06-10', amount: 200, kind: 'refund' }])
+  assert.deepEqual(reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN' }).unbooked, [])
+  // 200 refunded and 400 credited to the invoice settle the 600.
+  const r = reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN', applied: { c1: 400 } })
+  assert.deepEqual(r.unbooked.map(u => [u.number, u.amount]), [['AN-2099001', 200]])
+})

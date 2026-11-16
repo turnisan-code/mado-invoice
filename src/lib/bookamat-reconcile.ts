@@ -1,14 +1,17 @@
 // „Mit Bookamat abgleichen“ (Settings → Bookamat), read only: Mado's documents against a year's
 // bookings in Bookamat. Pure: the route reads both and hands them in.
 // - every booking Mado recorded: is it in Bookamat, with the same amount and date?
-// - money Mado should have booked but has not: does Bookamat have it already (the sync's rules)?
-// - bookings naming a Mado document's number that Mado did not record although it booked that
-//   money itself: possibly booked twice;
+// - money the sync would book but has not: does Bookamat have it already (the sync's rules), and
+//   can that booking be taken over (candidateFit)?
+// - for a document whose money Mado booked itself: another booking naming its number — possibly
+//   booked twice;
 // - bookings naming a number in Mado's invoice range that no Mado document has.
+// Each document is looked at on its own, so the order of the documents changes nothing.
 import { calcTotals } from '@/lib/utils/document'
+import { creditNoteSettled } from '@/lib/status'
 import { hasMoneyToBook, planBookings, unbookedPlan, type BookingRow, type MoneyRow } from '@/lib/bookamat-client'
 import {
-  bookingKey, findCandidates, numberPattern, numberQuery, type BookingCandidate, type BookingLite, type MoneyTarget,
+  bookingKey, candidateFit, findCandidates, numberPattern, type BookingCandidate, type BookingLite, type MoneyTarget,
 } from '@/lib/bookamat-search'
 
 export type ReconcileDoc = {
@@ -62,17 +65,27 @@ const toCandidate = (b: BookingLite, reason: BookingCandidate['reason']): Bookin
   ({ year: b.year, bookingId: b.id, date: b.date, title: b.title, total: b.total, reason })
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const longestRun = (number: string) => (number.match(/\d+/g) ?? []).reduce((a, b) => (b.length > a.length ? b : a), '')
 
-export function reconcile(input: { docs: ReconcileDoc[]; bookings: BookingLite[]; years: number[]; invoicePrefix: string | null }): ReconcileReport {
+// `applied`: per credit note, what was credited to invoices (it settles the credit note like a refund).
+export function reconcile(input: {
+  docs: ReconcileDoc[]
+  bookings: BookingLite[]
+  years: number[]
+  invoicePrefix: string | null
+  applied?: Record<string, number>
+}): ReconcileReport {
   const years = new Set(input.years)
   const byKey = new Map(input.bookings.map(b => [bookingKey(b.year, b.id), b]))
   const recordedKeys = new Set(input.docs.flatMap(d => (d.bookamat_bookings ?? []).map(r => bookingKey(r.year, String(r.booking_id)))))
   const report: ReconcileReport = { years: input.years, bookingsRead: input.bookings.length, recorded: [], unbooked: [], doubles: [], unknown: [] }
+  // Bookings some document already explains: never an unknown number.
   const named = new Set<string>()
 
   for (const d of input.docs) {
     if (d.type !== 'invoice' && d.type !== 'credit_note') continue
-    for (const r of d.bookamat_bookings ?? []) {
+    const recorded = d.bookamat_bookings ?? []
+    for (const r of recorded) {
       if (!years.has(r.year)) continue
       const b = byKey.get(bookingKey(r.year, String(r.booking_id)))
       const amount = Number(r.amount)
@@ -87,27 +100,39 @@ export function reconcile(input: { docs: ReconcileDoc[]; bookings: BookingLite[]
     const moneyIn = d.type === 'invoice'
     const pattern = numberPattern(d.number)
     const rows = d.payments ?? []
-    const offered = (d.currency ?? 'EUR') === 'EUR' && (d.type === 'invoice'
-      ? hasMoneyToBook({ type: 'invoice', number: d.number, status: d.status, payments: rows })
-      : d.status === 'sent' && rows.some(r => r.kind === 'refund' && r.amount > 0))
     const discount = d.discount_type && d.discount_value ? { type: d.discount_type as 'percent' | 'fixed', value: d.discount_value } : null
     const total = calcTotals(d.document_items ?? [], [], discount, d.tax_treatment).total
-    const todo = offered
-      ? unbookedPlan(planBookings({ type: d.type, total, rows }).bookings, d.bookamat_bookings ?? []).filter(p => years.has(p.year))
-      : []
+    const refunded = rows.filter(r => r.kind === 'refund').reduce((s, r) => s + r.amount, 0)
+    // What the sync would book now: a paid invoice, a settled credit note, in EUR.
+    const offered = (d.currency ?? 'EUR') === 'EUR' && (moneyIn
+      ? hasMoneyToBook({ type: 'invoice', number: d.number, status: d.status, payments: rows })
+      : d.status === 'sent' && refunded > 0 && creditNoteSettled(total, input.applied?.[d.id] ?? 0, refunded))
+    const todo = offered ? unbookedPlan(planBookings({ type: d.type, total, rows }).bookings, recorded) : []
+    const planned = todo.map(p => ({ year: p.year, amount: p.amount }))
     const moneyKind = moneyIn ? 'payment' : 'refund'
-    for (const p of todo) {
+    const mine = new Set<string>()
+    for (const p of todo.filter(x => years.has(x.year))) {
       const targets: MoneyTarget[] = [{ date: p.date, amounts: [p.amount, total] }]
-      for (const r of rows) if (r.kind === moneyKind && r.amount > 0 && Number(r.date.slice(0, 4)) === p.year) targets.push({ date: r.date, amounts: [r.amount, p.amount, total] })
+      for (const r of rows) {
+        if (r.kind !== moneyKind || !(r.amount > 0) || Number(r.date.slice(0, 4)) !== p.year) continue
+        const fees = rows.filter(f => f.kind === 'fee' && f.date === r.date).reduce((s, f) => s + f.amount, 0)
+        targets.push({ date: r.date, amounts: [r.amount, r.amount + fees, p.amount, total] })
+      }
       const candidates = findCandidates({ moneyIn, pattern, targets, bookings: input.bookings, exclude: recordedKeys })
-      for (const c of candidates) named.add(bookingKey(c.year, c.bookingId))
+        .filter(c => !mine.has(bookingKey(c.year, c.bookingId)))
+        .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: d.number, planned }) }))
+      for (const c of candidates) {
+        mine.add(bookingKey(c.year, c.bookingId))
+        named.add(bookingKey(c.year, c.bookingId))
+      }
       report.unbooked.push({ documentId: d.id, type: d.type, number: d.number, client: d.client, year: p.year, amount: p.amount, date: p.date, candidates })
     }
 
-    if (!pattern) continue
+    // Possibly booked twice: only where Mado booked this document's money itself.
+    if (!pattern || !recorded.length) continue
     for (const b of input.bookings) {
       const key = bookingKey(b.year, b.id)
-      if (recordedKeys.has(key) || named.has(key) || b.moneyIn !== moneyIn) continue
+      if (recordedKeys.has(key) || mine.has(key) || b.moneyIn !== moneyIn) continue
       if (!pattern.test(b.title) && !pattern.test(b.description)) continue
       named.add(key)
       report.doubles.push({ documentId: d.id, type: d.type, number: d.number, booking: toCandidate(b, 'number') })
@@ -115,7 +140,7 @@ export function reconcile(input: { docs: ReconcileDoc[]; bookings: BookingLite[]
   }
 
   // Numbers shaped like Mado's invoice numbers, from its first one on, that no document has.
-  const runs = input.docs.filter(d => d.type === 'invoice').map(d => numberQuery(d.number)).filter((r): r is string => !!r)
+  const runs = input.docs.filter(d => d.type === 'invoice').map(d => longestRun(d.number)).filter(r => r.length >= 5)
   const prefix = input.invoicePrefix?.trim()
   if (prefix && runs.length) {
     const length = runs[0].length

@@ -21,7 +21,8 @@ export type BookamatErrorCode =
   | 'cash_account_missing' | 'vat_account_missing' | 'account_missing' | 'accounts_stale' | 'in_progress' | 'auth'
   | 'year_missing' | 'timeout' | 'network' | 'bookamat' | 'db_write' | 'database' | 'not_synced' | 'unconfirmed'
   | 'unknown_outcome' | 'held' | 'preview' | 'external_duplicate' | 'duplicate_check_failed'
-  | 'adopt_not_found' | 'adopt_mismatch' | 'adopt_taken'
+  | 'adopt_not_found' | 'adopt_mismatch' | 'adopt_taken' | 'adopt_other_year' | 'adopt_kind' | 'adopt_other_number'
+  | 'adopt_unsettled' | 'adopt_nothing_left'
 
 export type ErrorDetail = Record<string, string | number>
 
@@ -30,7 +31,7 @@ const ERROR_CODES: readonly BookamatErrorCode[] = [
   'cash_account_missing', 'vat_account_missing', 'account_missing', 'accounts_stale', 'in_progress', 'auth',
   'year_missing', 'timeout', 'network', 'bookamat', 'db_write', 'database', 'not_synced', 'unconfirmed',
   'unknown_outcome', 'preview', 'external_duplicate', 'duplicate_check_failed', 'adopt_not_found', 'adopt_mismatch',
-  'adopt_taken',
+  'adopt_taken', 'adopt_other_year', 'adopt_kind', 'adopt_other_number', 'adopt_unsettled', 'adopt_nothing_left',
 ]
 
 // A route's error payload in the UI language; the general API codes (signed out, bad request) are

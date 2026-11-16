@@ -850,6 +850,8 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
   }
 
   async function saveBookamat() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({
@@ -883,6 +885,8 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
   }
 
   async function removeBookamatKey() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({ bookamat_api_key: null }).eq('id', settings.id)
@@ -909,6 +913,8 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
   }
 
   async function disconnectBookamat() {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setSavingBookamat(true)
     const { error } = await supabase.from('settings').update({
@@ -950,6 +956,8 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
   }
 
   async function toggleBookamatAutoSync(on: boolean) {
+    // A preview uses production's database: its Bookamat settings are not changed from there.
+    if (!bookamatWrites) { toast.error(t('books.errors.preview')); return }
     if (!settings) return
     setBookamatAutoSync(on)
     const { error } = await supabase.from('settings').update({ bookamat_auto_sync: on }).eq('id', settings.id)
@@ -2058,13 +2066,14 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
                     {t('books.settings.lastError', { date: bookamatError.at ? formatDate(bookamatError.at, lang) : '—', error: bookamatError.message })}
                   </p>
                 )}
-                {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && <BookamatReconcile />}
+                {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && <BookamatReconcile writes={bookamatWrites} />}
                 {bookamatKeySaved && bookamatBankId !== '' && bookamatCostId !== '' && (
                   <label className="flex items-start gap-2 text-sm cursor-pointer">
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300 dark:border-neutral-600 accent-neutral-900 dark:accent-white"
                       checked={bookamatAutoSync}
+                      disabled={!bookamatWrites}
                       onChange={e => void toggleBookamatAutoSync(e.target.checked)}
                     />
                     <span>

@@ -401,6 +401,7 @@ export default function CreditNoteSettlement({ creditNoteId, issued, number = nu
         open={!!duplicates}
         candidates={duplicates ?? []}
         busy={syncing ? 'sync' : adopting}
+        refund
         onAdopt={c => void adoptBooking(c)}
         onBookAnyway={bookAnyway}
         onCancel={closeDuplicates}

@@ -11,8 +11,8 @@ import { clientDisplayName } from '@/lib/utils/clients'
 import { archiveErrorMessage } from '@/lib/issued-pdf'
 import { bookamatWritesAllowed } from '@/lib/deployment'
 import {
-  WINDOW_DAYS, addDays, bookingKey, describeCandidate, findCandidates, numberPattern, numberQuery, readBookingsInWindow,
-  readBookingsTitled, toBookingLite, yearsBetween, type BookingCandidate, type BookingLite, type BookingRef, type GetPage, type MoneyTarget,
+  SearchLimitError, WINDOW_DAYS, addDays, bookingKey, candidateFit, describeCandidate, euro, findCandidates, numberPattern, readYear,
+  toBookingLite, yearsBetween, type BookingCandidate, type BookingLite, type BookingRef, type GetPage, type MoneyTarget,
 } from '@/lib/bookamat-search'
 import {
   BOOKING_COLUMNS, bookamatErrorMessage, hasMoneyToBook, planBookings, unbookedPlan,
@@ -290,7 +290,7 @@ function asFailure(err: unknown): SyncFailure {
     const status = err.code === 'db_write' || err.code === 'database' ? 500
       : err.code === 'preview' ? 403
       : err.code === 'adopt_not_found' ? 404
-      : err.code === 'unconfirmed' || err.code === 'unknown_outcome' || err.code === 'external_duplicate' || err.code === 'adopt_taken' || err.code === 'in_progress' ? 409
+      : err.code === 'unconfirmed' || err.code === 'unknown_outcome' || err.code === 'external_duplicate' || err.code === 'adopt_taken' || err.code === 'in_progress' || err.code === 'adopt_unsettled' ? 409
       : err.code === 'timeout' || err.code === 'network' || err.code === 'duplicate_check_failed' || (err.code === 'bookamat' && err.status >= 500) ? 502
       : 400
     return fail(status, err.code, err.message, { detail: err.detail, ...(err.candidates?.length ? { candidates: err.candidates } : {}) })
@@ -350,10 +350,15 @@ async function findBooking(creds: BookamatCredentials, entry: BookamatPending, d
   return items.map(i => validId(i.id)).filter((id): id is string => !!id).sort((a, b) => Number(a) - Number(b))[0] ?? null
 }
 
+// A year's bookings as read for one sync, shared by the syncs of one cron run.
+export type BookingsCache = Map<number, Promise<BookingLite[]>>
+
 // The bookings Bookamat has that may already be the money about to be booked, made by someone
 // other than Mado (Bookmatic, bookamat's own bank import, a hand booking): one naming the
 // document's number at any date, or one moving the same amount the same way within ±10 days of a
-// payment (src/lib/bookamat-search.ts). Bookings recorded here, for any document, are Mado's own;
+// payment (src/lib/bookamat-search.ts), each with how it fits Mado's plan (candidateFit). It reads
+// whole years: those Mado books in (they must exist), and the document's year and the window's
+// (a missing one is empty). Bookings recorded here, for any document, are Mado's own;
 // `acknowledged` ones the owner said are other money. A search that fails is a refusal
 // ('duplicate_check_failed'), never "nothing there" (Bookmatic audit P0-2).
 export async function findExternalBookings(
@@ -361,12 +366,15 @@ export async function findExternalBookings(
   creds: BookamatCredentials,
   input: {
     number: string
+    documentDate: string
     kind: BookamatBookingKind
     todo: PlannedBooking[]
     rows: MoneyRow[]
     total: number
     acknowledged?: BookingRef[]
     deadline?: number
+    t?: TFn
+    cache?: BookingsCache
   },
 ): Promise<BookingCandidate[]> {
   if (!input.todo.length) return []
@@ -375,20 +383,36 @@ export async function findExternalBookings(
   for (const p of input.todo) {
     targets.push({ date: p.date, amounts: [p.amount, input.total] })
     for (const r of input.rows) {
-      if (r.kind === moneyKind && r.amount > 0 && Number(r.date.slice(0, 4)) === p.year) targets.push({ date: r.date, amounts: [r.amount, p.amount, input.total] })
+      if (r.kind !== moneyKind || !(r.amount > 0) || Number(r.date.slice(0, 4)) !== p.year) continue
+      // A transfer recorded as payment plus dunning fees arrived as their sum.
+      const fees = input.rows.filter(f => f.kind === 'fee' && f.date === r.date).reduce((s, f) => s + f.amount, 0)
+      targets.push({ date: r.date, amounts: [r.amount, r.amount + fees, p.amount, input.total] })
     }
   }
   const dates = targets.map(t => t.date).sort()
-  const from = addDays(dates[0], -WINDOW_DAYS)
-  const until = addDays(dates[dates.length - 1], WINDOW_DAYS)
+  const mustExist = new Set(input.todo.map(p => p.year))
+  const years = [...new Set([
+    ...mustExist,
+    Number(input.documentDate.slice(0, 4)),
+    ...yearsBetween(addDays(dates[0], -WINDOW_DAYS), addDays(dates[dates.length - 1], WINDOW_DAYS)),
+  ])].filter(y => Number.isInteger(y) && y >= 2000 && y <= 2999).sort()
   const get: GetPage = (year, path) => bookamatFetch(creds, year, path, { deadline: input.deadline })
   const bookings: BookingLite[] = []
   try {
-    bookings.push(...await readBookingsInWindow(get, from, until))
-    const query = numberQuery(input.number)
-    if (query) bookings.push(...await readBookingsTitled(get, [...new Set([...input.todo.map(p => p.year), ...yearsBetween(from, until)])], query))
+    for (const year of years) {
+      const cached = input.cache?.get(year)
+      const read = cached ?? readYear(get, year, { missingIsEmpty: !mustExist.has(year) })
+      if (!cached && input.cache) {
+        input.cache.set(year, read)
+        read.catch(() => input.cache?.delete(year))
+      }
+      bookings.push(...await read)
+    }
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err)
+    const reason = err instanceof BookamatError && input.t
+      ? (err.code === 'year_missing' ? input.t('books.errors.year_missing', { year: err.detail.year ?? '' }) : bookamatErrorMessage(input.t, { code: err.code, error: err.message, detail: err.detail }))
+      : err instanceof SearchLimitError && input.t ? input.t('books.duplicates.tooMany', { year: err.year })
+      : err instanceof Error ? err.message : String(err)
     throw new BookamatError('duplicate_check_failed', `Bookamat could not be searched for an earlier booking of ${input.number}: ${reason}`, err instanceof BookamatError ? err.status : 0, { reason })
   }
   const exclude = new Set((input.acknowledged ?? []).map(a => bookingKey(a.year, a.bookingId)))
@@ -397,7 +421,25 @@ export async function findExternalBookings(
   const { data, error } = await supabase.from('bookamat_bookings').select('year, booking_id').in('booking_id', [...new Set(found.map(c => c.bookingId))])
   if (error) throw new BookamatError('database', error.message)
   const recorded = new Set(((data ?? []) as { year: number; booking_id: string }[]).map(r => bookingKey(Number(r.year), String(r.booking_id))))
-  return found.filter(c => !recorded.has(bookingKey(c.year, c.bookingId)))
+  const byKey = new Map(bookings.map(b => [bookingKey(b.year, b.id), b]))
+  const planned = input.todo.map(p => ({ year: p.year, amount: p.amount }))
+  return found
+    .filter(c => !recorded.has(bookingKey(c.year, c.bookingId)))
+    .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: input.number, planned }) }))
+}
+
+// Whether a document's money is ready to book, as the sync and the take-over require: an invoice
+// paid in full (or cancelled), a credit note settled by refunds and credits.
+async function moneyReady(supabase: SupabaseClient, doc: SyncDoc, total: number): Promise<SyncFailure | null> {
+  const rows = doc.payments ?? []
+  if (doc.type === 'invoice') {
+    return hasMoneyToBook({ ...doc, type: 'invoice' }) ? null : fail(400, 'not_settled', 'Only fully paid invoices can be synced — record the payment first')
+  }
+  const { data: applied, error } = await supabase.from('payments').select('amount').eq('kind', 'credit').eq('credit_note_id', doc.id)
+  if (error) return fail(500, 'database', error.message)
+  const refunded = rows.filter(r => r.kind === 'refund').reduce((s, r) => s + r.amount, 0)
+  const settled = creditNoteSettled(total, (applied ?? []).reduce((s, r) => s + Number(r.amount), 0), refunded)
+  return doc.status === 'sent' && settled ? null : fail(400, 'not_settled', 'Only settled credit notes can be synced — record the refund first')
 }
 
 const SYNC_DOC_RELATIONS = `document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value),
@@ -456,7 +498,7 @@ export async function syncBookamatDocument(
   documentId: string,
   opts: {
     adopt?: AdoptBooking[]; loadPdf?: LoadPdf; resolver?: AccountResolver; deadline?: number; unattended?: boolean
-    claudeHold?: ClaudeHold; acknowledge?: BookingRef[]
+    claudeHold?: ClaudeHold; acknowledge?: BookingRef[]; bookingsCache?: BookingsCache
   } = {},
 ): Promise<SyncSuccess | SyncFailure> {
   if (!isBookamatConfigured(settings)) return fail(400, 'not_configured', 'Bookamat is not fully configured')
@@ -485,15 +527,8 @@ export async function syncBookamatDocument(
   )
   if (!totals.vat_groups.length) return fail(400, 'no_items', 'The document has no lines to book')
 
-  if (doc.type === 'invoice') {
-    if (!hasMoneyToBook({ ...doc, type: 'invoice' })) return fail(400, 'not_settled', 'Only fully paid invoices can be synced — record the payment first')
-  } else {
-    const { data: applied, error: appliedErr } = await supabase.from('payments').select('amount').eq('kind', 'credit').eq('credit_note_id', doc.id)
-    if (appliedErr) return fail(500, 'database', appliedErr.message)
-    const refunded = rows.filter(r => r.kind === 'refund').reduce((s, r) => s + r.amount, 0)
-    const settled = creditNoteSettled(totals.total, (applied ?? []).reduce((s, r) => s + Number(r.amount), 0), refunded)
-    if (doc.status !== 'sent' || !settled) return fail(400, 'not_settled', 'Only settled credit notes can be synced — record the refund first')
-  }
+  const notReady = await moneyReady(supabase, doc, totals.total)
+  if (notReady) return notReady
 
   const plan = planBookings({ type: doc.type, total: totals.total, rows })
   const stored: BookingRow[] = [...(doc.bookamat_bookings ?? [])]
@@ -537,10 +572,23 @@ export async function syncBookamatDocument(
     if (!claimed?.length) return fail(409, 'in_progress', 'A Bookamat sync of this document is already running')
 
     let journal = parsePending((claimed[0] as { bookamat_pending: unknown }).bookamat_pending)
-    const saveJournal = async (): Promise<boolean> => {
-      const { error } = await supabase.from('documents').update({ bookamat_pending: journal.length ? journal : null }).eq('id', doc.id)
-      if (error) console.error(`[bookamat] ${doc.number}: pending bookings not saved:`, error.message)
-      return !error
+    // Written only while this sync still holds its claim: a sync that outlived it (a slow
+    // Bookamat search) must not post beside the one that took the claim over.
+    const saveJournal = async (): Promise<'saved' | 'lost' | 'failed'> => {
+      const { data: kept, error } = await supabase.from('documents')
+        .update({ bookamat_pending: journal.length ? journal : null })
+        .eq('id', doc.id)
+        .eq('bookamat_claimed_at', claimedAt)
+        .select('id')
+      if (error) {
+        console.error(`[bookamat] ${doc.number}: pending bookings not saved:`, error.message)
+        return 'failed'
+      }
+      if (!kept?.length) {
+        console.error(`[bookamat] ${doc.number}: another sync took the claim over; pending bookings not saved`)
+        return 'lost'
+      }
+      return 'saved'
     }
     // Bookings Bookamat has that could not be recorded here; they go back to the caller.
     const unrecorded: AdoptBooking[] = []
@@ -637,8 +685,8 @@ export async function syncBookamatDocument(
       // did not make? Then nothing is booked; the owner takes that booking over or says it is other
       // money (`acknowledge`, never given by the cron or Claude). A failed search books nothing too.
       const external = await findExternalBookings(supabase, creds, {
-        number: doc.number!, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
-        acknowledged: opts.acknowledge, deadline: opts.deadline,
+        number: doc.number!, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
+        acknowledged: opts.acknowledge, deadline: opts.deadline, t, cache: opts.bookingsCache,
       })
       if (external.length) {
         const list = external.map(describeCandidate).join('; ')
@@ -651,9 +699,12 @@ export async function syncBookamatDocument(
         // sync looks the booking up in Bookamat instead of posting it again.
         const entry: BookamatPending = { year: p.year, kind: p.kind, booking_id: null, amount: p.amount, date: p.date, title: body.title, at: new Date().toISOString() }
         journal.push(entry)
-        if (!(await saveJournal())) {
+        const saved = await saveJournal()
+        if (saved !== 'saved') {
           journal.pop()
-          throw new BookamatError('database', 'The booking could not be prepared here; nothing was sent to Bookamat')
+          throw saved === 'lost'
+            ? new BookamatError('in_progress', 'Another sync of this document took over meanwhile; nothing was sent to Bookamat', 409)
+            : new BookamatError('database', 'The booking could not be prepared here; nothing was sent to Bookamat')
         }
         let bookingId: string | null = null
         try {
@@ -779,9 +830,11 @@ export async function resetBookamatSync(supabase: SupabaseClient, documentId: st
 
 // Takes over a booking Bookamat already has for a document's money (one Mado did not make, named by
 // the sync's search or the reconciliation): records it as that year's booking and posts nothing.
-// The booking is read from Bookamat again and must be this money: the same direction and the
-// amount still to book for its year (±2 cents). Production only, under the sync's claim; the
-// document's error is cleared once it is recorded.
+// Only what the sync would book may be taken over (the same readiness), and only a booking that
+// is exactly that money: read from Bookamat again, an income booking of the year's amount still to
+// book (±2 cents), naming no other invoice (candidateFit). Anything else is refused with what to
+// do instead. Production only, under the sync's claim; the document's error is cleared once
+// nothing is left to book.
 export async function adoptExternalBooking(
   supabase: SupabaseClient,
   settings: BookamatSettings,
@@ -797,7 +850,7 @@ export async function adoptExternalBooking(
   if (!doc) return fail(404, 'not_found', 'Document not found')
   if ((doc.type !== 'invoice' && doc.type !== 'credit_note') || !doc.number) return fail(400, 'not_issued', 'Only issued invoices and credit notes have bookings')
   if ((doc.currency ?? 'EUR') !== 'EUR') return fail(400, 'not_eur', `${doc.number} is in ${doc.currency}`, { detail: { currency: doc.currency ?? '' } })
-  if (parsePending(doc.bookamat_pending).length) return fail(409, 'in_progress', 'An earlier sync of this document is not settled yet: sync it first')
+  if (parsePending(doc.bookamat_pending).length) return fail(409, 'adopt_unsettled', 'An earlier sync of this document is not settled yet: sync it first')
 
   const totals = calcTotals(
     doc.document_items ?? [],
@@ -805,6 +858,8 @@ export async function adoptExternalBooking(
     doc.discount_type && doc.discount_value ? { type: doc.discount_type as 'percent' | 'fixed', value: doc.discount_value } : null,
     doc.tax_treatment,
   )
+  const notReady = await moneyReady(supabase, doc, totals.total)
+  if (notReady) return notReady
   const plan = planBookings({ type: doc.type, total: totals.total, rows: doc.payments ?? [] })
 
   const claimedAt = new Date().toISOString()
@@ -823,8 +878,8 @@ export async function adoptExternalBooking(
     const { data: fresh, error: freshErr } = await supabase.from('bookamat_bookings').select(BOOKING_COLUMNS).eq('document_id', doc.id)
     if (freshErr) throw new BookamatError('database', freshErr.message)
     const stored = (fresh ?? []) as BookingRow[]
-    const planned = unbookedPlan(plan.bookings, stored).find(p => p.year === ref.year)
-    if (!planned) throw new BookamatError('nothing_to_book', `Nothing is left to book for ${doc.number} in ${ref.year}`, 400, { year: ref.year })
+    const todo = unbookedPlan(plan.bookings, stored)
+    if (!todo.length) throw new BookamatError('adopt_nothing_left', `Everything of ${doc.number} is booked already`, 400, { id: ref.bookingId, number: doc.number })
 
     let raw: unknown
     try {
@@ -836,27 +891,37 @@ export async function adoptExternalBooking(
     }
     const booking = toBookingLite(ref.year, raw)
     if (!booking || booking.id !== ref.bookingId) throw new BookamatError('adopt_not_found', `Bookamat ${ref.year} has no booking #${ref.bookingId}`, 404, { id: ref.bookingId, year: ref.year })
-    const sign = planned.kind === 'refund' ? -1 : 1
-    const sameWay = booking.moneyIn === (planned.kind === 'income')
-    if (!sameWay || Math.abs(booking.total - planned.amount) > 0.02) {
-      throw new BookamatError('adopt_mismatch', `Booking #${ref.bookingId} is not this money`, 400, {
-        id: ref.bookingId,
-        booked: `${sameWay ? '' : '−'}${booking.total.toFixed(2)}`,
-        planned: planned.amount.toFixed(2),
+    const kind: BookamatBookingKind = doc.type === 'invoice' ? 'income' : 'refund'
+    const fit = booking.moneyIn !== (kind === 'income')
+      ? { fit: 'kind' as const }
+      : candidateFit(booking, { documentNumber: doc.number, planned: todo.map(p => ({ year: p.year, amount: p.amount })) })
+    if (fit.fit === 'other_number') throw new BookamatError('adopt_other_number', `Booking #${ref.bookingId} names ${fit.other}`, 400, { id: ref.bookingId, other: fit.other ?? '' })
+    if (fit.fit === 'kind') throw new BookamatError('adopt_kind', `Booking #${ref.bookingId} is not an income booking of this money`, 400, { id: ref.bookingId })
+    if (fit.fit === 'year') {
+      throw new BookamatError('adopt_other_year', `Booking #${ref.bookingId} lies in ${ref.year}; Mado books this money in ${todo.map(p => p.year).join(', ')}`, 400, {
+        id: ref.bookingId, year: ref.year, years: todo.map(p => p.year).join(', '),
       })
     }
+    if (fit.fit !== 'exact') {
+      throw new BookamatError('adopt_mismatch', `Booking #${ref.bookingId} books ${booking.total}, not the ${fit.planned} still to book`, 400, {
+        id: ref.bookingId, booked: euro(booking.total), planned: euro(fit.planned ?? 0), year: ref.year,
+      })
+    }
+    const planned = todo.find(p => p.year === ref.year)!
 
     const { data: taken, error: takenErr } = await supabase.from('bookamat_bookings').select('document_id').eq('year', ref.year).eq('booking_id', ref.bookingId)
     if (takenErr) throw new BookamatError('database', takenErr.message)
     if (taken?.length) throw new BookamatError('adopt_taken', `Booking #${ref.bookingId} is recorded on another document`, 409, { id: ref.bookingId })
 
-    const row = { document_id: doc.id, year: ref.year, booking_id: ref.bookingId, amount: sign * booking.total, kind: planned.kind, booked_on: booking.date || planned.date }
+    const sign = kind === 'refund' ? -1 : 1
+    const row = { document_id: doc.id, year: ref.year, booking_id: ref.bookingId, amount: sign * booking.total, kind, booked_on: booking.date || planned.date }
     const { error: insertErr } = await supabase.from('bookamat_bookings').insert(row)
     if (insertErr?.code === '23505') throw new BookamatError('in_progress', `${doc.number} ${ref.year} was recorded meanwhile`, 409)
     if (insertErr) throw new BookamatError('database', insertErr.message)
     await logEvent(supabase, doc.id, 'bookamat_synced', { booking_id: ref.bookingId, year: ref.year, amount: row.amount, adopted: true, external: true })
-    await recordBookamatError(supabase, settings.id, doc.id, null)
     const bookings: BookingRow[] = [...stored, { year: row.year, booking_id: row.booking_id, amount: row.amount, kind: row.kind, booked_on: row.booked_on, pdf_attached_at: null }]
+    // Another year still to book keeps the document's error, so the list and the cron keep it open.
+    if (!unbookedPlan(plan.bookings, bookings).length) await recordBookamatError(supabase, settings.id, doc.id, null)
     return { ok: true, bookings: bookings.sort((a, b) => a.year - b.year), adopted: { year: ref.year, bookingId: ref.bookingId, amount: row.amount, date: row.booked_on } }
   } catch (err) {
     return asFailure(err)
@@ -936,14 +1001,16 @@ export async function autoSyncBookamat(
     return held ? [{ number: d.number, ok: false, held }] : []
   })
   const resolver = new AccountResolver(credentialsOf(settings), settings.bookamat_accounts_year, deadline)
+  // Each year of Bookamat is read once per run for the duplicate search.
+  const bookingsCache: BookingsCache = new Map()
   for (const doc of candidates.filter(d => !heldBack(d)).slice(0, limit)) {
     if (deadline - Date.now() < MIN_POST_MS) break
     // `unattended`: the marks are read again with the rows the bookings are made of, as Claude may
     // have changed the client or the payments since the list was read; the hand-back as well, as it
     // books what is still missing too.
-    let outcome = await syncBookamatDocument(supabase, settings, doc.id, { loadPdf, resolver, deadline, unattended: true })
+    let outcome = await syncBookamatDocument(supabase, settings, doc.id, { loadPdf, resolver, deadline, unattended: true, bookingsCache })
     // Bookamat has the booking but the database did not take it: hand it straight back.
-    if (!outcome.ok && outcome.pending?.length) outcome = await syncBookamatDocument(supabase, settings, doc.id, { adopt: outcome.pending, loadPdf, resolver, deadline, unattended: true })
+    if (!outcome.ok && outcome.pending?.length) outcome = await syncBookamatDocument(supabase, settings, doc.id, { adopt: outcome.pending, loadPdf, resolver, deadline, unattended: true, bookingsCache })
     if (!outcome.ok && outcome.code === 'held') {
       results.push({ number: doc.number, ok: false, held: outcome.error })
       continue
