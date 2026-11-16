@@ -47,7 +47,8 @@ export function BookamatReconcile({ writes = true }: { writes?: boolean }) {
     setAdopting(null)
     if (!res.ok) { toast.error(bookamatErrorMessage(t, res.payload)); return }
     toast.success(t('books.duplicates.adopted', { id: c.bookingId }))
-    setReport(r => r && { ...r, unbooked: r.unbooked.filter(u => !(u.documentId === documentId && u.year === year)) })
+    const booked = res.data.adopted.year
+    setReport(r => r && { ...r, unbooked: r.unbooked.filter(u => !(u.documentId === documentId && (u.year === booked || u.year === year))) })
   }
 
   const years = report?.years.join(', ') ?? ''

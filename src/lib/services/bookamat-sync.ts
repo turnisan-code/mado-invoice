@@ -143,7 +143,8 @@ export async function bookamatPreview(supabase: SupabaseClient, settings: Bookam
   const todo = unbookedPlan(plan.bookings, recorded)
   const external = search && todo.length
     ? await findExternalBookings(supabase, credentialsOf(settings), {
-      number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total, t: settingsT(settings),
+      number: doc.number, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
+      bookedYears: recorded.map(b => b.year), t: settingsT(settings),
     })
     : []
   return {

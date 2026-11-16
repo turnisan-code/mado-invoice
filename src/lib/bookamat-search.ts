@@ -24,9 +24,11 @@ export type BookingLite = {
 // - 'part' / 'more': less or more than that year's amount (a part payment booked on its own, a
 //   reminder fee in the same transfer): the money is in Bookamat, but not in Mado's shape;
 // - 'year': it lies in a year Mado books none of this money in (a payment dated across New Year);
+// - 'booked': it lies in a year whose money Mado booked already: possibly booked twice there;
 // - 'kind': not an income booking (booked as an expense);
-// - 'other_number': it names another invoice of the same numbering.
-export type CandidateFit = 'exact' | 'part' | 'more' | 'year' | 'kind' | 'other_number'
+// - 'other_number': it names another invoice of the same numbering, and not this one (a booking
+//   naming both is a combined one: 'more').
+export type CandidateFit = 'exact' | 'part' | 'more' | 'year' | 'booked' | 'kind' | 'other_number'
 
 // A booking that may be the money a sync is about to book. `reason`: it names the document's
 // number, or it moves the same amount within the window. `fit` and what it was compared with
@@ -113,8 +115,9 @@ export function numberPattern(documentNumber: string): RegExp | null {
 }
 
 // Another number of the same numbering in `text` (a booking of another invoice): the same prefix
-// letters with the same digit runs, or, for one long digit run, a bare run of that length. null
-// when there is none, or only this document's own.
+// letters with the same digit runs, or, for one long digit run, a bare run of that length that
+// starts with the same four digits (the year: a bank or customer reference such as 104857600 is
+// no invoice). null when there is none, or only this document's own.
 export function otherNumberIn(text: string, documentNumber: string): string | null {
   const own = numberPattern(documentNumber)
   const digitRuns = documentNumber.match(/\d+/g) ?? []
@@ -122,7 +125,7 @@ export function otherNumberIn(text: string, documentNumber: string): string | nu
   if (!own || !parts.length) return null
   const shape = parts.map(p => (/^\d+$/.test(p) ? `\\d{${p.length}}` : escapeRe(p))).join('[^\\p{L}\\p{N}]*')
   const sources = [`(?<![\\p{L}\\p{N}])${shape}(?!\\d)`]
-  if (digitRuns.length === 1 && digitRuns[0].length >= 7) sources.push(`(?<!\\d)\\d{${digitRuns[0].length}}(?!\\d)`)
+  if (digitRuns.length === 1 && digitRuns[0].length >= 7) sources.push(`(?<!\\d)${digitRuns[0].slice(0, 4)}\\d{${digitRuns[0].length - 4}}(?!\\d)`)
   for (const source of sources) {
     for (const m of text.matchAll(new RegExp(source, 'giu'))) {
       if (!own.test(m[0])) return m[0].trim()
@@ -163,17 +166,19 @@ export function findCandidates(input: {
 }
 
 // Whether `booking` can be taken over as the document's booking of its year (see CandidateFit).
-// `planned`: what Mado still books per year.
+// `planned`: what Mado still books per year; `bookedYears`: the years whose money Mado booked.
 export function candidateFit(
   booking: Pick<BookingLite, 'year' | 'title' | 'description' | 'total' | 'lines'>,
-  ctx: { documentNumber: string; planned: { year: number; amount: number }[] },
+  ctx: { documentNumber: string; planned: { year: number; amount: number }[]; bookedYears?: number[] },
 ): Pick<BookingCandidate, 'fit' | 'planned' | 'plannedYears' | 'other'> {
   const plannedYears = ctx.planned.map(p => p.year)
-  const other = otherNumberIn(`${booking.title} ${booking.description}`, ctx.documentNumber)
-  if (other) return { fit: 'other_number', other, plannedYears }
+  const text = `${booking.title} ${booking.description}`
+  const other = otherNumberIn(text, ctx.documentNumber)
+  const ownToo = !!numberPattern(ctx.documentNumber)?.test(text)
+  if (other && !ownToo) return { fit: 'other_number', other, plannedYears }
   if (booking.lines !== 'income') return { fit: 'kind', plannedYears }
   const p = ctx.planned.find(x => x.year === booking.year)
-  if (!p) return { fit: 'year', plannedYears }
+  if (!p) return { fit: ctx.bookedYears?.includes(booking.year) ? 'booked' : 'year', plannedYears }
   const fit = Math.abs(booking.total - p.amount) <= TOLERANCE ? 'exact' : booking.total < p.amount ? 'part' : 'more'
   return { fit, planned: p.amount, plannedYears }
 }

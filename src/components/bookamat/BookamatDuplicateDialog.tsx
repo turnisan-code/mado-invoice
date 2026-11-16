@@ -14,6 +14,7 @@ function fitNote(t: TFn, c: BookingCandidate): string | null {
     case 'part': return t('books.duplicates.fitPart', vars)
     case 'more': return t('books.duplicates.fitMore', vars)
     case 'year': return t('books.duplicates.fitYear', vars)
+    case 'booked': return t('books.duplicates.fitBooked', vars)
     case 'kind': return t('books.duplicates.fitKind', vars)
     case 'other_number': return t('books.duplicates.fitOther', vars)
     default: return null
@@ -37,7 +38,7 @@ export function BookamatDuplicateDialog({ open, candidates, busy, refund = false
 }) {
   const { t, lang } = useT()
   const count = candidates.length
-  const namesNumber = candidates.some(c => c.reason === 'number' && c.fit !== 'other_number')
+  const namesNumber = candidates.some(c => c.reason === 'number')
   return (
     <ConfirmDialog
       open={open}

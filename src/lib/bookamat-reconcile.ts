@@ -109,6 +109,8 @@ export function reconcile(input: {
       : d.status === 'sent' && refunded > 0 && creditNoteSettled(total, input.applied?.[d.id] ?? 0, refunded))
     const todo = offered ? unbookedPlan(planBookings({ type: d.type, total, rows }).bookings, recorded) : []
     const planned = todo.map(p => ({ year: p.year, amount: p.amount }))
+    const bookedYears = recorded.map(r => r.year)
+    const todoYears = new Set(todo.map(p => p.year))
     const moneyKind = moneyIn ? 'payment' : 'refund'
     const mine = new Set<string>()
     for (const p of todo.filter(x => years.has(x.year))) {
@@ -119,8 +121,9 @@ export function reconcile(input: {
         targets.push({ date: r.date, amounts: [r.amount, r.amount + fees, p.amount, total] })
       }
       const candidates = findCandidates({ moneyIn, pattern, targets, bookings: input.bookings, exclude: recordedKeys })
-        .filter(c => !mine.has(bookingKey(c.year, c.bookingId)))
-        .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: d.number, planned }) }))
+        // A booking found by the number belongs to the row of its own year, when there is one.
+        .filter(c => !mine.has(bookingKey(c.year, c.bookingId)) && (c.reason === 'amount' || c.year === p.year || !todoYears.has(c.year)))
+        .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: d.number, planned, bookedYears }) }))
       for (const c of candidates) {
         mine.add(bookingKey(c.year, c.bookingId))
         named.add(bookingKey(c.year, c.bookingId))

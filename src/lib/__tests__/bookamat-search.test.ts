@@ -57,6 +57,9 @@ test('another number of the same numbering', () => {
   assert.equal(otherNumberIn('MDW MIETE 01/26', 'RN-209903001'), null)
   assert.equal(otherNumberIn('G-2099-002 Muster', 'R-2099-001'), null)
   assert.equal(otherNumberIn('R-2099-002 Muster', 'R-2099-001'), 'R-2099-002')
+  // References of the same length are no invoice unless they start like one (the same year).
+  for (const text of ['Auftraggeberreferenz 104857600', 'Kd-Nr. 100200300', 'Ref 000123456']) assert.equal(otherNumberIn(text, 'RN-209903001'), null, text)
+  for (const text of ['Tel 0664 1234567', 'Ref 7654321']) assert.equal(otherNumberIn(text, 'AN-2099001'), null, text)
 })
 
 test('candidates: the number at any date, the same amount within ±10 days, the same direction only', () => {
@@ -108,6 +111,12 @@ test('how a found booking fits what Mado still books', () => {
   assert.equal(fit(income(9404, '2025-12-31', 'RN_209906001 - Muster', '600.00'), 2025).fit, 'year')
   assert.equal(fit(expense(9405, '2026-06-15', 'RN_209906001 - Muster', '600.00')).fit, 'kind')
   assert.deepEqual(fit(income(9406, '2026-06-15', 'RN_209906002 - Andere', '600.00')), { fit: 'other_number', other: 'RN_209906002', plannedYears: [2026] })
+  // Both invoices in one transfer: this money and more, never "another invoice".
+  assert.equal(fit(income(9407, '2026-06-15', 'RN-209906001 + RN-209906002 Muster', '1200.00')).fit, 'more')
+  // An exact booking whose description carries a bank reference stays exact.
+  assert.equal(fit({ ...income(9408, '2026-06-15', 'RN_209906001 Muster', '600.00'), description: 'Auftraggeberreferenz 104857600' }).fit, 'exact')
+  // A year whose money Mado booked already: possibly booked twice there.
+  assert.equal(candidateFit(lite(income(9409, '2025-12-20', 'RN_209906001 - Muster', '300.00'), 2025), { ...ctx, bookedYears: [2025] }).fit, 'booked')
 })
 
 // A stand-in for Bookamat's list endpoint: `pages[year]` are the pages it answers, in order.

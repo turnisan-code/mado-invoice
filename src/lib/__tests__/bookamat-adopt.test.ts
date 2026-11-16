@@ -140,6 +140,16 @@ test('another year still to book keeps the document\'s error', async () => {
   assert.equal(db.ops.some(o => o.table === 'documents' && o.action === 'update' && 'bookamat_error' in (o.values as object)), false)
 })
 
+test('a copy of a year Mado booked already is not taken over', async () => {
+  const stored = [{ year: 2025, booking_id: '70002', amount: 300, kind: 'income', booked_on: '2025-12-20', pdf_attached_at: null }]
+  const res = await adopt(setup(booking('300.00', { date: '2025-12-20' }), {
+    stored,
+    doc: { payments: [{ date: '2025-12-20', amount: 300, kind: 'payment', method: 'bank' }, { date: '2026-01-08', amount: 300, kind: 'payment', method: 'bank' }] },
+  }), 2025)
+  assert.equal(!res.ok && res.code, 'adopt_booked_year')
+  assert.deepEqual(!res.ok && res.detail, { id: '71101', year: 2025, bookings: '#70002' })
+})
+
 test('a preview takes nothing over and touches nothing', async () => {
   process.env.VERCEL_ENV = 'preview'
   const untouchable = new Proxy({}, { get: () => { throw new Error('the database was touched') } }) as never

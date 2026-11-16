@@ -106,3 +106,10 @@ test('a credit note is listed only once it is settled', () => {
   const r = reconcile({ docs: [partly], bookings: [], years: [2026], invoicePrefix: 'RN', applied: { c1: 400 } })
   assert.deepEqual(r.unbooked.map(u => [u.number, u.amount]), [['AN-2099001', 200]])
 })
+
+test('a booking found by the number is listed under its own year', () => {
+  const docs = [doc('d1', 'RN-209912010', 1000, [{ date: '2025-12-20', amount: 600, kind: 'payment' }, { date: '2026-03-08', amount: 600, kind: 'payment' }])]
+  const bookings = [booking(9941, '2026-03-08', 'RN_209912010 - Muster', '600.00')]
+  const r = reconcile({ docs, bookings, years: [2025, 2026], invoicePrefix: 'RN' })
+  assert.deepEqual(r.unbooked.map(u => [u.year, u.candidates.map(c => [c.bookingId, c.fit])]), [[2025, []], [2026, [['9941', 'exact']]]])
+})

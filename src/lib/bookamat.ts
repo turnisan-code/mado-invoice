@@ -371,6 +371,8 @@ export async function findExternalBookings(
     todo: PlannedBooking[]
     rows: MoneyRow[]
     total: number
+    // Years whose money Mado booked already (a booking found there is a possible double).
+    bookedYears?: number[]
     acknowledged?: BookingRef[]
     deadline?: number
     t?: TFn
@@ -425,7 +427,7 @@ export async function findExternalBookings(
   const planned = input.todo.map(p => ({ year: p.year, amount: p.amount }))
   return found
     .filter(c => !recorded.has(bookingKey(c.year, c.bookingId)))
-    .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: input.number, planned }) }))
+    .map(c => ({ ...c, ...candidateFit(byKey.get(bookingKey(c.year, c.bookingId))!, { documentNumber: input.number, planned, bookedYears: input.bookedYears }) }))
 }
 
 // Whether a document's money is ready to book, as the sync and the take-over require: an invoice
@@ -686,7 +688,7 @@ export async function syncBookamatDocument(
       // money (`acknowledge`, never given by the cron or Claude). A failed search books nothing too.
       const external = await findExternalBookings(supabase, creds, {
         number: doc.number!, documentDate: doc.date, kind: doc.type === 'invoice' ? 'income' : 'refund', todo, rows, total: totals.total,
-        acknowledged: opts.acknowledge, deadline: opts.deadline, t, cache: opts.bookingsCache,
+        bookedYears: stored.map(b => b.year), acknowledged: opts.acknowledge, deadline: opts.deadline, t, cache: opts.bookingsCache,
       })
       if (external.length) {
         const list = external.map(describeCandidate).join('; ')
@@ -894,9 +896,13 @@ export async function adoptExternalBooking(
     const kind: BookamatBookingKind = doc.type === 'invoice' ? 'income' : 'refund'
     const fit = booking.moneyIn !== (kind === 'income')
       ? { fit: 'kind' as const }
-      : candidateFit(booking, { documentNumber: doc.number, planned: todo.map(p => ({ year: p.year, amount: p.amount })) })
+      : candidateFit(booking, { documentNumber: doc.number, planned: todo.map(p => ({ year: p.year, amount: p.amount })), bookedYears: stored.map(b => b.year) })
     if (fit.fit === 'other_number') throw new BookamatError('adopt_other_number', `Booking #${ref.bookingId} names ${fit.other}`, 400, { id: ref.bookingId, other: fit.other ?? '' })
     if (fit.fit === 'kind') throw new BookamatError('adopt_kind', `Booking #${ref.bookingId} is not an income booking of this money`, 400, { id: ref.bookingId })
+    if (fit.fit === 'booked') {
+      const mine = stored.filter(b => b.year === ref.year).map(b => `#${b.booking_id}`).join(', ')
+      throw new BookamatError('adopt_booked_year', `Mado booked the ${ref.year} money of ${doc.number} already (${mine})`, 400, { id: ref.bookingId, year: ref.year, bookings: mine })
+    }
     if (fit.fit === 'year') {
       throw new BookamatError('adopt_other_year', `Booking #${ref.bookingId} lies in ${ref.year}; Mado books this money in ${todo.map(p => p.year).join(', ')}`, 400, {
         id: ref.bookingId, year: ref.year, years: todo.map(p => p.year).join(', '),
