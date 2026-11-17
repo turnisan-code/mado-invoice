@@ -162,11 +162,15 @@ export function amountEvidence(read: ReceiptRead | null | undefined, tx: TxLike)
   return null
 }
 
-// The debit — gross, net or the card stamp's own amount — among the amounts a text shows
+// The debit — gross, net or the card stamp's own amount — among the amounts a text shows. A
+// PDF's text reaches Mado with its no-break spaces as plain ones, and keepThousands
+// (lib/expenses/gmail-receipt.ts) puts them back in amounts with cents, so „Menge 2 450,00“
+// could be either: both readings count. It only ranks and gates the reads; a read proves.
 export function debitInText(text: string | null | undefined, tx: TxLike): boolean {
   if (!text) return false
   const wanted = [tx.amount, tx.net_amount, cardForeignAmount(tx)?.amount].filter((n): n is number => n != null).map(cents)
-  return amountsInText(text).some(a => wanted.includes(cents(a)))
+  const plain = text.replace(/(\d)\u00a0(?=\d)/g, '$1 ')
+  return [...amountsInText(text), ...(plain === text ? [] : amountsInText(plain))].some(a => wanted.includes(cents(a)))
 }
 
 // The number evidence of a candidate: the bank's number in its subject, file name or text,

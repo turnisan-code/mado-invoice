@@ -296,7 +296,7 @@ describe('searchLineReceipt — what a search keeps', () => {
   })
   test('what a line stores holds no NUL and no lone surrogate (jsonb refuses both); a „\\u0000“ written in the text stays as written', async () => {
     const s = setup({ line: bankLine() })
-    const g = gmail({ ...PROVEN, senders: { 'rechnung@muster.example': [msg('msg-a1', 'Ihre Rechnung\u0000 910000000123 \ud800', [pdf('1', 'Rechnung.pdf', 'a1')])] } })
+    const g = gmail({ ...PROVEN, senders: { 'rechnung@muster.example': [msg('msg-a1', 'Ihre Rechnung\u0000 910000000123 \ud800', [pdf('1', 'Rech\u0000nung.pdf', 'a1')])] } })
     g.deps.pdfText = async () => ({ text: 'Muster\u0000 GmbH Pfad C:\\u0000x Gesamt 23,45 EUR', pages: 1 })
     const r = await run(s, g.deps)
     assert.ok(r.status === 'searched' && r.attached)
@@ -305,6 +305,7 @@ describe('searchLineReceipt — what a search keeps', () => {
     const kept = s.world.line.receipt_search!
     assert.equal(kept.chosen?.subject, 'Ihre Rechnung 910000000123 \ufffd')
     assert.equal(kept.text, 'Muster GmbH Pfad C:\\u0000x Gesamt 23,45 EUR')
+    assert.equal(s.world.line.receipt_name, 'Rechnung.pdf')
   })
   test('searched again: the earlier search’s receipt is replaced, its copy removed once the new one is kept', async () => {
     const earlier = bankLine({ receipt_path: `${LINE_ID}/gmail-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-old', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'old', via: { kind: 'keyword', name: 'x' } }, check: 'number', read: null, text: 'alt', note: 'Rechnungsnr. 910000000123', plain_note: null, candidates: [], failed: [] } })

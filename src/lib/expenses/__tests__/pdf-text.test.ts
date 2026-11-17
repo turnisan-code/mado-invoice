@@ -34,6 +34,12 @@ describe('pdfTextOf — a PDF’s text and pages', () => {
     assert.equal(keepThousands('Menge 2 Stueck, 12 Monate'), 'Menge 2 Stueck, 12 Monate')
     assert.equal(keepThousands('Rechnung 2026 0001234'), 'Rechnung 2026 0001234')
   })
+  test('a quantity before a price („Menge 2 450,00“): the debit is in the text read either way, so no read Bookmatic would make is skipped', () => {
+    const text = keepThousands('Menge 2 450,00 EUR')
+    assert.equal(debitInText(text, debit(450)), true)
+    assert.equal(debitInText(text, debit(2450)), true)
+    assert.equal(debitInText(text, debit(45)), false)
+  })
   test('keepThousands: an invoice number printed in groups of three stays one the bank’s number is found in (verifier finding, PR 9b)', () => {
     const text = keepThousands('Rechnungsnr. 2026 001 234 · Gesamt 1 234,56 €')
     assert.equal(text, 'Rechnungsnr. 2026 001 234 · Gesamt 1\u00a0234,56 €')

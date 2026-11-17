@@ -53,9 +53,9 @@ const CHUNK = 500
 const BUCKET = 'receipts'
 const day = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 const cap = (s: string | null | undefined, max: number): string | null => (s ? s.replace(/\u0000/g, '').slice(0, max) : null)
-// What a line stores goes into jsonb, which refuses the NUL character and a lone surrogate (a
-// PDF's text, a header): each string without NUL, a lone surrogate as U+FFFD
-const jsonbSafe = <T>(v: T): T => (v == null ? v
+// What a step sends goes into text and jsonb, which refuse the NUL character and a lone surrogate
+// (a PDF's text, a header, a file name): each string without NUL, a lone surrogate as U+FFFD
+const dbSafe = <T>(v: T): T => (v == null ? v
   : JSON.parse(JSON.stringify(v), (_k, x: unknown) => (typeof x === 'string' ? x.replace(/\u0000/g, '').toWellFormed() : x)) as T)
 // The name a receipt is stored under: its file name, safe for a storage path, as the page names an
 // upload (lib/expenses/input.ts receiptPathOk)
@@ -226,11 +226,12 @@ export async function setLineReceipt(
   supabase: SupabaseClient, loaded: Loaded,
   next: { keys: readonly string[] | null; label: string; path: string | null; name: string | null; search: BankLineReceiptSearch | null; gmail: BankLineGmailReceipt | null },
 ): Promise<ReceiptStep> {
-  const { data, error } = await supabase.rpc('set_line_receipt', {
+  // The expected values are as the database holds them, so cleaning them changes nothing
+  const { data, error } = await supabase.rpc('set_line_receipt', dbSafe({
     p_line: loaded.id, p_expected_path: loaded.receipt_path, p_expected_search_at: loaded.receipt_search?.at ?? null,
     p_expected_gmail: !!loaded.receipt_gmail, p_keys: next.keys ? [...next.keys] : null, p_label: next.label,
-    p_path: next.path, p_name: next.name, p_search: jsonbSafe(next.search), p_gmail: jsonbSafe(next.gmail),
-  })
+    p_path: next.path, p_name: next.name, p_search: next.search, p_gmail: next.gmail,
+  }))
   if (error) throw new BookamatError('database', error.message)
   const step = data as ReceiptStep | null
   if (!step || !['ok', 'changed', 'not_found', 'held'].includes(step.status)) throw new BookamatError('database', 'set_line_receipt: unexpected answer')
