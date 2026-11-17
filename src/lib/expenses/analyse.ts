@@ -1,6 +1,7 @@
-// Mado's Analyse of a statement line (PR 9a): what Bookmatic's Analyse (lib/matcher.ts
+// Mado's Analyse of a statement line (PR 9a, 9b): what Bookmatic's Analyse (lib/matcher.ts
 // enrichExpense, processExpenseTransaction, processIncomeTransaction, findCsvDuplicates) makes
-// of a line, without a Gmail search, an AI or a Drive invoice — those come with PR 9b and 9c.
+// of a line, without an AI or a Drive invoice (PR 9c). The receipt a debit's Gmail search found
+// (PR 9b) is stored on the line and given to its row here (ExpenseLineState.found).
 // A debit: the fixed rules (a transfer to the owner's own account, a card issuer's
 // settlement), then the Buchungsregeln; any other debit is the owner's to fill in. A credit
 // that pays no Mado invoice (the „Einnahmen“ tab decides that): a refund of an expense is
@@ -9,7 +10,7 @@
 //
 // Pure and client-safe: the server and the page run it on the same inputs.
 import type {
-  BookamatAccounts, DuplicateInfo, EasybankTransaction, MatchedIncomeTransaction, MatchedTransaction, Vendor,
+  BookamatAccounts, DuplicateInfo, EasybankTransaction, GmailCandidate, MatchedIncomeTransaction, MatchedTransaction, Vendor,
 } from './types'
 import {
   findCounterpartyAccount, ownerNameWithExtras, ownTransfer, ownTransferExpenseSuggestion, withInvoiceQuestion,
@@ -17,14 +18,15 @@ import {
 } from './own-transfer'
 import { cardSettlement, cardSettlementExpenseRow } from './card-settlement'
 import {
-  generateTitle, matchRules, otherRuleBookedNote, otherRuleBooking, ownRuleOverride, pickRule, ruleChoiceStatus,
+  generateTitle, matchRules, otherRuleBookedNote, otherRuleBooking, ownRuleOverride, pickRule, receiptRuleIds, ruleChoiceStatus,
   ruleOutcome, ruleRowStatus, tiedRuleBookings,
 } from './rule-match'
 import { authorityMentionNoteOf, privateDepositKind, refundNote, refundReason, PRIVATE_DEPOSIT_GUESS_NOTE } from './refunds'
 import { statementBankAccountId } from './bank-account'
 import { assignDuplicates, bankRows, nearBankDate, windowFor, type BookingLite, type DuplicateMatch } from './duplicates'
 import { bookingDateOf } from './booking-dates'
-import { cleanCounterparty } from './invoice-parsing'
+import { cleanCounterparty, emailDateToIso, extractInvoiceNumberFromReference } from './invoice-parsing'
+import type { ReceiptPick, ReceiptRead, ReceiptVia } from './receipt-match'
 
 const EMPTY_RECEIPT = {
   gmail_message_id: null,
@@ -80,13 +82,42 @@ export function ownTransferExpenseRow(tx: EasybankTransaction, own: OwnTransfer,
   }
 }
 
+// The Gmail search's outcome a line keeps (bank_lines.receipt_search, PR 9b), as Bookmatic's
+// GmailFind gave it to the row (lib/expenses/gmail-receipt.ts): the receipt attached — its e-mail
+// and part, the e-mail's text for the rules' „E-Mail enthält“ —, how it was proven, what Claude
+// read and its text layer; what was found and not attached; the notes and the failed searches
+export type StoredGmailFind = {
+  chosen: {
+    messageId: string; partId: string | null; fileName: string; subject: string; date: string | null
+    via: ReceiptVia; bodyText?: string
+  } | null
+  check: ReceiptPick['check']
+  read: ReceiptRead | null
+  text: string | null
+  note: string | null
+  plainNote: string | null
+  candidates: GmailCandidate[]
+  failed: string[]
+}
+
 export type ExpenseLineState = {
   // The rule the owner picked among those that fit equally („Regel wählen“)
   ruleId?: string | null
   // A Beleg uploaded by hand: a Buchungsregel's row needs nothing more
   receipt?: boolean
+  // What the line's Gmail search found (PR 9b)
+  found?: StoredGmailFind | null
 }
 
+/**
+ * A debit's row (Bookmatic lib/matcher.ts enrichExpense, without the AI: PR 9c). An own transfer
+ * and a card issuer's settlement first, by their fixed rules, before any Buchungsregel or receipt.
+ * Then the Buchungsregeln, first without the receipt's text; with the receipt the line's Gmail
+ * search attached, a rule whose invoice address is not on it drops out. The receipt's fields as
+ * Bookmatic's Analyse filled them: its e-mail and part, the invoice number read (else the bank
+ * text's), the invoice date read (else the e-mail's), the euro total, how it was proven, what was
+ * found and not attached unless the receipt is proven, the rules whose sender sent it.
+ */
 export function analyseExpense(
   tx: EasybankTransaction, vendors: readonly Vendor[], lists: BookamatAccounts | null | undefined, state: ExpenseLineState = {},
 ): MatchedTransaction {
@@ -98,51 +129,102 @@ export function analyseExpense(
     return cardSettlementExpenseRow(tx, settlement, lists, (named.rule ?? named.tie[0])?.name)
   }
 
-  const m = matchRules(tx, [...vendors])
-  const outcome = ruleOutcome(m, m)
-  const withReceipt = (row: MatchedTransaction): MatchedTransaction =>
-    state.receipt && row.vendor && row.status === 'no_invoice' ? { ...row, status: 'ready' } : row
-
+  const fast = matchRules(tx, [...vendors])
+  const found = state.found ?? null
+  const chosen = found?.chosen ?? null
+  // With the receipt's text, when an invoice address could not be checked without it (a scan
+  // has no text: its address stays unchecked)
+  const receiptText = found?.text?.trim() ? found.text.toLowerCase() : ''
+  const m = receiptText && fast.addressUnchecked
+    ? matchRules(tx, [...vendors], address => receiptText.includes(address.toLowerCase()))
+    : fast
+  const outcome = ruleOutcome(fast, m)
+  // The rules whose sender's search found the receipt attached: a pick of another drops it
+  const sent = chosen?.via
+  let gmailRuleIds = sent?.kind === 'sender' ? sent.ruleIds : undefined
+  if (sent?.kind === 'sender' && outcome.kind !== 'ai' && chosen) {
+    gmailRuleIds = receiptRuleIds({ email: { subject: chosen.subject, bodyText: chosen.bodyText ?? '' }, sender: sent.sender, ruleIds: sent.ruleIds }, outcome.choices)
+  }
+  // What the row says of its receipt: how it was proven or why it is doubtful, the searches
+  // that failed
+  const receiptNote = (): string | null => [found?.note, ...(found?.failed ?? [])].filter(Boolean).join(' · ') || null
+  const receiptFields = () => {
+    const read = chosen ? found?.read ?? null : null
+    return {
+      gmail_message_id: chosen?.messageId ?? null,
+      gmail_part_id: chosen?.partId ?? null,
+      gmail_subject: chosen?.subject ?? null,
+      gmail_date: chosen?.date ?? null,
+      pdf_attachment_name: chosen?.fileName ?? null,
+      pdf_base64: null,
+      extracted_invoice_number: read?.invoice_number || extractInvoiceNumberFromReference(tx),
+      extracted_invoice_date: read?.date || emailDateToIso(chosen?.date),
+      extracted_amount: read?.amount || null,
+      ...(chosen && found?.check ? { receipt_check: found.check } : {}),
+      ...(found && found.check !== 'amount' && found.candidates.length ? { gmail_candidates: found.candidates } : {}),
+      ...(gmailRuleIds ? { gmail_rule_ids: gmailRuleIds } : {}),
+    }
+  }
+  // Rules that fit equally, or that lost only by their address on the receipt: the owner picks
+  // one („Regel wählen“)
   if (outcome.kind === 'choice') {
     const open: MatchedTransaction = {
       transaction: tx,
       vendor: null,
       confidence: 0,
-      ...EMPTY_RECEIPT,
+      ...receiptFields(),
       title: tx.counterparty,
-      status: ruleChoiceStatus({ gmail_message_id: null }, outcome.choices),
-      match_note: outcome.note,
+      status: ruleChoiceStatus({ gmail_message_id: chosen?.messageId ?? null }, outcome.choices),
+      match_note: join(outcome.note, receiptNote()),
       rule_choices: outcome.choices,
       rule_tie_checked: true,
     }
-    return state.ruleId ? withReceipt(pickRule(open, state.ruleId, 'owner')) : open
+    return applyRulePick(open, state.ruleId, !!state.receipt)
   }
+
+  const fields = receiptFields()
   if (outcome.kind === 'rule') {
     const row: MatchedTransaction = {
       transaction: tx,
       vendor: outcome.rule,
       confidence: 1,
-      ...EMPTY_RECEIPT,
+      ...fields,
       title: generateTitle(outcome.rule, tx.date),
-      status: ruleRowStatus({ gmail_message_id: null }, outcome.rule),
-      match_note: join(...outcome.notes),
+      // „Kein Beleg“ until its receipt is there, „Prüfen“ while it is not proven
+      status: ruleRowStatus(fields, outcome.rule),
+      match_note: join(receiptNote(), ...outcome.notes),
       ...(outcome.choices.length ? { rule_choices: outcome.choices } : {}),
       ...(outcome.pick ? { rule_pick: outcome.pick } : {}),
       rule_tie_checked: true,
     }
-    const picked = state.ruleId && state.ruleId !== outcome.rule.id ? pickRule(row, state.ruleId, 'owner') : row
-    return withReceipt(picked)
+    return applyRulePick(row, state.ruleId, !!state.receipt)
   }
+  // No rule: the owner fills it in (PR 9c asks Claude). The one rule that fit by its keyword and
+  // lost by its invoice address says why; a debit to an account of the owner's says so first.
   return {
     transaction: tx,
     vendor: null,
     confidence: 0,
-    ...EMPTY_RECEIPT,
+    ...fields,
     title: tx.counterparty,
     status: 'unknown_vendor',
-    match_note: join(outcome.note, ownAccountNoteOf(tx)),
+    match_note: join(ownAccountNoteOf(tx), outcome.note, receiptNote()),
     rule_tie_checked: true,
   }
+}
+
+/**
+ * The owner's pick among the rules („Regel wählen“, or a rule other than the one that fit), applied
+ * after the row's receipt as Bookmatic's page applied it: a receipt the picked rule's sender did not
+ * send drops out (lib/expenses/rule-match.ts pickRule). A Beleg uploaded by hand makes a rule's
+ * row ready. A choice not made yet stays a choice.
+ */
+export function applyRulePick(row: MatchedTransaction, ruleId: string | null | undefined, handReceipt: boolean): MatchedTransaction {
+  const withReceipt = (r: MatchedTransaction): MatchedTransaction =>
+    handReceipt && r.vendor && r.status === 'no_invoice' ? { ...r, status: 'ready' } : r
+  const choice = !row.vendor && !!row.rule_choices?.length
+  if (ruleId && (choice || (row.vendor && row.vendor.id !== ruleId))) return withReceipt(pickRule(row, ruleId, 'owner'))
+  return choice ? row : withReceipt(row)
 }
 
 // ─── Credits that pay no Mado invoice ────────────────────────────────────────

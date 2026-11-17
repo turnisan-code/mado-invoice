@@ -368,6 +368,8 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
     scopes: settings?.gmail_scopes ?? null,
   })
   const driveScopeGranted = !!google.scopes?.includes('/auth/drive')
+  // PR 9b: Mado reads receipts from Gmail (a grant from before asks again, keeping the Drive folder)
+  const gmailReadGranted = !!google.scopes?.includes('/auth/gmail.readonly')
   const [disconnecting, setDisconnecting] = useState(false)
   const [driveFolder, setDriveFolder] = useState(settings?.drive_folder_id ?? '')
   const [driveSaved, setDriveSaved] = useState<{ id: string | null; name: string | null }>({
@@ -1903,6 +1905,10 @@ export default function SettingsForm({ settings, bookamatWrites = true }: Props)
                   {driveScopeGranted
                     ? t('settings.integrations.google.driveGranted')
                     : <>{t('settings.integrations.google.driveNotConfirmed')}<a href="/api/gmail/auth" className="underline">{t('settings.integrations.google.reconnect')}</a>{t('settings.integrations.google.driveNotConfirmedTail')}</>}
+                  {' · '}
+                  {gmailReadGranted
+                    ? t('settings.integrations.google.gmailReadGranted')
+                    : <>{t('settings.integrations.google.gmailReadMissing')}<a href="/api/gmail/auth" className="underline">{t('settings.integrations.google.reconnect')}</a>{t('settings.integrations.google.gmailReadMissingTail')}</>}
                 </p>
                 <Button
                   type="button"

@@ -1,3 +1,5 @@
+import type { GmailCandidate, ReceiptRead, ReceiptVia } from '@/lib/expenses/receipt-types'
+
 export type Language = 'de' | 'en'
 export type Currency = 'EUR' | 'USD' | 'GBP'
 export type TaxTreatment = 'at_vat' | 'eu_reverse_charge' | 'non_eu'
@@ -426,10 +428,57 @@ export interface BankLine {
   review: BankLineReview
   receipt_path: string | null
   receipt_name: string | null
+  // PR 9b: the line's last Gmail search, and a receipt the owner attached from its list
+  receipt_search: BankLineReceiptSearch | null
+  receipt_gmail: BankLineGmailReceipt | null
   bookamat_claim: string | null
   bookamat_pending: BankLinePending | null
   created_at: string
   updated_at: string
+}
+
+// PR 9b „Belege aus Gmail“. What the line's last Gmail search found (lib/expenses/receipts.ts),
+// as Bookmatic's Analyse handed it to a row (lib/expenses/gmail-receipt.ts GmailFind): the receipt
+// it attached — its e-mail and part, never its data (the copy is receipt_path) —, how that was
+// proven, what Claude read on it and its text layer; what it found and did not attach; its notes
+// and the searches that failed. The line's row is built from it again on every read
+// (lib/expenses/lines.ts lineRow).
+export interface BankLineReceiptChosen {
+  message_id: string
+  part_id: string | null
+  file_name: string
+  subject: string
+  from: string
+  date: string | null
+  sha256: string | null
+  // Which search found it: a Buchungsregel's sender (with the rules searched), a payment
+  // processor, the vendor's name
+  via: ReceiptVia
+  // The e-mail's own text, capped: the rules' „E-Mail enthält“ (lib/expenses/rule-match.ts
+  // receiptRuleIds)
+  body_text?: string | null
+}
+export interface BankLineReceiptSearch {
+  at: string
+  chosen: BankLineReceiptChosen | null
+  check: 'amount' | 'number' | 'ambiguous' | 'unchecked' | null
+  read: ReceiptRead | null
+  // The chosen PDF's text layer, capped (the invoice address of tied rules; 9c's classifier)
+  text: string | null
+  note: string | null
+  plain_note: string | null
+  candidates: GmailCandidate[]
+  failed: string[]
+}
+// A PDF of that list the owner attached („Anhängen“), with what was read of it
+// (lib/expenses/gmail-attach.ts withGmailCandidate)
+export interface BankLineGmailReceipt {
+  candidate: GmailCandidate
+  name: string | null
+  extracted: { invoice_number?: string | null; date?: string | null; amount?: number | null }
+  unreadable: boolean
+  sha256: string | null
+  text: string | null
 }
 
 // A Buchungsregel. Accounts by their Bookamat title, looked up in each year's accounts.

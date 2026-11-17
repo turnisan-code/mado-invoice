@@ -493,12 +493,25 @@ create table bank_lines (
   review            jsonb not null default '{}'::jsonb,
   receipt_path      text,
   receipt_name      text,
+  -- 20261118_receipts.sql: the line's last Gmail search, a PDF of its list the owner attached
+  receipt_search    jsonb,
+  receipt_gmail     jsonb,
   bookamat_claim    timestamptz,
   bookamat_pending  jsonb,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
 create index bank_lines_open_idx on bank_lines(booked_on) where status = 'open';
+
+-- Each receipt held by one line only: by its Gmail part, its bytes (sha256) and its sender's
+-- invoice number (20261118_receipts.sql). A line's claims go with its receipt.
+create table receipt_claims (
+  key          text primary key,
+  bank_line_id uuid not null references bank_lines(id) on delete cascade,
+  label        text not null default '',
+  created_at   timestamptz not null default now()
+);
+create index receipt_claims_line_idx on receipt_claims (bank_line_id);
 
 create table bookamat_bookings (
   id              uuid primary key default uuid_generate_v4(),
@@ -1431,6 +1444,52 @@ create trigger bank_lines_booking_guard
   before update or delete on bank_lines
   for each row execute function bank_lines_booking_guard();
 
+-- ─── A statement line's receipt (20261118_receipts.sql) ──────────────────────
+-- One step for the receipt of a statement line (PR 9b): the line as the caller loaded it, its
+-- claims swapped and its receipt fields set — or nothing. Called by a Gmail search, by „Anhängen“
+-- and by a Beleg uploaded or removed by hand (src/lib/expenses/receipts.ts). The copy of a new
+-- receipt is uploaded before, under a name of its own, and removed by the caller when this
+-- refuses, so a refusal never touches the copy the line keeps.
+--  p_expected_*: receipt_path, receipt_search->>'at' and whether receipt_gmail was set, as loaded
+--  p_keys: the receipt's claim keys (null: the line's claims stay as they are; '{}': released)
+-- Refused ('changed') when the line is no longer open, a booking attempt is open or running (a
+-- claim younger than 3 minutes), or its receipt changed meanwhile; 'held' when another line
+-- holds one of the keys.
+create or replace function set_line_receipt(
+  p_line uuid, p_expected_path text, p_expected_search_at text, p_expected_gmail boolean,
+  p_keys text[], p_label text, p_path text, p_name text, p_search jsonb, p_gmail jsonb
+) returns jsonb language plpgsql as $$
+declare
+  l     bank_lines%rowtype;
+  other text;
+begin
+  select * into l from bank_lines where id = p_line for update;
+  if not found then return jsonb_build_object('status', 'not_found'); end if;
+  if l.status <> 'open' or l.bookamat_pending is not null
+     or (l.bookamat_claim is not null and l.bookamat_claim > now() - interval '3 minutes')
+     or l.receipt_path is distinct from p_expected_path
+     or (l.receipt_search ->> 'at') is distinct from p_expected_search_at
+     or (l.receipt_gmail is not null) is distinct from p_expected_gmail then
+    return jsonb_build_object('status', 'changed');
+  end if;
+  if p_keys is not null then
+    select c.label into other from receipt_claims c where c.key = any(p_keys) and c.bank_line_id <> p_line limit 1;
+    if found then return jsonb_build_object('status', 'held', 'label', other); end if;
+    begin
+      delete from receipt_claims where bank_line_id = p_line;
+      insert into receipt_claims (key, bank_line_id, label)
+        select distinct k, p_line, coalesce(p_label, '') from unnest(p_keys) as k;
+    exception when unique_violation then
+      -- Another line claimed one of them meanwhile: the line's own claims are as they were
+      return jsonb_build_object('status', 'held', 'label', '');
+    end;
+  end if;
+  update bank_lines set receipt_path = p_path, receipt_name = p_name, receipt_search = p_search, receipt_gmail = p_gmail
+  where id = p_line;
+  return jsonb_build_object('status', 'ok');
+end;
+$$;
+
 
 -- ─── Quote → invoice ─────────────────────────────────────────────────────────
 -- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
@@ -1642,6 +1701,7 @@ alter table recurring_schedules enable row level security;
 alter table bookamat_bookings enable row level security;
 alter table bank_lines      enable row level security;
 alter table booking_rules   enable row level security;
+alter table receipt_claims  enable row level security;
 alter table client_rates    enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -1656,6 +1716,7 @@ create policy "owner" on recurring_schedules for all to authenticated using (is_
 create policy "owner" on bookamat_bookings for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on bank_lines      for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on booking_rules   for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on receipt_claims  for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on client_rates    for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Projects, time tracking and billable expenses ───────────────────────────

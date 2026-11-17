@@ -80,3 +80,8 @@ export async function readExpenseAccounts(creds: BookamatCredentials, year: numb
     bank_accounts: keep(bank.map(bankAccountOf)),
   }
 }
+
+// The year's Zahlungsmittelkonten alone, with their IBAN (a receipt search's account check, PR 9b)
+export async function readBankAccounts(creds: BookamatCredentials, year: number, deadline?: number): Promise<BookamatAccount[]> {
+  return (await listAll(creds, year, 'preferences/bankaccounts/', deadline)).map(bankAccountOf).filter((x): x is BookamatAccount => !!x)
+}
