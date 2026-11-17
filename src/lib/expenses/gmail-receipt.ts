@@ -62,9 +62,12 @@ export type GmailReceiptDeps = {
 // A PDF's text layer and its pages (unpdf, PDF.js's serverless build; Bookmatic used pdf-parse).
 // unpdf opens and destroys the document. PDF.js gives a no-break space between thousands as a
 // plain one, which pdf-parse kept („1 234,56“), and lib/expenses/money.ts reads only the no-break
-// space as a thousands separator: a space between a digit and a group of three digits is one
-// again. It only ranks and gates the reads (debitInText); a read proves.
-export const keepThousands = (text: string): string => text.replace(/(\d) (?=\d{3}(?!\d))/g, '$1\u00a0')
+// space as a thousands separator: in an amount with cents („1 234,56“, „12 345 678,90“) the spaces
+// between its groups are no-break spaces again. Digit groups without cents — an invoice number
+// „2026 001“ — stay as read (lib/expenses/receipt-match.ts joins those across a plain space). It
+// only ranks and gates the reads (debitInText); a read proves.
+export const keepThousands = (text: string): string =>
+  text.replace(/(?<!\d)\d{1,3}(?: \d{3})+[,.]\d{2}(?!\d)/g, amount => amount.replace(/ /g, '\u00a0'))
 export async function pdfTextOf(base64: string): Promise<PdfText> {
   const { totalPages, text } = await extractText(new Uint8Array(Buffer.from(base64, 'base64')), { mergePages: true })
   return { text: keepThousands(text ?? ''), pages: totalPages ?? null }

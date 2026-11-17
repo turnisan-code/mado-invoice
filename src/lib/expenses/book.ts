@@ -275,14 +275,24 @@ export async function bookLines(
     // The line's claim: one attempt at a time
     const claimedAt = new Date().toISOString()
     const cutoff = new Date(Date.now() - CLAIM_TTL_MS).toISOString()
-    const { data: claimed, error: claimErr } = await supabase.from('bank_lines')
+    // …and only with the receipt it was loaded with: one a Gmail search or „Anhängen“ put there
+    // meanwhile is not the one this booking was prepared with (PR 9b)
+    let claim = supabase.from('bank_lines')
       .update({ bookamat_claim: claimedAt })
       .eq('id', line.id)
       .eq('status', 'open')
       .or(`bookamat_claim.is.null,bookamat_claim.lt."${cutoff}"`)
-      .select('bookamat_pending')
+    claim = line.receipt_path ? claim.eq('receipt_path', line.receipt_path) : claim.is('receipt_path', null)
+    claim = line.receipt_gmail ? claim.not('receipt_gmail', 'is', null) : claim.is('receipt_gmail', null)
+    claim = line.receipt_search?.at ? claim.eq('receipt_search->>at', line.receipt_search.at) : claim.is('receipt_search', null)
+    const { data: claimed, error: claimErr } = await claim.select('bookamat_pending')
     if (claimErr) throw new BookamatError('database', claimErr.message)
-    if (!claimed?.length) return error(line.id, LINE_TEXT.inProgress, 'in_progress')
+    if (!claimed?.length) {
+      const { data: now } = await supabase.from('bank_lines').select('receipt_path, receipt_gmail, receipt_search').eq('id', line.id).maybeSingle()
+      const r = now as Pick<BankLine, 'receipt_path' | 'receipt_gmail' | 'receipt_search'> | null
+      const changed = !!r && (r.receipt_path !== line.receipt_path || !!r.receipt_gmail !== !!line.receipt_gmail || (r.receipt_search?.at ?? null) !== (line.receipt_search?.at ?? null))
+      return changed ? error(line.id, LINE_TEXT.changed, 'changed') : error(line.id, LINE_TEXT.inProgress, 'in_progress')
+    }
 
     const saveJournal = async (pending: BankLinePending | null): Promise<boolean> => {
       const { data: kept, error: saveErr } = await supabase.from('bank_lines').update({ bookamat_pending: pending })

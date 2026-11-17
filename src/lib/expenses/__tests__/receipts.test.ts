@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fakeSupabase, hasFilter, type Op } from '@/lib/__tests__/fake-supabase'
+import { BookamatError } from '@/lib/bookamat'
 import {
   attachGmailCandidate, copyPath, ownReceipt, ReceiptError, searchLineReceipt, searchPaths, setHandReceipt, storedName,
   RECEIPT_TEXT, RECEIPT_TEXT_MAX, SEARCH_MAX_DURATION_S, type AttachDeps,
@@ -76,6 +77,8 @@ type DbWorld = {
   insertConflict?: boolean
   // the line changed between the load and the step (booked, held, its receipt another)
   changed?: boolean
+  // the step throws: before it saved anything (the database failing), or after (its answer lost)
+  stepThrows?: 'before' | 'after'
   documents?: { type: string; number: string }[]
 }
 type StepArgs = {
@@ -102,9 +105,10 @@ function setup(world: DbWorld) {
     return {}
   })
   // set_line_receipt (20261118_receipts.sql), as its SQL says
-  ;(db.client as unknown as { rpc: (name: string, args: StepArgs) => Promise<{ data: unknown; error: null }> }).rpc = async (name, args) => {
+  ;(db.client as unknown as { rpc: (name: string, args: StepArgs) => Promise<{ data: unknown; error: { message: string } | null }> }).rpc = async (name, args) => {
     assert.equal(name, 'set_line_receipt')
     steps.push(args)
+    if (world.stepThrows === 'before') return { data: null, error: { message: 'connection reset' } }
     const l = world.line
     const same = (l.receipt_path ?? null) === args.p_expected_path && (l.receipt_search?.at ?? null) === args.p_expected_search_at && !!l.receipt_gmail === args.p_expected_gmail
     if (world.changed || l.status !== 'open' || l.bookamat_pending || !same) return { data: { status: 'changed' }, error: null }
@@ -117,6 +121,7 @@ function setup(world: DbWorld) {
     }
     world.line = { ...l, receipt_path: args.p_path, receipt_name: args.p_name, receipt_search: args.p_search, receipt_gmail: args.p_gmail as BankLine['receipt_gmail'] }
     writes.push('line receipt')
+    if (world.stepThrows === 'after') return { data: null, error: { message: 'connection reset' } }
     return { data: { status: 'ok' }, error: null }
   }
   const storage = {
@@ -274,11 +279,32 @@ describe('searchLineReceipt — what a search keeps', () => {
   test('a line booked, held or given a receipt meanwhile: only the search’s own copy goes; the line and its claims stay as they are', async () => {
     const before = bankLine({ receipt_path: `${LINE_ID}/gmail-0000-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-a1', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'shaa1abcdef', via: { kind: 'keyword', name: 'x' } }, check: 'amount', read: null, text: null, note: null, plain_note: null, candidates: [], failed: [] } })
     const s = setup({ line: before, changed: true, claims: [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }] })
-    await assert.rejects(run(s, gmail(PROVEN).deps), (e: unknown) => e instanceof ReceiptError && e.code === 'changed' && e.status === 409)
+    await assert.rejects(run(s, gmail(PROVEN).deps), (e: unknown) => e instanceof ReceiptError && e.code === 'line_changed' && e.status === 409)
     // the same receipt found again: its new copy (a name of its own) goes, never the line's
     assert.equal(s.storage.removes.length, 1)
     assert.notEqual(s.storage.removes[0][0], before.receipt_path)
     assert.deepEqual([s.world.line, s.world.claims], [before, [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }]])
+  })
+  test('a step that throws: its copy goes when the line, read again, does not hold it; kept when only the answer was lost (verifier finding, PR 9b)', async () => {
+    const failed = setup({ line: bankLine(), stepThrows: 'before' })
+    await assert.rejects(run(failed, gmail(PROVEN).deps), (e: unknown) => e instanceof BookamatError && e.code === 'database')
+    assert.equal(failed.storage.uploads.length, 1)
+    assert.deepEqual([failed.storage.removes, failed.world.line.receipt_path], [[failed.storage.uploads], null])
+    const lost = setup({ line: bankLine(), stepThrows: 'after' })
+    await assert.rejects(run(lost, gmail(PROVEN).deps), (e: unknown) => e instanceof BookamatError && e.code === 'database')
+    assert.deepEqual([lost.storage.removes, lost.world.line.receipt_path], [[], lost.storage.uploads[0]])
+  })
+  test('what a line stores holds no NUL and no lone surrogate (jsonb refuses both); a „\\u0000“ written in the text stays as written', async () => {
+    const s = setup({ line: bankLine() })
+    const g = gmail({ ...PROVEN, senders: { 'rechnung@muster.example': [msg('msg-a1', 'Ihre Rechnung\u0000 910000000123 \ud800', [pdf('1', 'Rechnung.pdf', 'a1')])] } })
+    g.deps.pdfText = async () => ({ text: 'Muster\u0000 GmbH Pfad C:\\u0000x Gesamt 23,45 EUR', pages: 1 })
+    const r = await run(s, g.deps)
+    assert.ok(r.status === 'searched' && r.attached)
+    const strings = (v: unknown): string[] => (typeof v === 'string' ? [v] : v && typeof v === 'object' ? Object.values(v).flatMap(strings) : [])
+    assert.ok(strings(s.steps[0]).every(x => !x.includes('\u0000') && x.isWellFormed()))
+    const kept = s.world.line.receipt_search!
+    assert.equal(kept.chosen?.subject, 'Ihre Rechnung 910000000123 \ufffd')
+    assert.equal(kept.text, 'Muster GmbH Pfad C:\\u0000x Gesamt 23,45 EUR')
   })
   test('searched again: the earlier search’s receipt is replaced, its copy removed once the new one is kept', async () => {
     const earlier = bankLine({ receipt_path: `${LINE_ID}/gmail-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-old', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'old', via: { kind: 'keyword', name: 'x' } }, check: 'number', read: null, text: 'alt', note: 'Rechnungsnr. 910000000123', plain_note: null, candidates: [], failed: [] } })
@@ -341,9 +367,9 @@ describe('attachGmailCandidate — „Anhängen“ of a PDF the search found', (
   })
   test('not in the line’s list, no PDF, another line’s: refused, its copy gone, nothing kept', async () => {
     const s = setup({ line: listedLine() })
-    await assert.rejects(attachGmailCandidate(s.db.client, LINE_ID, 'msg-zz', '1', deps(), { storage: s.storage }), (e: unknown) => e instanceof ReceiptError && e.code === 'not_found')
+    await assert.rejects(attachGmailCandidate(s.db.client, LINE_ID, 'msg-zz', '1', deps(), { storage: s.storage }), (e: unknown) => e instanceof ReceiptError && e.code === 'not_listed' && e.status === 404)
     await assert.rejects(attachGmailCandidate(s.db.client, LINE_ID, 'msg-c1', '2', deps({ fetchPdf: async () => ({ base64: Buffer.from('GIF89a').toString('base64'), filename: 'x.pdf' }) }), { storage: s.storage }),
-      (e: unknown) => e instanceof ReceiptError && e.code === 'invalid_request')
+      (e: unknown) => e instanceof ReceiptError && e.code === 'not_attachable' && e.status === 400)
     const held = setup({ line: listedLine(), claims: [{ key: 'gmail:msg-c1:2', bank_line_id: OTHER_ID, label: '02.07.2026 · Muster · 25,00 €' }] })
     await assert.rejects(attachGmailCandidate(held.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: held.storage }),
       (e: unknown) => e instanceof ReceiptError && e.code === 'claimed' && e.message === RECEIPT_TEXT.claimed('02.07.2026 · Muster · 25,00 €'))
@@ -352,13 +378,21 @@ describe('attachGmailCandidate — „Anhängen“ of a PDF the search found', (
   test('over a Beleg uploaded by hand: refused (remove it first); over one from Gmail: replaced and its copy removed', async () => {
     const hand = setup({ line: listedLine({ receipt_path: `${LINE_ID}/Beleg.pdf`, receipt_name: 'Beleg.pdf' }) })
     await assert.rejects(attachGmailCandidate(hand.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: hand.storage }),
-      (e: unknown) => e instanceof ReceiptError && e.code === 'invalid_status' && e.message === RECEIPT_TEXT.handReceipt)
+      (e: unknown) => e instanceof ReceiptError && e.code === 'not_attachable' && e.status === 409 && e.message === RECEIPT_TEXT.handReceipt)
     assert.deepEqual([hand.storage.uploads, hand.steps], [[], []])
     const fromSearch = listedLine({ receipt_path: `${LINE_ID}/gmail-old-R.pdf`, receipt_name: 'R.pdf' })
     fromSearch.receipt_search!.chosen = { message_id: 'msg-old', part_id: '1', file_name: 'R.pdf', subject: 's', from: 'f', date: null, sha256: 'x', via: { kind: 'keyword', name: 'x' } }
     const g = setup({ line: fromSearch })
     await attachGmailCandidate(g.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: g.storage })
     assert.deepEqual(g.storage.removes, [[`${LINE_ID}/gmail-old-R.pdf`]])
+  })
+  test('a step that throws: its copy goes unless the line holds it (verifier finding, PR 9b)', async () => {
+    const failed = setup({ line: listedLine(), stepThrows: 'before' })
+    await assert.rejects(attachGmailCandidate(failed.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: failed.storage }), (e: unknown) => e instanceof BookamatError && e.code === 'database')
+    assert.deepEqual(failed.storage.removes, [failed.storage.uploads])
+    const lost = setup({ line: listedLine(), stepThrows: 'after' })
+    await assert.rejects(attachGmailCandidate(lost.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: lost.storage }))
+    assert.deepEqual([lost.storage.removes, lost.world.line.receipt_path], [[], lost.storage.uploads[0]])
   })
   test('the reader failing (or no key): attached all the same, its data not read', async () => {
     const s = setup({ line: listedLine() })

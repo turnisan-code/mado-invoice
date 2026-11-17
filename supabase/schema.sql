@@ -1444,18 +1444,8 @@ create trigger bank_lines_booking_guard
   before update or delete on bank_lines
   for each row execute function bank_lines_booking_guard();
 
-
--- ─── Quote → invoice ─────────────────────────────────────────────────────────
--- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
--- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
--- unnumbered draft dated today, due after the client's payment days and with the client's Skonto
--- (each falling back to the settings default; stored only above 0 %, as the builder does), with
--- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
--- and partial invoices made from the quote are never its conversion, nor is an invoice cancelled
--- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
--- plain invoice would bill them twice (MI019): p_final creates the final invoice instead and
--- links them to it (the app then writes the deduction lines). Null when the quote does not exist.
--- (20261118_receipts.sql) One step for the receipt of a statement line (PR 9b): the line as the caller loaded it, its
+-- ─── A statement line's receipt (20261118_receipts.sql) ──────────────────────
+-- One step for the receipt of a statement line (PR 9b): the line as the caller loaded it, its
 -- claims swapped and its receipt fields set — or nothing. Called by a Gmail search, by „Anhängen“
 -- and by a Beleg uploaded or removed by hand (src/lib/expenses/receipts.ts). The copy of a new
 -- receipt is uploaded before, under a name of its own, and removed by the caller when this
@@ -1500,6 +1490,17 @@ begin
 end;
 $$;
 
+
+-- ─── Quote → invoice ─────────────────────────────────────────────────────────
+-- One transaction: the quote row is locked, so a double click or a second tab gets the invoice
+-- the first call created. Only sent or accepted quotes convert (MI016). The invoice is an
+-- unnumbered draft dated today, due after the client's payment days and with the client's Skonto
+-- (each falling back to the settings default; stored only above 0 %, as the builder does), with
+-- every line and the buyer reference copied as they are; a sent quote becomes accepted. Advance
+-- and partial invoices made from the quote are never its conversion, nor is an invoice cancelled
+-- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
+-- plain invoice would bill them twice (MI019): p_final creates the final invoice instead and
+-- links them to it (the app then writes the deduction lines). Null when the quote does not exist.
 create or replace function convert_quote_to_invoice(p_quote_id uuid, p_final boolean default false)
 returns jsonb language plpgsql as $$
 declare

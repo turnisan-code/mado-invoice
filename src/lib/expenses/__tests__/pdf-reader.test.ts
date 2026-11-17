@@ -128,6 +128,9 @@ describe('readPdfInvoice — one read by Claude Opus 5.5 (D3a)', () => {
     assert.equal(schema.additionalProperties, false)
     for (const [field, p] of Object.entries(schema.properties)) assert.ok(p.anyOf.some(t => t.type === 'null'), field)
     assert.deepEqual(['amount', 'amount_due'].map(f => schema.properties[f].anyOf[0].type), ['number', 'number'])
+    // the document type: any string, the types named in its description (an answer outside the
+    // list is no failed read — pdfInvoiceFields keeps only a known type)
+    assert.deepEqual(schema.properties.document_type.anyOf, [{ type: 'string', description: `One of: ${DOCUMENT_TYPES.join(', ')}` }, { type: 'null' }])
   })
   test('without the owner’s UID given: the one from Einstellungen', async () => {
     const { messages, calls } = standIn(ok())
@@ -148,6 +151,12 @@ describe('readPdfInvoice — one read by Claude Opus 5.5 (D3a)', () => {
       date: '2026-07-15', invoice_number: '910000000123', amount: 25.2, currency: 'EUR', vatin: null,
       amount_due: 21, foreign_total: null, document_type: 'invoice',
     })
+  })
+  test('a document type named otherwise („Invoice“, „proforma“): the read stands, the type as asked or not known (verifier finding, PR 9b)', async () => {
+    const named = await readPdfInvoice(PDF, {}, standIn(ok({ ...PARSED, document_type: 'Invoice' })).messages)
+    assert.deepEqual([named.amount, named.document_type], [25.2, 'invoice'])
+    const other = await readPdfInvoice(PDF, {}, standIn(ok({ ...PARSED, document_type: 'proforma' })).messages)
+    assert.deepEqual([other.amount, other.invoice_number, other.document_type], [25.2, '910000000123', null])
   })
   test('„nicht lesbar“: declined by Claude and its fallback, cut off, ended otherwise, or no answer of the schema', async () => {
     const cases: [ReaderAnswer, RegExp][] = [

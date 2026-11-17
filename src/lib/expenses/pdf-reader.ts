@@ -54,7 +54,9 @@ export const PDF_READER_ANSWER = z.object({
   currency: z.string().nullable(),
   amount_due: z.number().nullable(),
   vatin: z.string().nullable(),
-  document_type: z.enum(DOCUMENT_TYPES).nullable(),
+  // As a string: the SDK sends an enum as the field's description, and an answer of „Invoice“ or
+  // „proforma“ must not make the whole read unreadable (pdfInvoiceFields keeps only a known type)
+  document_type: z.string().describe(`One of: ${DOCUMENT_TYPES.join(', ')}`).nullable(),
 })
 
 // What the reader asks. Its UID is the seller's, its Austrian one when it prints several, never

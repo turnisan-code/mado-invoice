@@ -10,7 +10,7 @@ export function expenseError(err: unknown): NextResponse {
   if (err instanceof BookamatError) {
     const status = err.code === 'database' || err.code === 'db_write' ? 500
       : err.code === 'forget_not_found' || err.code === 'not_found' ? 404
-      : err.code === 'in_progress' || err.code === 'unknown_outcome' || err.code === 'forget_still_booked' || err.code === 'unconfirmed' ? 409
+      : err.code === 'in_progress' || err.code === 'unknown_outcome' || err.code === 'forget_still_booked' || err.code === 'unconfirmed' || err.code === 'held' ? 409
       : err.code === 'preview' ? 403
       : err.code === 'timeout' || err.code === 'network' || (err.code === 'bookamat' && err.status >= 500) ? 502
       : 400

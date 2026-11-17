@@ -10,7 +10,6 @@
 // on „In Gmail suchen“, and by itself for the lines from the switch-over date on (decision D11);
 // what the search found and did not attach is listed with „Vorschau“ and „Anhängen“.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Eye, Loader2, Mail, Paperclip, Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -241,7 +240,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
   }), [lines, reviewOf, accounts, accountsErrors, t])
 
   type Prepared = (typeof prepared)[number]
-  const isChecked = (p: Prepared) => p.bookable && (selection[p.v.line.id] ?? p.ticked)
+  const isChecked = (p: Prepared) => p.bookable && !searching[p.v.line.id] && (selection[p.v.line.id] ?? p.ticked)
   const chosen = prepared.filter(isChecked)
   const bulk = prepared.filter(p => p.bookable && p.pill === 'ready')
   const allChecked = bulk.length > 0 && bulk.every(isChecked)
@@ -439,6 +438,8 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
       }
     }
     await Promise.all(Array.from({ length: Math.min(SEARCHES_AT_ONCE, ids.length) }, worker))
+    // Lines the batch never reached (the page left): searched on the next visit
+    if (signal.aborted) for (const left of queue) AUTO_TRIED.delete(left)
     for (const left of queue) done(left)
     if (changed && !signal.aborted) await onChanged()
   }, [onChanged, t])
@@ -793,7 +794,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
   const gmailNote = kind === 'expense' && gmail && (
     !gmail.read || gmailBlocked ? (
       <p role="status" className="mx-4 sm:mx-6 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-        {t('expenses.gmailReconnect')} <Link href="/settings" className="underline underline-offset-2">{t('expenses.gmailReconnectLink')}</Link>
+        {t('expenses.gmailReconnect')} <a href="/api/gmail/auth" className="underline underline-offset-2">{t('expenses.gmailReconnectLink')}</a>
       </p>
     ) : (
       <>
@@ -827,7 +828,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
           return (
             <div key={v.line.id} className={isChecked(p) ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''}>
               <div className="flex items-start gap-3 px-4 sm:px-6 py-3">
-                <input type="checkbox" className={`${CHECKBOX_CLS} mt-1`} checked={isChecked(p)} disabled={!p.bookable || busy}
+                <input type="checkbox" className={`${CHECKBOX_CLS} mt-1`} checked={isChecked(p)} disabled={!p.bookable || busy || !!searching[v.line.id]}
                   aria-label={t(p.pendingLine ? 'expenses.rebook' : 'expenses.select')} onChange={e => setSelection(s => ({ ...s, [v.line.id]: e.target.checked }))} />
                 <button type="button" onClick={() => setOpen(expanded ? null : v.line.id)} className="flex-1 min-w-0 text-left">
                   <div className="flex items-baseline justify-between gap-3">

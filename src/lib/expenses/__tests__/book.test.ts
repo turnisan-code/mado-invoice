@@ -56,6 +56,8 @@ type World = {
   posts?: ('ok' | 'timeout' | '502' | object)[]
   invoicePaid?: string[]
   claimTaken?: boolean
+  // The line as it is when read again by its id (its receipt changed meanwhile)
+  now?: Partial<BankLine>
   pending?: BankLinePending | null
   // The ledger: bookings Mado recorded, on documents or lines
   recorded?: { year: number; booking_id: string; bank_line_id: string | null; document_id?: string | null; payment_id?: string | null }[]
@@ -99,6 +101,11 @@ function setup(world: World) {
     log.push(`db ${op.table} ${op.action}${op.action === 'update' ? ` ${Object.keys(op.values as object).join(',')}` : ''}`)
     if (op.table === 'bank_lines' && op.action === 'select') {
       if (hasFilter(op, 'eq', 'status', 'open')) return { data: world.lines.filter(l => l.status === 'open') }
+      // One line by its id, as it is now
+      if (op.single === 'maybe' && hasFilter(op, 'eq', 'id')) {
+        const line = world.lines.find(l => l.id === op.filters.find(f => f[0] === 'eq' && f[1] === 'id')![2])
+        return { data: line ? { ...line, ...world.now } : null }
+      }
       return { data: world.lines }
     }
     if (op.table === 'booking_rules') return { data: RULES }
@@ -428,6 +435,22 @@ test('a dry run posts and claims nothing; a line another attempt holds is not bo
   const held = setup({ lines: [RENT], claimTaken: true })
   const [busy] = await book(held, ['l-rent'])
   assert.ok(isError(busy, 'in_progress'))
+  assert.equal(posted.length, 0)
+})
+
+test('the claim holds the line only with the receipt it was loaded with: one put there meanwhile is „changed“, nothing booked', async () => {
+  const claimOf = (db: ReturnType<typeof setup>) => db.ops.find(o => o.table === 'bank_lines' && o.action === 'update' && 'bookamat_claim' in (o.values as object))!
+  const receiptFilters = (db: ReturnType<typeof setup>) => claimOf(db).filters.filter(f => String(f[1]).startsWith('receipt_'))
+  const plain = setup({ lines: [RENT], claimTaken: true })
+  const [busy] = await book(plain, ['l-rent'])
+  assert.ok(isError(busy, 'in_progress'))
+  assert.deepEqual(receiptFilters(plain), [['is', 'receipt_path', null], ['is', 'receipt_gmail', null], ['is', 'receipt_search', null]])
+  const search = { at: '2026-11-17T08:00:00.000Z', chosen: null, check: null, read: null, text: null, note: null, plain_note: null, candidates: [], failed: [] }
+  const loaded = { ...RENT, receipt_path: 'l-rent/Beleg.pdf', receipt_name: 'Beleg.pdf', receipt_search: search }
+  const meanwhile = setup({ lines: [loaded], claimTaken: true, now: { receipt_path: 'l-rent/gmail-0000bbbb-33334444-R.pdf', receipt_search: { ...search, at: '2026-11-17T09:00:00.000Z' } } })
+  const [changed] = await book(meanwhile, ['l-rent'])
+  assert.ok(isError(changed, 'changed'), JSON.stringify(changed))
+  assert.deepEqual(receiptFilters(meanwhile), [['eq', 'receipt_path', 'l-rent/Beleg.pdf'], ['is', 'receipt_gmail', null], ['eq', 'receipt_search->>at', search.at]])
   assert.equal(posted.length, 0)
 })
 

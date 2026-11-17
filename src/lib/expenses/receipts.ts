@@ -52,7 +52,11 @@ const CHUNK = 500
 
 const BUCKET = 'receipts'
 const day = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
-const cap = (s: string | null | undefined, max: number): string | null => (s ? s.slice(0, max) : null)
+const cap = (s: string | null | undefined, max: number): string | null => (s ? s.replace(/\u0000/g, '').slice(0, max) : null)
+// What a line stores goes into jsonb, which refuses the NUL character and a lone surrogate (a
+// PDF's text, a header): each string without NUL, a lone surrogate as U+FFFD
+const jsonbSafe = <T>(v: T): T => (v == null ? v
+  : JSON.parse(JSON.stringify(v), (_k, x: unknown) => (typeof x === 'string' ? x.replace(/\u0000/g, '').toWellFormed() : x)) as T)
 // The name a receipt is stored under: its file name, safe for a storage path, as the page names an
 // upload (lib/expenses/input.ts receiptPathOk)
 export const storedName = (name: string) => name.replace(/[^\w.\-]+/g, '_').replace(/_+/g, '_').slice(-120) || 'beleg.pdf'
@@ -88,7 +92,8 @@ export const RECEIPT_TEXT = {
 // What a receipt route answers when the owner's step can't be done: the line changed meanwhile,
 // a receipt another line holds, a PDF that is none, Gmail not connected (src/lib/expenses/api.ts)
 export class ReceiptError extends Error {
-  constructor(readonly code: 'changed' | 'invalid_status' | 'invalid_request' | 'claimed' | 'not_found' | 'gmail_not_connected' | 'gmail_scope', message: string, readonly status: number) {
+  // Codes of their own: the page shows the server's words for them (never a generic text)
+  constructor(readonly code: 'line_changed' | 'not_searchable' | 'not_attachable' | 'claimed' | 'not_listed', message: string, readonly status: number) {
     super(message)
     this.name = 'ReceiptError'
     Object.setPrototypeOf(this, ReceiptError.prototype)
@@ -165,7 +170,7 @@ export { handReceipt, onlyFailed, receiptSearchForPage } from './receipt-state'
 // are not its receipts' — with the receipts other lines hold
 async function lineRun(supabase: SupabaseClient, line: StoredLine, tx: EasybankTransaction, opts: { startedAt?: number; now?: () => number }) {
   const around: StoredLine[] = []
-  const { data, error } = await supabase.from('bank_lines').select(LINE_COLUMNS)
+  const { data, error } = await supabase.from('bank_lines').select('id, cells, amount, booked_on')
     .gte('booked_on', day(String(line.booked_on), -AROUND_DAYS)).lte('booked_on', day(String(line.booked_on), AROUND_DAYS))
     .neq('id', line.id).order('booked_on').order('id').limit(CHUNK)
   if (error) throw new BookamatError('database', error.message)
@@ -224,12 +229,25 @@ export async function setLineReceipt(
   const { data, error } = await supabase.rpc('set_line_receipt', {
     p_line: loaded.id, p_expected_path: loaded.receipt_path, p_expected_search_at: loaded.receipt_search?.at ?? null,
     p_expected_gmail: !!loaded.receipt_gmail, p_keys: next.keys ? [...next.keys] : null, p_label: next.label,
-    p_path: next.path, p_name: next.name, p_search: next.search, p_gmail: next.gmail,
+    p_path: next.path, p_name: next.name, p_search: jsonbSafe(next.search), p_gmail: jsonbSafe(next.gmail),
   })
   if (error) throw new BookamatError('database', error.message)
   const step = data as ReceiptStep | null
   if (!step || !['ok', 'changed', 'not_found', 'held'].includes(step.status)) throw new BookamatError('database', 'set_line_receipt: unexpected answer')
   return step
+}
+
+// A step that threw (the database failing, the answer lost on the way): its outcome may be open,
+// so its copy goes only when the line, read again, does not hold it. Unread, the copy stays: an
+// unused copy harms nothing, a line whose copy is gone loses its receipt.
+async function dropCopyUnlessKept(supabase: SupabaseClient, storage: ReceiptStorage, lineId: string, path: string): Promise<void> {
+  const { data, error } = await supabase.from('bank_lines').select('receipt_path').eq('id', lineId).maybeSingle()
+  if (error || (data as { receipt_path: string | null } | null)?.receipt_path === path) return
+  await storage.remove([path])
+}
+const thrownStep = (supabase: SupabaseClient, storage: ReceiptStorage, lineId: string, path: string) => async (err: unknown): Promise<never> => {
+  await dropCopyUnlessKept(supabase, storage, lineId, path).catch(() => undefined)
+  throw err
 }
 
 // A search with no receipt of its own (a Beleg by hand in its place, or none): its list and notes
@@ -283,12 +301,13 @@ export async function searchLineReceipt(
     const path = copyPath(line.id, chosen.sha256 ?? createHash('sha256').update(bytes).digest('hex'), chosen.fileName)
     await storage.upload(path, bytes)
     const step = await setLineReceipt(supabase, line, { keys: found.pick.claimKeys, label: run.labels[0], path, name: chosen.fileName, search, gmail: null })
+      .catch(thrownStep(supabase, storage, line.id, path))
     if (step.status === 'ok') {
       if (earlier && earlier !== path) await storage.remove([earlier])
       return { status: 'searched', search: receiptSearchForPage(search)!, attached: { path, name: chosen.fileName }, dryRun: false, ms, gmailError }
     }
     await storage.remove([path])
-    if (step.status !== 'held') throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+    if (step.status !== 'held') throw new ReceiptError('line_changed', RECEIPT_TEXT.changed, 409)
     Object.assign(search, { chosen: null, check: null, read: null, text: null, note: RECEIPT_TEXT.claimedMeanwhile(step.label || 'einer anderen Zeile') })
   }
   // Nothing attached: the receipt an earlier search attached stays (Gmail failing, time running
@@ -303,7 +322,7 @@ export async function searchLineReceipt(
     }
     : search
   const step = await setLineReceipt(supabase, line, { keys: null, label: run.labels[0], path: line.receipt_path, name: line.receipt_name, search: stored, gmail: line.receipt_gmail })
-  if (step.status !== 'ok') throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+  if (step.status !== 'ok') throw new ReceiptError('line_changed', RECEIPT_TEXT.changed, 409)
   return { status: 'searched', search: receiptSearchForPage(stored)!, attached: null, dryRun: false, ms, gmailError }
 }
 
@@ -330,15 +349,15 @@ export async function attachGmailCandidate(
   const line = await loadLine(supabase, lineId)
   const tx = lineTransaction(line)
   const refused = await refusal(supabase, line, tx, opts.accountGate)
-  if (refused) throw new ReceiptError('invalid_status', refused, 409)
-  if (handReceipt(line)) throw new ReceiptError('invalid_status', RECEIPT_TEXT.handReceipt, 409)
+  if (refused) throw new ReceiptError('not_searchable', refused, 409)
+  if (handReceipt(line)) throw new ReceiptError('not_attachable', RECEIPT_TEXT.handReceipt, 409)
   const c = listed(line, messageId, partId)
-  if (!c) throw new ReceiptError('not_found', RECEIPT_TEXT.notListed, 404)
-  if (!gmailAttachable(c)) throw new ReceiptError('invalid_request', RECEIPT_TEXT.notAttachable, 400)
+  if (!c) throw new ReceiptError('not_listed', RECEIPT_TEXT.notListed, 404)
+  if (!gmailAttachable(c)) throw new ReceiptError('not_attachable', RECEIPT_TEXT.notAttachable, 400)
   const pdf = await deps.fetchPdf(messageId, partId)
-  if (!pdf) throw new ReceiptError('not_found', RECEIPT_TEXT.gone, 404)
+  if (!pdf) throw new ReceiptError('not_listed', RECEIPT_TEXT.gone, 404)
   const bytes = Buffer.from(pdf.base64, 'base64')
-  if (sniffAttachmentType(bytes) !== 'pdf') throw new ReceiptError('invalid_request', RECEIPT_TEXT.notPdf, 400)
+  if (sniffAttachmentType(bytes) !== 'pdf') throw new ReceiptError('not_attachable', RECEIPT_TEXT.notPdf, 400)
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   const text = await deps.pdfText(pdf.base64).then(t => t.text).catch(() => '')
   const read = await deps.readPdf(pdf.base64).catch(() => null)
@@ -354,14 +373,14 @@ export async function attachGmailCandidate(
   // The search's own receipt, or one attached from the list before, is replaced; its list stays
   const step = await setLineReceipt(supabase, line, {
     keys: ownClaimKeys({ messageId, partId, sha256, from: c.from, read }), label, path, name, search: withoutChosen(line.receipt_search), gmail,
-  })
+  }).catch(thrownStep(supabase, storage, line.id, path))
   if (step.status === 'ok') {
     if (line.receipt_path && line.receipt_path !== path) await storage.remove([line.receipt_path])
     return { path, name }
   }
   await storage.remove([path])
   if (step.status === 'held') throw new ReceiptError('claimed', RECEIPT_TEXT.claimed(step.label || 'einer anderen Zeile'), 409)
-  throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+  throw new ReceiptError('line_changed', RECEIPT_TEXT.changed, 409)
 }
 
 /**

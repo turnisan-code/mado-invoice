@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { keepThousands, pdfTextOf } from '../gmail-receipt'
 import { amountsInText } from '../money'
-import { debitInText } from '../receipt-match'
+import { debitInText, numberOnDocument } from '../receipt-match'
 import type { EasybankTransaction } from '@/lib/expenses/types'
 
 async function pdfWith(...lines: string[]): Promise<string> {
@@ -28,9 +28,16 @@ describe('pdfTextOf — a PDF’s text and pages', () => {
     assert.ok(amountsInText(t.text).includes(1234.56), t.text)
     assert.equal(debitInText(t.text, debit(1234.56)), true)
   })
-  test('keepThousands: a space between a digit and a group of three digits is a thousands separator again; others stay', () => {
+  test('keepThousands: in an amount with cents the spaces between its groups are no-break spaces again; other digits stay as read', () => {
     assert.deepEqual(amountsInText(keepThousands('1 234 567,89')), [1234567.89])
+    assert.equal(keepThousands('Total 1 234.56 USD'), 'Total 1\u00a0234.56 USD')
     assert.equal(keepThousands('Menge 2 Stueck, 12 Monate'), 'Menge 2 Stueck, 12 Monate')
     assert.equal(keepThousands('Rechnung 2026 0001234'), 'Rechnung 2026 0001234')
+  })
+  test('keepThousands: an invoice number printed in groups of three stays one the bank’s number is found in (verifier finding, PR 9b)', () => {
+    const text = keepThousands('Rechnungsnr. 2026 001 234 · Gesamt 1 234,56 €')
+    assert.equal(text, 'Rechnungsnr. 2026 001 234 · Gesamt 1\u00a0234,56 €')
+    assert.equal(numberOnDocument('2026001234', text), true)
+    assert.deepEqual(amountsInText(text), [1234.56])
   })
 })
