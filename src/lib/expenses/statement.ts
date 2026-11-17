@@ -9,14 +9,15 @@ import type { BankLine, BookingRule } from '@/types'
 import { BookamatError, credentialsOf } from '@/lib/bookamat'
 import { readExpenseAccounts } from './accounts'
 import { vendorsOf } from './rules'
-import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, type LineRow, type StoredLine } from './lines'
+import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, receiptKept, type LineRow, type StoredLine } from './lines'
 import { LINE_TEXT, type LineSettings } from './book'
 import { transactionOfCells } from './csv-parser'
 import { bookingDateOf } from './booking-dates'
 import { normIban } from './own-transfer'
 import { expenseOwnerOf, setExpenseOwner } from './owner'
 import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
-import type { BookamatAccounts, MatchedIncomeTransaction, MatchedTransaction } from './types'
+import { receiptSearchForPage } from './receipt-state'
+import type { BookamatAccounts, EasybankTransaction, MatchedIncomeTransaction, MatchedTransaction } from './types'
 
 export { MAX_LINES } from './limits'
 const CHUNK = 200
@@ -83,6 +84,11 @@ export type LineView = {
   // Why the booking refuses the line whatever the owner sets (the switch-over date, an account
   // that is no business account, another currency), else null
   gate: string | null
+  // The account and currency part of it alone (the switch-over aside): a line Mado never books,
+  // whose receipt is never searched in Gmail (PR 9b)
+  accountGate: string | null
+  // A receipt from Gmail the row dropped (the rule picked did not send it): never attached (PR 9b)
+  receiptDropped: boolean
   row: MatchedTransaction | MatchedIncomeTransaction
   booking: { year: number; booking_id: string; pdf_attached_at: string | null } | null
 }
@@ -144,16 +150,10 @@ export async function analyseStored(
   const open = built.filter(b => b.line.status === 'open' && !b.madoDocument && !(b.kind === 'bank_income' && paid.has(b.line.line_key)))
   const dup = await checkDuplicates(supabase, creds, open.map(b => ({ ...(b.line as StoredLine), built: b.built })), rules, listsOf, opts.deadline)
 
-  const ownIbans = [settings.iban ?? '', ...(settings.own_ibans ?? [])].map(normIban)
   const gateOf = (b: (typeof built)[number]): string | null => {
     if (!settings.expenses_from) return LINE_TEXT.notSwitched
     if (String(b.line.booked_on) < settings.expenses_from) return LINE_TEXT.beforeSwitch(settings.expenses_from)
-    const iban = normIban(b.tx.raw?.col0)
-    const business = !!iban && (ownIbans.includes(iban) || (listsOf(b.year)?.bank_accounts ?? []).some(a => normIban(a.iban) === iban))
-    if (!business) return LINE_TEXT.notBusiness(iban)
-    const currency = (b.tx.currency || 'EUR').trim().toUpperCase()
-    if (currency !== 'EUR') return LINE_TEXT.currency(currency)
-    return null
+    return accountGate(settings, b.tx, listsOf(b.year))
   }
 
   return {
@@ -163,7 +163,7 @@ export async function analyseStored(
       // The receipt's text and its e-mail's stay on the server (the row has what the page shows)
       const line = {
         ...stored,
-        receipt_search: stored.receipt_search ? { ...stored.receipt_search, text: null, chosen: stored.receipt_search.chosen ? { ...stored.receipt_search.chosen, body_text: null } : null } : null,
+        receipt_search: receiptSearchForPage(stored.receipt_search),
         receipt_gmail: stored.receipt_gmail ? { ...stored.receipt_gmail, text: null } : null,
       }
       const row = dup.rows.get(b.line.id) ?? b.built.row
@@ -173,7 +173,9 @@ export async function analyseStored(
       const madoDocument = b.madoDocument ?? (docBooking ? LINE_TEXT.madoBooking(docBooking.title, docBooking.id) : null)
       return {
         line, kind: b.kind, year: b.year, invoicePayment: paid.has(b.line.line_key), madoDocument,
-        gate: b.line.status === 'open' ? gateOf(b) : null, row, booking: bookingOf.get(b.line.id) ?? null,
+        gate: b.line.status === 'open' ? gateOf(b) : null, accountGate: accountGate(settings, b.tx, listsOf(b.year)),
+        receiptDropped: b.kind === 'expense' && !!b.line.receipt_path && !receiptKept(b.line, b.built.row as MatchedTransaction),
+        row, booking: bookingOf.get(b.line.id) ?? null,
       }
     }),
     accounts,
@@ -181,6 +183,19 @@ export async function analyseStored(
     unreadable: opts.unreadable ?? 0,
     switchFrom: settings.expenses_from ?? null,
   }
+}
+
+// Whether the line's account and currency let Mado book it at all, the switch-over aside: a
+// business account (the IBAN on the invoices, one under „Eigene Konten“, or one Bookamat keeps on
+// a Zahlungsmittelkonto) and euro; else why not
+export function accountGate(settings: Pick<LineSettings, 'iban' | 'own_ibans'>, tx: EasybankTransaction, lists: Pick<BookamatAccounts, 'bank_accounts'> | null): string | null {
+  const own = [settings.iban ?? '', ...(settings.own_ibans ?? [])].map(normIban)
+  const iban = normIban(tx.raw?.col0)
+  const business = !!iban && (own.includes(iban) || (lists?.bank_accounts ?? []).some(a => normIban(a.iban) === iban))
+  if (!business) return LINE_TEXT.notBusiness(iban)
+  const currency = (tx.currency || 'EUR').trim().toUpperCase()
+  if (currency !== 'EUR') return LINE_TEXT.currency(currency)
+  return null
 }
 
 // The debits still open, the newest first (the page without a file: what is left to do). A

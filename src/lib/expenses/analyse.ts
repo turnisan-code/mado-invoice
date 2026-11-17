@@ -165,9 +165,6 @@ export function analyseExpense(
       ...(gmailRuleIds ? { gmail_rule_ids: gmailRuleIds } : {}),
     }
   }
-  const withReceipt = (row: MatchedTransaction): MatchedTransaction =>
-    state.receipt && row.vendor && row.status === 'no_invoice' ? { ...row, status: 'ready' } : row
-
   // Rules that fit equally, or that lost only by their address on the receipt: the owner picks
   // one („Regel wählen“)
   if (outcome.kind === 'choice') {
@@ -182,7 +179,7 @@ export function analyseExpense(
       rule_choices: outcome.choices,
       rule_tie_checked: true,
     }
-    return state.ruleId ? withReceipt(pickRule(open, state.ruleId, 'owner')) : open
+    return applyRulePick(open, state.ruleId, !!state.receipt)
   }
 
   const fields = receiptFields()
@@ -200,8 +197,7 @@ export function analyseExpense(
       ...(outcome.pick ? { rule_pick: outcome.pick } : {}),
       rule_tie_checked: true,
     }
-    const picked = state.ruleId && state.ruleId !== outcome.rule.id ? pickRule(row, state.ruleId, 'owner') : row
-    return withReceipt(picked)
+    return applyRulePick(row, state.ruleId, !!state.receipt)
   }
   // No rule: the owner fills it in (PR 9c asks Claude). The one rule that fit by its keyword and
   // lost by its invoice address says why; a debit to an account of the owner's says so first.
@@ -215,6 +211,20 @@ export function analyseExpense(
     match_note: join(ownAccountNoteOf(tx), outcome.note, receiptNote()),
     rule_tie_checked: true,
   }
+}
+
+/**
+ * The owner's pick among the rules („Regel wählen“, or a rule other than the one that fit), applied
+ * after the row's receipt as Bookmatic's page applied it: a receipt the picked rule's sender did not
+ * send drops out (lib/expenses/rule-match.ts pickRule). A Beleg uploaded by hand makes a rule's
+ * row ready. A choice not made yet stays a choice.
+ */
+export function applyRulePick(row: MatchedTransaction, ruleId: string | null | undefined, handReceipt: boolean): MatchedTransaction {
+  const withReceipt = (r: MatchedTransaction): MatchedTransaction =>
+    handReceipt && r.vendor && r.status === 'no_invoice' ? { ...r, status: 'ready' } : r
+  const choice = !row.vendor && !!row.rule_choices?.length
+  if (ruleId && (choice || (row.vendor && row.vendor.id !== ruleId))) return withReceipt(pickRule(row, ruleId, 'owner'))
+  return choice ? row : withReceipt(row)
 }
 
 // ─── Credits that pay no Mado invoice ────────────────────────────────────────

@@ -3,7 +3,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   claimedByOther, classifierOptions, gmailMayStart, newAnalyseRun, otherNumbers, readOptions, runRead,
-  CLASSIFIER_MIN_MS, GMAIL_STOP_MS, MAX_READS_PER_RUN, READ_STOP_MS, READ_MAX_MS, READ_END_MS, RUN_CONCURRENCY, RUN_MARGIN_S,
+  CLASSIFIER_MIN_MS, GMAIL_STOP_MS, MAX_READS_PER_RUN, READ_STOP_MS, READ_MAX_MS, READ_END_MS, READ_TRY_MIN_MS, RUN_CONCURRENCY, RUN_MARGIN_S,
 } from '../analyse-run'
 import { rowLabel } from '../receipt-match'
 import type { EasybankTransaction } from '@/lib/expenses/types'
@@ -43,25 +43,31 @@ describe('newAnalyseRun — the run of one Analyse', () => {
     assert.equal(claimedByOther(run, 2)('gmail:msg-a1:1'), null)
     assert.equal(claimedByOther(run, 0)('gmail:msg-a2:1'), null)
   })
-  test('the time rules of a line’s search: Gmail until 20 s, reads until 35 s (each at most 25 s, ending 5 s before the deadline), the classifier until 42 s', () => {
+  test('the time rules of a line’s search: Gmail until 20 s, reads until 35 s — a read and its retry both end 5 s before the deadline; the classifier until 42 s', () => {
     const clock = clockAt(0)
     const run = newAnalyseRun([], { maxDurationS: 60, now: () => clock.now() })
     const at = (s: number) => { clock.ms = s * 1000; return { gmail: gmailMayStart(run), read: readOptions(run), ai: classifierOptions(run) } }
     const signal = run.signal
-    // 50 s left: one try for a read; the classifier one too
-    assert.deepEqual(at(0), { gmail: true, read: { timeoutMs: 25_000, maxRetries: 1, signal }, ai: { timeoutMs: 30_000, maxRetries: 1, signal } })
-    assert.deepEqual(at(9.999).read, { timeoutMs: 25_000, maxRetries: 1, signal })
-    assert.deepEqual(at(10).read, { timeoutMs: 25_000, maxRetries: 0, signal })
+    // 50 s left: two tries of 22,5 s each, ending by 45 s
+    assert.deepEqual(at(0), { gmail: true, read: { timeoutMs: 22_500, maxRetries: 1, signal }, ai: { timeoutMs: 30_000, maxRetries: 1, signal } })
+    assert.deepEqual(at(10).read, { timeoutMs: 17_500, maxRetries: 1, signal })
+    // two tries while each gets 15 s; then one, of what is left less 5 s, at most 25 s
+    assert.deepEqual(at(15).read, { timeoutMs: 15_000, maxRetries: 1, signal })
+    assert.deepEqual(at(15.001).read, { timeoutMs: 25_000, maxRetries: 0, signal })
     assert.equal(at(20).gmail, true)
     assert.equal(at(20.001).gmail, false)
-    // later reads end 5 s before the deadline; the last one starts at 35 s and gets 10 s
     assert.deepEqual(at(25).read, { timeoutMs: 20_000, maxRetries: 0, signal })
     assert.deepEqual(at(35).read, { timeoutMs: 10_000, maxRetries: 0, signal })
     assert.equal(at(35.001).read, null)
+    // every read ends before the deadline less 5 s, its retry included
+    for (let ms = 0; ms <= 35_000; ms += 250) {
+      const o = at(ms / 1000).read!
+      assert.ok(ms + o.timeoutMs! * ((o.maxRetries ?? 0) + 1) <= 45_000, String(ms))
+    }
     // the classifier: what is left less 3 s, from 8 s left on
     assert.deepEqual(at(42).ai, { timeoutMs: 5_000, maxRetries: 0, signal })
     assert.equal(at(42.001).ai, null)
-    assert.deepEqual([GMAIL_STOP_MS, READ_STOP_MS, READ_MAX_MS, READ_END_MS, CLASSIFIER_MIN_MS], [30_000, 15_000, 25_000, 5_000, 8_000])
+    assert.deepEqual([GMAIL_STOP_MS, READ_STOP_MS, READ_MAX_MS, READ_END_MS, READ_TRY_MIN_MS, CLASSIFIER_MIN_MS], [30_000, 15_000, 25_000, 5_000, 15_000, 8_000])
   })
   test('the signal aborts at the deadline', async () => {
     const run = newAnalyseRun([], { maxDurationS: RUN_MARGIN_S + 0.03 })
@@ -94,7 +100,7 @@ describe('runRead — one PDF read of the run', () => {
     const run = newAnalyseRun([], { maxDurationS: 60, now: () => clock.now() })
     const seen: unknown[] = []
     assert.deepEqual(await runRead(run, async opts => { seen.push(opts); return 'gelesen' }), { ok: 'gelesen' })
-    assert.deepEqual(seen, [{ timeoutMs: 25_000, maxRetries: 1, signal: run.signal }])
+    assert.deepEqual(seen, [{ timeoutMs: 22_500, maxRetries: 1, signal: run.signal }])
     assert.equal(run.reads.left, MAX_READS_PER_RUN - 1)
     run.reads.left = 0
     assert.deepEqual(await runRead(run, async () => 'nie'), { notRead: 'budget' })

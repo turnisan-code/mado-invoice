@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { apiError, invalidJson, isUuid, readJsonObject, requireUser, settingsUnavailable } from '@/lib/auth'
 import { expenseError } from '@/lib/expenses/api'
 import { searchLineReceipt } from '@/lib/expenses/receipts'
-import { gmailReadRefusal, recordGmailError, RECEIPT_SETTINGS_COLUMNS, searchDeps, type ReceiptSettings } from '@/lib/expenses/receipt-deps'
+import { gmailReadRefusal, receiptAccountGate, recordGmailError, RECEIPT_SETTINGS_COLUMNS, searchDeps, type ReceiptSettings } from '@/lib/expenses/receipt-deps'
 
 // One line's search in its own request (lib/expenses/receipts.ts SEARCH_MAX_DURATION_S)
 export const maxDuration = 60
@@ -10,7 +10,8 @@ export const maxDuration = 60
 // „In Gmail suchen“ for one statement line (PR 9b): Gmail is read for its receipt, the PDFs found
 // are read by Claude, a receipt proven is attached (a copy in the 'receipts' bucket) and what was
 // found is kept on the line. `auto`: the page's search after an upload, only from the switch-over
-// date on (decision D11). `dryRun`: „Probelauf“, searched and read as a search is, nothing kept.
+// date on (decision D11). `dryRun`: „Probelauf“, searched and read as a search is, nothing kept
+// and nothing written (no token refreshed into the settings, no Google error recorded).
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const startedAt = Date.now()
   const auth = await requireUser()
@@ -29,15 +30,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const refusal = gmailReadRefusal(s)
   if (refusal) return NextResponse.json({ error: refusal.error, code: refusal.code }, { status: refusal.status })
 
+  const dryRun = body.dryRun === true
   try {
-    const result = await searchLineReceipt(supabase, id, searchDeps(s, supabase), {
-      dryRun: body.dryRun === true, auto: body.auto === true, expensesFrom: s.expenses_from ?? null, startedAt,
+    const result = await searchLineReceipt(supabase, id, searchDeps(s, supabase, { dryRun }), {
+      dryRun, auto: body.auto === true, expensesFrom: s.expenses_from ?? null, accountGate: receiptAccountGate(s), startedAt,
     })
-    if (result.status === 'searched' && result.gmailError) await recordGmailError(result.gmailError, supabase, s.id)
     if (result.status === 'searched') {
-      const { gmailError: _gmail, ...answer } = result
-      void _gmail
-      return NextResponse.json(answer)
+      const { gmailError, ...answer } = result
+      // A dead grant or a missing permission: recorded (a dry run only says it, it writes nothing)
+      if (gmailError && !dryRun) await recordGmailError(gmailError, supabase, s.id)
+      return NextResponse.json(gmailError && dryRun ? { ...answer, gmail_error: gmailError instanceof Error ? gmailError.message : String(gmailError) } : answer)
     }
     return NextResponse.json(result)
   } catch (err) {

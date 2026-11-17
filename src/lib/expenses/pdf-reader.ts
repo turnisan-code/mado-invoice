@@ -9,7 +9,8 @@
 // turned off), and a refusal is retried on Anthropic's fallback model server-side
 // (`fallbacks: 'default'`). A refusal of the whole chain, a cut-off answer or one without the
 // fields is „nicht lesbar“ (ReceiptUnreadableError); an API error, a timeout or an abort is thrown
-// as it comes. The answer goes through pdfInvoiceFields as before, so a total in another currency
+// as it comes. The answer is parsed here, after its stop reason is checked (the SDK's parse()
+// would throw its own error on a refusal or a cut-off before that). The answer goes through pdfInvoiceFields as before, so a total in another currency
 // is never taken for euros. Server only: the key is ANTHROPIC_API_KEY.
 import Anthropic from '@anthropic-ai/sdk'
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod'
@@ -21,6 +22,8 @@ import { OWN_VATIN } from './vatin'
 export const PDF_READER_MODEL = 'claude-opus-5-5'
 // The server-side refusal fallback (decision D3a)
 export const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
+// Structured outputs on the beta messages API, as the SDK's own parse() asks for them
+export const STRUCTURED_OUTPUTS_BETA = 'structured-outputs-2025-12-15'
 // Thinking at low effort and the small answer; what is not used is not billed
 export const PDF_READER_MAX_TOKENS = 4096
 
@@ -137,7 +140,7 @@ export function readerRequest(pdfBase64: string, ownVatin: string = OWN_VATIN) {
   return {
     model: PDF_READER_MODEL,
     max_tokens: PDF_READER_MAX_TOKENS,
-    betas: [FALLBACK_BETA],
+    betas: [FALLBACK_BETA, STRUCTURED_OUTPUTS_BETA],
     fallbacks: 'default' as const,
     output_config: { effort: 'low' as const, format: betaZodOutputFormat(PDF_READER_ANSWER) },
     messages: [{
@@ -151,25 +154,25 @@ export function readerRequest(pdfBase64: string, ownVatin: string = OWN_VATIN) {
 }
 
 export type ReaderRequest = ReturnType<typeof readerRequest>
-// What a read gets back: how it ended and the parsed answer
-export type ReaderAnswer = { stop_reason: string | null; parsed_output?: unknown }
+// What a read gets back: how it ended and its content
+export type ReaderAnswer = { stop_reason: string | null; content?: readonly { type: string; text?: string }[] | null }
 // The SDK's beta messages API as the reader calls it; tests pass a stand-in, so nothing reaches
 // the network
 export type PdfReaderMessages = {
-  parse(body: ReaderRequest, options?: Anthropic.RequestOptions): PromiseLike<ReaderAnswer>
+  create(body: ReaderRequest, options?: Anthropic.RequestOptions): PromiseLike<ReaderAnswer>
 }
 
 export { pdfReaderConfigured } from './reader-config'
 
 let client: Anthropic | null = null
 const sdkMessages = (): PdfReaderMessages => ({
-  parse: (body, options) => {
+  create: (body, options) => {
     client ??= new Anthropic()
-    return client.beta.messages.parse(body, options)
+    return client.beta.messages.create(body, options) as PromiseLike<ReaderAnswer>
   },
 })
 
-// The answer as the schema holds it, or why it can't be used
+// The answer as the schema holds it, or why it can't be used: how it ended first, then its text
 export function readerAnswer(msg: ReaderAnswer): Record<string, unknown> {
   if (msg.stop_reason === 'refusal') throw new ReceiptUnreadableError('Claude hat das Lesen abgelehnt')
   if (msg.stop_reason !== 'end_turn') {
@@ -177,9 +180,16 @@ export function readerAnswer(msg: ReaderAnswer): Record<string, unknown> {
       ? 'Antwort der KI abgeschnitten'
       : `Antwort der KI unvollständig (${msg.stop_reason ?? 'ohne Grund'})`)
   }
-  const out = msg.parsed_output
-  if (!out || typeof out !== 'object' || Array.isArray(out)) throw new ReceiptUnreadableError('keine gültige Antwort der KI')
-  return out as Record<string, unknown>
+  const text = (msg.content ?? []).map(b => (b.type === 'text' ? b.text ?? '' : '')).join('')
+  let json: unknown
+  try {
+    json = JSON.parse(text)
+  } catch {
+    throw new ReceiptUnreadableError('keine gültige Antwort der KI')
+  }
+  const out = PDF_READER_ANSWER.safeParse(json)
+  if (!out.success) throw new ReceiptUnreadableError('keine gültige Antwort der KI')
+  return out.data as Record<string, unknown>
 }
 
 /**
@@ -193,6 +203,6 @@ export async function readPdfInvoice(
   messages: PdfReaderMessages = sdkMessages(),
 ): Promise<PdfInvoiceData> {
   const { ownVatin, ...call } = opts
-  const msg = await untilAborted(messages.parse(readerRequest(pdfBase64, ownVatin ?? OWN_VATIN), aiRequestOptions(call)), call.signal)
+  const msg = await untilAborted(messages.create(readerRequest(pdfBase64, ownVatin ?? OWN_VATIN), aiRequestOptions(call)), call.signal)
   return pdfInvoiceFields(readerAnswer(msg))
 }

@@ -11,7 +11,8 @@
  * request that timed out again, so without it one call could outlast the route. Before it:
  * - no Gmail search starts in the last 30 s (after 20 s);
  * - no PDF read starts in the last 15 s (after 35 s); a read of Claude Opus 5.5 gets at most
- *   25 s (and never past 5 s before the deadline), and 1 retry while more than 40 s are left;
+ *   25 s and never runs past 5 s before the deadline; it is tried again only while both tries
+ *   fit, each in at least 15 s (each then gets half the time left);
  * - the classifier (PR 9c) is asked only with 8 s left, for at most 30 s and 1 retry while more
  *   than 40 s are left.
  * Bookmatic's enrich route had 120 s for a whole statement, and Haiku read in 20 s.
@@ -29,9 +30,10 @@ export const RUN_MARGIN_S = 10
 export const GMAIL_STOP_MS = 30_000
 // No PDF read starts later than this before the deadline
 export const READ_STOP_MS = 15_000
-// One read's time at most, and what it leaves before the deadline
+// One read's time at most, what it leaves before the deadline, and the least a try of two gets
 export const READ_MAX_MS = 25_000
 export const READ_END_MS = 5_000
+export const READ_TRY_MIN_MS = 15_000
 // The classifier is not asked with less than this left
 export const CLASSIFIER_MIN_MS = 8_000
 // PDF reads per Analyse
@@ -115,7 +117,10 @@ export const gmailMayStart = (run: Pick<AnalyseRun, 'deadline' | 'now'>): boolea
 export function readOptions(run: Pick<AnalyseRun, 'deadline' | 'now' | 'signal'>): AiCallOptions | null {
   const left = remaining(run)
   if (left < READ_STOP_MS) return null
-  return { timeoutMs: Math.min(READ_MAX_MS, left - READ_END_MS), maxRetries: left > 40_000 ? 1 : 0, signal: run.signal }
+  const usable = left - READ_END_MS
+  return usable >= 2 * READ_TRY_MIN_MS
+    ? { timeoutMs: Math.min(READ_MAX_MS, Math.floor(usable / 2)), maxRetries: 1, signal: run.signal }
+    : { timeoutMs: Math.min(READ_MAX_MS, usable), maxRetries: 0, signal: run.signal }
 }
 
 // The options of the classifier asked now, or null when there is no time left for it

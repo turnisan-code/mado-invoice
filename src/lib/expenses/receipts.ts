@@ -12,10 +12,14 @@
 // it (lib/expenses/lines.ts lineRow). The receipt it attaches is copied into the private
 // 'receipts' bucket as a Beleg uploaded by hand is (decision D12), and claimed for the line
 // (receipt_claims): by its Gmail part, its bytes and its sender's invoice number, so no other
-// line gets it. A dry run („Probelauf“) searches and reads as a search does and keeps nothing.
+// line gets it. Claims and the line's receipt change in one step, against the line as it was
+// loaded (set_line_receipt, 20261118_receipts.sql); every copy has a name of its own, so a step
+// refused removes only its own copy. A search that attaches nothing never takes away the receipt
+// an earlier search attached. A dry run („Probelauf“) searches and reads as a search does and
+// keeps nothing.
 //
 // Gmail is only read. Server only: the route passes the Gmail API and the reader (deps).
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BankLine, BankLineGmailReceipt, BankLineReceiptSearch, BookingRule } from '@/types'
 import { BookamatError } from '@/lib/bookamat'
@@ -30,13 +34,18 @@ import { gmailAttachable, ownClaimKeys, rowLabel, type ReceiptRead } from './rec
 import { matchRules } from './rule-match'
 import { vendorsOf } from './rules'
 import { sniffAttachmentType } from './attachment'
+import { handReceipt, onlyFailed, receiptSearchForPage } from './receipt-state'
 import type { EasybankTransaction, GmailCandidate, Vendor } from './types'
 
 // The route's time (src/app/api/bank-lines/[id]/receipts/*)
 export const SEARCH_MAX_DURATION_S = 60
-// What a line keeps of the receipt's text and of its e-mail's
-export const RECEIPT_TEXT_MAX = 6000
-export const EMAIL_TEXT_MAX = 4000
+// What a line keeps of the receipt's text and of its e-mail's: the invoice address of tied rules
+// and the rules' „E-Mail enthält“ are looked for in them (Bookmatic looked in the whole text)
+export const RECEIPT_TEXT_MAX = 50_000
+export const EMAIL_TEXT_MAX = 20_000
+// A copy's path: the line's folder, a name of its own (lib/expenses/input.ts receiptPathOk)
+export const copyPath = (lineId: string, sha256: string, name: string): string =>
+  `${lineId}/gmail-${randomUUID().slice(0, 8)}-${sha256.slice(0, 8)}-${storedName(name)}`
 // The lines around a line whose invoice numbers and receipts are not its own
 const AROUND_DAYS = 40
 const CHUNK = 500
@@ -65,13 +74,15 @@ export const RECEIPT_TEXT = {
   ownTransfer: 'Überweisung auf dein eigenes Konto — kein Beleg zu suchen',
   cardSettlement: 'Kreditkartenabrechnung — die Abrechnung liegt im Portal des Kartenausstellers, nicht in Gmail',
   beforeSwitch: 'Vor dem Umstellungsdatum wird nur auf „In Gmail suchen“ gesucht',
+  searchedBefore: 'Schon in Gmail gesucht — „Erneut in Gmail suchen“ sucht nochmals',
+  handReceipt: 'Diese Zeile hat einen Beleg, den du hochgeladen hast — zuerst entfernen, dann anhängen',
   claimedMeanwhile: (label: string) => `⚠ Der gefundene Beleg hängt inzwischen an ${label} — nicht angehängt`,
   notListed: 'Dieser Beleg steht nicht in der Liste der Zeile — erneut suchen',
   notAttachable: 'Dieser Beleg ist kein PDF bis 10 MB — nicht anhängbar',
   notPdf: 'Die Datei aus Gmail ist kein PDF — nicht angehängt',
   gone: 'Der Beleg ist in Gmail nicht mehr zu finden — erneut suchen',
   claimed: (label: string) => `Dieser Beleg hängt schon an ${label} — dort entfernen, dann hier anhängen`,
-  changed: 'Die Zeile hat sich inzwischen geändert — Seite neu laden',
+  changed: 'Die Zeile hat sich inzwischen geändert (gebucht, ein Buchungsversuch läuft, oder ihr Beleg ist ein anderer) — Seite neu laden',
 } as const
 
 // What a receipt route answers when the owner's step can't be done: the line changed meanwhile,
@@ -131,15 +142,24 @@ async function loadLine(supabase: SupabaseClient, lineId: string): Promise<Store
   return data as StoredLine
 }
 
-// Why a line is not searched, or null
-async function refusal(supabase: SupabaseClient, line: StoredLine, tx: EasybankTransaction): Promise<string | null> {
+// Why Mado never books a line, its account and currency alone (lib/expenses/statement.ts
+// accountGate with the owner's IBANs and Bookamat's accounts): the route's to say
+export type AccountGate = (tx: EasybankTransaction, year: number) => Promise<string | null>
+
+// Why a line is not searched, or null: a credit, a line booked, skipped or held, one on an
+// account Mado never books or in another currency, one that names a Mado document
+async function refusal(supabase: SupabaseClient, line: StoredLine, tx: EasybankTransaction, gate?: AccountGate): Promise<string | null> {
   if (lineKind(line) !== 'expense') return RECEIPT_TEXT.notDebit
   if (line.status !== 'open') return RECEIPT_TEXT.notOpen
   if (line.bookamat_pending) return RECEIPT_TEXT.pending
+  const account = gate ? await gate(tx, Number(String(line.booked_on).slice(0, 4))) : null
+  if (account) return account
   const named = namedDocument(tx, await readMadoNumbers(supabase))
   if (named) return madoDocumentText(named, false)
   return null
 }
+
+export { handReceipt, onlyFailed, receiptSearchForPage } from './receipt-state'
 
 // The run of a line's search: the line (row 0) and the lines around it — their invoice numbers
 // are not its receipts' — with the receipts other lines hold
@@ -155,15 +175,22 @@ async function lineRun(supabase: SupabaseClient, line: StoredLine, tx: EasybankT
   const expenses = [tx, ...around.map(lineTransaction)]
   const run = newAnalyseRun(expenses, { maxDurationS: SEARCH_MAX_DURATION_S, startedAt: opts.startedAt, now: opts.now })
   const rowOf = new Map(around.map((l, k) => [l.id, k + 1]))
-  const { data: claims, error: claimErr } = await supabase.from('receipt_claims').select('key, bank_line_id, label')
-  if (claimErr) throw new BookamatError('database', claimErr.message)
   let elsewhere = expenses.length
-  for (const c of (claims ?? []) as { key: string; bank_line_id: string; label: string }[]) {
-    const row = c.bank_line_id === line.id ? 0 : rowOf.get(c.bank_line_id) ?? elsewhere++
-    run.claims.claim([c.key], row, c.bank_line_id === line.id ? run.labels[0] : c.label || 'einer anderen Zeile')
+  for (let from = 0; ; from += CLAIM_PAGE) {
+    const { data: claims, error: claimErr } = await supabase.from('receipt_claims').select('key, bank_line_id, label')
+      .order('key').range(from, from + CLAIM_PAGE - 1)
+    if (claimErr) throw new BookamatError('database', claimErr.message)
+    const rows = (claims ?? []) as { key: string; bank_line_id: string; label: string }[]
+    for (const c of rows) {
+      const row = c.bank_line_id === line.id ? 0 : rowOf.get(c.bank_line_id) ?? elsewhere++
+      run.claims.claim([c.key], row, c.bank_line_id === line.id ? run.labels[0] : c.label || 'einer anderen Zeile')
+    }
+    if (rows.length < CLAIM_PAGE) break
   }
   return run
 }
+// What Supabase answers at most per read
+const CLAIM_PAGE = 1000
 
 // The search as a line keeps it
 function storedSearch(found: Awaited<ReturnType<typeof findGmailReceipt>>, at: string): BankLineReceiptSearch {
@@ -184,25 +211,31 @@ function storedSearch(found: Awaited<ReturnType<typeof findGmailReceipt>>, at: s
   }
 }
 
-// The line's claims replaced by `keys` (none: released). A key another line holds: its label.
-async function claimFor(supabase: SupabaseClient, lineId: string, keys: readonly string[], label: string): Promise<{ held: string } | null> {
-  if (keys.length) {
-    const { data, error } = await supabase.from('receipt_claims').select('key, bank_line_id, label').in('key', [...keys])
-    if (error) throw new BookamatError('database', error.message)
-    const other = ((data ?? []) as { bank_line_id: string; label: string }[]).find(c => c.bank_line_id !== lineId)
-    if (other) return { held: other.label || 'einer anderen Zeile' }
-  }
-  const { error: delErr } = await supabase.from('receipt_claims').delete().eq('bank_line_id', lineId)
-  if (delErr) throw new BookamatError('database', delErr.message)
-  if (!keys.length) return null
-  const { error } = await supabase.from('receipt_claims').insert(keys.map(key => ({ key, bank_line_id: lineId, label })))
-  if (error) {
-    // Another line's search claimed one of the keys meanwhile
-    if (error.code === '23505') return { held: 'einer anderen Zeile' }
-    throw new BookamatError('database', error.message)
-  }
-  return null
+// The line's receipt as it was loaded: the one step changes it only if it is still so
+type Loaded = Pick<BankLine, 'id' | 'receipt_path' | 'receipt_search' | 'receipt_gmail'>
+export type ReceiptStep = { status: 'ok' } | { status: 'changed' } | { status: 'not_found' } | { status: 'held'; label: string }
+
+// set_line_receipt (20261118_receipts.sql): claims swapped (`keys` null: as they are; []: released)
+// and the line's receipt fields set — or nothing, when the line changed since `loaded`
+export async function setLineReceipt(
+  supabase: SupabaseClient, loaded: Loaded,
+  next: { keys: readonly string[] | null; label: string; path: string | null; name: string | null; search: BankLineReceiptSearch | null; gmail: BankLineGmailReceipt | null },
+): Promise<ReceiptStep> {
+  const { data, error } = await supabase.rpc('set_line_receipt', {
+    p_line: loaded.id, p_expected_path: loaded.receipt_path, p_expected_search_at: loaded.receipt_search?.at ?? null,
+    p_expected_gmail: !!loaded.receipt_gmail, p_keys: next.keys ? [...next.keys] : null, p_label: next.label,
+    p_path: next.path, p_name: next.name, p_search: next.search, p_gmail: next.gmail,
+  })
+  if (error) throw new BookamatError('database', error.message)
+  const step = data as ReceiptStep | null
+  if (!step || !['ok', 'changed', 'not_found', 'held'].includes(step.status)) throw new BookamatError('database', 'set_line_receipt: unexpected answer')
+  return step
 }
+
+// A search with no receipt of its own (a Beleg by hand in its place, or none): its list and notes
+// stay, the receipt it attached and what was said of it go
+export const withoutChosen = (s: BankLineReceiptSearch | null): BankLineReceiptSearch | null =>
+  s ? { ...s, chosen: null, check: null, read: null, text: null, note: null, plain_note: null } : null
 
 /**
  * Searches line `lineId`'s receipt in Gmail and keeps what it found (a dry run keeps nothing).
@@ -213,15 +246,21 @@ export async function searchLineReceipt(
   supabase: SupabaseClient,
   lineId: string,
   deps: GmailReceiptDeps,
-  opts: { dryRun?: boolean; auto?: boolean; expensesFrom?: string | null; startedAt?: number; now?: () => number; storage?: ReceiptStorage } = {},
+  opts: {
+    dryRun?: boolean; auto?: boolean; expensesFrom?: string | null; accountGate?: AccountGate
+    startedAt?: number; now?: () => number; storage?: ReceiptStorage
+  } = {},
 ): Promise<LineSearchResult> {
   const started = opts.startedAt ?? Date.now()
   const line = await loadLine(supabase, lineId)
   const tx = lineTransaction(line)
-  const refused = await refusal(supabase, line, tx)
+  const refused = await refusal(supabase, line, tx, opts.accountGate)
   if (refused) return { status: 'not_searched', reason: refused }
   if (ownReceipt(line)) return { status: 'not_searched', reason: RECEIPT_TEXT.ownReceipt }
   if (opts.auto && (!opts.expensesFrom || String(line.booked_on) < opts.expensesFrom)) return { status: 'not_searched', reason: RECEIPT_TEXT.beforeSwitch }
+  // By itself only once: a line searched before is searched again on the owner's „Erneut“, or
+  // when its search only failed
+  if (opts.auto && line.receipt_search && !onlyFailed(line.receipt_search)) return { status: 'not_searched', reason: RECEIPT_TEXT.searchedBefore }
 
   const { data: ruleData, error: ruleErr } = await supabase.from('booking_rules').select('*').order('name').order('id')
   if (ruleErr) throw new BookamatError('database', ruleErr.message)
@@ -234,38 +273,38 @@ export async function searchLineReceipt(
   const ms = (opts.now ?? Date.now)() - started
   const chosen = found.pick.chosen
   const gmailError = run.gmailAuthError ?? undefined
-  if (opts.dryRun) return { status: 'searched', search, attached: chosen ? { path: null, name: chosen.fileName } : null, dryRun: true, ms, gmailError }
+  if (opts.dryRun) return { status: 'searched', search: receiptSearchForPage(search)!, attached: chosen ? { path: null, name: chosen.fileName } : null, dryRun: true, ms, gmailError }
 
-  // The receipt the line's earlier search attached goes; what this one attaches is claimed first
+  // A new receipt: its copy first (a name of its own), then the one step; refused, its copy goes
   const storage = opts.storage ?? bucketStorage(supabase)
-  const old = line.receipt_search?.chosen ? line.receipt_path : null
-  let attached: { path: string; name: string } | null = null
+  const earlier = line.receipt_search?.chosen ? line.receipt_path : null
   if (chosen && found.chosenBase64) {
-    const held = await claimFor(supabase, line.id, found.pick.claimKeys, run.labels[0])
-    if (held) {
-      Object.assign(search, { chosen: null, check: null, read: null, text: null, note: RECEIPT_TEXT.claimedMeanwhile(held.held) })
-    } else {
-      const bytes = Buffer.from(found.chosenBase64, 'base64')
-      const path = `${line.id}/gmail-${(chosen.sha256 ?? createHash('sha256').update(bytes).digest('hex')).slice(0, 8)}-${storedName(chosen.fileName)}`
-      await storage.upload(path, bytes)
-      attached = { path, name: chosen.fileName }
+    const bytes = Buffer.from(found.chosenBase64, 'base64')
+    const path = copyPath(line.id, chosen.sha256 ?? createHash('sha256').update(bytes).digest('hex'), chosen.fileName)
+    await storage.upload(path, bytes)
+    const step = await setLineReceipt(supabase, line, { keys: found.pick.claimKeys, label: run.labels[0], path, name: chosen.fileName, search, gmail: null })
+    if (step.status === 'ok') {
+      if (earlier && earlier !== path) await storage.remove([earlier])
+      return { status: 'searched', search: receiptSearchForPage(search)!, attached: { path, name: chosen.fileName }, dryRun: false, ms, gmailError }
     }
-  } else {
-    await claimFor(supabase, line.id, [], run.labels[0])
+    await storage.remove([path])
+    if (step.status !== 'held') throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+    Object.assign(search, { chosen: null, check: null, read: null, text: null, note: RECEIPT_TEXT.claimedMeanwhile(step.label || 'einer anderen Zeile') })
   }
-
-  const { data: saved, error } = await supabase.from('bank_lines')
-    .update({ receipt_search: search, receipt_gmail: null, ...(attached ? { receipt_path: attached.path, receipt_name: attached.name } : old ? { receipt_path: null, receipt_name: null } : {}) })
-    .eq('id', line.id).eq('status', 'open').is('bookamat_pending', null).select('id')
-  if (error || !saved?.length) {
-    // Booked or held meanwhile: nothing kept
-    if (attached) await storage.remove([attached.path])
-    await claimFor(supabase, line.id, [], run.labels[0]).catch(() => null)
-    if (error) throw new BookamatError('database', error.message)
-    throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
-  }
-  if (old && old !== attached?.path) await storage.remove([old])
-  return { status: 'searched', search, attached, dryRun: false, ms, gmailError }
+  // Nothing attached: the receipt an earlier search attached stays (Gmail failing, time running
+  // out or the e-mail gone never take it away), with what was said of it; this search's list and
+  // its failures beside it
+  const kept = line.receipt_search?.chosen ?? null
+  const stored: BankLineReceiptSearch = kept && line.receipt_search
+    ? {
+      ...search, chosen: kept, check: line.receipt_search.check, read: line.receipt_search.read, text: line.receipt_search.text,
+      note: line.receipt_search.note, plain_note: line.receipt_search.plain_note,
+      candidates: search.candidates.filter(c => !(c.message_id === kept.message_id && (c.part_id ?? null) === (kept.part_id ?? null))),
+    }
+    : search
+  const step = await setLineReceipt(supabase, line, { keys: null, label: run.labels[0], path: line.receipt_path, name: line.receipt_name, search: stored, gmail: line.receipt_gmail })
+  if (step.status !== 'ok') throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+  return { status: 'searched', search: receiptSearchForPage(stored)!, attached: null, dryRun: false, ms, gmailError }
 }
 
 // The candidate a line's list names (its e-mail and part)
@@ -286,12 +325,13 @@ export type AttachDeps = {
  */
 export async function attachGmailCandidate(
   supabase: SupabaseClient, lineId: string, messageId: string, partId: string | null, deps: AttachDeps,
-  opts: { storage?: ReceiptStorage } = {},
+  opts: { storage?: ReceiptStorage; accountGate?: AccountGate } = {},
 ): Promise<{ path: string; name: string }> {
   const line = await loadLine(supabase, lineId)
   const tx = lineTransaction(line)
-  const refused = await refusal(supabase, line, tx)
+  const refused = await refusal(supabase, line, tx, opts.accountGate)
   if (refused) throw new ReceiptError('invalid_status', refused, 409)
+  if (handReceipt(line)) throw new ReceiptError('invalid_status', RECEIPT_TEXT.handReceipt, 409)
   const c = listed(line, messageId, partId)
   if (!c) throw new ReceiptError('not_found', RECEIPT_TEXT.notListed, 404)
   if (!gmailAttachable(c)) throw new ReceiptError('invalid_request', RECEIPT_TEXT.notAttachable, 400)
@@ -303,42 +343,37 @@ export async function attachGmailCandidate(
   const text = await deps.pdfText(pdf.base64).then(t => t.text).catch(() => '')
   const read = await deps.readPdf(pdf.base64).catch(() => null)
   const label = rowLabel(tx)
-  const held = await claimFor(supabase, line.id, ownClaimKeys({ messageId, partId, sha256, from: c.from, read }), label)
-  if (held) throw new ReceiptError('claimed', RECEIPT_TEXT.claimed(held.held), 409)
-
   const storage = opts.storage ?? bucketStorage(supabase)
   const name = pdf.filename || c.file_name || 'Beleg.pdf'
-  const path = `${line.id}/gmail-${sha256.slice(0, 8)}-${storedName(name)}`
+  const path = copyPath(line.id, sha256, name)
   await storage.upload(path, bytes)
   const gmail: BankLineGmailReceipt = {
     candidate: c, name, sha256, text: cap(text, RECEIPT_TEXT_MAX), unreadable: !read,
     extracted: { invoice_number: read?.invoice_number ?? null, date: read?.date ?? null, amount: read?.amount ?? null },
   }
-  // The search's own receipt, if it had one, is replaced; its list stays
-  const old = line.receipt_path && line.receipt_path !== path ? line.receipt_path : null
-  const search = line.receipt_search ? { ...line.receipt_search, chosen: null, check: null, read: null, text: null } : null
-  const { data: saved, error } = await supabase.from('bank_lines')
-    .update({ receipt_gmail: gmail, receipt_search: search, receipt_path: path, receipt_name: name })
-    .eq('id', line.id).eq('status', 'open').is('bookamat_pending', null).select('id')
-  if (error || !saved?.length) {
-    await storage.remove([path])
-    await claimFor(supabase, line.id, [], label).catch(() => null)
-    if (error) throw new BookamatError('database', error.message)
-    throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
+  // The search's own receipt, or one attached from the list before, is replaced; its list stays
+  const step = await setLineReceipt(supabase, line, {
+    keys: ownClaimKeys({ messageId, partId, sha256, from: c.from, read }), label, path, name, search: withoutChosen(line.receipt_search), gmail,
+  })
+  if (step.status === 'ok') {
+    if (line.receipt_path && line.receipt_path !== path) await storage.remove([line.receipt_path])
+    return { path, name }
   }
-  if (old) await storage.remove([old])
-  return { path, name }
+  await storage.remove([path])
+  if (step.status === 'held') throw new ReceiptError('claimed', RECEIPT_TEXT.claimed(step.label || 'einer anderen Zeile'), 409)
+  throw new ReceiptError('changed', RECEIPT_TEXT.changed, 409)
 }
 
 /**
- * „Beleg entfernen“, or a Beleg uploaded by hand in its place: the line's claims go, a receipt
- * from Gmail is forgotten (its list stays). The copy in the bucket is the caller's to remove.
- * Returns the update the line's PATCH applies with its own fields.
+ * „Beleg entfernen“, or a Beleg uploaded by hand in its place (the line's PATCH): the line's claims
+ * go, a receipt from Gmail is forgotten (its list stays), in one step against the line as loaded.
+ * The copies in the bucket are the page's to remove.
  */
-export async function releaseGmailReceipt(supabase: SupabaseClient, line: Pick<BankLine, 'id' | 'receipt_search'>): Promise<Pick<BankLine, 'receipt_gmail'> & Partial<Pick<BankLine, 'receipt_search'>>> {
-  await claimFor(supabase, line.id, [], '')
-  return {
-    receipt_gmail: null,
-    ...(line.receipt_search?.chosen ? { receipt_search: { ...line.receipt_search, chosen: null, check: null, read: null, text: null } } : {}),
-  }
+export async function setHandReceipt(
+  supabase: SupabaseClient, line: Loaded, receipt: { path: string; name: string } | null,
+): Promise<ReceiptStep> {
+  return setLineReceipt(supabase, line, {
+    keys: [], label: '', path: receipt?.path ?? null, name: receipt?.name ?? null, search: withoutChosen(line.receipt_search), gmail: null,
+  })
 }
+

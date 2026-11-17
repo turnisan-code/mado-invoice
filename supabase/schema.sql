@@ -1455,6 +1455,51 @@ create trigger bank_lines_booking_guard
 -- with its Storno (the quote converts again, e.g. into a new final invoice). Once issued ones exist, a
 -- plain invoice would bill them twice (MI019): p_final creates the final invoice instead and
 -- links them to it (the app then writes the deduction lines). Null when the quote does not exist.
+-- (20261118_receipts.sql) One step for the receipt of a statement line (PR 9b): the line as the caller loaded it, its
+-- claims swapped and its receipt fields set — or nothing. Called by a Gmail search, by „Anhängen“
+-- and by a Beleg uploaded or removed by hand (src/lib/expenses/receipts.ts). The copy of a new
+-- receipt is uploaded before, under a name of its own, and removed by the caller when this
+-- refuses, so a refusal never touches the copy the line keeps.
+--  p_expected_*: receipt_path, receipt_search->>'at' and whether receipt_gmail was set, as loaded
+--  p_keys: the receipt's claim keys (null: the line's claims stay as they are; '{}': released)
+-- Refused ('changed') when the line is no longer open, a booking attempt is open or running (a
+-- claim younger than 3 minutes), or its receipt changed meanwhile; 'held' when another line
+-- holds one of the keys.
+create or replace function set_line_receipt(
+  p_line uuid, p_expected_path text, p_expected_search_at text, p_expected_gmail boolean,
+  p_keys text[], p_label text, p_path text, p_name text, p_search jsonb, p_gmail jsonb
+) returns jsonb language plpgsql as $$
+declare
+  l     bank_lines%rowtype;
+  other text;
+begin
+  select * into l from bank_lines where id = p_line for update;
+  if not found then return jsonb_build_object('status', 'not_found'); end if;
+  if l.status <> 'open' or l.bookamat_pending is not null
+     or (l.bookamat_claim is not null and l.bookamat_claim > now() - interval '3 minutes')
+     or l.receipt_path is distinct from p_expected_path
+     or (l.receipt_search ->> 'at') is distinct from p_expected_search_at
+     or (l.receipt_gmail is not null) is distinct from p_expected_gmail then
+    return jsonb_build_object('status', 'changed');
+  end if;
+  if p_keys is not null then
+    select c.label into other from receipt_claims c where c.key = any(p_keys) and c.bank_line_id <> p_line limit 1;
+    if found then return jsonb_build_object('status', 'held', 'label', other); end if;
+    begin
+      delete from receipt_claims where bank_line_id = p_line;
+      insert into receipt_claims (key, bank_line_id, label)
+        select distinct k, p_line, coalesce(p_label, '') from unnest(p_keys) as k;
+    exception when unique_violation then
+      -- Another line claimed one of them meanwhile: the line's own claims are as they were
+      return jsonb_build_object('status', 'held', 'label', '');
+    end;
+  end if;
+  update bank_lines set receipt_path = p_path, receipt_name = p_name, receipt_search = p_search, receipt_gmail = p_gmail
+  where id = p_line;
+  return jsonb_build_object('status', 'ok');
+end;
+$$;
+
 create or replace function convert_quote_to_invoice(p_quote_id uuid, p_final boolean default false)
 returns jsonb language plpgsql as $$
 declare

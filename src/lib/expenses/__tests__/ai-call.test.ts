@@ -60,8 +60,8 @@ describe('what the SDK does with them: the bounds Analyse’s deadline counts on
       return answer(init)
     }
     const client = new Anthropic({ apiKey: 'test-key', baseURL: 'https://api.anthropic.invalid', fetch })
-    // The PDF reader's call: the beta messages' parse (structured outputs, the fallback beta)
-    const reader: PdfReaderMessages = { parse: (body, options) => client.beta.messages.parse(body, options) }
+    // The PDF reader's call: the beta messages' create (structured outputs, the fallback beta)
+    const reader: PdfReaderMessages = { create: (body, options) => client.beta.messages.create(body, options) as never }
     return { messages: client.messages, reader, sent }
   }
 

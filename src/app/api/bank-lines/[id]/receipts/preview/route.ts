@@ -16,7 +16,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   if (!isUuid(id)) return apiError(404, 'not_found', 'Statement line not found')
   const messageId = req.nextUrl.searchParams.get('message_id') ?? ''
-  const partId = req.nextUrl.searchParams.get('part_id') || null
+  // An e-mail that is only a PDF names its part '' (kept as such); none given: no part
+  const partId = req.nextUrl.searchParams.get('part_id')
   const { data: line, error: lineErr } = await supabase.from('bank_lines').select('receipt_search').eq('id', id).maybeSingle()
   if (lineErr) return apiError(500, 'database', lineErr.message)
   const search = (line as { receipt_search: BankLineReceiptSearch | null } | null)?.receipt_search

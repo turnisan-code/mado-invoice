@@ -1,14 +1,15 @@
 import './owner'
 // The PDF reader of PR 9b (Claude Opus 5.5, decision D3a) without an API call: the prompt as sent,
 // the request (structured outputs, low effort, the server-side refusal fallback), and what the
-// search gets back — the fields as Bookmatic's pdfInvoiceFields read them, or „nicht lesbar“.
+// search gets back — the fields as Bookmatic's pdfInvoiceFields read them, or „nicht lesbar“: how
+// the answer ended is checked before its text is parsed and held to the schema.
 // Ported from Bookmatic's lib/__tests__/ai-extractor.test.ts (475072f, the PDF reader's part).
 // Synthetic answers only.
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import Anthropic from '@anthropic-ai/sdk'
 import {
-  DOCUMENT_TYPES, FALLBACK_BETA, PDF_READER_MAX_TOKENS, PDF_READER_MODEL, ReceiptUnreadableError, pdfInvoiceFields, pdfInvoicePrompt,
+  DOCUMENT_TYPES, FALLBACK_BETA, PDF_READER_MAX_TOKENS, PDF_READER_MODEL, STRUCTURED_OUTPUTS_BETA, ReceiptUnreadableError, pdfInvoiceFields, pdfInvoicePrompt,
   pdfReaderConfigured, readPdfInvoice, readerRequest, type PdfReaderMessages, type ReaderAnswer,
 } from '../pdf-reader'
 import { TEST_OWNER } from './owner'
@@ -68,6 +69,12 @@ describe('pdfInvoiceFields — what the search takes from the reader’s answer'
       assert.equal(read({ document_type }).document_type, null, String(document_type))
     }
   })
+  test('an answer read as text before (Bookmatic’s Drive path): the five fields cleaned, the new ones not known', () => {
+    assert.deepEqual(pdfInvoiceFields({ date: '15.07.2026', invoice_number: ' 2025019001 ', amount: '23,45', currency: 'EUR', vatin: null }), {
+      date: null, invoice_number: '2025019001', amount: 23.45, currency: 'EUR', vatin: null,
+      amount_due: null, foreign_total: null, document_type: null,
+    })
+  })
   test('a date that is no ISO day is not known', () => {
     assert.equal(read({ date: '15.07.2026' }).date, null)
     assert.equal(read({ date: '2026-02-30' }).date, null)
@@ -79,7 +86,7 @@ describe('pdfInvoiceFields — what the search takes from the reader’s answer'
 function standIn(...answers: (ReaderAnswer | Error)[]) {
   const calls: { body: ReturnType<typeof readerRequest>; options?: Anthropic.RequestOptions }[] = []
   const messages: PdfReaderMessages = {
-    parse: async (body, options) => {
+    create: async (body, options) => {
       calls.push({ body, options })
       const answer = answers[Math.min(calls.length, answers.length) - 1]
       if (answer instanceof Error) throw answer
@@ -90,7 +97,7 @@ function standIn(...answers: (ReaderAnswer | Error)[]) {
 }
 const PDF = 'JVBERi0xLjQK'
 const PARSED = { date: '2026-07-15', invoice_number: '910000000123', amount: 25.2, currency: 'EUR', amount_due: 21, vatin: null, document_type: 'invoice' }
-const ok = (parsed: unknown = PARSED): ReaderAnswer => ({ stop_reason: 'end_turn', parsed_output: parsed })
+const ok = (parsed: unknown = PARSED): ReaderAnswer => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(parsed) }] })
 
 describe('readPdfInvoice — one read by Claude Opus 5.5 (D3a)', () => {
   test('the request: Opus 5.5 at low effort, the answer held to the schema, the refusal fallback opted in; the PDF as a document, then the prompt with the owner’s UID', async () => {
@@ -100,8 +107,8 @@ describe('readPdfInvoice — one read by Claude Opus 5.5 (D3a)', () => {
     assert.equal(body.model, 'claude-opus-5-5')
     assert.equal(PDF_READER_MODEL, 'claude-opus-5-5')
     assert.equal(body.max_tokens, PDF_READER_MAX_TOKENS)
-    assert.deepEqual(body.betas, ['server-side-fallback-2026-07-01'])
-    assert.equal(FALLBACK_BETA, 'server-side-fallback-2026-07-01')
+    assert.deepEqual(body.betas, ['server-side-fallback-2026-07-01', 'structured-outputs-2025-12-15'])
+    assert.deepEqual([FALLBACK_BETA, STRUCTURED_OUTPUTS_BETA], ['server-side-fallback-2026-07-01', 'structured-outputs-2025-12-15'])
     assert.equal(body.fallbacks, 'default')
     assert.equal(body.output_config.effort, 'low')
     assert.equal(body.output_config.format.type, 'json_schema')
@@ -144,12 +151,15 @@ describe('readPdfInvoice — one read by Claude Opus 5.5 (D3a)', () => {
   })
   test('„nicht lesbar“: declined by Claude and its fallback, cut off, ended otherwise, or no answer of the schema', async () => {
     const cases: [ReaderAnswer, RegExp][] = [
-      [{ stop_reason: 'refusal', parsed_output: null }, /abgelehnt/],
-      [{ stop_reason: 'max_tokens', parsed_output: null }, /abgeschnitten/],
-      [{ stop_reason: 'pause_turn', parsed_output: null }, /unvollständig \(pause_turn\)/],
+      // a refusal with its words, an answer cut off mid-JSON: said before any parsing
+      [{ stop_reason: 'refusal', content: [{ type: 'text', text: 'Ich kann das nicht lesen.' }] }, /abgelehnt/],
+      [{ stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"date": "2026-07' }] }, /abgeschnitten/],
+      [{ stop_reason: 'pause_turn', content: [] }, /unvollständig \(pause_turn\)/],
       [{ stop_reason: null }, /unvollständig \(ohne Grund\)/],
       [ok(null), /keine gültige Antwort/],
       [ok([1, 2]), /keine gültige Antwort/],
+      [{ stop_reason: 'end_turn', content: [{ type: 'text', text: 'kein JSON' }] }, /keine gültige Antwort/],
+      [ok({ ...PARSED, amount: 'viel' }), /keine gültige Antwort/],
     ]
     for (const [answer, why] of cases) {
       await assert.rejects(readPdfInvoice(PDF, {}, standIn(answer).messages), (e: unknown) => {

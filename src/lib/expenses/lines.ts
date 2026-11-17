@@ -6,7 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { BankBookingKind, BankLine, BankLineReceiptSearch, BookingRule } from '@/types'
 import { BookamatError, bookamatFetch, type BookamatCredentials } from '@/lib/bookamat'
 import { vendorsOf } from './rules'
-import { analyseCredit, analyseExpense, annotateDuplicates, duplicateWindow, type AnalysedLine, type StoredGmailFind } from './analyse'
+import { analyseCredit, analyseExpense, annotateDuplicates, applyRulePick, duplicateWindow, type AnalysedLine, type StoredGmailFind } from './analyse'
+import { addressesOnReceipt, recheckRuleChoice, ruleChoiceAddresses } from './rule-match'
 import { withGmailCandidate } from './gmail-attach'
 import { transactionOfCells } from './csv-parser'
 import { toBookingLite, yearsOf, type BookingLike, type BookingLite } from './duplicates'
@@ -39,11 +40,18 @@ export function lineRow(
   const ack = review.ack_duplicate_ids ?? []
   if (lineKind(line) === 'expense') {
     // The receipt the line's Gmail search attached, with what it found (PR 9b); a PDF of its list
-    // the owner attached („Anhängen“) as Bookmatic's page made it the row's (lib/expenses/gmail-attach.ts)
+    // the owner attached („Anhängen“) as Bookmatic's page made it the row's (lib/expenses/gmail-attach.ts),
+    // its invoice address deciding among the rules the row was chosen among (recheckRuleChoice);
+    // then the rule the owner picked — a receipt its sender did not send drops out
     const found = storedFind(line.receipt_search ?? null)
     const fromList = line.receipt_gmail ?? null
-    let row = analyseExpense(tx, vendors, lists, { ruleId: review.rule_id, receipt: !!line.receipt_path && !fromList && !found?.chosen, found })
-    if (fromList) row = withGmailCandidate(row, fromList.candidate, { name: fromList.name, extracted: fromList.extracted, unreadable: fromList.unreadable })
+    const hand = !!line.receipt_path && !fromList && !found?.chosen
+    let row = analyseExpense(tx, vendors, lists, { receipt: hand, found })
+    if (fromList) {
+      row = withGmailCandidate(row, fromList.candidate, { name: fromList.name, extracted: fromList.extracted, unreadable: fromList.unreadable })
+      row = recheckRuleChoice(row, addressesOnReceipt(fromList.text, ruleChoiceAddresses(row))).row
+    }
+    row = applyRulePick(row, review.rule_id, hand)
     return { kind: 'expense', row: { ...row, override, ...(review.lines?.length ? { booking_lines: review.lines } : {}), ack_duplicate_ids: ack } }
   }
   return { kind: 'bank_income', row: { ...analyseCredit(tx, vendors, lists), override, ack_duplicate_ids: ack } }

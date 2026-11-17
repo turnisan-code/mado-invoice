@@ -78,7 +78,8 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 describe('findGmailReceipt — a Buchungsregel’s sender', () => {
   test('its PDF read and attached by its amount, claimed for the row by all its keys; Gmail with the run’s limiter and signal; the reader with the run’s time', async () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
-    const run = newAnalyseRun([tx], { maxDurationS: 60 })
+    // A fixed clock: the read's options at the run's start (both tries fit: 22,5 s each)
+    const run = newAnalyseRun([tx], { maxDurationS: 60, startedAt: 0, now: () => 0 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-a1', 'Ihre Rechnung', [pdf('1', 'Rechnung_910000000123.pdf', 'a1')])] },
       texts: { a1: { text: 'Rechnung 910000000123\nGesamt 23,45 €', pages: 1 } },
@@ -94,7 +95,7 @@ describe('findGmailReceipt — a Buchungsregel’s sender', () => {
     // the query asks for the bank text's number as it is written there
     assert.equal(log.params[0].invoiceNumber, '910000000123')
     assert.deepEqual(log.gmailOptions, [{ limit: run.gmailLimit, signal: run.signal }])
-    assert.deepEqual(log.readOptions, [{ timeoutMs: 25_000, maxRetries: 1, signal: run.signal }])
+    assert.deepEqual(log.readOptions, [{ timeoutMs: 22_500, maxRetries: 1, signal: run.signal }])
     assert.equal(run.reads.left, 149)
   })
   test('the window: from the day of payment less 10 days — a card payment of 29.12. posted on 04.01. too —, to the bank date plus 3', () => {

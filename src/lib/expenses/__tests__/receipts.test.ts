@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fakeSupabase, hasFilter, type Op } from '@/lib/__tests__/fake-supabase'
 import {
-  attachGmailCandidate, ownReceipt, releaseGmailReceipt, ReceiptError, searchLineReceipt, searchPaths, storedName,
+  attachGmailCandidate, copyPath, ownReceipt, ReceiptError, searchLineReceipt, searchPaths, setHandReceipt, storedName,
   RECEIPT_TEXT, RECEIPT_TEXT_MAX, SEARCH_MAX_DURATION_S, type AttachDeps,
 } from '../receipts'
 import { lineRow, receiptKept, storedFind } from '../lines'
@@ -72,15 +72,20 @@ type DbWorld = {
   around?: BankLine[]
   rules?: BookingRule[]
   claims?: { key: string; bank_line_id: string; label: string }[]
+  // set_line_receipt meets a key another line claimed just now
   insertConflict?: boolean
+  // the line changed between the load and the step (booked, held, its receipt another)
   changed?: boolean
   documents?: { type: string; number: string }[]
 }
+type StepArgs = {
+  p_line: string; p_expected_path: string | null; p_expected_search_at: string | null; p_expected_gmail: boolean
+  p_keys: string[] | null; p_label: string; p_path: string | null; p_name: string | null; p_search: BankLineReceiptSearch | null; p_gmail: unknown
+}
 const inValues = (op: Op, column: string) => (op.filters.find(f => f[0] === 'in' && f[1] === column)?.[2] ?? []) as string[]
-const eqValue = (op: Op, column: string) => op.filters.find(f => f[0] === 'eq' && f[1] === column)?.[2]
 function setup(world: DbWorld) {
   const writes: string[] = []
-  const updates: Record<string, unknown>[] = []
+  const steps: StepArgs[] = []
   const db = fakeSupabase((op: Op) => {
     if (op.table === 'bank_lines' && op.action === 'select') {
       if (hasFilter(op, 'eq', 'id')) return { data: world.line }
@@ -88,36 +93,41 @@ function setup(world: DbWorld) {
     }
     if (op.table === 'documents') return { data: world.documents ?? [] }
     if (op.table === 'booking_rules') return { data: world.rules ?? RULES }
-    if (op.table === 'receipt_claims') {
-      if (op.action === 'select') return { data: hasFilter(op, 'in', 'key') ? (world.claims ?? []).filter(c => inValues(op, 'key').includes(c.key)) : world.claims ?? [] }
-      if (op.action === 'delete') {
-        writes.push('claims delete')
-        world.claims = (world.claims ?? []).filter(c => c.bank_line_id !== eqValue(op, 'bank_line_id'))
-        return {}
-      }
-      if (op.action === 'insert') {
-        if (world.insertConflict) return { error: { message: 'duplicate key value violates unique constraint', code: '23505' } }
-        const rows = op.values as { key: string; bank_line_id: string; label: string }[]
-        writes.push(`claims insert ${rows.length}`)
-        world.claims = [...(world.claims ?? []), ...rows]
-        return {}
-      }
+    if (op.table === 'receipt_claims' && op.action === 'select') {
+      const all = hasFilter(op, 'in', 'key') ? (world.claims ?? []).filter(c => inValues(op, 'key').includes(c.key)) : world.claims ?? []
+      const range = op.filters.find(f => f[0] === 'range') as [string, number, number] | undefined
+      return { data: range ? all.slice(range[1], range[2] + 1) : all }
     }
-    if (op.table === 'bank_lines' && op.action === 'update') {
-      writes.push('line update')
-      updates.push(op.values as Record<string, unknown>)
-      return { data: world.changed ? [] : [{ id: world.line.id }] }
-    }
+    writes.push(`${op.action} ${op.table}`)
     return {}
   })
+  // set_line_receipt (20261118_receipts.sql), as its SQL says
+  ;(db.client as unknown as { rpc: (name: string, args: StepArgs) => Promise<{ data: unknown; error: null }> }).rpc = async (name, args) => {
+    assert.equal(name, 'set_line_receipt')
+    steps.push(args)
+    const l = world.line
+    const same = (l.receipt_path ?? null) === args.p_expected_path && (l.receipt_search?.at ?? null) === args.p_expected_search_at && !!l.receipt_gmail === args.p_expected_gmail
+    if (world.changed || l.status !== 'open' || l.bookamat_pending || !same) return { data: { status: 'changed' }, error: null }
+    if (args.p_keys) {
+      const other = (world.claims ?? []).find(c => args.p_keys!.includes(c.key) && c.bank_line_id !== l.id)
+      if (other) return { data: { status: 'held', label: other.label }, error: null }
+      if (world.insertConflict) return { data: { status: 'held', label: '' }, error: null }
+      world.claims = [...(world.claims ?? []).filter(c => c.bank_line_id !== l.id), ...args.p_keys.map(key => ({ key, bank_line_id: l.id, label: args.p_label }))]
+      writes.push(`claims ${args.p_keys.length}`)
+    }
+    world.line = { ...l, receipt_path: args.p_path, receipt_name: args.p_name, receipt_search: args.p_search, receipt_gmail: args.p_gmail as BankLine['receipt_gmail'] }
+    writes.push('line receipt')
+    return { data: { status: 'ok' }, error: null }
+  }
   const storage = {
     uploads: [] as string[],
     removes: [] as string[][],
     upload: async (path: string) => { storage.uploads.push(path) },
     remove: async (paths: string[]) => { storage.removes.push(paths) },
   }
-  return { db, storage, writes, updates }
+  return { db, storage, writes, steps, world }
 }
+const COPY = new RegExp(`^${LINE_ID}/gmail-[0-9a-f]{8}-shaa1abc-Rechnung\\.pdf$`)
 const run = (s: ReturnType<typeof setup>, deps: GmailReceiptDeps, opts: Parameters<typeof searchLineReceipt>[3] = {}) =>
   searchLineReceipt(s.db.client, LINE_ID, deps, { storage: s.storage, ...opts })
 
@@ -176,6 +186,19 @@ describe('searchLineReceipt — which lines are searched', () => {
     assert.equal(ownReceipt({ receipt_path: `${LINE_ID}/x.pdf`, receipt_search: null, receipt_gmail: null }), true)
     assert.equal(ownReceipt({ receipt_path: null, receipt_search: null, receipt_gmail: { candidate: {} as never, name: 'x', extracted: {}, unreadable: false, sha256: null, text: null } }), true)
   })
+  test('a line Mado never books (another account, another currency): not searched, the route’s gate says why', async () => {
+    const gate = async () => 'Konto AT000000000000000099 ist keines deiner Geschäftskonten (Einstellungen → Buchungsregeln) — nicht gebucht'
+    const r = await refused(bankLine(), { accountGate: gate })
+    assert.deepEqual(r, { status: 'not_searched', reason: await gate() })
+  })
+  test('by itself only once: a line searched before is searched again on „Erneut“, or by itself when its search only failed', async () => {
+    const searched: BankLineReceiptSearch = { at: NOW, chosen: null, check: null, read: null, text: null, note: null, plain_note: null, candidates: [], failed: [] }
+    assert.deepEqual(await refused(bankLine({ receipt_search: searched }), { auto: true, expensesFrom: '2026-07-01' }), { status: 'not_searched', reason: RECEIPT_TEXT.searchedBefore })
+    const failed = setup({ line: bankLine({ receipt_search: { ...searched, failed: ['⚠ Gmail-Suche fehlgeschlagen'] } }) })
+    assert.equal((await run(failed, gmail(PROVEN).deps, { auto: true, expensesFrom: '2026-07-01' })).status, 'searched')
+    const again = setup({ line: bankLine({ receipt_search: searched }) })
+    assert.equal((await run(again, gmail(PROVEN).deps)).status, 'searched')
+  })
   test('the page’s search after an upload (auto): only from the switch-over date on (D11); „In Gmail suchen“ any time', async () => {
     assert.deepEqual(await refused(bankLine(), { auto: true, expensesFrom: null }), { status: 'not_searched', reason: RECEIPT_TEXT.beforeSwitch })
     assert.deepEqual(await refused(bankLine(), { auto: true, expensesFrom: '2026-08-01' }), { status: 'not_searched', reason: RECEIPT_TEXT.beforeSwitch })
@@ -186,26 +209,31 @@ describe('searchLineReceipt — which lines are searched', () => {
 })
 
 describe('searchLineReceipt — what a search keeps', () => {
-  test('a receipt proven by its amount: copied into the bucket, claimed for the line by all its keys, the search kept on the line', async () => {
+  test('a receipt proven by its amount: copied under a name of its own, claimed by all its keys and kept on the line in one step', async () => {
     const s = setup({ line: bankLine() })
     const g = gmail(PROVEN)
     const r = await run(s, g.deps)
     assert.equal(r.status, 'searched')
     if (r.status !== 'searched') return
     assert.deepEqual(g.log.searches, ['from:rechnung@muster.example'])
-    assert.deepEqual(r.attached, { path: `${LINE_ID}/gmail-shaa1abc-Rechnung.pdf`, name: 'Rechnung.pdf' })
-    assert.deepEqual(s.storage.uploads, [`${LINE_ID}/gmail-shaa1abc-Rechnung.pdf`])
-    assert.deepEqual(s.writes, ['claims delete', 'claims insert 3', 'line update'])
-    const update = s.updates[0] as { receipt_search: BankLineReceiptSearch; receipt_gmail: null; receipt_path: string; receipt_name: string }
-    assert.equal(update.receipt_gmail, null)
-    assert.deepEqual([update.receipt_path, update.receipt_name], [`${LINE_ID}/gmail-shaa1abc-Rechnung.pdf`, 'Rechnung.pdf'])
-    const kept = update.receipt_search
+    assert.match(r.attached?.path ?? '', COPY)
+    assert.deepEqual(s.storage.uploads, [r.attached!.path])
+    // the step: the line as loaded, the three keys, the copy
+    assert.deepEqual(s.writes, ['claims 3', 'line receipt'])
+    assert.deepEqual([s.steps[0].p_expected_path, s.steps[0].p_expected_search_at, s.steps[0].p_expected_gmail], [null, null, false])
+    const line = s.world.line
+    assert.deepEqual([line.receipt_path, line.receipt_name, line.receipt_gmail], [r.attached!.path, 'Rechnung.pdf', null])
+    const kept = line.receipt_search!
     assert.deepEqual([kept.chosen?.message_id, kept.chosen?.part_id, kept.chosen?.via.kind, kept.check], ['msg-a1', '1', 'sender', 'amount'])
     assert.deepEqual([kept.read?.amount, kept.read?.invoice_number, kept.read?.date], [23.45, '910000000123', '2026-07-10'])
     assert.match(kept.text ?? '', /Gesamt 23,45 EUR/)
     assert.equal(kept.chosen?.body_text, 'Ihre Rechnung')
-    // Never the PDF's data
-    assert.doesNotMatch(JSON.stringify(update), new RegExp(bytesOf('a1')))
+    // Never the PDF's data; the page's answer without the receipt's text and its e-mail's
+    assert.doesNotMatch(JSON.stringify(line), new RegExp(bytesOf('a1')))
+    assert.deepEqual([r.search.text, r.search.chosen?.body_text], [null, null])
+  })
+  test('every copy has a name of its own (the same receipt found twice too)', () => {
+    assert.notEqual(copyPath(LINE_ID, 'abcdef12', 'R.pdf'), copyPath(LINE_ID, 'abcdef12', 'R.pdf'))
   })
   test('a dry run („Probelauf“): searched and read as a search is, nothing written, nothing stored', async () => {
     const s = setup({ line: bankLine() })
@@ -214,56 +242,76 @@ describe('searchLineReceipt — what a search keeps', () => {
     assert.ok(r.status === 'searched' && r.dryRun)
     assert.deepEqual(r.status === 'searched' && r.attached, { path: null, name: 'Rechnung.pdf' })
     assert.deepEqual([g.log.searches, g.log.reads], [['from:rechnung@muster.example'], ['a1']])
-    assert.deepEqual([s.writes, s.storage.uploads, s.storage.removes], [[], [], []])
+    assert.deepEqual([s.writes, s.steps, s.storage.uploads, s.storage.removes], [[], [], [], []])
     assert.equal(r.status === 'searched' && r.search.check, 'amount')
   })
-  test('a receipt another line holds is not this line’s: listed as that line’s, nothing attached', async () => {
+  test('a receipt another line holds is not this line’s: listed as that line’s, nothing attached, the claims as they were', async () => {
     const s = setup({ line: bankLine(), claims: [{ key: 'gmail:msg-a1:1', bank_line_id: OTHER_ID, label: '02.07.2026 · Muster · 23,45 €' }] })
     const r = await run(s, gmail(PROVEN).deps)
     assert.ok(r.status === 'searched')
     if (r.status !== 'searched') return
     assert.deepEqual([r.attached, r.search.chosen, s.storage.uploads], [null, null, []])
     assert.deepEqual(r.search.candidates.map(c => [c.message_id, c.why, c.claimed_by]), [['msg-a1', 'claimed', '02.07.2026 · Muster · 23,45 €']])
+    assert.equal(s.steps[0].p_keys, null)
   })
-  test('a receipt another line’s search claimed meanwhile: not attached, said on the line', async () => {
+  test('the claims are read page by page: a receipt claimed after the first thousand is still another line’s', async () => {
+    const many = Array.from({ length: 1000 }, (_, k) => ({ key: `gmail:msg-x${String(k).padStart(4, '0')}:1`, bank_line_id: OTHER_ID, label: 'x' }))
+    const s = setup({ line: bankLine(), claims: [...many, { key: 'gmail:msg-a1:1', bank_line_id: OTHER_ID, label: 'die andere Zeile' }] })
+    const r = await run(s, gmail(PROVEN).deps)
+    assert.ok(r.status === 'searched' && !r.attached)
+  })
+  test('a receipt another line’s search claimed meanwhile: its copy goes, the line keeps the search without it, said', async () => {
     const s = setup({ line: bankLine(), insertConflict: true })
     const r = await run(s, gmail(PROVEN).deps)
     assert.ok(r.status === 'searched')
     if (r.status !== 'searched') return
-    assert.deepEqual([r.attached, r.search.chosen, s.storage.uploads], [null, null, []])
-    assert.equal(r.search.note, RECEIPT_TEXT.claimedMeanwhile('einer anderen Zeile'))
+    assert.equal(r.attached, null)
+    assert.equal(s.storage.uploads.length, 1)
+    assert.deepEqual(s.storage.removes, [[s.storage.uploads[0]]])
+    assert.deepEqual([s.world.line.receipt_path, s.world.line.receipt_search?.chosen], [null, null])
+    assert.equal(s.world.line.receipt_search?.note, RECEIPT_TEXT.claimedMeanwhile('einer anderen Zeile'))
   })
-  test('a line booked or held meanwhile: the copy and the claims go, nothing kept', async () => {
-    const s = setup({ line: bankLine(), changed: true })
+  test('a line booked, held or given a receipt meanwhile: only the search’s own copy goes; the line and its claims stay as they are', async () => {
+    const before = bankLine({ receipt_path: `${LINE_ID}/gmail-0000-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-a1', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'shaa1abcdef', via: { kind: 'keyword', name: 'x' } }, check: 'amount', read: null, text: null, note: null, plain_note: null, candidates: [], failed: [] } })
+    const s = setup({ line: before, changed: true, claims: [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }] })
     await assert.rejects(run(s, gmail(PROVEN).deps), (e: unknown) => e instanceof ReceiptError && e.code === 'changed' && e.status === 409)
-    assert.deepEqual(s.storage.removes, [[`${LINE_ID}/gmail-shaa1abc-Rechnung.pdf`]])
-    assert.deepEqual(s.writes.slice(-1), ['claims delete'])
+    // the same receipt found again: its new copy (a name of its own) goes, never the line's
+    assert.equal(s.storage.removes.length, 1)
+    assert.notEqual(s.storage.removes[0][0], before.receipt_path)
+    assert.deepEqual([s.world.line, s.world.claims], [before, [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }]])
   })
   test('searched again: the earlier search’s receipt is replaced, its copy removed once the new one is kept', async () => {
-    const earlier = bankLine({ receipt_path: `${LINE_ID}/gmail-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-old', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'old', via: { kind: 'keyword', name: 'x' } }, check: 'number', read: null, text: null, note: null, plain_note: null, candidates: [], failed: [] } })
+    const earlier = bankLine({ receipt_path: `${LINE_ID}/gmail-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-old', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'old', via: { kind: 'keyword', name: 'x' } }, check: 'number', read: null, text: 'alt', note: 'Rechnungsnr. 910000000123', plain_note: null, candidates: [], failed: [] } })
     const s = setup({ line: earlier })
     await run(s, gmail(PROVEN).deps)
     assert.deepEqual(s.storage.removes, [[`${LINE_ID}/gmail-old-Rechnung.pdf`]])
-    // and nothing found: the earlier receipt goes all the same
-    const none = setup({ line: earlier })
-    const r = await run(none, gmail({}).deps)
-    assert.ok(r.status === 'searched' && !r.attached)
-    assert.deepEqual([none.updates[0].receipt_path, none.updates[0].receipt_name], [null, null])
-    assert.deepEqual(none.storage.removes, [[`${LINE_ID}/gmail-old-Rechnung.pdf`]])
+    assert.match(s.world.line.receipt_path ?? '', COPY)
   })
-  test('the text kept is capped; a file name is made safe for the path', () => {
-    assert.equal(RECEIPT_TEXT_MAX, 6000)
+  test('searched again and nothing picked (Gmail failing, time out, the e-mail gone): the earlier receipt stays, with what was said of it', async () => {
+    const earlier = bankLine({ receipt_path: `${LINE_ID}/gmail-old-Rechnung.pdf`, receipt_name: 'Rechnung.pdf', receipt_search: { at: NOW, chosen: { message_id: 'msg-old', part_id: '1', file_name: 'Rechnung.pdf', subject: 'x', from: 'y', date: null, sha256: 'old', via: { kind: 'keyword', name: 'x' } }, check: 'amount', read: { amount: 23.45, amount_due: null, currency: 'EUR', foreign_total: null, invoice_number: null, date: '2026-07-10', vatin: null, document_type: 'invoice' }, text: 'alt', note: 'Gmail: muster · Betrag 23,45 € stimmt', plain_note: null, candidates: [], failed: [] } })
+    const s = setup({ line: earlier, claims: [{ key: 'gmail:msg-old:1', bank_line_id: LINE_ID, label: '' }] })
+    const r = await run(s, gmail({}).deps)
+    assert.ok(r.status === 'searched' && !r.attached)
+    const line = s.world.line
+    assert.deepEqual([line.receipt_path, line.receipt_search?.chosen?.message_id, line.receipt_search?.check, line.receipt_search?.note],
+      [`${LINE_ID}/gmail-old-Rechnung.pdf`, 'msg-old', 'amount', 'Gmail: muster · Betrag 23,45 € stimmt'])
+    assert.notEqual(line.receipt_search?.at, NOW)
+    assert.deepEqual([s.storage.removes, s.steps[0].p_keys, s.world.claims?.length], [[], null, 1])
+  })
+  test('the text kept is capped generously (the invoice address may stand far down); a file name is made safe for the path', () => {
+    assert.equal(RECEIPT_TEXT_MAX, 50_000)
     assert.equal(storedName('Rechnung 05/2026 (Kopie).pdf'), 'Rechnung_05_2026_Kopie_.pdf')
     assert.equal(storedName('///'), '_')
   })
 })
 
 describe('attachGmailCandidate — „Anhängen“ of a PDF the search found', () => {
-  const listedLine = () => bankLine({
+  const listedLine = (o: Partial<BankLine> = {}) => bankLine({
     receipt_search: {
       at: NOW, chosen: null, check: null, read: null, text: null, note: null, plain_note: null, failed: [],
       candidates: [{ message_id: 'msg-c1', part_id: '2', file_name: 'Rechnung_Juli.pdf', subject: 'Ihre Rechnung', from: 'Muster GmbH <rechnung@muster.example>', date: 'Wed, 15 Jul 2026 08:00:00 +0200', size: 2048, amount: 25, currency: null, foreign_total: null, invoice_number: null, why: 'amount', found_by: { sender: 'rechnung@muster.example', rule_ids: ['r-tel'] } }],
     },
+    ...o,
   })
   const deps = (over: Partial<AttachDeps> = {}): AttachDeps => ({
     fetchPdf: async () => ({ base64: bytesOf('c1'), filename: 'Rechnung_Juli.pdf' }),
@@ -271,20 +319,27 @@ describe('attachGmailCandidate — „Anhängen“ of a PDF the search found', (
     readPdf: async () => ({ ...NOTHING, amount: 25, invoice_number: '910000000999', date: '2026-07-14', document_type: 'invoice' }),
     ...over,
   })
-  test('fetched, read, claimed, copied, kept as the owner’s; the search’s own receipt replaced, its list kept', async () => {
+  test('fetched, read, copied, claimed and kept as the owner’s in one step; the search’s own receipt replaced, its list kept', async () => {
     const s = setup({ line: listedLine() })
     const out = await attachGmailCandidate(s.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: s.storage })
-    assert.match(out.path, new RegExp(`^${LINE_ID}/gmail-[0-9a-f]{8}-Rechnung_Juli\\.pdf$`))
+    assert.match(out.path, new RegExp(`^${LINE_ID}/gmail-[0-9a-f]{8}-[0-9a-f]{8}-Rechnung_Juli\\.pdf$`))
     assert.deepEqual(s.storage.uploads, [out.path])
-    assert.deepEqual(s.writes, ['claims delete', 'claims insert 3', 'line update'])
-    const u = s.updates[0] as { receipt_gmail: { candidate: { message_id: string }; extracted: unknown; unreadable: boolean }; receipt_search: BankLineReceiptSearch }
-    assert.equal(u.receipt_gmail.candidate.message_id, 'msg-c1')
-    assert.deepEqual(u.receipt_gmail.extracted, { invoice_number: '910000000999', date: '2026-07-14', amount: 25 })
-    assert.equal(u.receipt_gmail.unreadable, false)
-    assert.equal(u.receipt_search.chosen, null)
-    assert.equal(u.receipt_search.candidates.length, 1)
+    assert.deepEqual(s.writes, ['claims 3', 'line receipt'])
+    const line = s.world.line
+    assert.equal(line.receipt_gmail?.candidate.message_id, 'msg-c1')
+    assert.deepEqual(line.receipt_gmail?.extracted, { invoice_number: '910000000999', date: '2026-07-14', amount: 25 })
+    assert.equal(line.receipt_gmail?.unreadable, false)
+    assert.deepEqual([line.receipt_search?.chosen, line.receipt_search?.note], [null, null])
+    assert.equal(line.receipt_search?.candidates.length, 1)
   })
-  test('not in the line’s list, no PDF, another line’s: refused, nothing kept', async () => {
+  test('an e-mail that is only a PDF (its part \'\'): attached as any other', async () => {
+    const line = listedLine()
+    line.receipt_search!.candidates[0] = { ...line.receipt_search!.candidates[0], part_id: '' }
+    const s = setup({ line })
+    await attachGmailCandidate(s.db.client, LINE_ID, 'msg-c1', '', deps(), { storage: s.storage })
+    assert.equal(s.world.line.receipt_gmail?.candidate.part_id, '')
+  })
+  test('not in the line’s list, no PDF, another line’s: refused, its copy gone, nothing kept', async () => {
     const s = setup({ line: listedLine() })
     await assert.rejects(attachGmailCandidate(s.db.client, LINE_ID, 'msg-zz', '1', deps(), { storage: s.storage }), (e: unknown) => e instanceof ReceiptError && e.code === 'not_found')
     await assert.rejects(attachGmailCandidate(s.db.client, LINE_ID, 'msg-c1', '2', deps({ fetchPdf: async () => ({ base64: Buffer.from('GIF89a').toString('base64'), filename: 'x.pdf' }) }), { storage: s.storage }),
@@ -292,24 +347,37 @@ describe('attachGmailCandidate — „Anhängen“ of a PDF the search found', (
     const held = setup({ line: listedLine(), claims: [{ key: 'gmail:msg-c1:2', bank_line_id: OTHER_ID, label: '02.07.2026 · Muster · 25,00 €' }] })
     await assert.rejects(attachGmailCandidate(held.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: held.storage }),
       (e: unknown) => e instanceof ReceiptError && e.code === 'claimed' && e.message === RECEIPT_TEXT.claimed('02.07.2026 · Muster · 25,00 €'))
-    assert.deepEqual([s.storage.uploads, held.storage.uploads, held.updates], [[], [], []])
+    assert.deepEqual([s.storage.uploads, held.storage.removes, held.world.line.receipt_gmail], [[], [held.storage.uploads], null])
+  })
+  test('over a Beleg uploaded by hand: refused (remove it first); over one from Gmail: replaced and its copy removed', async () => {
+    const hand = setup({ line: listedLine({ receipt_path: `${LINE_ID}/Beleg.pdf`, receipt_name: 'Beleg.pdf' }) })
+    await assert.rejects(attachGmailCandidate(hand.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: hand.storage }),
+      (e: unknown) => e instanceof ReceiptError && e.code === 'invalid_status' && e.message === RECEIPT_TEXT.handReceipt)
+    assert.deepEqual([hand.storage.uploads, hand.steps], [[], []])
+    const fromSearch = listedLine({ receipt_path: `${LINE_ID}/gmail-old-R.pdf`, receipt_name: 'R.pdf' })
+    fromSearch.receipt_search!.chosen = { message_id: 'msg-old', part_id: '1', file_name: 'R.pdf', subject: 's', from: 'f', date: null, sha256: 'x', via: { kind: 'keyword', name: 'x' } }
+    const g = setup({ line: fromSearch })
+    await attachGmailCandidate(g.db.client, LINE_ID, 'msg-c1', '2', deps(), { storage: g.storage })
+    assert.deepEqual(g.storage.removes, [[`${LINE_ID}/gmail-old-R.pdf`]])
   })
   test('the reader failing (or no key): attached all the same, its data not read', async () => {
     const s = setup({ line: listedLine() })
     await attachGmailCandidate(s.db.client, LINE_ID, 'msg-c1', '2', deps({ readPdf: async () => null }), { storage: s.storage })
-    assert.equal((s.updates[0] as { receipt_gmail: { unreadable: boolean } }).receipt_gmail.unreadable, true)
+    assert.equal(s.world.line.receipt_gmail?.unreadable, true)
   })
 })
 
-describe('releaseGmailReceipt — a Beleg by hand in its place, or none', () => {
-  test('the claims go, a receipt from Gmail is forgotten, its list stays', async () => {
-    const s = setup({ line: bankLine(), claims: [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }] })
-    const search: BankLineReceiptSearch = { at: NOW, chosen: { message_id: 'msg-a1', part_id: '1', file_name: 'R.pdf', subject: 's', from: 'f', date: null, sha256: null, via: { kind: 'keyword', name: 'x' } }, check: 'amount', read: null, text: 't', note: 'n', plain_note: null, candidates: [], failed: [] }
-    const update = await releaseGmailReceipt(s.db.client, { id: LINE_ID, receipt_search: search })
-    assert.deepEqual(s.writes, ['claims delete'])
-    assert.equal(update.receipt_gmail, null)
-    assert.deepEqual([update.receipt_search?.chosen, update.receipt_search?.check, update.receipt_search?.text, update.receipt_search?.note], [null, null, null, 'n'])
-    assert.deepEqual(await releaseGmailReceipt(s.db.client, { id: LINE_ID, receipt_search: null }), { receipt_gmail: null })
+describe('setHandReceipt — a Beleg by hand in its place, or none', () => {
+  test('in one step: the claims go, a receipt from Gmail is forgotten with what was said of it, its list stays', async () => {
+    const search: BankLineReceiptSearch = { at: NOW, chosen: { message_id: 'msg-a1', part_id: '1', file_name: 'R.pdf', subject: 's', from: 'f', date: null, sha256: null, via: { kind: 'keyword', name: 'x' } }, check: 'amount', read: null, text: 't', note: 'n', plain_note: 'p', candidates: [], failed: [] }
+    const s = setup({ line: bankLine({ receipt_path: `${LINE_ID}/gmail-x-R.pdf`, receipt_search: search }), claims: [{ key: 'gmail:msg-a1:1', bank_line_id: LINE_ID, label: '' }] })
+    assert.deepEqual(await setHandReceipt(s.db.client, s.world.line, { path: `${LINE_ID}/Beleg.pdf`, name: 'Beleg.pdf' }), { status: 'ok' })
+    const line = s.world.line
+    assert.deepEqual([line.receipt_path, line.receipt_gmail, s.world.claims], [`${LINE_ID}/Beleg.pdf`, null, []])
+    assert.deepEqual([line.receipt_search?.chosen, line.receipt_search?.check, line.receipt_search?.text, line.receipt_search?.note, line.receipt_search?.plain_note], [null, null, null, null, null])
+    // refused while the line changed (booked, an attempt open, its receipt another)
+    const late = setup({ line: bankLine({ status: 'booked' }) })
+    assert.deepEqual(await setHandReceipt(late.db.client, late.world.line, null), { status: 'changed' })
   })
 })
 
@@ -346,6 +414,42 @@ describe('lineRow — the row built from what the line keeps', () => {
     assert.deepEqual([row.gmail_message_id, row.receipt_check, row.extracted_invoice_date, row.status], ['msg-c1', 'owner', '2026-07-14', 'ready'])
     assert.ok((row.match_note ?? '').includes(gmailAttachedNote('Rechnung_Juli.pdf')))
   })
+  // Two rules of one sender that fit equally, told apart by the invoice address on the receipt
+  const TIE = [
+    rule({ id: 'r-buero', name: 'Telefon Büro', invoice_address_match: 'Musterweg 1' }),
+    rule({ id: 'r-studio', name: 'Telefon Studio', invoice_address_match: 'Beispielgasse 2' }),
+  ]
+  const tieRow = (line: BankLine) => {
+    const built = lineRow(line, vendorsOf(TIE, null), null)
+    return built.kind === 'expense' ? built.row : (null as never)
+  }
+  const fromList = (text: string | null, ruleIds: string[]) => ({
+    candidate: { message_id: 'msg-c1', part_id: '2', file_name: 'Rechnung.pdf', subject: 'Ihre Rechnung', from: 'rechnung@muster.example', date: null, size: 1, amount: 23.45, currency: null, foreign_total: null, invoice_number: null, why: 'unchecked' as const, found_by: { sender: 'rechnung@muster.example', rule_ids: ruleIds } },
+    name: 'Rechnung.pdf', extracted: { amount: 23.45 }, unreadable: false, sha256: 'x', text,
+  })
+  test('a PDF of the list attached: its invoice address decides between rules that tie, as Bookmatic’s „Anhängen“ did', () => {
+    const open = tieRow(bankLine())
+    assert.equal(open.vendor, null)
+    const decided = tieRow(bankLine({ receipt_path: `${LINE_ID}/gmail-x-R.pdf`, receipt_gmail: fromList('Rechnung an Konrad Testmann, Beispielgasse 2, 1020 Wien', ['r-buero', 'r-studio']) }))
+    assert.deepEqual([decided.vendor?.id, decided.rule_pick, decided.gmail_message_id], ['r-studio', 'address', 'msg-c1'])
+    // a scan (no text): nothing decided by it
+    assert.equal(tieRow(bankLine({ receipt_path: `${LINE_ID}/gmail-x-R.pdf`, receipt_gmail: fromList(null, ['r-buero', 'r-studio']) })).vendor, null)
+  })
+  test('the rule the owner picks comes after the receipt: a receipt the picked rule’s sender did not send drops out, and is not attached', () => {
+    // the two rules with senders of their own (one sender's receipt counts for every rule it sends for)
+    const OWN_SENDERS = [TIE[0], { ...TIE[1], email_sender: 'office@beispiel.example' }]
+    const rowOwn = (line: BankLine) => {
+      const built = lineRow(line, vendorsOf(OWN_SENDERS, null), null)
+      return built.kind === 'expense' ? built.row : (null as never)
+    }
+    const line = bankLine({ receipt_path: `${LINE_ID}/gmail-x-R.pdf`, receipt_gmail: fromList(null, ['r-buero']), review: { rule_id: 'r-studio' } })
+    const row = rowOwn(line)
+    assert.deepEqual([row.vendor?.id, row.gmail_message_id], ['r-studio', null])
+    assert.equal(receiptKept(line, row), false)
+    // picked the rule whose sender sent it: kept
+    const own = bankLine({ ...line, review: { rule_id: 'r-buero' } })
+    assert.equal(receiptKept(own, rowOwn(own)), true)
+  })
   test('a Beleg uploaded by hand: the rule’s row ready, as in 9a', () => {
     const row = rowOf(bankLine({ receipt_path: `${LINE_ID}/Beleg.pdf`, receipt_name: 'Beleg.pdf' }))
     assert.deepEqual([row.status, row.gmail_message_id], ['ready', null])
@@ -377,7 +481,14 @@ describe('wiring: the receipt routes', () => {
       assert.match(src, /const refusal = gmailReadRefusal\(s\)\n\s+if \(refusal\) return/, rel)
     }
     const search = route('route.ts')
-    assert.match(search, /dryRun: body\.dryRun === true, auto: body\.auto === true, expensesFrom: s\.expenses_from \?\? null, startedAt/)
+    assert.match(search, /searchDeps\(s, supabase, \{ dryRun \}\), \{\n\s+dryRun, auto: body\.auto === true, expensesFrom: s\.expenses_from \?\? null, accountGate: receiptAccountGate\(s\), startedAt,/)
+    // A dry run writes nothing: no Google error recorded (its token is not written back either)
+    assert.match(search, /if \(gmailError && !dryRun\) await recordGmailError\(gmailError, supabase, s\.id\)/)
+    // „Anhängen“ checks the account as the search does, within its deadline
+    assert.match(route('attach/route.ts'), /const signal = AbortSignal\.timeout\(ATTACH_DEADLINE_MS\)\n\s+return NextResponse\.json\(await attachGmailCandidate\(supabase, id, messageId, partId as string \| null, attachDeps\(s, supabase, signal\), \{ accountGate: receiptAccountGate\(s\) \}\)\)/)
+    // An e-mail that is only a PDF: its part '' kept
+    assert.match(route('attach/route.ts'), /\/\^\[\\w\.-\]\{0,40\}\$\//)
+    assert.match(route('preview/route.ts'), /const partId = req\.nextUrl\.searchParams\.get\('part_id'\)\n/)
     // Only what the line's list names is shown or attached
     assert.match(route('preview/route.ts'), /const c = \(search\?\.candidates \?\? \[\]\)\.find\(/)
   })

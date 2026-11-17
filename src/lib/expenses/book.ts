@@ -61,6 +61,7 @@ export const LINE_TEXT = {
   split: 'Eine Aufteilung braucht mindestens zwei Zeilen',
   changed: 'Die Zeile hat sich seit der Anzeige geändert — Seite neu laden, prüfen, dann buchen',
   unconfirmed: 'Bookamat hat die Buchung noch nicht bestätigt — in zwei Minuten erneut buchen: Mado sieht dann zuerst in Bookamat nach',
+  receiptDropped: 'Der Beleg aus Gmail gehört nach der gewählten Regel nicht zu dieser Zeile — nicht angehängt',
   noTime: 'Keine Zeit mehr in diesem Durchgang — nichts gesendet, erneut buchen',
   inProgress: 'Diese Zeile wird gerade gebucht, oder sie ist nicht mehr offen',
   madoBooking: (title: string, id: number) => `In Bookamat schon für einen Beleg aus Mado gebucht („${title}“, #${id}) — dort erfasst, hier nicht buchen`,
@@ -431,10 +432,17 @@ async function attachTo(
 // „Beleg anhängen“: a booked line's Beleg that was not attached when it was booked
 export async function attachLineReceipt(supabase: SupabaseClient, settings: BookamatSettings, lineId: string, loadReceipt: LoadReceipt): Promise<{ attached: true }> {
   refuseOutsideProduction()
-  const { data: line, error: lineErr } = await supabase.from('bank_lines').select('id, status, receipt_path, receipt_name').eq('id', lineId).maybeSingle()
+  const { data: line, error: lineErr } = await supabase.from('bank_lines').select(LINE_COLUMNS).eq('id', lineId).maybeSingle()
   if (lineErr) throw new BookamatError('database', lineErr.message)
-  const l = line as Pick<BankLine, 'id' | 'status' | 'receipt_path' | 'receipt_name'> | null
+  const l = line as StoredLine | null
   if (!l || l.status !== 'booked' || !l.receipt_path) throw new BookamatError('not_found', 'Diese Zeile hat keine Buchung mit Beleg zum Anhängen', 404)
+  // A receipt from Gmail the row dropped (another rule picked) is not this booking's (PR 9b)
+  if (l.receipt_search?.chosen || l.receipt_gmail) {
+    const { data: ruleData, error: ruleErr } = await supabase.from('booking_rules').select('*').order('name').order('id')
+    if (ruleErr) throw new BookamatError('database', ruleErr.message)
+    const built = lineRow(l, vendorsOf((ruleData ?? []) as BookingRule[], null), null)
+    if (!receiptKept(l, built.kind === 'expense' ? built.row : null)) throw new BookamatError('held', LINE_TEXT.receiptDropped, 409)
+  }
   const { data: rows, error: rowErr } = await supabase.from('bookamat_bookings').select('year, booking_id, booked_on, pdf_attached_at').eq('bank_line_id', lineId)
   if (rowErr) throw new BookamatError('database', rowErr.message)
   const row = (rows ?? [])[0] as { year: number; booking_id: string; booked_on: string | null; pdf_attached_at: string | null } | undefined

@@ -16,7 +16,7 @@
  * Server only. Tests pass their own searches, pdf-parse and reader (`deps`): no network.
  */
 
-import { extractText, getDocumentProxy } from 'unpdf'
+import { extractText } from 'unpdf'
 import { parseISO } from 'date-fns'
 import type { EasybankTransaction, Vendor } from './types'
 import { gmailSearches, type GmailCallOptions, type GmailMessage, type KeywordSearch, type SenderSearch } from './gmail'
@@ -59,16 +59,20 @@ export type GmailReceiptDeps = {
   readPdf: (base64: string, opts: AiCallOptions) => Promise<PdfInvoiceData>
 }
 
-// A PDF's text layer and its pages (unpdf, PDF.js's serverless build; Bookmatic used pdf-parse)
+// A PDF's text layer and its pages (unpdf, PDF.js's serverless build; Bookmatic used pdf-parse).
+// unpdf opens and destroys the document. PDF.js gives a no-break space between thousands as a
+// plain one, which pdf-parse kept („1 234,56“), and lib/expenses/money.ts reads only the no-break
+// space as a thousands separator: a space between a digit and a group of three digits is one
+// again. It only ranks and gates the reads (debitInText); a read proves.
+export const keepThousands = (text: string): string => text.replace(/(\d) (?=\d{3}(?!\d))/g, '$1\u00a0')
 export async function pdfTextOf(base64: string): Promise<PdfText> {
-  const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(base64, 'base64')))
-  const { totalPages, text } = await extractText(pdf, { mergePages: true })
-  return { text: text ?? '', pages: totalPages ?? null }
+  const { totalPages, text } = await extractText(new Uint8Array(Buffer.from(base64, 'base64')), { mergePages: true })
+  return { text: keepThousands(text ?? ''), pages: totalPages ?? null }
 }
 
 // What a line's search reads with on Mado's Google connection: the Gmail API, the owner's UID
-// for the reader's prompt; `readPdf` null without ANTHROPIC_API_KEY (nothing is read, nothing
-// proven by a read)
+// for the reader's prompt (without ANTHROPIC_API_KEY the route's reader fails every read as
+// „nicht lesbar“: lib/expenses/receipt-deps.ts)
 export function gmailReceiptDeps(gmail: Parameters<typeof gmailSearches>[0], ownVatin: string): GmailReceiptDeps {
   const searches = gmailSearches(gmail)
   return {
