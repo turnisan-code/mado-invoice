@@ -6,6 +6,8 @@ import { calcTotals, roundCents } from '@/lib/utils/document'
 import { isBookamatConfigured } from '@/lib/public-settings'
 import StatementPage from '@/components/bank/StatementPage'
 import { expenseOwnerOf } from '@/lib/expenses/owner'
+import { GMAIL_READONLY_SCOPE } from '@/lib/google/reauth'
+import { pdfReaderConfigured } from '@/lib/expenses/reader-config'
 import type { OpenInvoice } from '@/lib/bank/match'
 
 const INVOICE_COLS = 'id, number, date, due_date, tax_treatment, discount_type, discount_value, skonto_percent, skonto_days, reminder_level, reminder_log(level), clients(name, company), document_items(line_type, sort_order, quantity, unit_price, vat_rate, discount_type, discount_value), payments(date, amount, kind, import_ref)'
@@ -24,7 +26,7 @@ export default async function StatementRoute() {
     // one is not among them: its client may pay it under the reissued invoice's amount.
     supabase.from('documents').select('id, number').eq('type', 'invoice').eq('status', 'paid').not('number', 'is', null).order('date', { ascending: false }).limit(1000),
     supabase.from('payments').select('import_ref').not('import_ref', 'is', null),
-    supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id, quote_prefix, credit_note_prefix, owner_name, uid_number, iban, own_ibans').single(),
+    supabase.from('settings').select('bookamat_username, bookamat_api_key, bookamat_bank_account_id, bookamat_cost_account_id, quote_prefix, credit_note_prefix, owner_name, uid_number, iban, own_ibans, gmail_refresh_token, gmail_scopes, expenses_from').single(),
     // Credits booked in Bookamat from this page (or being booked): no invoice payment any more
     supabase.from('bank_lines').select('line_key').gt('amount', 0).or('status.eq.booked,bookamat_pending.not.is.null').limit(5000),
   ])
@@ -64,6 +66,13 @@ export default async function StatementRoute() {
   const importedRefs = [...new Set((refs ?? []).map(r => (r.import_ref as string).replace(/:(?:skonto|fee|bankfees)$/, '')))]
   const lineBookedRefs = ((lineBooked ?? []) as { line_key: string }[]).map(l => l.line_key)
   const bookamatConfigured = !!settings && isBookamatConfigured(settings)
+  // Receipts from Gmail (PR 9b): whether Mado may read Gmail, whether Claude can read what it
+  // finds, and from when it searches by itself — booleans and a date; the token and the key stay here
+  const gmail = {
+    read: !!settings?.gmail_refresh_token && (settings.gmail_scopes ?? '').split(/\s+/).includes(GMAIL_READONLY_SCOPE),
+    reader: pdfReaderConfigured(),
+    switchFrom: (settings?.expenses_from as string | null | undefined) ?? null,
+  }
 
   return (
     <div className="p-4 sm:p-8 max-w-5xl mx-auto space-y-6">
@@ -82,6 +91,7 @@ export default async function StatementRoute() {
         bookamatConfigured={bookamatConfigured}
         owner={expenseOwnerOf(settings ?? {})}
         lineBookedRefs={lineBookedRefs}
+        gmail={gmail}
         otherPrefixes={[settings?.quote_prefix ?? 'A', settings?.credit_note_prefix ?? 'G']}
         closedInvoices={[
           ...((closedDocs ?? []) as { id: string; number: string }[]),

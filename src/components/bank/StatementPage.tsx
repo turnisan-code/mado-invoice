@@ -28,11 +28,13 @@ interface Props {
   owner: ExpenseOwner
   // Credits booked in Bookamat from this page, or being booked: no invoice payment any more
   lineBookedRefs: string[]
+  // Receipts from Gmail (PR 9b): what the debits' searches may do
+  gmail?: { read: boolean; reader: boolean; switchFrom: string | null }
 }
 
 type Tab = 'income' | 'expenses'
 
-export default function StatementPage({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices, owner, lineBookedRefs }: Props) {
+export default function StatementPage({ invoices, importedRefs, bookamatConfigured, otherPrefixes, closedInvoices, owner, lineBookedRefs, gmail }: Props) {
   const { t, lang } = useT()
   const [statement, setStatement] = useState<LoadedStatement | null>(null)
   // A new file or none: a new epoch, never one an earlier answer had (a column mapping keeps it)
@@ -204,7 +206,7 @@ export default function StatementPage({ invoices, importedRefs, bookamatConfigur
           {state() ?? (view && (
             <>
               {banner}
-              <ExpenseLines kind="expense" lines={debits} accounts={view.accounts} accountsErrors={view.accountsErrors} owner={owner} onChanged={reload} />
+              <ExpenseLines kind="expense" lines={debits} accounts={view.accounts} accountsErrors={view.accountsErrors} owner={owner} onChanged={reload} gmail={gmail} />
             </>
           ))}
         </section>

@@ -1,6 +1,8 @@
 import type { DictKey, TFn } from '@/lib/i18n'
 
 export const GOOGLE_REAUTH_CODE = 'google_reauth'
+// The permission to read Gmail (PR 9b, decision D4)
+export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 export const GOOGLE_REAUTH_MESSAGE = 'Google connection expired — reconnect in Settings'
 export const GOOGLE_SCOPE_MESSAGE = 'Google connection is missing the Drive permission — reconnect in Settings'
 export const GOOGLE_NOT_CONNECTED_MESSAGE = 'Google not connected — connect it in Settings'

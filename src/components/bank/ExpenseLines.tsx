@@ -6,9 +6,12 @@
 // split lines, a Beleg —, saved as it changes. The booking each line would make is built and
 // checked here with the server's own engine (lib/expenses), and its fingerprint goes with the
 // line when it is booked: the server books it only as shown. Only „Bereit“ lines are ticked on
-// their own; the server checks every line again.
+// their own; the server checks every line again. A debit's receipt is searched in Gmail (PR 9b):
+// on „In Gmail suchen“, and by itself for the lines from the switch-over date on (decision D11);
+// what the search found and did not attach is listed with „Vorschau“ and „Anhängen“.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Paperclip, Plus, Trash2, X } from 'lucide-react'
+import Link from 'next/link'
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Eye, Loader2, Mail, Paperclip, Plus, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +23,8 @@ import { n, type DictKey, type TFn } from '@/lib/i18n'
 import { apiErrorMessage } from '@/lib/api-errors'
 import { formatDate, formatMoney } from '@/lib/utils/document'
 import type { BankLineReview, BankLineSplit } from '@/types'
+import type { GmailCandidate } from '@/lib/expenses/types'
+import { bankInvoice, gmailAttachable, gmailCandidateLine, gmailPreviewable } from '@/lib/expenses/receipt-match'
 import type { LineView } from '@/lib/expenses/statement'
 import type { LineResult } from '@/lib/expenses/book'
 import type { BookamatAccount, BookamatAccounts, MatchedIncomeTransaction, MatchedTransaction } from '@/lib/expenses/types'
@@ -45,7 +50,13 @@ interface Props {
   hints?: Record<string, string>
   // Reads the lines again; resolves once they are there
   onChanged: () => Promise<void>
+  // Debits only (PR 9b): whether Mado may read Gmail (gmail.readonly granted), whether Claude can
+  // read what it finds (ANTHROPIC_API_KEY), and the switch-over date from which it searches by itself
+  gmail?: { read: boolean; reader: boolean; switchFrom: string | null }
 }
+
+// Searches running at a time (each one line's request, up to 60 s)
+const SEARCHES_AT_ONCE = 2
 
 type Row = MatchedTransaction | MatchedIncomeTransaction
 type Pill = 'ready' | 'receipt' | 'choice' | 'review' | 'unknown' | 'duplicate' | 'possible' | 'booked' | 'skipped' | 'pending' | 'blocked' | 'failed'
@@ -152,7 +163,7 @@ function useAutosave(save: (id: string, review: BankLineReview) => Promise<boole
   return { queue, flush }
 }
 
-export default function ExpenseLines({ kind, lines, accounts, accountsErrors, owner, hints = {}, onChanged }: Props) {
+export default function ExpenseLines({ kind, lines, accounts, accountsErrors, owner, hints = {}, onChanged, gmail }: Props) {
   const { t, lang } = useT()
   const [reviews, setReviews] = useState<Record<string, BankLineReview>>({})
   const [selection, setSelection] = useState<Record<string, boolean>>({})
@@ -162,6 +173,10 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
   const [saving, setSaving] = useState<Record<string, 'saving' | 'saved' | 'failed'>>({})
   const [forget, setForget] = useState<LineView | null>(null)
   const [forceDiscard, setForceDiscard] = useState<LineView | null>(null)
+  // The lines whose Gmail search is running; Gmail found unreadable (a grant without gmail.readonly)
+  const [searching, setSearching] = useState<Record<string, boolean>>({})
+  const [gmailBlocked, setGmailBlocked] = useState(false)
+  const autoTried = useRef(new Set<string>())
   const plural = (count: number, one: DictKey, other: DictKey) => n(count, t(one, { count }), t(other, { count }))
   const money = (amount: number) => formatMoney(amount, 'EUR', lang)
 
@@ -377,6 +392,67 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     setBusy(false)
   }
 
+  // ─── Receipts from Gmail (PR 9b) ───────────────────────────────────────────
+
+  // One request per line, two at a time; the lines read again once all are done. `auto`: the
+  // search after an upload (the server takes only lines from the switch-over date on). A grant
+  // without gmail.readonly stops the searches and says so.
+  const searchGmail = useCallback(async (ids: readonly string[], auto: boolean) => {
+    const queue = [...ids]
+    let found = false
+    const worker = async () => {
+      for (let id = queue.shift(); id; id = queue.shift()) {
+        setSearching(s => ({ ...s, [id!]: true }))
+        const res = await fetch(`/api/bank-lines/${id}/receipts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ auto }) }).catch(() => null)
+        setSearching(s => ({ ...s, [id!]: false }))
+        const body = res ? await res.json().catch(() => ({})) : {}
+        if (res?.ok) {
+          if (body.status === 'searched') found = true
+          else if (!auto && body.reason) toast.info(body.reason)
+        } else if (body?.code === 'google_reauth') {
+          setGmailBlocked(true)
+          queue.length = 0
+        } else if (!auto) {
+          toast.error(t('expenses.gmailSearchFailed', { error: res ? apiErrorMessage(t, body) : t('messages.network') }))
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(SEARCHES_AT_ONCE, ids.length) }, worker))
+    if (found) await onChanged()
+  }, [onChanged, t])
+
+  // By itself, once per line and visit: the open debits from the switch-over date on that have no
+  // receipt and were never searched (decision D11)
+  useEffect(() => {
+    if (kind !== 'expense' || !gmail?.read || !gmail.switchFrom || gmailBlocked) return
+    const due = lines.filter(v => v.kind === 'expense' && v.line.status === 'open' && !v.line.bookamat_pending && !v.line.receipt_path
+      && !v.line.receipt_search && !v.madoDocument && String(v.line.booked_on) >= gmail.switchFrom! && !autoTried.current.has(v.line.id))
+    if (!due.length) return
+    for (const v of due) autoTried.current.add(v.line.id)
+    void searchGmail(due.map(v => v.line.id), true)
+  }, [kind, lines, gmail, gmailBlocked, searchGmail])
+
+  async function attachCandidate(p: Prepared, c: GmailCandidate) {
+    setBusy(true)
+    if (await saved([p.v.line.id])) {
+      const res = await fetch(`/api/bank-lines/${p.v.line.id}/receipts/attach`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message_id: c.message_id, part_id: c.part_id }),
+      }).catch(() => null)
+      if (res?.ok) await onChanged()
+      else {
+        const body = res ? await res.json().catch(() => ({})) : {}
+        if (body?.code === 'google_reauth') setGmailBlocked(true)
+        toast.error(t('expenses.gmailAttachFailed', { error: res ? apiErrorMessage(t, body) : t('messages.network') }))
+      }
+    }
+    setBusy(false)
+  }
+
+  // Whether a line can be searched: an open debit, no attempt open, not a Mado document's money,
+  // and no Beleg the owner attached (one the search attached is searched again)
+  const searchable = (p: Prepared): boolean => kind === 'expense' && !!gmail?.read && !gmailBlocked && p.v.line.status === 'open'
+    && !p.pendingLine && !p.v.madoDocument && !p.v.line.receipt_gmail && (!p.v.line.receipt_path || !!p.v.line.receipt_search?.chosen)
+
   async function attachLater(v: LineView) {
     setBusy(true)
     if (await post(`/api/bank-lines/${v.line.id}/attach`)) {
@@ -537,6 +613,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
           {v.line.receipt_path ? (
             <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800">
               <Paperclip size={12} /> {v.line.receipt_name ?? t('expenses.receipt')}
+              {(v.line.receipt_search?.chosen || v.line.receipt_gmail) && <span className="text-[10px] text-neutral-500 dark:text-neutral-400">· {t('expenses.gmailTag')}</span>}
               {!locked && <button type="button" aria-label={t('expenses.receiptRemove')} onClick={() => void removeReceipt(p)} className="ml-1 text-neutral-500 hover:text-red-600"><X size={12} /></button>}
             </span>
           ) : !locked && (
@@ -544,6 +621,12 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
               <Paperclip size={12} /> {t('expenses.receiptUpload')}
               <input type="file" accept=".pdf,.jpg,.jpeg,.png,.gif,application/pdf,image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (f) void uploadReceipt(p, f); e.target.value = '' }} />
             </label>
+          )}
+          {searchable(p) && (
+            <Button type="button" variant="outline" size="sm" disabled={busy || !!searching[v.line.id]} onClick={() => void searchGmail([v.line.id], false)}>
+              {searching[v.line.id] ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+              {searching[v.line.id] ? t('expenses.gmailSearching') : t(v.line.receipt_search ? 'expenses.gmailSearchAgain' : 'expenses.gmailSearch')}
+            </Button>
           )}
           {v.line.status === 'booked' && v.line.receipt_path && v.booking && !v.booking.pdf_attached_at && (
             <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void attachLater(v)}>{t('expenses.attach')}</Button>
@@ -555,6 +638,38 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
           {p.pendingLine && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void discardAttempt(v)}>{t('expenses.discard')}</Button>}
           {saving[v.line.id] && <span className="text-[11px] text-neutral-400 ml-auto">{t(`expenses.save.${saving[v.line.id]}`)}</span>}
         </div>
+        {candidates(p, locked)}
+      </div>
+    )
+  }
+
+  // What the line's Gmail search found and did not attach, each with „Vorschau“ and „Anhängen“
+  function candidates(p: Prepared, locked: boolean) {
+    const list = kind === 'expense' ? (p.row as MatchedTransaction).gmail_candidates ?? [] : []
+    if (!list.length) return null
+    const tx = p.row.transaction
+    const bankNumber = bankInvoice(tx)?.number ?? null
+    return (
+      <div className="space-y-1">
+        <p className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{t('expenses.gmailFound')}</p>
+        <ul className="space-y-1">
+          {list.map(c => (
+            <li key={`${c.message_id}:${c.part_id ?? ''}`} className="flex flex-wrap items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+              <span className="min-w-0 break-words">{gmailCandidateLine(c, tx, bankNumber)}</span>
+              {gmailPreviewable(c) && (
+                <a href={`/api/bank-lines/${p.v.line.id}/receipts/preview?message_id=${encodeURIComponent(c.message_id)}&part_id=${encodeURIComponent(c.part_id ?? '')}`}
+                  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100">
+                  <Eye size={12} /> {t('expenses.gmailPreview')}
+                </a>
+              )}
+              {gmailAttachable(c) && !locked && !gmailBlocked && (
+                <button type="button" disabled={busy} onClick={() => void attachCandidate(p, c)} className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-50">
+                  <Paperclip size={12} /> {t('expenses.gmailAttach')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
       </div>
     )
   }
@@ -634,8 +749,23 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
     )
   }
 
+  // Receipts from Gmail (PR 9b): why none can be searched or read, and when they are by themselves
+  const gmailNote = kind === 'expense' && gmail && (
+    !gmail.read || gmailBlocked ? (
+      <p className="mx-4 sm:mx-6 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        {t('expenses.gmailReconnect')} <Link href="/settings" className="underline underline-offset-2">{t('expenses.gmailReconnectLink')}</Link>
+      </p>
+    ) : (
+      <>
+        {!gmail.reader && <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 px-4 sm:px-6"><AlertTriangle size={13} /> {t('expenses.gmailReaderMissing')}</p>}
+        {!gmail.switchFrom && <p className="text-xs text-neutral-500 dark:text-neutral-400 px-4 sm:px-6">{t('expenses.gmailAutoHint')}</p>}
+      </>
+    )
+  )
+
   return (
     <div className="space-y-3">
+      {gmailNote}
       {Object.entries(accountsErrors).map(([year, error]) => (
         <p key={year} className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 px-4 sm:px-6"><AlertTriangle size={13} /> {t('expenses.accountsMissing', { year, error })}</p>
       ))}
@@ -675,6 +805,7 @@ export default function ExpenseLines({ kind, lines, accounts, accountsErrors, ow
                       {formatDate(v.line.booked_on, lang)} · {tx.counterparty || '—'}{v.line.fee ? ` · ${t('expenses.fee', { amount: money(Number(v.line.fee)) })}` : ''}
                     </span>
                     {v.line.receipt_path && <Paperclip size={12} className="text-neutral-400" aria-label={t('expenses.receipt')} />}
+                    {searching[v.line.id] && <span className="inline-flex items-center gap-1 text-xs text-neutral-500"><Loader2 size={12} className="animate-spin" /> {t('expenses.gmailSearching')}</span>}
                   </div>
                   {notes(p).map((note, i) => (
                     <p key={i} className={`text-[11px] leading-tight mt-1 ${note.tone === 'error' ? 'text-red-600 dark:text-red-400' : note.tone === 'warn' ? 'text-amber-700 dark:text-amber-400' : 'text-neutral-500 dark:text-neutral-400'}`}>{note.text}</p>

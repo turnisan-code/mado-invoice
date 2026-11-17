@@ -159,9 +159,7 @@ export type PdfReaderMessages = {
   parse(body: ReaderRequest, options?: Anthropic.RequestOptions): PromiseLike<ReaderAnswer>
 }
 
-// Whether Mado can read PDFs at all: without the key the search lists what it finds and proves
-// nothing
-export const pdfReaderConfigured = (): boolean => !!process.env.ANTHROPIC_API_KEY?.trim()
+export { pdfReaderConfigured } from './reader-config'
 
 let client: Anthropic | null = null
 const sdkMessages = (): PdfReaderMessages => ({

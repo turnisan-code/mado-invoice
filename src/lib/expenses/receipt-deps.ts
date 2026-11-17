@@ -6,14 +6,14 @@ import type { Settings } from '@/types'
 import {
   getAuthorizedGoogle, googleFailure, isGoogleScopeError, recordGoogleError,
 } from '@/lib/google/client'
-import { GOOGLE_GMAIL_READ_MESSAGE, GOOGLE_NOT_CONNECTED_MESSAGE, GOOGLE_REAUTH_CODE } from '@/lib/google/reauth'
+import { GMAIL_READONLY_SCOPE, GOOGLE_GMAIL_READ_MESSAGE, GOOGLE_NOT_CONNECTED_MESSAGE, GOOGLE_REAUTH_CODE } from '@/lib/google/reauth'
 import { expenseOwnerOf, setExpenseOwner } from './owner'
 import { gmailApiOf, gmailSearches } from './gmail'
 import { gmailReceiptDeps, pdfTextOf, type GmailReceiptDeps } from './gmail-receipt'
 import { pdfReaderConfigured, readPdfInvoice, ReceiptUnreadableError } from './pdf-reader'
 import type { AttachDeps } from './receipts'
 
-export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+export { GMAIL_READONLY_SCOPE }
 export const RECEIPT_SETTINGS_COLUMNS = 'id, gmail_email, gmail_access_token, gmail_refresh_token, gmail_token_expiry, gmail_scopes, uid_number, owner_name, iban, own_ibans, expenses_from'
 export type ReceiptSettings = Pick<Settings, 'id' | 'gmail_email' | 'gmail_access_token' | 'gmail_refresh_token' | 'gmail_token_expiry' | 'gmail_scopes' | 'uid_number' | 'owner_name' | 'iban'>
   & { own_ibans?: string[] | null; expenses_from?: string | null }
