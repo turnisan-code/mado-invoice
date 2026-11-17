@@ -11,8 +11,11 @@ export async function GET() {
   const url = getOAuthClient().generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
+    // gmail.readonly: the „Kontoauszug“ page reads receipts from Gmail (PR 9b, decision D4); a
+    // grant made before asks for it again with „Google neu verbinden“
     scope: [
       'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/drive',
     ],
