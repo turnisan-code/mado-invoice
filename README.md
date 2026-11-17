@@ -36,7 +36,8 @@ All keys are listed in `.env.example`; on Vercel set the same keys in the projec
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key. Shipped to the browser; data access is enforced by RLS (`is_app_user()`). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server only. Bypasses RLS for the client portal, the two crons and the Claude connector (its sign-in at consent, OAuth codes and tokens, connections and request log; Claude's own queries run as the owner under RLS). |
 | `CRON_SECRET` | Bearer token Vercel Cron sends; both cron routes refuse to run without it. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client for Gmail sending and the Drive archive. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client for Gmail (sending, and reading the Belege of the statement's debits) and the Drive archive. |
+| `ANTHROPIC_API_KEY` | Server only. Claude Opus 5.5 reads the receipt PDFs a Gmail search finds (Kontoauszug → Ausgaben); the PDFs go to Anthropic's API. Without it receipts are found and listed but not read, and the page says so. |
 | `NEXT_PUBLIC_APP_URL` | Public origin, no trailing slash (`http://localhost:3000` locally). Builds the OAuth redirect, links in emails and the Claude connector's URLs. |
 | `MCP_SECRET` | Server only. Secret of the Claude connector, at least 32 random bytes in base64 (`openssl rand -base64 48`). Changing it disconnects Claude. |
 
@@ -49,7 +50,8 @@ Run SQL in the Supabase SQL editor (the storage policies need the `postgres` rol
 - **New, empty project:** run `supabase/schema.sql` once. It is a snapshot of the current schema:
   tables, RPCs (`issue_document`, `create_credit_note`, `convert_quote_to_invoice`, …), RLS pinned
   to `app_users`, the public `logos` bucket, the private `documents` bucket for frozen PDFs and
-  the private `receipts` bucket for the Belege uploaded on the Kontoauszug page.
+  the private `receipts` bucket for the Belege of statement lines (uploaded on the Kontoauszug page,
+  or copied from Gmail).
   The settings table holds exactly one row (`settings_singleton`).
 - **Existing database:** run the files in `supabase/migrations/` that are not applied yet, in
   filename order (they are dated, e.g. `20261030_lifecycle.sql` before `20261031_editor.sql`).
@@ -84,8 +86,11 @@ Turn off public sign-ups (Authentication → Providers → Email); only the owne
 
 Create an OAuth client (type “Web application”) in Google Cloud and register
 `${NEXT_PUBLIC_APP_URL}/api/gmail/callback` as an authorized redirect URI. The app asks for
-`gmail.send`, `userinfo.email` and `drive`. Connect the account and choose the Drive folder in
-Settings → Google.
+`gmail.send`, `gmail.readonly`, `userinfo.email` and `drive`. Connect the account and choose the
+Drive folder in Settings → Google. Gmail read access finds the Belege of the statement's debits
+(see [Kontoauszug](#kontoauszug-payments-and-expenses)); a connection made before it was asked for
+asks once more: „neu verbinden“ under Einstellungen → Integrationen keeps the Drive folder,
+„Trennen“ forgets it.
 
 The PDF of each issued document goes into that folder under `<year>/<type>`: the year of the
 document date, then `Invoices`, `Credit notes` or `Quotes` (`Rechnungen`, `Gutschriften`,
@@ -344,6 +349,34 @@ one row per line, keyed by the line as the bank wrote it), so a line not booked 
 there tomorrow without the file, and what the owner sets on a line is saved as it changes. Only
 the owner books, from this page: there is no daily job for expenses, and Claude's connector has
 no tool for them.
+
+**Belege aus Gmail.** A debit's receipt is searched in Gmail on Mado's Google connection, as
+Bookmatic's Job 1 searched it (`src/lib/expenses/gmail*.ts`, `receipt-match.ts`):
+
+- **Where:** the Buchungsregel's sender, else a payment service's (Paddle, Klarna, Stripe, PayPal),
+  else the vendor's name; from ten days before the payment to three days after the bank date.
+- **When:** on „In Gmail suchen“ for a line, and by itself after a statement upload for the open
+  debits from the switch-over date on, once per line (a line whose search only failed is tried
+  again).
+- **Read:** Claude Opus 5.5 reads at most four of the PDFs found (total, amount due, invoice number
+  and date, the seller's UID, what the document is). The PDFs go to Anthropic's API.
+- **Attached only when proven:** its total is the debit (gross, net of SPESEN, the amount due, or
+  the foreign total on the card stamp), it carries no other line's invoice number, and it is no
+  credit note, order confirmation or reminder. One attached without that proof shows „Beleg
+  prüfen“ and is not ticked. What was found and not attached is listed under the line, with
+  „Vorschau“ and „Anhängen“.
+- **One line per receipt:** `receipt_claims` holds each receipt by its Gmail part, its bytes and its
+  sender's invoice number. A copy goes into the `receipts` bucket, and the booking attaches that
+  copy. A line's receipt and its claims change in one step (`set_line_receipt`), only while the
+  line is open and as it was read; a booking claims its line only with the receipt it was
+  prepared with.
+- **Never searched:** own transfers, card settlements, credits, a line that names a Mado document,
+  lines booked, skipped or with a booking attempt open, lines on an account Mado does not book or
+  in another currency, and a line with a Beleg uploaded by hand.
+- **„Probelauf“:** `POST /api/bank-lines/[id]/receipts` with `{ "dryRun": true }` searches and reads
+  as a search does and keeps nothing.
+- **Limits:** a line's search has the route's 60 s (later PDFs are left unread, and the line says
+  so); PDFs over 10 MB or with more than 10 pages are not read.
 
 Mado books a statement line only when:
 
