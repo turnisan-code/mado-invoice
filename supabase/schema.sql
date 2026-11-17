@@ -493,12 +493,25 @@ create table bank_lines (
   review            jsonb not null default '{}'::jsonb,
   receipt_path      text,
   receipt_name      text,
+  -- 20261118_receipts.sql: the line's last Gmail search, a PDF of its list the owner attached
+  receipt_search    jsonb,
+  receipt_gmail     jsonb,
   bookamat_claim    timestamptz,
   bookamat_pending  jsonb,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
 create index bank_lines_open_idx on bank_lines(booked_on) where status = 'open';
+
+-- Each receipt held by one line only: by its Gmail part, its bytes (sha256) and its sender's
+-- invoice number (20261118_receipts.sql). A line's claims go with its receipt.
+create table receipt_claims (
+  key          text primary key,
+  bank_line_id uuid not null references bank_lines(id) on delete cascade,
+  label        text not null default '',
+  created_at   timestamptz not null default now()
+);
+create index receipt_claims_line_idx on receipt_claims (bank_line_id);
 
 create table bookamat_bookings (
   id              uuid primary key default uuid_generate_v4(),
@@ -1642,6 +1655,7 @@ alter table recurring_schedules enable row level security;
 alter table bookamat_bookings enable row level security;
 alter table bank_lines      enable row level security;
 alter table booking_rules   enable row level security;
+alter table receipt_claims  enable row level security;
 alter table client_rates    enable row level security;
 
 create policy "owner" on settings        for all to authenticated using (is_app_user()) with check (is_app_user());
@@ -1656,6 +1670,7 @@ create policy "owner" on recurring_schedules for all to authenticated using (is_
 create policy "owner" on bookamat_bookings for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on bank_lines      for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on booking_rules   for all to authenticated using (is_app_user()) with check (is_app_user());
+create policy "owner" on receipt_claims  for all to authenticated using (is_app_user()) with check (is_app_user());
 create policy "owner" on client_rates    for all to authenticated using (is_app_user()) with check (is_app_user());
 
 -- ─── Projects, time tracking and billable expenses ───────────────────────────

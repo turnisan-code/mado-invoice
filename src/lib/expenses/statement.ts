@@ -29,7 +29,7 @@ const dayOf = (raw: string | undefined): string | null => {
 }
 
 // The stored row of a line, from its cells; null when they are no transaction
-export function lineRecord(input: LineInput): Omit<BankLine, 'id' | 'review' | 'receipt_path' | 'receipt_name' | 'bookamat_claim' | 'bookamat_pending' | 'status' | 'created_at' | 'updated_at'> | null {
+export function lineRecord(input: LineInput): Omit<BankLine, 'id' | 'review' | 'receipt_path' | 'receipt_name' | 'receipt_search' | 'receipt_gmail' | 'bookamat_claim' | 'bookamat_pending' | 'status' | 'created_at' | 'updated_at'> | null {
   const tx = transactionOfCells(input.cells)
   if (!tx) return null
   return {
@@ -46,7 +46,7 @@ export function lineRecord(input: LineInput): Omit<BankLine, 'id' | 'review' | '
   }
 }
 
-export const LINE_SELECT = 'id, line_key, cells, statement_iban, booked_on, value_on, amount, currency, counterparty, bank_text, fee, status, review, receipt_path, receipt_name, bookamat_claim, bookamat_pending, created_at, updated_at'
+export const LINE_SELECT = 'id, line_key, cells, statement_iban, booked_on, value_on, amount, currency, counterparty, bank_text, fee, status, review, receipt_path, receipt_name, receipt_search, receipt_gmail, bookamat_claim, bookamat_pending, created_at, updated_at'
 
 // Stores the lines it has not seen (a line's review and status stay as they are) and returns
 // every line of these keys, in the order given. Lines whose cells are no transaction are left
@@ -158,8 +158,14 @@ export async function analyseStored(
 
   return {
     lines: built.map(b => {
-      const { cells: _cells, bank_text: _text, ...line } = b.line
+      const { cells: _cells, bank_text: _text, ...stored } = b.line
       void _cells; void _text
+      // The receipt's text and its e-mail's stay on the server (the row has what the page shows)
+      const line = {
+        ...stored,
+        receipt_search: stored.receipt_search ? { ...stored.receipt_search, text: null, chosen: stored.receipt_search.chosen ? { ...stored.receipt_search.chosen, body_text: null } : null } : null,
+        receipt_gmail: stored.receipt_gmail ? { ...stored.receipt_gmail, text: null } : null,
+      }
       const row = dup.rows.get(b.line.id) ?? b.built.row
       // A booking of this payment that Mado recorded on a document: that document's money,
       // whatever the owner said about it

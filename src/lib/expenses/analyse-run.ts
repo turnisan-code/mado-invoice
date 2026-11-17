@@ -1,32 +1,37 @@
 /**
- * One Analyse (P2-11, PR „Job 1 fixes“ § 2.1 E, § 3.2): its deadline, its rows' claims on
- * Gmail receipts, its limiters and its budget of PDF reads.
+ * One receipt search's run (Bookmatic's run of one Analyse, P2-11, PR „Job 1 fixes“ § 2.1 E,
+ * § 3.2, ported for PR 9b): its deadline, the claims on Gmail receipts, its limiters and its
+ * budget of PDF reads.
  *
- * The deadline is the route's maxDuration less 25 s (enrich: 95 s), counted from the route's
- * request — its reads before the rows included —, and the run's signal
- * aborts every Gmail and AI call still running then: the SDK and googleapis send a request
- * that timed out again, so without it one call could outlast the route. Before it:
- * - no Gmail search starts in the last 30 s (enrich: after 65 s);
- * - no PDF read starts in the last 35 s (after 60 s); a read gets at most 20 s and 1 retry
- *   while more than 50 s are left, else none;
- * - the classifier is asked only with 8 s left, for at most 30 s and 1 retry while more
+ * In Mado one statement line is searched per request (src/app/api/bank-lines/[id]/receipts,
+ * maxDuration 60 s); its run holds the line (row 0) and the lines around it, whose invoice
+ * numbers and receipts are not this line's. The deadline is the route's maxDuration less 10 s
+ * (60 s → 50 s: the receipt found is stored after it), counted from the request, and the run's
+ * signal aborts every Gmail and AI call still running then: the SDK and googleapis send a
+ * request that timed out again, so without it one call could outlast the route. Before it:
+ * - no Gmail search starts in the last 30 s (after 20 s);
+ * - no PDF read starts in the last 15 s (after 35 s); a read of Claude Opus 5.5 gets at most
+ *   25 s (and never past 5 s before the deadline), and 1 retry while more than 40 s are left;
+ * - the classifier (PR 9c) is asked only with 8 s left, for at most 30 s and 1 retry while more
  *   than 40 s are left.
- * Six Gmail calls and six PDF reads run at a time, run-wide; at most 150 PDFs are read per
- * Analyse (≈ $1,35). What one row read is the others' too, by the PDF's bytes (sha256).
+ * Bookmatic's enrich route had 120 s for a whole statement, and Haiku read in 20 s.
  *
- * Server only (lib/gmail-receipt.ts, lib/matcher.ts, the enrich route).
+ * Server only (lib/expenses/gmail-receipt.ts, lib/expenses/receipts.ts).
  */
 
 import type { EasybankTransaction } from './types'
 import type { AiCallOptions } from './ai-call'
 import { bankInvoiceKey, makeLimiter, rowLabel, ReceiptClaims, type Limiter, type ReceiptRead } from './receipt-match'
 
-// The run's deadline: the route's maxDuration less this, for the last rows to be sent
-export const RUN_MARGIN_S = 25
+// The run's deadline: the route's maxDuration less this, for the receipt found to be stored
+export const RUN_MARGIN_S = 10
 // No Gmail search starts later than this before the deadline
 export const GMAIL_STOP_MS = 30_000
 // No PDF read starts later than this before the deadline
-export const READ_STOP_MS = 35_000
+export const READ_STOP_MS = 15_000
+// One read's time at most, and what it leaves before the deadline
+export const READ_MAX_MS = 25_000
+export const READ_END_MS = 5_000
 // The classifier is not asked with less than this left
 export const CLASSIFIER_MIN_MS = 8_000
 // PDF reads per Analyse
@@ -110,7 +115,7 @@ export const gmailMayStart = (run: Pick<AnalyseRun, 'deadline' | 'now'>): boolea
 export function readOptions(run: Pick<AnalyseRun, 'deadline' | 'now' | 'signal'>): AiCallOptions | null {
   const left = remaining(run)
   if (left < READ_STOP_MS) return null
-  return { timeoutMs: Math.min(20_000, left - 15_000), maxRetries: left > 50_000 ? 1 : 0, signal: run.signal }
+  return { timeoutMs: Math.min(READ_MAX_MS, left - READ_END_MS), maxRetries: left > 40_000 ? 1 : 0, signal: run.signal }
 }
 
 // The options of the classifier asked now, or null when there is no time left for it

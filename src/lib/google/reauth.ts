@@ -4,12 +4,15 @@ export const GOOGLE_REAUTH_CODE = 'google_reauth'
 export const GOOGLE_REAUTH_MESSAGE = 'Google connection expired — reconnect in Settings'
 export const GOOGLE_SCOPE_MESSAGE = 'Google connection is missing the Drive permission — reconnect in Settings'
 export const GOOGLE_NOT_CONNECTED_MESSAGE = 'Google not connected — connect it in Settings'
+// PR 9b: a grant from before gmail.readonly (or one with its box unticked)
+export const GOOGLE_GMAIL_READ_MESSAGE = 'Google connection cannot read Gmail yet — reconnect in Settings'
 export const GOOGLE_FOLDER_TRASHED_MESSAGE = 'The Drive folder is in the trash'
 
 const WORDED: Record<string, DictKey> = {
   [GOOGLE_REAUTH_MESSAGE]: 'books.google.expired',
   [GOOGLE_SCOPE_MESSAGE]: 'books.google.missingDrive',
   [GOOGLE_NOT_CONNECTED_MESSAGE]: 'books.google.notConnected',
+  [GOOGLE_GMAIL_READ_MESSAGE]: 'books.google.missingGmailRead',
   [GOOGLE_FOLDER_TRASHED_MESSAGE]: 'books.google.folderTrashed',
 }
 

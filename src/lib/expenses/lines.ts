@@ -3,17 +3,18 @@
 // the booking applies — the same assignment of bookings to lines (each booking to one line), over
 // every open line of the store, never a booking Mado recorded on another line.
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { BankBookingKind, BankLine, BookingRule } from '@/types'
+import type { BankBookingKind, BankLine, BankLineReceiptSearch, BookingRule } from '@/types'
 import { BookamatError, bookamatFetch, type BookamatCredentials } from '@/lib/bookamat'
 import { vendorsOf } from './rules'
-import { analyseCredit, analyseExpense, annotateDuplicates, duplicateWindow, type AnalysedLine } from './analyse'
+import { analyseCredit, analyseExpense, annotateDuplicates, duplicateWindow, type AnalysedLine, type StoredGmailFind } from './analyse'
+import { withGmailCandidate } from './gmail-attach'
 import { transactionOfCells } from './csv-parser'
 import { toBookingLite, yearsOf, type BookingLike, type BookingLite } from './duplicates'
 import type { BookamatAccounts, DuplicateInfo, EasybankTransaction, MatchedIncomeTransaction, MatchedTransaction, Vendor } from './types'
 
-export const LINE_COLUMNS = 'id, line_key, cells, booked_on, amount, currency, statement_iban, status, review, receipt_path, receipt_name, bookamat_claim, bookamat_pending'
+export const LINE_COLUMNS = 'id, line_key, cells, booked_on, amount, currency, statement_iban, status, review, receipt_path, receipt_name, receipt_search, receipt_gmail, bookamat_claim, bookamat_pending'
 
-export type StoredLine = Pick<BankLine, 'id' | 'line_key' | 'cells' | 'booked_on' | 'amount' | 'currency' | 'statement_iban' | 'status' | 'review' | 'receipt_path' | 'receipt_name' | 'bookamat_claim' | 'bookamat_pending'>
+export type StoredLine = Pick<BankLine, 'id' | 'line_key' | 'cells' | 'booked_on' | 'amount' | 'currency' | 'statement_iban' | 'status' | 'review' | 'receipt_path' | 'receipt_name' | 'receipt_search' | 'receipt_gmail' | 'bookamat_claim' | 'bookamat_pending'>
 
 export const lineKind = (line: Pick<BankLine, 'amount'>): BankBookingKind => (Number(line.amount) < 0 ? 'expense' : 'bank_income')
 export const engineKind = (kind: BankBookingKind): 'expense' | 'income' => (kind === 'expense' ? 'expense' : 'income')
@@ -28,16 +29,40 @@ export type LineRow = { kind: 'expense'; row: MatchedTransaction } | { kind: 'ba
 
 // A line as the engine books it: the Analyse (lib/expenses/analyse.ts) with what the owner set
 // on it — the rule picked, the fields, the split lines, the bookings said not to be it.
-export function lineRow(line: Pick<BankLine, 'cells' | 'amount' | 'review' | 'receipt_path'>, vendors: readonly Vendor[], lists: BookamatAccounts | null): LineRow {
+export function lineRow(
+  line: Pick<BankLine, 'cells' | 'amount' | 'review' | 'receipt_path'> & Partial<Pick<BankLine, 'receipt_search' | 'receipt_gmail'>>,
+  vendors: readonly Vendor[], lists: BookamatAccounts | null,
+): LineRow {
   const tx = lineTransaction(line)
   const review = line.review ?? {}
   const override = review.override ?? {}
   const ack = review.ack_duplicate_ids ?? []
   if (lineKind(line) === 'expense') {
-    const row = analyseExpense(tx, vendors, lists, { ruleId: review.rule_id, receipt: !!line.receipt_path })
+    // The receipt the line's Gmail search attached, with what it found (PR 9b); a PDF of its list
+    // the owner attached („Anhängen“) as Bookmatic's page made it the row's (lib/expenses/gmail-attach.ts)
+    const found = storedFind(line.receipt_search ?? null)
+    const fromList = line.receipt_gmail ?? null
+    let row = analyseExpense(tx, vendors, lists, { ruleId: review.rule_id, receipt: !!line.receipt_path && !fromList && !found?.chosen, found })
+    if (fromList) row = withGmailCandidate(row, fromList.candidate, { name: fromList.name, extracted: fromList.extracted, unreadable: fromList.unreadable })
     return { kind: 'expense', row: { ...row, override, ...(review.lines?.length ? { booking_lines: review.lines } : {}), ack_duplicate_ids: ack } }
   }
   return { kind: 'bank_income', row: { ...analyseCredit(tx, vendors, lists), override, ack_duplicate_ids: ack } }
+}
+
+// A line's stored search as the row reads it (lib/expenses/analyse.ts StoredGmailFind)
+export function storedFind(search: BankLineReceiptSearch | null): StoredGmailFind | null {
+  if (!search) return null
+  const c = search.chosen
+  return {
+    chosen: c ? { messageId: c.message_id, partId: c.part_id, fileName: c.file_name, subject: c.subject, date: c.date, via: c.via, bodyText: c.body_text ?? '' } : null,
+    check: c ? search.check : null,
+    read: c ? search.read : null,
+    text: c ? search.text : null,
+    note: search.note,
+    plainNote: search.plain_note,
+    candidates: search.candidates ?? [],
+    failed: search.failed ?? [],
+  }
 }
 
 type ListPage = { results?: unknown; next?: unknown } | unknown[] | string | null
@@ -192,4 +217,16 @@ export async function checkDuplicates(
     for (const g of given) rows.set(g.line.id, { ...g.built.row, duplicate_check_failed: failed })
     return { rows, documentMatches: new Map(), failed }
   }
+}
+
+// Whether the booking attaches the line's Beleg: one uploaded by hand always; one from Gmail only
+// while the row keeps it (a pick of another rule drops a receipt its sender did not send,
+// lib/expenses/rule-match.ts pickRule)
+export function receiptKept(
+  line: Pick<BankLine, 'receipt_path'> & Partial<Pick<BankLine, 'receipt_search' | 'receipt_gmail'>>,
+  row: { gmail_message_id?: string | null } | null | undefined,
+): boolean {
+  if (!line.receipt_path) return false
+  if (!line.receipt_search?.chosen && !line.receipt_gmail) return true
+  return !!row?.gmail_message_id
 }

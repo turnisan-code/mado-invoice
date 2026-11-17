@@ -78,7 +78,7 @@ const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart
 describe('findGmailReceipt — a Buchungsregel’s sender', () => {
   test('its PDF read and attached by its amount, claimed for the row by all its keys; Gmail with the run’s limiter and signal; the reader with the run’s time', async () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-a1', 'Ihre Rechnung', [pdf('1', 'Rechnung_910000000123.pdf', 'a1')])] },
       texts: { a1: { text: 'Rechnung 910000000123\nGesamt 23,45 €', pages: 1 } },
@@ -94,7 +94,7 @@ describe('findGmailReceipt — a Buchungsregel’s sender', () => {
     // the query asks for the bank text's number as it is written there
     assert.equal(log.params[0].invoiceNumber, '910000000123')
     assert.deepEqual(log.gmailOptions, [{ limit: run.gmailLimit, signal: run.signal }])
-    assert.deepEqual(log.readOptions, [{ timeoutMs: 20_000, maxRetries: 1, signal: run.signal }])
+    assert.deepEqual(log.readOptions, [{ timeoutMs: 25_000, maxRetries: 1, signal: run.signal }])
     assert.equal(run.reads.left, 149)
   })
   test('the window: from the day of payment less 10 days — a card payment of 29.12. posted on 04.01. too —, to the bank date plus 3', () => {
@@ -104,7 +104,7 @@ describe('findGmailReceipt — a Buchungsregel’s sender', () => {
     assert.deepEqual([ymd(card.dateFrom), ymd(card.dateTo)], ['2026-12-19', '2027-01-07'])
   })
   test('a rule that searches none, or has no sender: nothing searched, nothing said', async () => {
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const { deps, log } = standIn({})
     for (const r of [rule('sk', 'Ohne Suche', { skip_invoice_search: true }), rule('no', 'Ohne Absender', { email_sender: ' ' })]) {
       const found = await findGmailReceipt(debit('x'), { paths: [{ kind: 'sender', rules: [r] }], run, row: 0 }, deps)
@@ -118,7 +118,7 @@ describe('findGmailReceipt — two debits of one sender (the Magenta pair)', () 
   test('by their numbers: each row its own PDF — the other’s number keeps each off it', async () => {
     const one = debit('Netzcom|Rechnung 910000000301 vom 10.07.2026', { amount: 40.52 })
     const two = debit('Netzcom|Rechnung 910000000302 vom 10.07.2026', { amount: 40.52 })
-    const run = newAnalyseRun([one, two], { maxDurationS: 120 })
+    const run = newAnalyseRun([one, two], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-b1', 'Ihre Rechnung', [pdf('1', 'Rechnung_910000000301.pdf', 'b1')]), msg('msg-b2', 'Ihre Rechnung', [pdf('1', 'Rechnung_910000000302.pdf', 'b2')])] },
       texts: { b1: { text: 'Rechnung 910000000301 Summe 40,52 €', pages: 1 }, b2: { text: 'Rechnung 910000000302 Summe 40,52 €', pages: 1 } },
@@ -135,7 +135,7 @@ describe('findGmailReceipt — two debits of one sender (the Magenta pair)', () 
   test('without numbers: each row sees both PDFs of the amount — „ambiguous“ for both, attached one to one by the claims', async () => {
     const one = debit('Netzcom|Lastschrift', { amount: 40.52 })
     const two = debit('Netzcom|Lastschrift', { amount: 40.52 })
-    const run = newAnalyseRun([one, two], { maxDurationS: 120 })
+    const run = newAnalyseRun([one, two], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-c1', 'Rechnung', [pdf('1', 'Rechnung.pdf', 'c1')]), msg('msg-c2', 'Rechnung', [pdf('1', 'Rechnung.pdf', 'c2')], { date: DAY(14) })] },
       texts: { c1: { text: 'Summe 40,52 €', pages: 2 }, c2: { text: 'Summe 40,52 €', pages: 2 } },
@@ -152,7 +152,7 @@ describe('findGmailReceipt — two debits of one sender (the Magenta pair)', () 
 
 describe('findGmailReceipt — what is read', () => {
   test('reading stops at the PDF of the debit’s amount — the terms beside it, whose text shows no debit, are not read', async () => {
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-d1', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'd1'), pdf('2', 'AGB.pdf', 'd2')])] },
       texts: { d1: { text: 'Gesamt 23,45 €', pages: 1 }, d2: { text: 'Allgemeine Geschäftsbedingungen', pages: 3 } },
@@ -162,7 +162,7 @@ describe('findGmailReceipt — what is read', () => {
     assert.deepEqual([found.pick.check, found.pick.chosen?.partId, log.reads], ['amount', '1', ['d1']])
   })
   test('a match the row cannot attach (a credit note of the amount) does not end the reading: the scan after it is read and attached', async () => {
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-d3', 'Gutschrift', [pdf('1', 'Gutschrift.pdf', 'd3')]), msg('msg-d4', 'Rechnung', [pdf('1', 'Scan.pdf', 'd4')])] },
       texts: { d3: { text: 'Gutschrift 23,45 €', pages: 1 }, d4: { text: '', pages: 1 } },
@@ -174,7 +174,7 @@ describe('findGmailReceipt — what is read', () => {
   })
   test('at most 4 reads a row: the rest listed „nicht geprüft“', async () => {
     const tx = debit('x')
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const labels = ['e1', 'e2', 'e3', 'e4', 'e5', 'e6']
     const { deps, log } = standIn({
       keyword: labels.map(l => msg(`msg-${l}`, 'Ihre Rechnung', [pdf('1', `${l}.pdf`, l)])),
@@ -188,7 +188,7 @@ describe('findGmailReceipt — what is read', () => {
     assert.deepEqual(found.pick.candidates.map(c => c.why), ['amount', 'amount', 'amount', 'amount', 'unchecked', 'unchecked'])
   })
   test('more than 10 pages: not read — the sender’s only PDF attached unchecked (D2)', async () => {
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-g1', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'g1')])] },
       texts: { g1: { text: 'Einzelverbindungen …', pages: 14 } },
@@ -199,7 +199,7 @@ describe('findGmailReceipt — what is read', () => {
   })
   test('one e-mail, two PDFs of the amount, its subject naming the bank’s number: each part knows the e-mail has two — the one read with the number attached, never the first by MIME order (review GMAIL-01)', async () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-z1', 'Ihre Rechnung 910000000123', [pdf('1', 'Rechnung_910000000201.pdf', 'z1'), pdf('2', 'Rechnung.pdf', 'z2')])] },
       // the second a scan: its text shows no amount
@@ -216,7 +216,7 @@ describe('findGmailReceipt — what is read', () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
     // a payment confirmation of the amount, or another purchase's invoice read without a number, then the own invoice as a scan
     for (const [file, read] of [['Zahlungsbestaetigung.pdf', { amount: 23.45, document_type: 'receipt' }], ['Rechnung_A.pdf', { amount: 23.45 }]] as const) {
-      const run = newAnalyseRun([tx], { maxDurationS: 120 })
+      const run = newAnalyseRun([tx], { maxDurationS: 60 })
       const { deps, log } = standIn({
         senders: { '@muster.example': [msg('msg-z3', 'Ihre Rechnung 910000000123', [pdf('1', file, 'z3'), pdf('2', 'Rechnung.pdf', 'z4')])] },
         texts: { z3: { text: 'Betrag 23,45 EUR', pages: 1 }, z4: { text: '', pages: 1 } },
@@ -227,7 +227,7 @@ describe('findGmailReceipt — what is read', () => {
       assert.deepEqual(found.pick.candidates.map(c => [c.part_id, c.why]), [['1', 'amount']], file)
     }
     // no number in the bank text: two documents of the amount — said, the nearest attached, never ticked
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { '@muster.example': [msg('msg-z5', 'Ihre Rechnung', [pdf('1', 'Zahlungsbestaetigung.pdf', 'z5'), pdf('2', 'Rechnung.pdf', 'z6')])] },
       texts: { z5: { text: 'Betrag 23,45 EUR', pages: 1 }, z6: { text: '', pages: 1 } },
@@ -236,7 +236,7 @@ describe('findGmailReceipt — what is read', () => {
     const found = await findGmailReceipt(debit('x'), { paths: SENDER, run, row: 0 }, deps)
     assert.deepEqual([found.pick.check, log.reads], ['ambiguous', ['z5', 'z6']])
     // a scan in another e-mail after the match: not read (the read stop stands)
-    const other = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const other = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const two = standIn({
       senders: { '@muster.example': [msg('msg-z7', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'z7')]), msg('msg-z8', 'Ihre Rechnung', [pdf('1', 'Scan.pdf', 'z8')], { date: DAY(10) })] },
       texts: { z7: { text: 'Gesamt 23,45 €', pages: 1 }, z8: { text: '', pages: 1 } },
@@ -249,7 +249,7 @@ describe('findGmailReceipt — what is read', () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
     for (const [scanText, pages] of [['\n\n', 1], ['\n\n\n\n', 2]] as const) {
       for (const [file, read] of [['Zahlungsbestaetigung.pdf', { amount: 23.45, document_type: 'receipt' }], ['Rechnung_A.pdf', { amount: 23.45 }]] as const) {
-        const run = newAnalyseRun([tx], { maxDurationS: 120 })
+        const run = newAnalyseRun([tx], { maxDurationS: 60 })
         const { deps, log } = standIn({
           senders: { '@muster.example': [msg('msg-z3', 'Ihre Rechnung 910000000123', [pdf('1', file, 'z3'), pdf('2', 'Rechnung.pdf', 'z4')])] },
           texts: { z3: { text: 'Betrag 23,45 EUR', pages: 1 }, z4: { text: scanText, pages } },
@@ -264,7 +264,7 @@ describe('findGmailReceipt — what is read', () => {
   })
   test('the name search asks for the bank text’s number too: its downloads ranked by it (review GMAIL-B2)', async () => {
     const tx = debit('Muster Telekom|Rechnung 910000000123 vom 10.07.2026')
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const { deps, log } = standIn({})
     await findGmailReceipt(tx, { paths: [{ kind: 'keyword', name: 'MUSTER TELEKOM' }], run, row: 0 }, deps)
     assert.deepEqual([log.searches, log.params[0].invoiceNumber], [['name:MUSTER TELEKOM'], '910000000123'])
@@ -274,7 +274,7 @@ describe('findGmailReceipt — what is read', () => {
   })
   test('a PDF another row of the run has: not read for this row — listed as that row’s', async () => {
     const tx = debit('x')
-    const run = newAnalyseRun([tx, tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx, tx], { maxDurationS: 60 })
     run.claims.claim(['gmail:msg-l1:1'], 0, 'Zeile 1')
     const { deps, log } = standIn({ senders: { '@muster.example': [msg('msg-l1', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'l1')])] }, reads: { l1: { amount: 23.45 } } })
     const found = await findGmailReceipt(tx, { paths: SENDER, run, row: 1 }, deps)
@@ -284,34 +284,37 @@ describe('findGmailReceipt — what is read', () => {
 })
 
 describe('findGmailReceipt — the run’s time and a dead connection', () => {
-  test('after the Gmail stop (65 s) no search starts: „Analyse-Zeit aufgebraucht“; after the read stop (60 s) no read — the sender’s only PDF attached unchecked (D2)', async () => {
+  test('after the Gmail stop (20 s) no search starts: „Analyse-Zeit aufgebraucht“; after the read stop (35 s) no read — the sender’s only PDF attached unchecked (D2)', async () => {
     const tx = debit('x')
     const clock = { ms: 0 }
-    const run = newAnalyseRun([tx], { maxDurationS: 120, now: () => clock.ms })
+    const run = newAnalyseRun([tx], { maxDurationS: 60, now: () => clock.ms })
     const { deps, log } = standIn({ senders: { '@muster.example': [msg('msg-f1', 'Rechnung', [pdf('1', 'Rechnung.pdf', 'f1')])] }, reads: { f1: { amount: 23.45 } } })
-    clock.ms = 65_001
+    clock.ms = 20_001
     const late = await findGmailReceipt(tx, { paths: SENDER, run, row: 0 }, deps)
     assert.deepEqual([late.pick.note, late.pick.chosen, log.searches], [GMAIL_TIME_NOTE, null, []])
     assert.equal(late.pick.plainNote, 'Analyse-Zeit aufgebraucht — kein Beleg nötig')
-    clock.ms = 61_000
-    const unread = await findGmailReceipt(tx, { paths: SENDER, run, row: 0 }, deps)
+    // In Mado the Gmail stop (20 s) comes before the read stop (35 s): a search that starts at
+    // 19 s and ends at 36 s leaves no time to read
+    clock.ms = 19_000
+    const slowSearch: GmailReceiptDeps = { ...deps, searchInvoices: async (params, opts) => { const r = await deps.searchInvoices(params, opts); clock.ms = 36_000; return r } }
+    const unread = await findGmailReceipt(tx, { paths: SENDER, run, row: 0 }, slowSearch)
     assert.deepEqual([unread.pick.check, log.searches, log.reads], ['unchecked', ['from:@muster.example'], []])
     assert.equal(unread.pick.note, '⚠ Beleg von @muster.example angehängt, Betrag nicht geprüft (Analyse-Zeit aufgebraucht) — Beleg prüfen')
   })
   test('a search left out for time after another ran: „Gmail nicht vollständig durchsucht“ — the name search after the processor’s, a tied rule’s second sender; not when a receipt was picked (review GMAIL-04)', async () => {
     const tx = debit('PADDLE.NET* ACME\\LISBOA', { counterparty: 'PADDLE.NET* ACME\\LISBOA' })
     const clock = { ms: 0 }
-    // each search takes the clock past the Gmail stop (65 s)
+    // each search takes the clock past the Gmail stop (20 s)
     const late = (deps: GmailReceiptDeps): GmailReceiptDeps => ({
       ...deps,
       searchInvoices: async (params, opts) => {
         const emails = await deps.searchInvoices(params, opts)
-        clock.ms = 66_000
+        clock.ms = 21_000
         return emails
       },
     })
     const ai = standIn({})
-    const run = newAnalyseRun([tx], { maxDurationS: 120, now: () => clock.ms })
+    const run = newAnalyseRun([tx], { maxDurationS: 60, now: () => clock.ms })
     const found = await findGmailReceipt(tx, { paths: [{ kind: 'processor', domain: 'paddle.com', name: 'ACME' }, { kind: 'keyword', name: 'ACME' }], run, row: 0 }, late(ai.deps))
     assert.deepEqual([found.failed, found.pick.chosen, ai.log.searches], [[GMAIL_TIME_PARTIAL_NOTE], null, ['from:paddle.com']])
     assert.equal(GMAIL_TIME_PARTIAL_NOTE, '⚠ Analyse-Zeit aufgebraucht — Gmail nicht vollständig durchsucht: Beleg selbst anhängen oder neu analysieren')
@@ -319,12 +322,12 @@ describe('findGmailReceipt — the run’s time and a dead connection', () => {
     const tie: GmailPath[] = [{ kind: 'sender', rules: [MU, rule('ze', 'Zeta Telekom', { email_sender: '@zeta.example' })] }]
     clock.ms = 0
     const tied = standIn({})
-    const cut = await findGmailReceipt(debit('x'), { paths: tie, run: newAnalyseRun([tx], { maxDurationS: 120, now: () => clock.ms }), row: 0 }, late(tied.deps))
+    const cut = await findGmailReceipt(debit('x'), { paths: tie, run: newAnalyseRun([tx], { maxDurationS: 60, now: () => clock.ms }), row: 0 }, late(tied.deps))
     assert.deepEqual([cut.failed, cut.pick.chosen, tied.log.searches], [[GMAIL_TIME_PARTIAL_NOTE], null, ['from:@muster.example']])
     // the first sender's only PDF picked (unread for time: D2's): nothing more to say
     clock.ms = 0
     const hit = standIn({ senders: { '@muster.example': [msg('msg-t2', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 't2')])] } })
-    const picked = await findGmailReceipt(debit('x'), { paths: tie, run: newAnalyseRun([tx], { maxDurationS: 120, now: () => clock.ms }), row: 0 }, late(hit.deps))
+    const picked = await findGmailReceipt(debit('x'), { paths: tie, run: newAnalyseRun([tx], { maxDurationS: 60, now: () => clock.ms }), row: 0 }, late(hit.deps))
     assert.deepEqual([picked.failed, picked.pick.check, picked.pick.chosen?.messageId], [[], 'unchecked', 'msg-t2'])
   })
   test('the scan beside a confirmation of the amount left unread by the read stop or the run’s reads: the confirmation attached „ambiguous“, the scan listed, never ticked as proof (repair check GI-4)', async () => {
@@ -334,17 +337,17 @@ describe('findGmailReceipt — the run’s time and a dead connection', () => {
       texts: { z3: { text: 'Betrag 23,45 EUR', pages: 1 }, z4: { text: '\n\n', pages: 1 } },
       reads: { z3: { amount: 23.45, document_type: 'receipt' }, z4: { amount: 23.45, invoice_number: '910000000123' } },
     }
-    // the confirmation's read starts at 58 s and ends at 61 s: past the read stop (60 s)
-    const clock = { ms: 58_000 }
+    // the confirmation's read starts at 19 s and ends at 36 s: past the read stop (35 s)
+    const clock = { ms: 19_000 }
     const timed = standIn(world)
-    const slow: GmailReceiptDeps = { ...timed.deps, readPdf: async (base64, opts) => { const r = await timed.deps.readPdf(base64, opts); clock.ms = 61_000; return r } }
-    const late = await findGmailReceipt(tx, { paths: SENDER, run: newAnalyseRun([tx], { maxDurationS: 120, startedAt: 0, now: () => clock.ms }), row: 0 }, slow)
+    const slow: GmailReceiptDeps = { ...timed.deps, readPdf: async (base64, opts) => { const r = await timed.deps.readPdf(base64, opts); clock.ms = 36_000; return r } }
+    const late = await findGmailReceipt(tx, { paths: SENDER, run: newAnalyseRun([tx], { maxDurationS: 60, startedAt: 0, now: () => clock.ms }), row: 0 }, slow)
     assert.deepEqual([late.pick.check, late.pick.chosen?.partId, timed.log.reads], ['ambiguous', '1', ['z3']])
     assert.equal(late.pick.note, '⚠ In derselben E-Mail „Rechnung.pdf“ nicht geprüft (Analyse-Zeit aufgebraucht) — angehängt nach dem Betrag: Beleg prüfen · Gmail: @muster.example · Betrag 23,45 € stimmt')
     assert.deepEqual(late.pick.candidates.map(c => [c.part_id, c.why]), [['2', 'unchecked']])
     // the run's reads used up after the confirmation's
     const budget = standIn(world)
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     run.reads.left = 1
     const spent = await findGmailReceipt(tx, { paths: SENDER, run, row: 0 }, budget.deps)
     assert.deepEqual([spent.pick.check, spent.pick.chosen?.partId, budget.log.reads], ['ambiguous', '1', ['z3']])
@@ -354,7 +357,7 @@ describe('findGmailReceipt — the run’s time and a dead connection', () => {
   test('a download or a read cut by the run’s deadline: not read for time — „nicht geprüft“, never „nicht lesbar“ (review GMAIL-04)', async () => {
     const tx = debit('x')
     // the deadline passed while the search's downloads ran
-    const run = { ...newAnalyseRun([tx], { maxDurationS: 120 }), signal: AbortSignal.abort() }
+    const run = { ...newAnalyseRun([tx], { maxDurationS: 60 }), signal: AbortSignal.abort() }
     const { deps } = standIn({ keyword: [msg('msg-u1', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'u1', { base64: null, sha256: null, skipped: 'download_failed' })])] })
     const cut = await findGmailReceipt(tx, { paths: [{ kind: 'keyword', name: 'MUSTER TELEKOM' }], run, row: 0 }, deps)
     assert.deepEqual(cut.pick.candidates.map(c => [c.why, gmailCandidateLabel(c, tx)]), [['unchecked', 'nicht geprüft']])
@@ -362,16 +365,16 @@ describe('findGmailReceipt — the run’s time and a dead connection', () => {
     assert.equal(cut.pick.note, '⚠ 1 Beleg in Gmail gefunden, 1 davon nicht geprüft (Analyse-Zeit aufgebraucht), keiner mit Betrag 23,45 € — nicht angehängt: Beleg prüfen und anhängen')
     // a read the SDK gave up when the signal aborted: the sender's only PDF unchecked for time
     const reader = standIn({ senders: { '@muster.example': [msg('msg-u2', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'u2')])] }, reads: { u2: new Error('Request was aborted.') } })
-    const unread = await findGmailReceipt(tx, { paths: SENDER, run: { ...newAnalyseRun([tx], { maxDurationS: 120 }), signal: AbortSignal.abort() }, row: 0 }, reader.deps)
+    const unread = await findGmailReceipt(tx, { paths: SENDER, run: { ...newAnalyseRun([tx], { maxDurationS: 60 }), signal: AbortSignal.abort() }, row: 0 }, reader.deps)
     assert.deepEqual([unread.pick.check, unread.pick.note], ['unchecked', '⚠ Beleg von @muster.example angehängt, Betrag nicht geprüft (Analyse-Zeit aufgebraucht) — Beleg prüfen'])
     // before the deadline a failed download is „nicht lesbar“, as before
     const failed = standIn({ keyword: [msg('msg-u3', 'Ihre Rechnung', [pdf('1', 'Rechnung.pdf', 'u3', { base64: null, sha256: null, skipped: 'download_failed' })])] })
-    const before = await findGmailReceipt(tx, { paths: [{ kind: 'keyword', name: 'MUSTER TELEKOM' }], run: newAnalyseRun([tx], { maxDurationS: 120 }), row: 0 }, failed.deps)
+    const before = await findGmailReceipt(tx, { paths: [{ kind: 'keyword', name: 'MUSTER TELEKOM' }], run: newAnalyseRun([tx], { maxDurationS: 60 }), row: 0 }, failed.deps)
     assert.deepEqual(before.pick.candidates.map(c => c.why), ['unreadable'])
   })
   test('a dead connection (invalid_grant): said, kept for the run — later rows search no more and say the first error; a rate limit is no dead connection', async () => {
     const dead = Object.assign(new Error('invalid_grant'), { response: { status: 400, data: { error: 'invalid_grant' } } })
-    const run = newAnalyseRun([debit('a'), debit('b')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('a'), debit('b')], { maxDurationS: 60 })
     const { deps, log } = standIn({ senders: { '@muster.example': dead } })
     const first = await findGmailReceipt(debit('a'), { paths: SENDER, run, row: 0 }, deps)
     assert.deepEqual([first.failed, first.pick.chosen], [[gmailFailedNote(dead)], null])
@@ -379,7 +382,7 @@ describe('findGmailReceipt — the run’s time and a dead connection', () => {
     const later = await findGmailReceipt(debit('b'), { paths: [{ kind: 'keyword', name: 'MUSTER' }], run, row: 1 }, deps)
     assert.deepEqual([later.failed, later.pick.chosen, log.searches], [[gmailFailedNote(dead)], null, ['from:@muster.example']])
     const limited = Object.assign(new Error('User Rate Limit Exceeded'), { code: 403, errors: [{ reason: 'userRateLimitExceeded' }] })
-    const run2 = newAnalyseRun([debit('a')], { maxDurationS: 120 })
+    const run2 = newAnalyseRun([debit('a')], { maxDurationS: 60 })
     const busy = standIn({ senders: { '@muster.example': limited } })
     const once = await findGmailReceipt(debit('a'), { paths: SENDER, run: run2, row: 0 }, busy.deps)
     assert.deepEqual([once.failed, run2.gmailAuthError], [[gmailFailedNote(limited)], null])
@@ -392,7 +395,7 @@ describe('findGmailReceipt — an AI row: the processor, then the name', () => {
   const tx = debit('PADDLE.NET* ACME\\LISBOA', { counterparty: 'PADDLE.NET* ACME\\LISBOA' })
   const paths: GmailPath[] = [{ kind: 'processor', domain: 'paddle.com', name: 'ACME' }, { kind: 'keyword', name: 'ACME' }]
   test('the processor’s e-mails that do not name the vendor are none; none picked → the name search runs — its hits read too', async () => {
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { 'paddle.com': [msg('msg-h1', 'Your receipt', [pdf('1', 'receipt.pdf', 'h1')], { from: 'Paddle <receipts@paddle.example>', bodyText: 'Your purchase from Other Shop' })] },
       keyword: [msg('msg-h2', 'Ihre Rechnung von ACME', [pdf('1', 'invoice.pdf', 'h2')], { from: 'ACME <billing@acme.example>' })],
@@ -404,7 +407,7 @@ describe('findGmailReceipt — an AI row: the processor, then the name', () => {
     assert.equal(found.pick.note, 'Gmail-Suche nach „ACME“ · Betrag 23,45 € stimmt')
   })
   test('the processor’s e-mail naming the vendor, of the amount: attached — no name search', async () => {
-    const run = newAnalyseRun([tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx], { maxDurationS: 60 })
     const { deps, log } = standIn({
       senders: { 'paddle.com': [msg('msg-h3', 'Your receipt', [pdf('1', 'receipt.pdf', 'h3')], { from: 'Paddle <receipts@paddle.example>', bodyText: 'Thank you for your purchase from ACME' })] },
       reads: { h3: { amount: 23.45 } },
@@ -418,7 +421,7 @@ describe('findGmailReceipt — an AI row: the processor, then the name', () => {
 describe('findGmailReceipt — the claim', () => {
   test('should the claim fail all the same, the pick is made once more with the claims as they are', async () => {
     const tx = debit('x')
-    const run = newAnalyseRun([tx, tx], { maxDurationS: 120 })
+    const run = newAnalyseRun([tx, tx], { maxDurationS: 60 })
     const { deps } = standIn({
       senders: { '@muster.example': [msg('msg-i1', 'Rechnung', [pdf('1', 'a.pdf', 'i1')]), msg('msg-i2', 'Rechnung', [pdf('1', 'b.pdf', 'i2')])] },
       texts: { i1: { text: 'Gesamt 23,45 €', pages: 1 }, i2: { text: 'Gesamt 23,45 €', pages: 1 } },
@@ -466,7 +469,7 @@ describe('findGmailReceipt — through the Gmail layer (lib/gmail.ts readMessage
         return { ...NOTHING, amount: isInvoice(b64) ? 23.45 : null, document_type: 'invoice' }
       },
     }
-    const run = newAnalyseRun([debit('x')], { maxDurationS: 120 })
+    const run = newAnalyseRun([debit('x')], { maxDurationS: 60 })
     const found = await findGmailReceipt(debit('x'), { paths: SENDER, run, row: 0 }, deps)
     assert.deepEqual([found.pick.check, found.pick.chosen?.partId, found.pick.chosen?.fileName, reads], ['amount', '1', 'Rechnung.pdf', ['Rechnung']])
     assert.equal(found.chosenBase64, RECHNUNG.toString('base64'))

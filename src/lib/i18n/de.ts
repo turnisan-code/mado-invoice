@@ -2274,6 +2274,7 @@ export const de = {
       lastError: 'Letzter Fehler, {date}: {error}',
       expired: 'Die Google-Verbindung ist abgelaufen — in den Einstellungen neu verbinden',
       missingDrive: 'Der Google-Verbindung fehlt die Drive-Berechtigung — in den Einstellungen neu verbinden',
+      missingGmailRead: 'Mado darf Gmail noch nicht lesen — Google in den Einstellungen neu verbinden, damit Belege gefunden werden',
       notConnected: 'Google ist nicht verbunden — in den Einstellungen verbinden',
       folderTrashed: 'Der Drive-Ordner liegt im Papierkorb',
     },

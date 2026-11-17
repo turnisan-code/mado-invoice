@@ -36,7 +36,7 @@ const RULES = [
 const bankLine = (id: string, text: string, amount: number, o: Partial<BankLine> = {}, iban = OWN, currency = 'EUR'): BankLine => ({
   id, line_key: `key-${id}`, cells: [iban, text, '15.06.2026', '15.06.2026', amount.toFixed(2).replace('.', ','), currency],
   statement_iban: iban, booked_on: '2026-06-15', value_on: '2026-06-15', amount, currency, counterparty: '', bank_text: text, fee: null,
-  status: 'open', review: {}, receipt_path: null, receipt_name: null, bookamat_claim: null, bookamat_pending: null,
+  status: 'open', review: {}, receipt_path: null, receipt_name: null, receipt_search: null, receipt_gmail: null, bookamat_claim: null, bookamat_pending: null,
   created_at: '2026-11-17T00:00:00Z', updated_at: '2026-11-17T00:00:00Z', ...o,
 })
 const RENT_TEXT = 'Abbuchung Dauerauftrag BG/000000651|BKAUATWWXXX AT000000000000000002 Hausmann Peter|Miete Juni'

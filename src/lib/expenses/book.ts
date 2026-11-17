@@ -33,7 +33,7 @@ import { expenseOwnerOf, setExpenseOwner, type OwnerSettings } from './owner'
 import { madoDocumentText, namedDocument, readMadoNumbers } from './mado-numbers'
 import { payloadFingerprint } from './fingerprint'
 import { bookamatWritesAllowed } from '@/lib/deployment'
-import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, LINE_COLUMNS, type LineRow, type StoredLine } from './lines'
+import { checkDuplicates, engineKind, lineKind, lineRow, lineTransaction, receiptKept, LINE_COLUMNS, type LineRow, type StoredLine } from './lines'
 import type { BookamatAccounts, BookingPayload, EasybankTransaction } from './types'
 
 export { lineKind, lineRow, lineTransaction } from './lines'
@@ -202,7 +202,7 @@ export async function bookLines(
   return results
 
   // Everything the booking checks before anything is posted: a refusal, or the payload
-  type Prepared = { result: LineResult } | { payload: BookingPayload; problems: BookingProblem[]; year: number; kind: BankBookingKind }
+  type Prepared = { result: LineResult } | { payload: BookingPayload; problems: BookingProblem[]; year: number; kind: BankBookingKind; receipt: boolean }
   function prepare(line: StoredLine, entry: BookEntry): Prepared {
     const kind = lineKind(line)
     const ek = engineKind(kind)
@@ -250,7 +250,7 @@ export async function bookLines(
     const match = checked.duplicate_of ?? null
     if (match) return { result: { id: line.id, status: 'duplicate', existing: { id: match.id, title: match.title, date: match.date, total: match.total, certain: match.certain } } }
     if (blockingProblems(problems).length) return { result: error(line.id, notBooked(problems), 'problems', problems) }
-    return { payload, problems, year, kind }
+    return { payload, problems, year, kind, receipt: receiptKept(line, built.kind === 'expense' ? built.row : null) }
   }
 
   async function bookLine(line: StoredLine, entry: BookEntry): Promise<LineResult> {
@@ -392,7 +392,7 @@ export async function bookLines(
       await record(journal, bookingId)
 
       let receiptError: string | null = null
-      if (line.receipt_path && opts.loadReceipt) {
+      if (prep.receipt && opts.loadReceipt) {
         receiptError = opts.deadline && opts.deadline - Date.now() < MIN_ATTACH_MS
           ? 'Beleg nicht angehängt (keine Zeit mehr) — „Beleg anhängen“ an der Zeile'
           : await attachTo(supabase, creds, line, prep.year, bookingId, payload, opts.loadReceipt, opts.deadline)

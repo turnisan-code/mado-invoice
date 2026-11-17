@@ -2275,6 +2275,7 @@ export const en = {
       lastError: 'Last error, {date}: {error}',
       expired: 'The Google connection has expired — reconnect in Settings',
       missingDrive: 'The Google connection is missing the Drive permission — reconnect in Settings',
+      missingGmailRead: 'Mado can’t read Gmail yet — reconnect Google in Settings so receipts can be found',
       notConnected: 'Google is not connected — connect it in Settings',
       folderTrashed: 'The Drive folder is in the trash',
     },
