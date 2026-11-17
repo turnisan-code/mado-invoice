@@ -48,7 +48,8 @@ Run SQL in the Supabase SQL editor (the storage policies need the `postgres` rol
 
 - **New, empty project:** run `supabase/schema.sql` once. It is a snapshot of the current schema:
   tables, RPCs (`issue_document`, `create_credit_note`, `convert_quote_to_invoice`, …), RLS pinned
-  to `app_users`, the public `logos` bucket and the private `documents` bucket for frozen PDFs.
+  to `app_users`, the public `logos` bucket, the private `documents` bucket for frozen PDFs and
+  the private `receipts` bucket for the Belege uploaded on the Kontoauszug page.
   The settings table holds exactly one row (`settings_singleton`).
 - **Existing database:** run the files in `supabase/migrations/` that are not applied yet, in
   filename order (they are dated, e.g. `20261030_lifecycle.sql` before `20261031_editor.sql`).
@@ -320,6 +321,62 @@ invoice was marked overdue again), only a due date set back to the one the remin
 from, or an earlier one, brings the level back; a later date that stood only for a moment in between
 does not. Both need `supabase/migrations/20261107_dunning.sql` (the trigger
 `documents_due_date_reminders`).
+
+## Kontoauszug: payments and expenses
+
+The **Kontoauszug** page (`/bank`, sidebar; `/invoices/import` leads there) reads a bank statement
+once, in the browser (CAMT.053-XML, a CSV with its columns mapped, or easybank's CSV read
+directly):
+
+- **Einnahmen** — the credits are matched to open invoices and recorded as payments once
+  confirmed (Mado then books them in Bookamat, one booking per payment). Below them, **Andere
+  Gutschriften**: the credits that pay no invoice, booked straight into Bookamat (a Privateinlage
+  by its fixed rule, any other by hand); a refund of an expense is shown and not booked.
+- **Ausgaben** — the debits, booked straight into Bookamat. A transfer to the owner's own account
+  is a Privatentnahme by a fixed rule, a card issuer's settlement follows its own; a debit the
+  Buchungsregeln recognise is booked on the rule's accounts; any other is filled in by hand
+  (Steuerkonto, Vorsteuerkonto — only those Bookamat links to it —, rate, BA Betrag/USt, dates,
+  UID, country, split lines). A Beleg can be uploaded per line (private `receipts` bucket) and is
+  attached to the booking.
+
+Expenses are booked from an easybank statement only: its lines are stored in Mado (`bank_lines`,
+one row per line, keyed by the line as the bank wrote it), so a line not booked today is still
+there tomorrow without the file, and what the owner sets on a line is saved as it changes. Only
+the owner books, from this page: there is no daily job for expenses, and Claude's connector has
+no tool for them.
+
+Mado books a statement line only when:
+
+- it lies on or after the switch-over date (Buchungsregeln, `settings.expenses_from`). Until the
+  date is set, and for the lines before it, Bookmatic books the statement and each line says so;
+- it is on one of the owner's business accounts: the IBAN on Mado's invoices, one listed under
+  „Eigene Konten“, or one Bookamat keeps on a Zahlungsmittelkonto (Bookamat's own list may carry
+  none);
+- it is in euro;
+- the app runs in production. A preview, and a local server without `BOOKAMAT_ALLOW_WRITES=1`,
+  refuse before anything is claimed or journaled, as the daily sync does (`src/lib/deployment.ts`).
+
+Before a line is booked, the server checks it again with the same engine the page shows it
+with (`src/lib/expenses`, ported from Bookmatic's Job 1 with its tests): the payload and
+Bookamat's account rules (linked Vorsteuerkonten, allowed rates, locked BA values, the UID a
+reverse charge needs), a booking Bookamat already has of the payment (held until the owner books
+it anyway; while the check cannot run nothing is booked), and that the line names no Mado
+invoice or credit note (that money belongs to the document). A booking is posted once: a claim
+per line, a journal written before the post, a lost answer looked up in Bookamat before
+anything is posted again, the booking recorded on the line (`bookamat_bookings.bank_line_id`,
+unique). A booked line stays as it was booked (MI050) until its booking is deleted in Bookamat
+and „Buchung vergessen…“ is chosen; while an attempt's outcome is open the line is held
+(MI051, „Offenen Versuch verwerfen“ once Bookamat has no booking of it). A booking Bookamat
+refuses for a cause it names (a blocked BA value, a missing invoice or delivery date, a
+country code) is corrected and posted again, and every correction is listed.
+
+**Buchungsregeln** (Einstellungen → Buchungsregeln, `/settings/rules`): keywords that recognise a
+recurring debit (and an amount range), its accounts by their Bookamat title — looked up in each
+year's books, so nothing is picked again in January —, rate, BA Betrag and BA USt, title and
+description templates (`{vendor}`, `{month}`, `{month_short}`), and whether it needs a Beleg.
+Rules that fit a debit equally ask „Regel wählen“. The same page keeps the owner's other
+business accounts (`settings.own_ibans`): a transfer to or from one is no Privatentnahme or
+Privateinlage.
 
 ## Crons
 

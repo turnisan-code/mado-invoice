@@ -304,11 +304,11 @@ function asFailure(err: unknown): SyncFailure {
   return fail(500, 'database', err instanceof Error ? err.message : String(err))
 }
 
-const validId = (v: unknown): string | null =>
+export const validId = (v: unknown): string | null =>
   (typeof v === 'number' && Number.isInteger(v) && v > 0) || (typeof v === 'string' && /^\d{1,18}$/.test(v)) ? String(v) : null
 
 // An id Bookamat reports for a booking it already has (a 409), if the body names one.
-function conflictBookingId(body: unknown): string | null {
+export function conflictBookingId(body: unknown): string | null {
   if (!body || typeof body !== 'object') return null
   const o = body as Record<string, unknown>
   for (const key of ['id', 'booking', 'booking_id', 'pk']) {
@@ -343,10 +343,10 @@ function parsePending(value: unknown): BookamatPending[] {
 }
 
 // A booking an earlier attempt may have created although its answer never arrived: the year's
-// live booking with exactly this title and date that no document has recorded (a deleted one, or
-// one Mado recorded, is another booking that happens to share them). When Bookamat's answer is not
+// live booking with exactly this title and date that Mado has not recorded on a document or a
+// statement line (a deleted one, or one Mado recorded, is another booking that happens to share them). When Bookamat's answer is not
 // visibly filtered by them, or two such bookings remain, only the owner can tell, so the sync stops.
-async function findBooking(supabase: SupabaseClient, creds: BookamatCredentials, entry: BookamatPending, deadline?: number): Promise<string | null> {
+export async function findBooking(supabase: SupabaseClient, creds: BookamatCredentials, entry: Pick<BookamatPending, 'year' | 'title' | 'date'>, deadline?: number): Promise<string | null> {
   const q = (v: string) => encodeURIComponent(v).replace(/\./g, '%2E')
   const data: unknown = await bookamatFetch(creds, entry.year, `bookings/?title=${q(entry.title)}&date=${q(entry.date)}&format=json`, { deadline })
   const page = data && typeof data === 'object' && !Array.isArray(data) ? data as { results?: unknown; next?: unknown } : null
@@ -435,7 +435,9 @@ export async function findExternalBookings(
   }
   const found = [...byFound.values()].sort((a, b) => a.date.localeCompare(b.date) || Number(a.bookingId) - Number(b.bookingId))
   if (!found.length) return []
-  const { data, error } = await supabase.from('bookamat_bookings').select('year, booking_id').in('booking_id', [...new Set(found.map(c => c.bookingId))])
+  // Mado's own bookings of documents; a booking Mado made from a statement line (PR 9a) is other
+  // money as far as a document is concerned, and is shown
+  const { data, error } = await supabase.from('bookamat_bookings').select('year, booking_id').not('document_id', 'is', null).in('booking_id', [...new Set(found.map(c => c.bookingId))])
   if (error) throw new BookamatError('database', error.message)
   const recorded = new Set(((data ?? []) as { year: number; booking_id: string }[]).map(r => bookingKey(Number(r.year), String(r.booking_id))))
   const byKey = new Map(bookings.map(b => [bookingKey(b.year, b.id), b]))
@@ -759,8 +761,11 @@ export async function syncBookamatDocument(
         } catch (err) {
           bookingId = err instanceof BookamatError && err.status === 409 ? conflictBookingId(err.body) : null
           if (!bookingId) {
-            if (err instanceof BookamatError && (err.code === 'timeout' || err.code === 'network')) {
-              throw new BookamatError('unconfirmed', `Bookamat did not confirm the ${p.year} booking; the next sync checks Bookamat before booking again`, 0, { year: p.year })
+            // No answer, Bookamat failing (a 5xx may come after the booking was made), or a conflict
+            // that names no booking: it may exist; the next sync looks it up first
+            if (err instanceof BookamatError && (err.code === 'timeout' || err.code === 'network' || err.status === 409 || err.status >= 500)) {
+              const said = err.status ? ` (Bookamat ${err.status}: ${err.message.slice(0, 200)})` : ''
+              throw new BookamatError('unconfirmed', `Bookamat did not confirm the ${p.year} booking${said}; the next sync checks Bookamat before booking again`, 0, { year: p.year })
             }
             // Refused: nothing was booked.
             journal.pop()
@@ -1025,7 +1030,7 @@ export async function adoptExternalBooking(
 
     const { data: taken, error: takenErr } = await supabase.from('bookamat_bookings').select('document_id').eq('year', ref.year).eq('booking_id', ref.bookingId)
     if (takenErr) throw new BookamatError('database', takenErr.message)
-    if (taken?.length) throw new BookamatError('adopt_taken', `Booking #${ref.bookingId} is recorded on another document`, 409, { id: ref.bookingId })
+    if (taken?.length) throw new BookamatError('adopt_taken', `Booking #${ref.bookingId} is recorded on another document or statement line`, 409, { id: ref.bookingId })
 
     const sign = kind === 'refund' ? -1 : 1
     const row = { document_id: doc.id, year: ref.year, booking_id: ref.bookingId, amount: sign * booking.total, kind, booked_on: booking.date || target.date, payment_id: target.paymentId }

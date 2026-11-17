@@ -353,7 +353,7 @@ export default function InvoiceList({ invoices, recurringSourceIds = [], bookama
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('invoices.title')}</h1>
         <div className="flex items-center gap-2">
-          <Link href="/invoices/import" title={t('bankImport.button')} className={headerButtonClass}>
+          <Link href="/bank" title={t('bankImport.button')} className={headerButtonClass}>
             <Landmark size={14} />
             <span className="sr-only sm:not-sr-only">{t('bankImport.button')}</span>
           </Link>

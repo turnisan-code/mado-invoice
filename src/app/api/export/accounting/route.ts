@@ -167,7 +167,7 @@ function fetchAll(supabase: Supabase, table: string) {
 
 const BACKUP_TABLES = ['clients', 'catalogue_items', 'documents', 'document_items', 'payments', 'reminder_log', 'recurring_schedules'] as const
 // Tables that only exist once their migration has run; a backup without them is still complete.
-const OPTIONAL_TABLES = ['document_events', 'bookamat_bookings', 'client_rates', 'projects', 'time_entries', 'project_expenses'] as const
+const OPTIONAL_TABLES = ['document_events', 'bank_lines', 'bookamat_bookings', 'booking_rules', 'client_rates', 'projects', 'time_entries', 'project_expenses'] as const
 
 async function backupResponse(supabase: Supabase) {
   const tables: Record<string, unknown[]> = {}

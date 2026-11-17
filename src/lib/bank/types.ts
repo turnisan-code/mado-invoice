@@ -17,6 +17,9 @@ export interface BankTransaction {
   search?: string
   /** What the bank charged on this line („SPESEN“ in an easybank text), shown with it. */
   fee?: number
+  /** easybank only: the line's cells as the bank wrote them. Mado stores the line from them to
+   *  book it as an expense (src/lib/expenses: everything is read again from these). */
+  cells?: string[]
 }
 
 /** Column indexes into the CSV header. */

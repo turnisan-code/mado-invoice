@@ -59,6 +59,11 @@ export interface Settings {
   uid_number: string
   iban: string
   bic: string
+  // The owner's other business accounts: a transfer to or from one is no Privatentnahme/Privateinlage
+  // (src/lib/expenses/owner.ts). The IBAN above and the statement's own account count anyway.
+  own_ibans: string[]
+  // From this bank date on Mado books statement lines (the switch-over from Bookmatic); null: not yet
+  expenses_from: string | null
   bank_name: string | null
   bank_account_holder: string | null
   invoice_prefix: string
@@ -357,6 +362,101 @@ export interface BookamatBooking {
   // covers its year's money.
   payment_id: string | null
   created_at: string
+}
+
+// ─── Bank statement lines and Buchungsregeln (PR 9a) ─────────────────────────
+
+// A statement line booked straight into Bookamat: a debit ('expense') or a credit that pays no
+// Mado invoice ('bank_income').
+export type BankBookingKind = 'expense' | 'bank_income'
+
+export type BankLineStatus = 'open' | 'skipped' | 'booked'
+
+// One split line of a booking as the owner set it (the expense engine's BookingLine).
+export interface BankLineSplit {
+  label: string
+  amount_gross: number
+  vat_percent: number
+  deductibility_amount_percent?: number
+  deductibility_tax_percent?: number
+  cost_account_id?: number
+  purchasetax_account_id?: number
+  bank_account_id?: number
+}
+
+// bank_lines.review: the owner's state of a line, saved as it changes.
+export interface BankLineReview {
+  // The Buchungsregel chosen among those that fit equally („Regel wählen“), or none
+  rule_id?: string | null
+  // The fields the owner set, as the engine reads them (lib/expenses/row-defaults.ts): account
+  // ids of the line's year, rates and BA values, title, Buchungs-/Rechnungs-/Lieferdatum, UID,
+  // country, description. '' is a field cleared on purpose.
+  override?: Record<string, string>
+  // Split lines; none = one line
+  lines?: BankLineSplit[]
+  // Bookamat bookings the owner said are not this payment („trotzdem buchen“)
+  ack_duplicate_ids?: number[]
+}
+
+// bank_lines.bookamat_pending: a booking about to be posted (no booking_id: the outcome is unknown
+// until Bookamat is asked) or posted and not recorded yet. The next attempt settles it first.
+export interface BankLinePending {
+  year: number
+  kind: BankBookingKind
+  booking_id: string | null
+  amount: number
+  date: string
+  title: string
+  at: string
+}
+
+export interface BankLine {
+  id: string
+  line_key: string
+  cells: string[]
+  statement_iban: string
+  booked_on: string
+  value_on: string | null
+  amount: number
+  currency: string
+  counterparty: string
+  bank_text: string
+  fee: number | null
+  status: BankLineStatus
+  review: BankLineReview
+  receipt_path: string | null
+  receipt_name: string | null
+  bookamat_claim: string | null
+  bookamat_pending: BankLinePending | null
+  created_at: string
+  updated_at: string
+}
+
+// A Buchungsregel. Accounts by their Bookamat title, looked up in each year's accounts.
+export interface BookingRule {
+  id: string
+  name: string
+  active: boolean
+  category: string
+  match_strings: string[]
+  email_sender: string
+  email_body_keywords: string[]
+  cost_account: string
+  tax_account: string
+  bank_account: string
+  tax_percent: number
+  ba_amount: number
+  ba_tax: number
+  country: string
+  vatin: string
+  title_template: string
+  notes_template: string
+  amount_min: number | null
+  amount_max: number | null
+  invoice_address_match: string
+  skip_receipt: boolean
+  created_at: string
+  updated_at: string
 }
 
 // A document's Bookamat state as lists show it; 'none' when there is nothing to book (yet).
